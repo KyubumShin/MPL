@@ -60,47 +60,125 @@ if lsp_hover fails for a language:
 
 ## Step 0: Triage
 
-Use haiku-level analysis to classify the user's prompt. Triage determines two things: **pipeline_mode** (which pipeline variant to run) and **interview_depth** (how deep the PP interview goes).
+Triage determines two things: **pipeline_tier** (which pipeline depth to use) and **interview_depth** (how deep the PP interview goes). Pipeline tier is determined by Quick Scope Scan (F-20), replacing the previous keyword-based mode detection.
 
-### 0.1: Pipeline Mode Detection
+### 0.1: Quick Scope Scan + Pipeline Tier (F-20)
 
-```
-pipeline_mode = classify_pipeline(user_request):
-
-  if single_file_target AND (bug_fix OR typo OR config_change) AND clear_success_criteria:
-    -> "bugfix" (activate mpl-bugfix skill — skip PP, Phase 0, decomposition)
-
-  elif estimated_files <= 3 AND estimated_todos <= 5 AND no_architecture_change:
-    -> "small" (activate mpl-small skill — lightweight 3-phase pipeline)
-
-  else:
-    -> "full" (standard MPL pipeline)
-```
-
-| pipeline_mode | Condition | Pipeline |
-|---------------|-----------|----------|
-| `"bugfix"` | Single file, clear bug/fix target | `/mpl:mpl-bugfix` — 1-phase, no PP, no Phase 0 |
-| `"small"` | ≤3 files, ≤5 TODOs, no architecture change | `/mpl:mpl-small` — 3-phase lightweight |
-| `"full"` | Everything else | Full MPL pipeline (Steps 0~6) |
-
-Detection signals:
-- **bugfix**: keywords ("fix", "bug", "수정", "오류"), single file path mentioned, error message quoted
-- **small**: small scope ("add a field", "rename", "update config"), few files implied
-- **full**: broad scope ("refactor", "migrate", "new feature"), multiple modules, architecture keywords
+Perform a lightweight codebase scan (~1-2K tokens) to calculate `pipeline_score` and determine `pipeline_tier`:
 
 ```
-if pipeline_mode == "bugfix":
-  Announce: "[MPL] Triage: bugfix mode. Activating mpl-bugfix."
-  -> Invoke Skill: /mpl:mpl-bugfix with user_request
-  -> EXIT (do not continue to Step 0.2)
+Quick Scope Scan:
+  1. Glob("**/*.{ts,tsx,js,jsx,py,go,rs,java}") → project file count
+  2. Identify affected files from user prompt:
+     - Extract file/module names mentioned in prompt
+     - Grep for their existence → affected_files count
+  3. Test existence check:
+     - Glob("**/*.{test,spec}.*", "**/*_test.*", "**/test_*") → test file count
+     - Estimate test_scenarios = min(affected_files × 2, test_file_count)
+  4. Import depth sampling (1-hop):
+     - For first 3 affected files: Grep("import|require|from", file)
+     - import_depth = max import chain depth found
+  5. Risk signal from prompt keywords:
+     - bugfix/fix/typo → 0.1
+     - add/update/field → 0.3
+     - feature/implement → 0.5
+     - refactor/migrate/architecture → 0.8
+     - overhaul/rewrite → 0.95
 
-if pipeline_mode == "small":
-  Announce: "[MPL] Triage: small mode. Activating mpl-small."
-  -> Invoke Skill: /mpl:mpl-small with user_request
-  -> EXIT (do not continue to Step 0.2)
+pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
+               + (dependency_depth × 0.25) + (risk_signal × 0.15)
+
+  file_scope      = min(affected_files / 10, 1.0)
+  test_complexity  = min(test_scenarios / 8, 1.0)
+  dependency_depth = min(import_depth / 5, 1.0)
 ```
 
-### 0.2: Interview Depth (full pipeline only)
+Classify tier from score (or override with user hint):
+
+| pipeline_tier | Score | Tier Hint | Pipeline Depth |
+|---------------|-------|-----------|---------------|
+| `"frugal"` | < 0.3 | `"mpl bugfix"` | Error Spec → Fix Cycle → Gate 1 → Commit |
+| `"standard"` | 0.3~0.65 | `"mpl small"` | PP(light) → Error Spec → Single Phase → Gate 1 → Commit |
+| `"frontier"` | > 0.65 | (none) | Full 9+ step pipeline (Steps 0~6) |
+
+```
+tier_hint = state.tier_hint  // from keyword-detector (may be null)
+{ score, breakdown } = calculatePipelineScore(scan_results)
+{ tier, source } = classifyTier(score, tier_hint)
+
+Write pipeline_tier to state:
+  writeState(cwd, { pipeline_tier: tier })
+
+Announce: "[MPL] Triage: pipeline_tier={tier} (source={source}, score={score}).
+           Scan: files={affected_files}, tests={test_scenarios}, depth={import_depth}, risk={risk_signal}."
+```
+
+#### Tier-Based Step Selection
+
+After tier is determined, subsequent steps are selected per tier:
+
+| Step | Frugal | Standard | Frontier |
+|------|--------|----------|----------|
+| Step 0.2 Interview Depth | skip | skip or light | full detection |
+| Step 0.5 Maturity | skip | read config | read config |
+| Step 1 PP Interview | skip (extract from prompt) | light (Round 1+2) | full (4 rounds) |
+| Step 1-B Pre-Execution | skip | skip | full |
+| Step 2 Codebase Analysis | skip (use scan) | structure + tests only | full (6 modules) |
+| Step 2.5 Phase 0 Enhanced | Step 4 only (Error Spec) | Step 4 only (Error Spec) | complexity-adaptive |
+| Step 3 Decomposition | skip (single fix cycle) | skip (single phase) | full decomposition |
+| Gates | Gate 1 only | Gate 1 only | Gate 1 + 2 + 3 |
+
+```
+if pipeline_tier == "frugal":
+  -> Skip to Step 2.5.5 (Error Spec only)
+  -> Then proceed directly to Phase Execution (single fix cycle)
+
+if pipeline_tier == "standard":
+  -> Continue to Step 0.2 (interview_depth forced to "light" or "skip")
+  -> Then Steps 1 → 2.5.5 → Phase Execution (single phase)
+
+if pipeline_tier == "frontier":
+  -> Continue to Step 0.2 (full interview depth detection)
+  -> Then full pipeline (Steps 0.5 → 1 → 1-B → 2 → 2.5 → 3 → 4 → 5)
+```
+
+### 0.1.5: RUNBOOK Initialization (F-10)
+
+After Triage determines pipeline_tier, create the RUNBOOK:
+
+```
+Write(".mpl/mpl/RUNBOOK.md"):
+  # RUNBOOK — {user_request (first 100 chars)}
+  Started: {ISO timestamp}
+  Pipeline Tier: {pipeline_tier} (source: {source}, score: {score})
+  Maturity: (pending detection)
+
+  ## Current Status
+  - Phase: 0/? (triage complete, pre-execution)
+  - State: mpl-init
+  - Last Updated: {ISO timestamp}
+
+  ## Milestone Progress
+  (decomposition pending)
+
+  ## Key Decisions
+  (none yet)
+
+  ## Known Issues
+  (none yet)
+
+  ## Blockers
+  (none)
+
+  ## Discoveries
+  (none yet)
+
+  ## How to Resume
+  Load: this file
+  Next: PP Interview → Codebase Analysis → Decomposition
+```
+
+### 0.2: Interview Depth
 
 ```
 interview_depth = classify_prompt(user_request):
@@ -120,7 +198,7 @@ interview_depth = classify_prompt(user_request):
 | `"light"` | Specific but incomplete (density 4-7) | What + What NOT only |
 | `"skip"` | Very detailed with constraints (density 8+) | Extract PPs directly from prompt |
 
-Announce: `[MPL] Triage: pipeline=full, interview_depth={depth}. Prompt density: {score}.`
+Announce: `[MPL] Triage: interview_depth={depth}. Prompt density: {score}.`
 
 ---
 

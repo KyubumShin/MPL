@@ -22,7 +22,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Import shared MPL state utility
-const { readState, writeState, isMplActive, checkConvergence } = await import(
+const { readState, writeState, isMplActive, checkConvergence, escalateTier } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 
@@ -283,6 +283,24 @@ async function main() {
       const maxFix = state.max_fix_loops || 10;
 
       if (fixCount >= maxFix) {
+        // F-21: Try escalation before giving up
+        const tier = state.pipeline_tier;
+        if (tier && tier !== 'frontier') {
+          const esc = escalateTier(cwd, 'fix_loop_exhausted', {
+            fix_count: fixCount,
+            max_fix: maxFix
+          });
+          if (esc) {
+            console.log(JSON.stringify({
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'Stop',
+                additionalContext: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Escalating tier: ${esc.from} → ${esc.to}. Re-running with expanded pipeline.`
+              }
+            }));
+            break;
+          }
+        }
         // Fix loop limit reached → Phase 5 (partial completion)
         writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
@@ -296,6 +314,24 @@ async function main() {
         // H1: Check convergence before continuing
         const convergenceResult = checkConvergence(state);
         if (convergenceResult.status === 'stagnating' || convergenceResult.status === 'regressing') {
+          // F-21: Try escalation on convergence failure
+          const tier = state.pipeline_tier;
+          if (tier && tier !== 'frontier') {
+            const esc = escalateTier(cwd, `convergence_${convergenceResult.status}`, {
+              delta: convergenceResult.delta,
+              fix_count: fixCount
+            });
+            if (esc) {
+              console.log(JSON.stringify({
+                continue: true,
+                hookSpecificOutput: {
+                  hookEventName: 'Stop',
+                  additionalContext: `[MPL] Convergence ${convergenceResult.status} (delta: ${convergenceResult.delta?.toFixed(3)}). Escalating tier: ${esc.from} → ${esc.to}.`
+                }
+              }));
+              break;
+            }
+          }
           writeState(cwd, { current_phase: 'phase5-finalize' });
           console.log(JSON.stringify({
             continue: true,

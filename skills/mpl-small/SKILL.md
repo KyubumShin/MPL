@@ -1,8 +1,14 @@
 ---
-description: 3-Phase lightweight pipeline - simplified MPL for small features and refactors
+description: "[DEPRECATED] 3-Phase lightweight pipeline — use /mpl:mpl instead (auto-routes to standard tier via F-20)"
 ---
 
-# MPL Small
+# MPL Small (Deprecated)
+
+> **Deprecated (v3.2)**: This skill is superseded by `/mpl:mpl` with Adaptive Pipeline Router (F-20).
+> The unified `/mpl:mpl` entry point auto-detects task complexity and routes to the appropriate tier.
+> Use `"mpl small ..."` keyword to hint standard tier, or let auto-scoring decide.
+>
+> This skill still works for backward compatibility but internally redirects to `/mpl:mpl` with `tier_hint: "standard"`.
 
 3-Phase lightweight pipeline for small-scope tasks that don't warrant the full 9+ step MPL.
 

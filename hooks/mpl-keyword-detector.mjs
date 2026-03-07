@@ -171,36 +171,30 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
       return;
     }
 
-    // Detect small/quick/light variant
-    const isSmallRun = /\bmpl[\s-]*(small|quick|light)\b/i.test(cleanPrompt);
+    // F-20: Extract tier hint from keywords (bugfix→frugal, small→standard, null→auto)
+    let tierHint = null;
+    if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(cleanPrompt)) tierHint = 'frugal';
+    else if (/\bmpl[\s-]*(small|quick|light)\b/i.test(cleanPrompt)) tierHint = 'standard';
 
-    // Initialize MPL state with appropriate run mode
+    // Initialize MPL state — always single entry point
     const featureName = extractFeatureName(prompt);
-    const runMode = isSmallRun ? 'small' : 'full';
-    initState(cwd, featureName, runMode);
+    initState(cwd, featureName, 'auto', tierHint);
 
-    // Return magic keyword to trigger appropriate MPL skill
-    const skillName = isSmallRun ? 'mpl-small' : 'mpl';
-    const commandName = isSmallRun ? 'mpl-small-run' : 'mpl-run';
-    const pipelineDesc = isSmallRun
-      ? 'MPL 3-Phase Lightweight Pipeline'
-      : 'MPL 5-Phase Pipeline';
-    const phaseDesc = isSmallRun
-      ? 'Phase 1: Small Plan'
-      : 'Phase 1: Quick Plan';
-
+    // F-20: Always use single 'mpl' skill — Triage determines tier
+    const hintDesc = tierHint ? ` (hint: ${tierHint})` : '';
     const message = `[MAGIC KEYWORD: MPL]
 
-${pipelineDesc} activated. State initialized at .mpl/state.json (run_mode: "${runMode}").
+MPL Pipeline activated${hintDesc}. State initialized at .mpl/state.json (run_mode: "auto").
+Triage will determine pipeline_tier (frugal/standard/frontier) via Quick Scope Scan.
 
 You MUST invoke the skill using the Skill tool:
 
-Skill: ${skillName}
+Skill: mpl
 
 User request:
 ${prompt}
 
-IMPORTANT: Load the MPL orchestration protocol via /mpl:${commandName} command, then begin ${phaseDesc}.`;
+IMPORTANT: Load the MPL orchestration protocol via /mpl:mpl-run command, then begin Triage (Step 0).`;
 
     console.log(JSON.stringify({
       continue: true,

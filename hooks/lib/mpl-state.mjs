@@ -19,6 +19,9 @@ const STATE_FILE = 'state.json';
 const DEFAULT_STATE = {
   pipeline_id: null,
   run_mode: 'full',
+  pipeline_tier: null,       // F-20: "frugal" | "standard" | "frontier" (set by Triage)
+  tier_hint: null,           // F-20: user keyword hint ("frugal" | "standard" | null)
+  escalation_history: [],    // F-21: [{from, to, reason, preserved_work, timestamp}]
   current_phase: 'phase1-plan',
   started_at: null,
   plan_approved: false,
@@ -130,7 +133,47 @@ export function isMplActive(cwd) {
  * @param {string} runMode - Pipeline mode: 'full' (5-phase) or 'small' (3-phase lightweight)
  * @returns {object} Initial state
  */
-export function initState(cwd, featureName, runMode = 'full') {
+/**
+ * Escalate pipeline tier to next level (F-21)
+ * @param {string} cwd - Working directory
+ * @param {string} reason - Reason for escalation (e.g. "circuit_break")
+ * @param {object} preservedWork - Summary of preserved work
+ * @returns {{ from: string, to: string } | null} Escalation result, or null if already at frontier
+ */
+export function escalateTier(cwd, reason, preservedWork = {}) {
+  const state = readState(cwd);
+  if (!state) return null;
+
+  const current = state.pipeline_tier;
+  const next = getEscalationTarget(current);
+  if (!next) return null;
+
+  const entry = {
+    from: current,
+    to: next,
+    reason,
+    preserved_work: preservedWork,
+    timestamp: new Date().toISOString(),
+  };
+
+  const history = [...(state.escalation_history || []), entry];
+  writeState(cwd, { pipeline_tier: next, escalation_history: history });
+
+  return { from: current, to: next };
+}
+
+/**
+ * Get next escalation tier
+ * @param {string} currentTier
+ * @returns {string|null} Next tier or null if at frontier
+ */
+export function getEscalationTarget(currentTier) {
+  if (currentTier === 'frugal') return 'standard';
+  if (currentTier === 'standard') return 'frontier';
+  return null; // frontier → no further escalation
+}
+
+export function initState(cwd, featureName, runMode = 'full', tierHint = null) {
   // H5: Load config overrides
   let config = {};
   try {
@@ -147,17 +190,22 @@ export function initState(cwd, featureName, runMode = 'full') {
     .replace(/^-|-$/g, '')
     .slice(0, 40);
 
-  const isSmall = runMode === 'small';
+  const isSmall = runMode === 'small' || tierHint === 'standard';
+  const isFrugal = tierHint === 'frugal';
 
-  const maxFixLoops = config.max_fix_loops ?? (isSmall ? 3 : 10);
-  const maxTokens = config.max_total_tokens ?? (isSmall ? 150000 : 500000);
+  const maxFixLoops = config.max_fix_loops ?? (isFrugal ? 3 : isSmall ? 5 : 10);
+  const maxTokens = config.max_total_tokens ?? (isFrugal ? 80000 : isSmall ? 150000 : 500000);
   const convergenceConfig = config.convergence ?? {};
 
+  const tierPrefix = isFrugal ? 'frugal-' : isSmall ? 'small-' : '';
   return writeState(cwd, {
     ...DEFAULT_STATE,
-    pipeline_id: `mpl-${isSmall ? 'small-' : ''}${dateStr}-${slug}`,
-    run_mode: runMode,
-    current_phase: isSmall ? 'small-plan' : 'phase1a-research',
+    pipeline_id: `mpl-${tierPrefix}${dateStr}-${slug}`,
+    run_mode: runMode === 'auto' ? 'auto' : runMode,
+    pipeline_tier: null,           // Set by Triage after Quick Scope Scan
+    tier_hint: tierHint,
+    escalation_history: [],
+    current_phase: isFrugal ? 'phase1a-research' : isSmall ? 'small-plan' : 'phase1a-research',
     max_fix_loops: maxFixLoops,
     cost: {
       ...DEFAULT_STATE.cost,

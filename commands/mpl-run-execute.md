@@ -242,8 +242,18 @@ Merge test_result into Phase Runner's verification data:
      "duration_ms": elapsed
    }
 9. Report: "[MPL] Phase N/total 완료: {name}. Pass rate: {pass_rate}%. Micro-fixes: {micro_fixes}. PD {count}건."
-10. More phases -> current_phase = "mpl-phase-running", continue 4.1
-11. All done -> proceed to Step 4.5 (3-Gate Quality)
+10. **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
+    ```markdown
+    ## Phase {N} Complete: {name}
+    - **Pass Rate**: {pass_rate}%
+    - **Criteria**: {criteria_passed}
+    - **Micro-fixes**: {micro_fixes}
+    - **PDs Created**: {pd_count}
+    - **Discoveries**: {discovery_count}
+    - **Timestamp**: {ISO timestamp}
+    ```
+11. More phases -> current_phase = "mpl-phase-running", continue 4.1
+12. All done -> proceed to Step 4.5 (3-Gate Quality)
 ```
 
 **On `"circuit_break"`**:
@@ -251,7 +261,23 @@ Merge test_result into Phase Runner's verification data:
 ```
 1. Record: phase_details[N].status = "circuit_break", phases.circuit_breaks++
 2. Update pipeline state: current_phase = "mpl-circuit-break"
-3. Proceed to Redecomposition (4.4)
+3. **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
+   ## Circuit Break: Phase {N} - {name}
+   - **Failure**: {failure_summary}
+   - **Attempted Fixes**: {attempted_fixes list}
+   - **Retries Exhausted**: 3/3
+   - **Timestamp**: {ISO timestamp}
+4. **Dynamic Escalation (F-21)**: Check pipeline_tier before redecomposition:
+   - If pipeline_tier < "frontier":
+     escalation = escalateTier(cwd, "circuit_break", { completed_phases, failed_phase })
+     If escalation succeeded:
+       Report: "[MPL] Escalating: {from} → {to}. Preserving completed work."
+       RUNBOOK: Append "## Tier Escalation: {from} → {to}"
+       Re-run Triage with new tier (reload skipped steps)
+       Continue from failed phase with expanded pipeline
+   - If pipeline_tier == "frontier" or escalation returns null:
+     Proceed to Redecomposition (4.4)
+5. Proceed to Redecomposition (4.4) if no escalation
 ```
 
 ### 4.3.5: Side Interview (Conditional)
@@ -393,6 +419,16 @@ If Gate 3 fails -> enter fix loop (see 4.6).
 All 3 gates pass -> proceed to Step 5 (E2E & Finalize).
 Report: `[MPL] 3-Gate Quality: Gate 1 {pass_rate}%, Gate 2 {verdict}, Gate 3 {pass/fail}.`
 
+**RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
+```markdown
+## 3-Gate Quality Results
+- **Gate 1 (Tests)**: {pass_rate}%
+- **Gate 2 (Code Review)**: {verdict}
+- **Gate 3 (PP Compliance)**: {pass/fail}
+- **Overall**: {all_pass ? "PASSED" : "FAILED — entering fix loop"}
+- **Timestamp**: {ISO timestamp}
+```
+
 ### 4.6: Fix Loop (with Convergence Detection)
 
 When any gate fails, enter the fix loop:
@@ -421,6 +457,16 @@ Record convergence_status in state: "progressing" | "stagnating" | "regressing"
 
 Max fix loop iterations: controlled by max_fix_loops from config (default 10).
 Exceeding max -> mpl-failed state.
+
+**RUNBOOK Update (F-10)**: After each fix attempt, append to `.mpl/mpl/RUNBOOK.md`:
+```markdown
+## Fix Loop Iteration {N}
+- **Target Gate**: {failed_gate}
+- **Fix Strategy**: {strategy_description}
+- **Pass Rate**: {new_pass_rate}% (delta: {delta})
+- **Convergence**: {convergence_status}
+- **Timestamp**: {ISO timestamp}
+```
 
 ### 4.7: Partial Rollback on Circuit Break
 

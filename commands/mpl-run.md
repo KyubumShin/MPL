@@ -80,12 +80,25 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
 | `summary.md` | Cached Phase 0 summary |
 | `complexity-report.json` | Cached complexity report |
 
+### RUNBOOK: `.mpl/mpl/RUNBOOK.md`
+
+| File | Purpose |
+|------|---------|
+| `RUNBOOK.md` | Integrated execution log — current status, milestones, decisions, issues, resume info. Single file for human/agent session continuity (F-10) |
+
 ### Profile Artifacts: `.mpl/mpl/profile/`
 
 | File | Purpose |
 |------|---------|
 | `phases.jsonl` | Per-phase token/timing profile (append-only, JSONL) |
 | `run-summary.json` | Complete run profile (generated at finalize) |
+
+### Routing Memory: `.mpl/memory/`
+
+| File | Purpose |
+|------|---------|
+| `routing-patterns.jsonl` | Past execution patterns for tier prediction (F-22, append-only) |
+| `learnings.md` | Run-to-Run accumulated learnings (F-11) |
 
 ---
 
@@ -98,6 +111,27 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
 | mpl-worker | sonnet | Architecture changes or 3+ retry failures |
 
 ---
+
+## Adaptive Pipeline Routing (F-20)
+
+Triage (Step 0) determines `pipeline_tier` via Quick Scope Scan. The tier controls which steps are executed:
+
+| Tier | Score | Steps Executed | Skipped | ~Tokens |
+|------|-------|---------------|---------|---------|
+| **frugal** | < 0.3 | Error Spec → Single Fix Cycle → Gate 1 → Commit | PP, Phase 0 Steps 1-3, Decomposition, Gate 2/3 | ~5-15K |
+| **standard** | 0.3~0.65 | PP(light) → Error Spec → Single Phase → Gate 1 → Commit | Full PP, Phase 0 Steps 1-3, Multi-phase decomposition, Gate 2/3 | ~20-40K |
+| **frontier** | > 0.65 | Full 9+ step pipeline | None | ~50-100K+ |
+
+User hints (`"mpl bugfix"` → frugal, `"mpl small"` → standard) override auto-scoring.
+
+### Dynamic Escalation (F-21)
+
+On circuit break, if tier < frontier, auto-escalate:
+```
+frugal → circuit break → standard (preserve completed TODOs)
+standard → circuit break → frontier (preserve completed phase work)
+frontier → circuit break → redecomposition (existing behavior)
+```
 
 ## Phase-Specific Protocols (MUST Read)
 
@@ -115,9 +149,9 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 
 | File | Steps | Contents | ~Tokens |
 |------|-------|----------|---------|
-| `mpl-run-phase0.md` | -1 ~ 2.5 | LSP Warm-up, Triage, PP Interview, Pre-Execution Analysis, Codebase Analysis, Phase 0 Enhanced | ~14K |
+| `mpl-run-phase0.md` | -1 ~ 2.5 | LSP Warm-up, Triage (with Quick Scope Scan + tier routing), PP Interview, Pre-Execution Analysis, Codebase Analysis, Phase 0 Enhanced | ~14K |
 | `mpl-run-decompose.md` | 3 ~ 3-B | Phase Decomposition, Verification Planning (Critic absorbed into Decomposer) | ~3K |
-| `mpl-run-execute.md` | 4 | Phase Execution Loop, Context Assembly, 3-Gate Quality, Fix Loop | ~11K |
+| `mpl-run-execute.md` | 4 | Phase Execution Loop, Context Assembly, 3-Gate Quality, Fix Loop, RUNBOOK updates | ~11K |
 | `mpl-run-finalize.md` | 5 ~ 6 | E2E, Finalize, Resume Protocol, Discovery Processing, Related Skills | ~7K |
 
 **IMPORTANT**: Do NOT proceed with any step without loading the corresponding protocol file first. Each file contains the exact agent calls, context assembly rules, and output handling logic for that stage.

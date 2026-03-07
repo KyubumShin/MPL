@@ -1,8 +1,14 @@
 ---
-description: Standalone adaptive bug fixing - lightweight MPL pipeline for targeted fixes
+description: "[DEPRECATED] Standalone adaptive bug fixing — use /mpl:mpl instead (auto-routes to frugal tier via F-20)"
 ---
 
-# MPL Bugfix
+# MPL Bugfix (Deprecated)
+
+> **Deprecated (v3.2)**: This skill is superseded by `/mpl:mpl` with Adaptive Pipeline Router (F-20).
+> The unified `/mpl:mpl` entry point auto-detects task complexity and routes to the appropriate tier.
+> Use `"mpl bugfix ..."` or `"mpl fix ..."` keyword to hint frugal tier, or let auto-scoring decide.
+>
+> This skill still works for backward compatibility but internally redirects to `/mpl:mpl` with `tier_hint: "frugal"`.
 
 Lightweight bug fixing pipeline. Skips full decomposition and runs a single-phase fix cycle.
 

@@ -69,6 +69,15 @@ Task(subagent_type="mpl-decomposer", model="opus",
      Report HIGH risks to user (informational, non-blocking)
    - Save risk_assessment to `.mpl/mpl/risk-assessment.md`
 8. Report: `"[MPL] Decomposition: N phases generated. Risk: {go_no_go}. Phase 1: {name}"`
+9. **RUNBOOK Update (F-10)**: Append milestone to `.mpl/mpl/RUNBOOK.md`:
+   ```markdown
+   ## Decomposition Complete
+   - **Phases**: {N} phases generated
+   - **Risk Assessment**: {go_no_go}
+   - **Phase List**: {phase_id: phase_name for each phase}
+   - **Redecompose Count**: {redecompose_count}
+   - **Timestamp**: {ISO timestamp}
+   ```
 
 ---
 

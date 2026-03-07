@@ -116,7 +116,24 @@ Profile data enables:
 
 Summarize: phases completed/failed, retries, redecompositions, key discoveries/PD overrides, verification status, key learnings.
 
-### 5.6: Update State
+### 5.6: RUNBOOK Finalize (F-10)
+
+Append final section to `.mpl/mpl/RUNBOOK.md`:
+```markdown
+## Pipeline Complete
+- **Status**: {completed | partial}
+- **Phases**: {completed}/{total}
+- **Final Pass Rate**: {pass_rate}%
+- **Total Retries**: {total_retries}
+- **Total Micro-fixes**: {total_micro_fixes}
+- **Redecompositions**: {redecompose_count}
+- **Elapsed**: {elapsed_ms}ms
+- **Pipeline Tier**: {pipeline_tier}
+- **Escalations**: {escalation_count}
+- **Completed At**: {ISO timestamp}
+```
+
+### 5.7: Update State
 
 Pipeline `current_phase = "completed"`, MPL `status = "completed"`, `completed_at = timestamp`.
 
@@ -132,10 +149,16 @@ On session start:
     mplState = Read .mpl/mpl/state.json
     nextPhase = first phase with status != "completed"
 
+    # F-10: Load RUNBOOK for session continuity
+    if exists(".mpl/mpl/RUNBOOK.md"):
+      runbook = Read(".mpl/mpl/RUNBOOK.md")
+      // RUNBOOK provides: current status, milestones, decisions, issues
+      // Use as primary context for understanding pipeline state
+
     if all completed -> Step 5 (Finalize) if not done
     else:
       Report: "[MPL] Resuming: {completed}/{total} done. Next: {nextPhase.name}"
-      Load: phase-decisions.md + last state-summary.md
+      Load: RUNBOOK.md + phase-decisions.md + last state-summary.md
       Continue from Step 4.1 for nextPhase
 ```
 
@@ -196,14 +219,18 @@ for each discovery in result.discoveries:
 
 | Skill | Purpose |
 |-------|---------|
-| `/mpl:mpl` | Micro-Phase Loop pipeline (this protocol) |
-| `/mpl:mpl-small` | 3-Phase lightweight pipeline |
+| `/mpl:mpl` | Micro-Phase Loop pipeline — single entry point with auto tier routing (F-20) |
+| `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to standard tier) |
 | `/mpl:mpl-pivot` | Pivot Points interview |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-bugfix` | Standalone adaptive bug fixing |
+| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes to frugal tier) |
 | `/mpl:mpl-compound` | Learning extraction |
 | `/mpl:mpl-doctor` | Installation diagnostics |
 | `/mpl:mpl-setup` | Setup wizard |
 | `/mpl:mpl-gap-analysis` | Gap analysis for missing requirements |
+
+> **Note (F-20)**: `mpl-small` and `mpl-bugfix` are deprecated. The `/mpl:mpl` skill now auto-detects
+> pipeline tier (frugal/standard/frontier) via Quick Scope Scan. Use keyword hints for manual override:
+> `"mpl bugfix"` → frugal, `"mpl small"` → standard.

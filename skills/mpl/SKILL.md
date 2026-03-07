@@ -9,11 +9,12 @@ MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh 
 
 ## Activation Protocol
 
-1. Initialize `.mpl/state.json` with `run_mode: "mpl"` (keyword hook may have already done this)
+1. Initialize `.mpl/state.json` with `run_mode: "auto"` (keyword hook has already done this with tier_hint)
 2. Initialize `.mpl/mpl/state.json` for MPL-specific tracking
-3. Read state to determine current phase
+3. Read state to determine current phase and `pipeline_tier`
 4. **Load the detailed orchestration protocol**: read `MPL/commands/mpl-run.md`
-5. Execute phases until completion
+5. **Triage (Step 0)** determines `pipeline_tier` via Quick Scope Scan (F-20)
+6. Execute tier-appropriate steps until completion
 
 ## Core Rules (HARD ENFORCEMENT)
 
@@ -53,7 +54,10 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 | `.mpl/cache/phase0/manifest.json` | Phase 0 cache metadata |
 | `.mpl/mpl/profile/phases.jsonl` | Per-phase token/timing profile |
 | `.mpl/mpl/profile/run-summary.json` | Complete run profile |
+| `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
 | `.mpl/mpl/phases/phase-N/` | Per-phase artifacts (mini-plan, state-summary, verification) |
+| `.mpl/memory/routing-patterns.jsonl` | Past execution patterns for tier prediction (F-22) |
+| `.mpl/memory/learnings.md` | Run-to-run accumulated learnings (F-11) |
 | `.mpl/pivot-points.md` | Immutable constraints (shared with standard mode) |
 
 ## Phase Overview
@@ -91,14 +95,17 @@ Do NOT proceed with Phase execution without loading the corresponding protocol f
 
 | Skill | Purpose |
 |-------|---------|
-| `/mpl:mpl` | Full MPL pipeline — Micro-Phase Loop (this skill) |
-| `/mpl:mpl-small` | 3-Phase lightweight pipeline (1-5 files, clear scope) |
+| `/mpl:mpl` | MPL pipeline — single entry point with auto tier routing (this skill) |
+| `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to standard tier) |
 | `/mpl:mpl-pivot` | Pivot Points interview (immutable constraints) |
 | `/mpl:mpl-research` | Standalone deep research (independent of pipeline) |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-bugfix` | Standalone adaptive bug fixing (single bug, 3 attempts) |
+| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes to frugal tier) |
 | `/mpl:mpl-compound` | Learning extraction and knowledge distillation |
 | `/mpl:mpl-doctor` | Installation diagnostics and health check |
 | `/mpl:mpl-setup` | Setup wizard - install, configure, repair |
+
+> **F-20 Note**: `mpl-small` and `mpl-bugfix` still work but redirect to `/mpl:mpl` with tier hints.
+> Use `"mpl bugfix ..."` or `"mpl small ..."` keywords for manual tier override.
