@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v3.1
+# MPL (Micro-Phase Loop) v3.2
 
 Coherence-first autonomous coding pipeline plugin for Claude Code.
 
@@ -79,6 +79,7 @@ mkdir -p .mpl/mpl/phase0
 mkdir -p .mpl/mpl/phases
 mkdir -p .mpl/mpl/profile
 mkdir -p .mpl/cache/phase0
+mkdir -p .mpl/memory
 ```
 
 ### Step 3: Create Default Config
@@ -167,7 +168,7 @@ The orchestrator NEVER writes source code directly. All code changes are delegat
 
 ```
 Step -1: LSP Warm-up (non-blocking, parallel with Step 0)
-Step  0: Triage (pipeline_mode: bugfix/small/full) + Interview Depth
+Step  0: Triage + Quick Scope Scan → pipeline_tier (frugal/standard/frontier)
 Step  0.5: Maturity Mode Detection (explore/standard/strict)
 Step  1: Pivot Points Interview (immutable constraints)
 Step  1-B: Pre-Execution Analysis (gap + tradeoff in single call)
@@ -177,17 +178,28 @@ Step  2.5: Phase 0 Enhanced (API contracts, examples, types, error specs)
 Step  3: Phase Decomposition (mpl-decomposer -> ordered micro-phases)
 Step  3-B: Verification Planning (A/S/H-items classification)
 Step  4: Phase Execution Loop (mpl-phase-runner -> mpl-worker per phase)
-Step  5: E2E & Finalize (learnings, atomic commits, metrics)
-Step  6: Resume Protocol (restart from last checkpoint)
+Step  5: E2E & Finalize (learnings, atomic commits, metrics, RUNBOOK)
+Step  6: Resume Protocol (restart from last checkpoint via RUNBOOK)
 ```
 
-### Fast-Fail Triage
+### Adaptive Pipeline Router (v3.2)
 
-| pipeline_mode | Condition | Pipeline |
-|---------------|-----------|----------|
-| `bugfix` | Single file, clear bug/fix target | 1-phase, no PP, no Phase 0 |
-| `small` | ≤3 files, ≤5 TODOs, no architecture change | 3-phase lightweight |
-| `full` | Everything else | Full MPL pipeline (Steps -1~6) |
+Single entry point — the system auto-detects task complexity:
+
+```
+pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
+               + (dependency_depth × 0.25) + (risk_signal × 0.15)
+```
+
+| Tier | Score | Pipeline | ~Tokens |
+|------|-------|----------|---------|
+| **Frugal** | < 0.3 | Error Spec → Fix → Gate 1 → Commit | ~5-15K |
+| **Standard** | 0.3~0.65 | PP(light) → Error Spec → Single Phase → Gate 1 → Commit | ~20-40K |
+| **Frontier** | > 0.65 | Full 9+ step pipeline | ~50-100K+ |
+
+**Dynamic Escalation**: On circuit break, auto-escalates frugal→standard→frontier, preserving completed work.
+
+**Keyword hints**: `"mpl bugfix"` → frugal, `"mpl small"` → standard, `"mpl"` → auto.
 
 ### State Machine
 
@@ -229,7 +241,7 @@ complexity_score = (modules x 10) + (external_deps x 5) + (test_files x 3)
 ### Token Budget Rebalance
 
 ```
-v1.0 (~81K total)              v3.1 (adaptive)
+v1.0 (~81K total)              v3.2 (adaptive)
 Phase 0:  ~5K  ( 6%)           Phase 0: 8~20K (16~40%)  <- strengthened
 Phase 1-3: ~45K (57%)          Phase 1-3: ~36K (60~72%)
 Phase 4:  ~15K (19%)           Phase 4:  ~6K  (11~12%)
@@ -311,13 +323,15 @@ mpl-git-master <------------------------+ (Atomic Commits)
 
 | Skill | Purpose |
 |-------|---------|
-| `/mpl:mpl` | Main MPL pipeline |
+| `/mpl:mpl` | Main MPL pipeline — single entry point with auto tier routing |
 | `/mpl:mpl-pivot` | Pivot Points interview (standalone or pipeline) |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last checkpoint |
 | `/mpl:mpl-doctor` | Installation diagnostics |
 | `/mpl:mpl-setup` | Setup wizard |
+
+> **Deprecated**: `/mpl:mpl-small` and `/mpl:mpl-bugfix` still work but redirect to `/mpl:mpl` with tier hints.
 
 ### Hooks (4)
 
@@ -341,7 +355,10 @@ mpl-git-master <------------------------+ (Atomic Commits)
 | `.mpl/mpl/pre-execution-analysis.md` | Gap + Tradeoff unified analysis |
 | `.mpl/mpl/phase0/` | Phase 0 Enhanced artifacts |
 | `.mpl/mpl/phases/phase-N/` | Per-phase artifacts (mini-plan, state-summary, verification, recovery) |
+| `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity |
 | `.mpl/mpl/profile/` | Token/timing profile (phases.jsonl, run-summary.json) |
+| `.mpl/memory/routing-patterns.jsonl` | Past execution patterns for tier prediction |
+| `.mpl/memory/learnings.md` | Run-to-run accumulated learnings |
 | `.mpl/cache/phase0/` | Phase 0 cached artifacts |
 | `.mpl/mpl/metrics.json` | Pipeline metrics |
 
@@ -441,14 +458,14 @@ When LSP/AST MCP tools are unavailable, MPL automatically uses fallback tools:
 ## Usage
 
 ```bash
-# Full pipeline
-mpl add user authentication
+# Auto-routing (recommended) — system determines tier automatically
+mpl add user authentication           # → likely frontier
+mpl add validation to signup           # → likely standard
+mpl fix null check in handleSubmit     # → likely frugal
 
-# Lightweight pipeline (≤3 files)
-mpl small fix login button style
-
-# Bugfix (single file)
-mpl bugfix missing null check in handleSubmit
+# Keyword hints (optional) — override auto-routing
+mpl bugfix missing null check          # → forces frugal tier
+mpl small fix login button style       # → forces standard tier
 
 # Direct skill invocation
 /mpl:mpl
@@ -470,6 +487,7 @@ node --test hooks/__tests__/*.test.mjs
 
 - Full specification: `docs/design.md`
 - Roadmap overview: `docs/roadmap/overview.md`
+- Adaptive Router plan: `docs/roadmap/adaptive-router-plan.md`
 - Phase 1 Foundation: `docs/roadmap/phase1-foundation.md`
 - Phase 2 Incremental: `docs/roadmap/phase2-incremental.md`
 - Phase 3 Automation: `docs/roadmap/phase3-automation.md`
