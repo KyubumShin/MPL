@@ -275,15 +275,15 @@ After: 시스템이 자동 판정 + 동적 전환
 | F-20 | **Adaptive Pipeline Router — 단일 진입점** | ✅ **S1 완료** | Triage(Step 0)를 확장하여 `pipeline_tier`(frugal/standard/frontier)를 자동 산정. Quick Scope Scan(Glob/Grep, ~1-2K 토큰)으로 영향 파일 수, 테스트 존재 여부, import 깊이를 측정. `pipeline_score` 공식으로 tier 결정. keyword-detector를 단일 진입점으로 통합 (mpl-bugfix/mpl-small 별도 분기 제거). 사용자 힌트(bugfix/small)는 tier 오버라이드로만 기능. **Ouroboros PAL Router 참조** |
 | F-21 | **Dynamic Escalation/Downgrade** | ✅ **S1 완료** | 실행 중 tier 자동 전환. Frugal에서 circuit break → Standard로 에스컬레이션 → 여전히 실패 → Frontier로 에스컬레이션. 에스컬레이션 시 완료된 작업 보존, 실패 페이즈만 확장 파이프라인으로 재실행. 다운그레이드는 Phase 0에서 이전 routing pattern 참조로 구현 (F-22 연동) |
 | F-10 | **RUNBOOK.md — 통합 실행 로그** | ✅ **S1 완료** | `docs/documentation.md` 개념을 MPL에 도입. `.mpl/mpl/RUNBOOK.md`에 Current Status, Milestone Progress, Key Decisions, Known Issues, How to Resume 섹션을 파이프라인 실행 중 자동 갱신. 사람이든 에이전트든 이 파일 하나로 현재 상태 파악 → 즉시 재개 가능 |
-| F-11 | **Run-to-Run 학습 축적** | 미구현 | RUNBOOK의 decisions/issues가 실행 완료 시 `mpl-compound`를 통해 `.mpl/memory/learnings.md`로 증류. 다음 실행 Phase 0에서 자동 로드. 실패 패턴(타입 혼동, 에러 불일치), 성공 패턴, 프로젝트 컨벤션(discovered)을 축적. **흐름**: 실행 중 RUNBOOK 기록 → compound 증류 → 다음 Phase 0 참조 |
-| F-12 | **세션 내 컨텍스트 영속** | 미구현 | 오케스트레이터가 페이즈 전환마다 `<remember priority>` 태그로 핵심 상태(현재 페이즈, PP 요약, 직전 실패 원인)를 마킹. RUNBOOK.md(파일 기반)와 `<remember>`(태그 기반)의 이중 안전망으로 장시간 실행 시 컨텍스트 압축에 대응 |
+| F-11 | **Run-to-Run 학습 축적** | ✅ **S2 완료** | RUNBOOK의 decisions/issues가 실행 완료 시 `mpl-compound`를 통해 `.mpl/memory/learnings.md`로 증류. 다음 실행 Phase 0에서 자동 로드. 실패 패턴(타입 혼동, 에러 불일치), 성공 패턴, 프로젝트 컨벤션(discovered)을 축적. **흐름**: 실행 중 RUNBOOK 기록 → compound 증류 → 다음 Phase 0 참조 |
+| F-12 | **세션 내 컨텍스트 영속** | ✅ **S2 완료** | 오케스트레이터가 페이즈 전환마다 `<remember priority>` 태그로 핵심 상태(현재 페이즈, PP 요약, 직전 실패 원인)를 마킹. RUNBOOK.md(파일 기반)와 `<remember>`(태그 기반)의 이중 안전망으로 장시간 실행 시 컨텍스트 압축에 대응 |
 | F-04 | Standalone 독립 동작 | 미구현 | (기존) OMC 의존성 제거. Grep/Glob 폴백 |
 
 #### MEDIUM — 실행 효율 및 UX
 
 | ID | 항목 | 상태 | 설명 |
 |----|------|------|------|
-| F-22 | **Routing Pattern Learning** | 미구현 | `.mpl/memory/routing-patterns.jsonl`에 실행 결과(task 설명, tier, 성공 여부, 토큰 사용량)를 append. 다음 실행 Triage에서 Jaccard 유사도(≥0.8)로 이전 패턴과 비교하여 초기 tier 추천. F-11 learnings.md와 별도 파일 — learnings는 기술적 교훈, routing-patterns는 비용 최적화 데이터. **Ouroboros DowngradeManager 참조** |
+| F-22 | **Routing Pattern Learning** | ✅ **S2 완료** | `.mpl/memory/routing-patterns.jsonl`에 실행 결과(task 설명, tier, 성공 여부, 토큰 사용량)를 append. 다음 실행 Triage에서 Jaccard 유사도(≥0.8)로 이전 패턴과 비교하여 초기 tier 추천. F-11 learnings.md와 별도 파일 — learnings는 기술적 교훈, routing-patterns는 비용 최적화 데이터. **Ouroboros DowngradeManager 참조** |
 | F-13 | **Background Execution** | 미구현 | Phase Runner 내에서 파일 충돌 없는 독립 TODO의 worker를 `run_in_background: true`로 병렬 실행. v3.1의 파일 충돌 감지와 결합하여 충돌 시 자동 순차 강제 |
 | F-14 | **AskUserQuestion HITL** | ✅ **기존 구현** | `mpl-interviewer`의 PP 인터뷰 + Side Interview에서 `AskUserQuestion` 도구 사용. 클릭 가능한 선택지 제공으로 HITL 응답 속도 개선 |
 | F-15 | **Worktree 격리 실행** | 미구현 | Pre-Execution Analysis에서 risk=HIGH인 페이즈를 `isolation: "worktree"`로 실행. 성공 시 머지, 실패 시 자동 정리. circuit break 시 부분 롤백 불필요 |

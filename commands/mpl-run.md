@@ -100,6 +100,17 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
 | `routing-patterns.jsonl` | Past execution patterns for tier prediction (F-22, append-only) |
 | `learnings.md` | Run-to-Run accumulated learnings (F-11) |
 
+### Session Context Persistence (F-12)
+
+Dual safety net against context loss during long-running pipelines:
+
+| Layer | Mechanism | Survives |
+|-------|-----------|----------|
+| `<remember priority>` tag | Emitted at each phase transition (Step 4.3.6) | Context compression within session |
+| `RUNBOOK.md` | Updated at each milestone (Steps 4.3, 4.5, 5.6) | Session boundaries |
+
+The orchestrator emits `<remember priority>` after every phase completion with: pipeline_id, current progress, tier, PP summary, last failure reason, and next phase. On context compression, the model retains this critical state and can reconstruct the execution context from RUNBOOK.md.
+
 ---
 
 ## Model Routing

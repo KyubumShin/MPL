@@ -93,6 +93,38 @@ pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
   dependency_depth = min(import_depth / 5, 1.0)
 ```
 
+#### 0.1.5a: Routing Pattern Matching (F-22)
+
+Before finalizing tier, check past execution patterns for a similar task:
+
+```
+if exists(".mpl/memory/routing-patterns.jsonl"):
+  { match, similarity, recommendation } = findSimilarPattern(cwd, user_request)
+  // Uses hooks/lib/mpl-routing-patterns.mjs (Jaccard similarity, threshold 0.8)
+
+  if recommendation:
+    // Pattern match found — use as tier hint (but score can override if 2+ tiers apart)
+    if |tier_from_score - recommendation| <= 1 tier:
+      tier = recommendation
+      source = "pattern_match"
+      Announce: "[MPL] Routing pattern match: similarity={similarity}, recommending tier={recommendation}."
+    else:
+      // Score and pattern disagree significantly — trust score
+      Announce: "[MPL] Routing pattern found (similarity={similarity}) but score disagrees. Using score-based tier."
+```
+
+#### 0.1.5b: Load Run-to-Run Learnings (F-11)
+
+Load accumulated learnings from past runs for Phase 0 and execution reference:
+
+```
+if exists(".mpl/memory/learnings.md"):
+  learnings = Read(".mpl/memory/learnings.md")
+  // Learnings are injected into Phase Runner context (Step 4.2) as supplementary reference
+  // and into Phase 0 Enhanced (Step 2.5) for error spec and pattern alignment
+  Announce: "[MPL] Loaded learnings from past runs."
+```
+
 Classify tier from score (or override with user hint):
 
 | pipeline_tier | Score | Tier Hint | Pipeline Depth |

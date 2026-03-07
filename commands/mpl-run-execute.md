@@ -25,8 +25,22 @@ context = {
   maturity_mode:    config.maturity_mode,
   prev_summary:     Read previous phase's state-summary.md (if available),
   dep_summaries:    load_dependency_summaries(current_phase),  // All phases referenced in interface_contract.requires
-  verification_plan:  load_phase_verification_plan(current_phase)  // A/S/H items for this phase
+  verification_plan:  load_phase_verification_plan(current_phase),  // A/S/H items for this phase
+  learnings:        load_learnings()                // F-11: Past run learnings (optional)
 }
+```
+
+#### Run-to-Run Learnings Loading (F-11)
+
+```
+load_learnings():
+  path = ".mpl/memory/learnings.md"
+  if exists(path):
+    content = Read(path)
+    // Cap at 2000 tokens (~100 lines) to bound context
+    // Prioritize Failure Patterns section (most actionable)
+    return truncate(content, max_lines=100)
+  return null  // No learnings yet — first run
 ```
 
 #### Phase 0 Artifacts Loading
@@ -170,6 +184,9 @@ result = Task(subagent_type="mpl-phase-runner", model="sonnet",
      ## Verification Plan (A/S/H items for this phase)
      {phase_verification_plan}
 
+     ## Past Run Learnings (F-11)
+     {learnings or "N/A — first run, no accumulated learnings"}
+
      ## Expected Output
      Return structured JSON:
      {
@@ -311,13 +328,36 @@ Record Side Interview results in `.mpl/mpl/phases/phase-N/side-interview.md`
 Report: "[MPL] Side Interview (Phase {N}): {role}. Result: {outcome}."
 ```
 
-### 4.3.6: Orchestrator Context Cleanup
+### 4.3.6: Session Context Persistence (F-12)
+
+After each phase completes, persist critical state to survive context compression:
+
+```
+<remember priority>
+[MPL Session State]
+- Pipeline: {pipeline_id}
+- Phase: {completed_phase}/{total_phases} complete
+- Tier: {pipeline_tier}
+- PP Summary: {top 3 PP names and status}
+- Last Phase: {phase_name} — {pass/fail}, pass_rate={pass_rate}%
+- Last Failure: {failure_reason or "none"}
+- Next: {next_phase_name or "finalize"}
+- RUNBOOK: .mpl/mpl/RUNBOOK.md
+</remember>
+```
+
+This tag is emitted by the orchestrator after Step 4.3 result processing. Combined with RUNBOOK.md (file-based), this creates a dual safety net:
+- `<remember priority>` — survives context compression within the session
+- `RUNBOOK.md` — survives session boundaries (readable by next session)
+
+### 4.3.7: Orchestrator Context Cleanup
 
 After each phase completes, manage orchestrator context to prevent accumulation:
 
 1. Ensure state_summary is saved to `.mpl/mpl/phases/phase-N/state-summary.md` (already done in 4.3)
-2. Release detailed phase data from orchestrator working memory
-3. For next phase, load only:
+2. Emit `<remember priority>` tag with critical state (4.3.6 above)
+3. Release detailed phase data from orchestrator working memory
+4. For next phase, load only:
    - Previous phase summary (from file)
    - Dependency summaries (from files, per interface_contract.requires)
    - Updated phase-decisions.md

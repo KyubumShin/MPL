@@ -46,6 +46,51 @@ Task(subagent_type="mpl-compound", model="sonnet",
 ```
 Save to `docs/learnings/{feature}/`: learnings.md, decisions.md, issues.md, metrics.md
 
+### 5.2.5: Run-to-Run Learning Distillation (F-11)
+
+Distill RUNBOOK decisions/issues into persistent learnings for future runs:
+
+```
+runbook = Read(".mpl/mpl/RUNBOOK.md")
+existing_learnings = Read(".mpl/memory/learnings.md") or ""
+
+Task(subagent_type="mpl-compound", model="sonnet",
+     prompt="""
+     Distill execution learnings into the persistent memory file.
+
+     ## RUNBOOK (current run)
+     {runbook}
+
+     ## Phase Summaries
+     {all state-summary.md contents}
+
+     ## Existing Learnings (append, do not duplicate)
+     {existing_learnings}
+
+     ## Output Format
+     Append NEW entries only to the existing file. Use this structure:
+
+     ### Failure Patterns
+     - [{date}] {pattern description} — {resolution}
+
+     ### Success Patterns
+     - [{date}] {what worked and why}
+
+     ### Project Conventions (discovered)
+     - {convention discovered during execution}
+
+     Rules:
+     1. Do NOT duplicate entries already in existing learnings
+     2. Only record patterns that would help FUTURE runs
+     3. Skip session-specific details (file paths, variable names)
+     4. Focus on generalizable lessons (type mismatches, API patterns, test strategies)
+     """)
+
+Save output to `.mpl/memory/learnings.md`
+Ensure .mpl/memory/ directory exists.
+Report: "[MPL] Learnings distilled: {new_entries} new patterns added to memory."
+```
+
 ### 5.3: Atomic Commits
 
 Reuse `mpl-git-master`:
@@ -131,6 +176,31 @@ Append final section to `.mpl/mpl/RUNBOOK.md`:
 - **Pipeline Tier**: {pipeline_tier}
 - **Escalations**: {escalation_count}
 - **Completed At**: {ISO timestamp}
+```
+
+### 5.6.5: Routing Pattern Recording (F-22)
+
+Record execution result to `.mpl/memory/routing-patterns.jsonl` for future tier prediction:
+
+```
+state = Read(".mpl/state.json")
+mpl_state = Read(".mpl/mpl/state.json")
+
+pattern = {
+  description: state.task or user_request (first 100 chars, summarized),
+  tier: state.pipeline_tier,
+  escalated_from: state.escalation_history.length > 0
+    ? state.escalation_history[0].from
+    : null,
+  result: mpl_state.status,  // "completed" | "partial" | "failed"
+  tokens: mpl_state.totals.total_tokens or profile.totals.tokens,
+  files: count of all created/modified files across phases
+}
+
+appendPattern(cwd, pattern)
+// Uses hooks/lib/mpl-routing-patterns.mjs
+
+Report: "[MPL] Routing pattern recorded: tier={tier}, result={result}, tokens={tokens}."
 ```
 
 ### 5.7: Update State
