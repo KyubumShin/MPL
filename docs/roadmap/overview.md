@@ -191,12 +191,10 @@ v1.0 (기존)                          v3.0 (달성)
 
 에이전트 수: 12→10 (critic 흡수 + gap/tradeoff 통합, deprecated 파일 삭제)
 
-### 미래 로드맵
+### 미래 로드맵 (기존 — v3.1 이전)
 
 | ID | 항목 | 우선순위 | 상태 | 설명 |
 |----|------|---------|------|------|
-| F-01 | Run-to-Run 학습 축적 | **HIGH** | 미구현 | mpl-compound 학습 추출 → `memory/mpl-learnings.md`에 저장 → 다음 run Phase 0에서 로드. 실패 패턴(타입 혼동, 에러 메시지 불일치), 성공 패턴(플래그, 설정), PP 승격 이력을 축적 |
-| F-02 | `mpl-scout` 에이전트 | MED | 미구현 | haiku 기반 경량 코드베이스 탐색 에이전트. Phase Runner의 context loading, fix loop의 원인 파일 탐색, Phase 0 구조 분석 위임에 활용. Read/Glob/Grep/LSP만 허용 |
 | F-03 | 언어별 LSP 통합 강화 | MED | **완료** | Step -1 LSP Warm-up 추가 (mpl-run-phase0.md). 언어 자동 감지 → cold start 제거 → ast_grep 폴백 |
 | F-04 | Standalone 독립 동작 | **HIGH** | 미구현 | OMC 의존성 제거. `/mpl:mpl-setup`으로 LSP·MCP 자동 설정, `mpl-doctor` 에이전트로 진단. OMC 도구(lsp_*, ast_grep) 없으면 Grep/Glob 폴백 |
 | F-05 | Phase 0 캐시 부분 무효화 | LOW | 미구현 | 전체 무효화 대신 변경된 모듈만 재분석 |
@@ -204,14 +202,277 @@ v1.0 (기존)                          v3.0 (달성)
 
 ---
 
+## v3.2 로드맵 — "문서가 메모리다 + 적응형 라우팅" (2026-03-07)
+
+### 설계 방향
+
+v3.2는 두 축으로 진화한다:
+
+**축 1: 문서가 메모리다** — 세션 간·실행 간 연속성 보장
+
+> 장기 실행 에이전트의 성공은 모델 지능이 아니라 **운영 구조**에서 비롯된다.
+> — [Run long-horizon tasks with Codex](https://www.linkedin.com/posts/gb-jeong_run-long-horizon-tasks-with-codex-activity-7435825294554484736-hBEX)
+
+**축 2: 적응형 파이프라인 라우팅** — 사용자가 복잡도를 판단하지 않는다
+
+> MPL이 복잡해질수록 경량 작업의 진입 장벽이 높아지는 역설을 해결한다.
+> Ouroboros의 PAL Router(Progressive Adaptive LLM Router)에서 영감을 받아,
+> **단일 진입점 + 자동 tier 분류 + 동적 에스컬레이션**으로 3개 스킬(mpl/mpl-small/mpl-bugfix)을 통합한다.
+> — [Ouroboros](https://github.com/Q00/ouroboros) 분석 (2026-03-07)
+
+#### 4-Document 매핑 (축 1)
+
+| 레퍼런스 문서 | 역할 | MPL 대응 | 상태 |
+|-------------|------|---------|------|
+| `docs/prompt.md` | 목표/비목표, 완료 기준 동결 | `pivot-points.md` | ✅ 있음 |
+| `docs/plans.md` | 마일스톤별 수용기준 + 검증 명령 | `decomposition.yaml` | ✅ 있음 |
+| `docs/implement.md` | plans를 SSOT로, 범위 확대 금지 | `mpl-run.md` (오케스트레이터 프로토콜) | ✅ 있음 |
+| `docs/documentation.md` | 감시 기록, 세션 간 연속성 | **없음** → `RUNBOOK.md`로 신설 | ❌ 미구현 |
+
+MPL은 1~3번 문서가 이미 강력하지만, 4번 — "감시 기록(audit log) 겸 공유 메모리"가 부족하다. 현재 State Summary가 페이즈별로 파편화되어 있고, 사람이나 다음 세션 에이전트가 "지금 어디까지 왔고, 왜 이런 결정을 했는지"를 한눈에 파악할 통합 문서가 없다.
+
+#### Adaptive Pipeline Router (축 2) — 문제와 해결
+
+**현재 문제**: 3개 스킬 분기가 사용자 키워드에 의존한다.
+
+```
+"mpl bugfix" → mpl-bugfix (최소 파이프라인)
+"mpl small"  → mpl-small  (3-Phase 경량)
+"mpl"        → mpl full   (9+ step 전체)
+```
+
+| 문제 | 상세 |
+|------|------|
+| 사용자 판단 의존 | "이건 small인가 full인가?"를 미리 결정해야 함 |
+| Triage와 중복 | full의 Triage(Step 0)가 이미 정보 밀도를 분석하는데, small은 우회함 |
+| 에스컬레이션 없음 | small로 시작 → 복잡 → circuit break → 사용자가 full을 재실행해야 함 |
+| 다운그레이드 없음 | full로 시작 → 사실 간단 → 9+ 단계 전체 오버헤드 |
+| 토큰 갭 | bugfix(~5-10K) ↔ small(~15-25K) ↔ full(~50-100K+) 사이에 최적 경로 없음 |
+
+**해결**: Ouroboros PAL Router 방식을 MPL에 적응.
+
+```
+Before: 사용자가 3개 중 선택
+  "mpl bugfix: 로그인 에러 수정"    → mpl-bugfix
+  "mpl small: 검증 추가"           → mpl-small
+  "mpl: 인증 시스템 리팩토링"       → mpl full
+
+After: 시스템이 자동 판정 + 동적 전환
+  "mpl 로그인 에러 수정"            → Triage → Frugal (≈bugfix)
+  "mpl 검증 추가"                  → Triage → Standard (≈small 확장)
+  "mpl 인증 시스템 리팩토링"        → Triage → Frontier (≈full)
+  (실행 중 circuit break 시 자동 에스컬레이션)
+```
+
+---
+
+### 전체 항목
+
+#### HIGH — 핵심 아키텍처
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-20 | **Adaptive Pipeline Router — 단일 진입점** | 미구현 | Triage(Step 0)를 확장하여 `pipeline_tier`(frugal/standard/frontier)를 자동 산정. Quick Scope Scan(Glob/Grep, ~1-2K 토큰)으로 영향 파일 수, 테스트 존재 여부, import 깊이를 측정. `pipeline_score` 공식으로 tier 결정. keyword-detector를 단일 진입점으로 통합 (mpl-bugfix/mpl-small 별도 분기 제거). 사용자 힌트(bugfix/small)는 tier 오버라이드로만 기능. **Ouroboros PAL Router 참조** |
+| F-21 | **Dynamic Escalation/Downgrade** | 미구현 | 실행 중 tier 자동 전환. Frugal에서 circuit break → Standard로 에스컬레이션 → 여전히 실패 → Frontier로 에스컬레이션. 에스컬레이션 시 완료된 작업 보존, 실패 페이즈만 확장 파이프라인으로 재실행. 다운그레이드는 Phase 0에서 이전 routing pattern 참조로 구현 (F-22 연동) |
+| F-10 | **RUNBOOK.md — 통합 실행 로그** | 미구현 | `docs/documentation.md` 개념을 MPL에 도입. `.mpl/mpl/RUNBOOK.md`에 Current Status, Milestone Progress, Key Decisions, Known Issues, How to Resume 섹션을 파이프라인 실행 중 자동 갱신. 사람이든 에이전트든 이 파일 하나로 현재 상태 파악 → 즉시 재개 가능 |
+| F-11 | **Run-to-Run 학습 축적** | 미구현 | RUNBOOK의 decisions/issues가 실행 완료 시 `mpl-compound`를 통해 `.mpl/memory/learnings.md`로 증류. 다음 실행 Phase 0에서 자동 로드. 실패 패턴(타입 혼동, 에러 불일치), 성공 패턴, 프로젝트 컨벤션(discovered)을 축적. **흐름**: 실행 중 RUNBOOK 기록 → compound 증류 → 다음 Phase 0 참조 |
+| F-12 | **세션 내 컨텍스트 영속** | 미구현 | 오케스트레이터가 페이즈 전환마다 `<remember priority>` 태그로 핵심 상태(현재 페이즈, PP 요약, 직전 실패 원인)를 마킹. RUNBOOK.md(파일 기반)와 `<remember>`(태그 기반)의 이중 안전망으로 장시간 실행 시 컨텍스트 압축에 대응 |
+| F-04 | Standalone 독립 동작 | 미구현 | (기존) OMC 의존성 제거. Grep/Glob 폴백 |
+
+#### MEDIUM — 실행 효율 및 UX
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-22 | **Routing Pattern Learning** | 미구현 | `.mpl/memory/routing-patterns.jsonl`에 실행 결과(task 설명, tier, 성공 여부, 토큰 사용량)를 append. 다음 실행 Triage에서 Jaccard 유사도(≥0.8)로 이전 패턴과 비교하여 초기 tier 추천. F-11 learnings.md와 별도 파일 — learnings는 기술적 교훈, routing-patterns는 비용 최적화 데이터. **Ouroboros DowngradeManager 참조** |
+| F-13 | **Background Execution** | 미구현 | Phase Runner 내에서 파일 충돌 없는 독립 TODO의 worker를 `run_in_background: true`로 병렬 실행. v3.1의 파일 충돌 감지와 결합하여 충돌 시 자동 순차 강제 |
+| F-14 | **AskUserQuestion HITL** | 미구현 | `mpl-interviewer`의 PP 인터뷰 + Side Interview에서 `AskUserQuestion` 도구 사용. 클릭 가능한 선택지 제공으로 HITL 응답 속도 개선 |
+| F-15 | **Worktree 격리 실행** | 미구현 | Pre-Execution Analysis에서 risk=HIGH인 페이즈를 `isolation: "worktree"`로 실행. 성공 시 머지, 실패 시 자동 정리. circuit break 시 부분 롤백 불필요 |
+| F-16 | **mpl-scout 에이전트** | 미구현 | haiku 기반 경량 코드베이스 탐색 에이전트. Phase 0 구조 분석, Fix Loop 원인 탐색, context loading에 활용. Read/Glob/Grep/LSP만 허용. sonnet/opus 토큰 절감 |
+| F-17 | **lsp_diagnostics_directory 통합** | 미구현 | Gate 1 자동 테스트 전에 프로젝트 전체 타입 체크. tool_mode=full일 때 활성, standalone이면 `tsc --noEmit` / `python -m py_compile` 폴백 |
+
+#### LOW — 유지
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-05 | Phase 0 캐시 부분 무효화 | 미구현 | 전체 무효화 대신 변경된 모듈만 재분석 |
+| F-06 | 멀티 프로젝트 지원 | 미구현 | monorepo 환경에서 프로젝트별 독립 파이프라인 |
+
+---
+
+### Adaptive Pipeline Router 상세 설계 (F-20, F-21, F-22)
+
+#### Pipeline Score 공식
+
+Triage(Step 0)에서 Quick Scope Scan 후 산출:
+
+```
+pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
+               + (dependency_depth × 0.25) + (risk_signal × 0.15)
+
+file_scope:       min(affected_files / 10, 1.0)
+test_complexity:  min(test_scenarios / 8, 1.0)
+dependency_depth: min(import_chain_depth / 5, 1.0)
+risk_signal:      keyword_hint 또는 prompt 분석 (0.0~1.0)
+```
+
+Quick Scope Scan은 Glob/Grep만으로 ~1-2K 토큰에 완료된다. 기존 Step 2 코드베이스 분석의 경량 버전.
+
+#### 3-Tier 파이프라인 매핑
+
+| Tier | Score | 실행 단계 | 스킵 | 예상 토큰 |
+|------|-------|----------|------|----------|
+| **Frugal** (< 0.3) | 단순 버그 수정, 1-2 파일 | Bug Analysis → Fix → Gate 1 → Commit | Triage, PP, Phase 0, Decomposition, Gate 2/3 | ~5-15K |
+| **Standard** (0.3~0.65) | 소규모 기능, 3-5 파일 | Triage(skip) → PP(light) → Phase 0(Error Spec) → 단일 Phase → Gate 1 → Commit | Full PP, Phase 0 Step 1-3, Decomposition(다중 페이즈), Gate 2/3 | ~20-40K |
+| **Frontier** (> 0.65) | 복잡 작업, 6+ 파일 | 전체 9+ step 파이프라인 | 없음 | ~50-100K+ |
+
+사용자 힌트 오버라이드: `"mpl bugfix"` → tier를 frugal로 강제, `"mpl small"` → standard 강제. 힌트 없으면 자동 산정.
+
+#### 동적 에스컬레이션 프로토콜
+
+```
+[Frugal] ──circuit break──→ [Standard] ──circuit break──→ [Frontier]
+                              │                              │
+                              ├─ 완료된 TODO 보존             ├─ 완료된 페이즈 보존
+                              ├─ 실패 TODO를 단일 Phase로     ├─ 실패 Phase를 재분해
+                              │  재구성                       │
+                              └─ PP 추출 (light)              └─ Full PP + Phase 0
+```
+
+에스컬레이션 시 state.json에 `escalation_history` 기록:
+
+```json
+{
+  "pipeline_tier": "standard",
+  "escalation_history": [
+    {"from": "frugal", "to": "standard", "reason": "circuit_break", "preserved_todos": 3}
+  ]
+}
+```
+
+#### Routing Pattern 파일 형식 (F-22)
+
+```jsonl
+{"ts":"2026-03-07T10:00:00Z","desc":"add validation to endpoint","tier":"standard","result":"success","tokens":32400,"files":4}
+{"ts":"2026-03-07T11:30:00Z","desc":"fix typo in error message","tier":"frugal","result":"success","tokens":8200,"files":1}
+{"ts":"2026-03-07T14:00:00Z","desc":"refactor auth module","tier":"frontier","result":"success","tokens":87000,"files":12}
+{"ts":"2026-03-07T15:00:00Z","desc":"add input sanitization","tier":"frugal","escalated":"standard","result":"success","tokens":28000,"files":3}
+```
+
+Jaccard 유사도로 매칭 (토큰화 후 intersection/union, 임계값 0.8):
+
+```
+new_task: "add email validation to signup endpoint"
+match:    "add validation to endpoint" (similarity=0.83) → tier=standard 추천
+```
+
+---
+
+### 전체 흐름도
+
+```
+진입 (keyword-detector)
+├── "mpl" 감지 → 단일 스킬 진입                             [F-20]
+└── hint 추출 (bugfix→frugal, small→standard, 없음→auto)
+
+Triage (Step 0) — 확장
+├── 정보 밀도 분석 → interview_depth
+├── Quick Scope Scan (Glob/Grep, ~1-2K 토큰)               [F-20]
+│   ├── 영향 파일 수
+│   ├── 테스트 존재 여부
+│   └── import 깊이 샘플링
+├── routing-patterns.jsonl 매칭 (이전 패턴 참조)             [F-22]
+├── pipeline_score 산출 → pipeline_tier                     [F-20]
+└── .mpl/memory/learnings.md 로드                           [F-11]
+
+실행 전 (Phase 0) — tier별 분기
+├── Frugal:  Error Spec만 → 단일 Fix Cycle
+├── Standard: Error Spec + light PP → 단일 Phase
+├── Frontier: 전체 Phase 0 → 다중 Phase
+├── mpl-scout(haiku)로 구조 분석                            [F-16]
+└── lsp_diagnostics_directory 타입 체크                      [F-17]
+
+실행 중 (Phase 1~N)
+├── RUNBOOK.md 실시간 갱신                                   [F-10]
+├── <remember priority> 태그로 컴팩션 대비                    [F-12]
+├── Background Execution (독립 TODO 병렬)                    [F-13]
+├── AskUserQuestion (Side Interview HITL)                    [F-14]
+├── Worktree 격리 (HIGH 리스크 페이즈)                       [F-15]
+├── circuit break 시 자동 에스컬레이션                        [F-21]
+│   └── Frugal→Standard→Frontier (완료 작업 보존)
+└── mpl-scout (Fix Loop 원인 탐색)                           [F-16]
+
+실행 후 (Finalize)
+├── routing-patterns.jsonl에 실행 결과 append                [F-22]
+├── RUNBOOK decisions/issues → memory/learnings.md 증류      [F-11]
+└── 다음 실행 Phase 0에서 learnings + patterns 자동 참조
+```
+
+### RUNBOOK.md 형식 (F-10)
+
+```markdown
+# RUNBOOK — {task description}
+Started: 2026-03-07T10:00:00Z
+
+## Current Status
+- Phase: 3/5 (phase-3: Add validation layer)
+- Pipeline Mode: full
+- Maturity: standard
+
+## Milestone Progress
+- [x] Phase 1: DB schema migration — PASS (4/4 criteria)
+- [x] Phase 2: API endpoints — PASS (6/6 criteria)
+- [ ] Phase 3: Validation layer — IN PROGRESS (2/5 criteria)
+- [ ] Phase 4: Error handling
+- [ ] Phase 5: Integration tests
+
+## Key Decisions
+- PD-001: chose Zod over Joi for validation (PP-02 type safety)
+- PD-003: split user/admin routes (decomposer recommendation)
+
+## Known Issues
+- ISS-001: rate limiter not tested under load (H-item, deferred)
+
+## Blockers
+(none)
+
+## How to Resume
+Load: pivot-points.md + decomposition.yaml + this file
+Next: Phase 3 TODO #3 — email format validator
+```
+
+### learnings.md 형식 (F-11)
+
+```markdown
+# MPL Learnings (auto-accumulated)
+Last updated: 2026-03-07
+
+## Failure Patterns
+- [2026-03-05] Type mismatch: Python dict vs TypedDict — always use TypedDict
+- [2026-03-07] pytest fixture scope confusion — default to "function" scope
+
+## Success Patterns
+- [2026-03-05] Zod schema shared between frontend/backend validation
+- [2026-03-07] Error spec from Phase 0 eliminated all debugging
+
+## Project Conventions (discovered)
+- Import order: stdlib > third-party > local (enforced by ruff)
+- Test naming: test_{module}_{scenario}_{expected}
+```
+
+---
+
 ## 결론
 
-MPL은 v1.0→v3.0 진화를 통해 "예방이 치료보다 낫다"는 원칙을 실증 데이터로 뒷받침하는 파이프라인으로 성장했다. 7개 실험의 일관된 결과에 기반한 Phase 0 Enhanced와, 로드맵 외에서 추가된 Pre-Execution Analysis, 3-Gate 품질 시스템, Convergence Detection이 결합되어 견고한 자율 코딩 파이프라인을 구성한다.
+MPL은 v1.0→v3.0 진화를 통해 "예방이 치료보다 낫다"는 원칙을 실증 데이터로 뒷받침하는 파이프라인으로 성장했다. v3.2는 두 가지 원칙을 추가한다:
+
+1. **"문서가 메모리다"** — 단일 실행 내 품질뿐 아니라 세션 간·실행 간 연속성을 보장
+2. **"사용자에게 복잡도를 판단하라고 요구하지 않는다"** — Ouroboros PAL Router에서 영감을 받은 적응형 파이프라인 라우팅으로, 단일 진입점 + 자동 tier 분류 + 동적 에스컬레이션을 통해 경량 작업의 진입 장벽을 제거
 
 상세 설계는 각 문서를 참고한다:
 
 - [Phase 1: Foundation - Phase 0 Enhanced](./phase1-foundation.md) — **구현 완료**
 - [Phase 2: Incremental - 점진적 구현/테스트](./phase2-incremental.md) — **구현 완료**
 - [Phase 3: Automation - 자동화 및 최적화](./phase3-automation.md) — **부분 구현**
+- [Adaptive Pipeline Router 구현 계획](./adaptive-router-plan.md) — **v3.2 신규**
 - [실험 결과 요약](./experiments-summary.md)
 - [v3.0 설계 문서](../design.md)
