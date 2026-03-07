@@ -287,8 +287,10 @@ After: 시스템이 자동 판정 + 동적 전환
 | F-13 | **Background Execution** | 미구현 | Phase Runner 내에서 파일 충돌 없는 독립 TODO의 worker를 `run_in_background: true`로 병렬 실행. v3.1의 파일 충돌 감지와 결합하여 충돌 시 자동 순차 강제 |
 | F-14 | **AskUserQuestion HITL** | ✅ **기존 구현** | `mpl-interviewer`의 PP 인터뷰 + Side Interview에서 `AskUserQuestion` 도구 사용. 클릭 가능한 선택지 제공으로 HITL 응답 속도 개선 |
 | F-15 | **Worktree 격리 실행** | 미구현 | Pre-Execution Analysis에서 risk=HIGH인 페이즈를 `isolation: "worktree"`로 실행. 성공 시 머지, 실패 시 자동 정리. circuit break 시 부분 롤백 불필요 |
-| F-16 | **mpl-scout 에이전트** | 미구현 | haiku 기반 경량 코드베이스 탐색 에이전트. Phase 0 구조 분석, Fix Loop 원인 탐색, context loading에 활용. Read/Glob/Grep/LSP만 허용. sonnet/opus 토큰 절감 |
+| F-16 | **mpl-scout 에이전트** | 미구현 | haiku 기반 경량 코드베이스 탐색 에이전트. Phase 0 구조 분석, Fix Loop 원인 탐색, Phase Runner 컨텍스트 보조에 활용. Read/Glob/Grep/LSP만 허용. sonnet/opus 토큰 절감. Claude Code의 Guide subagent 패턴 — 도구 추가 없이 기능 확장. **"Seeing like an Agent" Progressive Disclosure 참조** |
 | F-17 | **lsp_diagnostics_directory 통합** | 미구현 | Gate 1 자동 테스트 전에 프로젝트 전체 타입 체크. tool_mode=full일 때 활성, standalone이면 `tsc --noEmit` / `python -m py_compile` 폴백 |
+| F-23 | **Phase Runner Task-based TODO 관리** | 미구현 | Phase Runner가 mini-plan.md 체크박스 대신 Task tool로 TODO를 관리. Worker 간 의존성 추적, 병렬 실행 상태 자동 동기화. 현재 mini-plan.md 패턴은 Claude Code 초기 TodoWrite와 동일한 한계 — 모델이 목록에 얽매이고 에이전트 간 통신이 불가. F-13(Background Execution)과 시너지: 독립 TODO를 병렬 Task로 dispatch. **"Seeing like an Agent" TodoWrite→Task 교훈 참조** |
+| F-24 | **Phase Runner Self-Directed Context** | 미구현 | Phase Runner에게 scope-bounded search를 허용하여 필요한 컨텍스트를 직접 탐색. 현재: 오케스트레이터가 context assembly 후 주입 ("given context"). 개선: impact files 목록만 제공하고 실제 내용은 Phase Runner가 직접 Read/Grep. 격리 원칙 유지를 위해 해당 phase의 impact 범위 내에서만 검색 허용(scope-bounded). **"Seeing like an Agent" RAG→self-directed search 교훈 참조** |
 
 #### LOW — 유지
 

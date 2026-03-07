@@ -51,6 +51,41 @@
 
 ---
 
+### Seeing like an Agent (Thariq, Claude Code team)
+
+- **Source**: https://x.com/trq212/status/2027463795355095314
+- **저자**: Thariq (Claude Code @Anthropic)
+- **분석일**: 2026-03-08
+- **영향 범위**: F-23, F-24, F-16 확장
+
+#### 참조한 교훈
+
+| 교훈 | MPL 적응 | 적용 위치 |
+|------|---------|----------|
+| **TodoWrite → Task Tool 진화** — 모델 능력 향상 시 기존 도구가 제약이 됨. 체크박스 목록 → 에이전트 간 통신 도구로 교체 | Phase Runner의 mini-plan.md 체크박스 → Task tool 기반 TODO 관리 (F-23) | `docs/roadmap/overview.md` F-23 |
+| **RAG → self-directed search** — 컨텍스트를 "제공"하기보다 에이전트가 "스스로 구축"하게 하는 것이 효과적 | Phase Runner scope-bounded search 허용 (F-24). 오케스트레이터 context assembly 의존도 감소 | `docs/roadmap/overview.md` F-24 |
+| **Progressive Disclosure** — 시스템 프롬프트 비대화 대신, subagent/skill 파일로 필요 시 로드 | mpl-scout(F-16)를 Phase Runner 컨텍스트 보조로 확장. Guide subagent 패턴 | `docs/roadmap/overview.md` F-16 |
+| **AskUserQuestion 도구** — 구조화된 질문이 plain text보다 효과적 | F-14에서 이미 적용 (Side Interview + PP Interview) | 변경 없음 |
+
+#### MPL에 이미 잘 적용된 패턴
+
+| 패턴 | MPL 대응 |
+|------|---------|
+| Progressive Disclosure (필요 시만 로드) | Protocol 4분할 (phase0/decompose/execute/finalize), Phase 0 복잡도 적응 |
+| 도구 추가 없이 기능 확장 | SKILL.md → mpl-run.md → stage별 파일 체인 |
+| AskUserQuestion 구조화 | F-14: Side Interview + PP Interview |
+| 에이전트 간 분리 (code author ≠ tester) | Phase Runner ≠ Test Agent, Orchestrator ≠ Worker |
+
+#### 핵심 인용
+
+> *"As model capabilities increase, the tools that your models once needed might now be constraining them. It's important to constantly revisit previous assumptions on what tools are needed."*
+
+> *"Claude was given this context instead of finding the context itself."*
+
+> *"We were able to add things to Claude's action space without adding a tool."*
+
+---
+
 ## v3.0~v3.1 — 내부 실험 기반
 
 ### 7개 실험 (Exp 1~8, Exp 2 제외)
