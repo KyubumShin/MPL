@@ -1,0 +1,245 @@
+#!/usr/bin/env node
+/**
+ * MPL Output Validation Hook (PostToolUse)
+ * Inserts validation reminder when a validate_prompt-enabled agent completes.
+ *
+ * Based on: design doc section 9.2 hook 2 + hoyeon validate_prompt pattern
+ *
+ * Agents with validate_prompt: pre-execution-analyzer, verification-planner, worker
+ * When these agents complete via Task tool, this hook inserts a [MPL VALIDATION] reminder
+ * so the orchestrator checks the output against the agent's Output_Schema.
+ */
+
+import { dirname, join } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { existsSync, readFileSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Import shared MPL state utility
+const { isMplActive, readState, writeState } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
+);
+
+// Import shared stdin reader
+const { readStdin } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+
+// Agents that require output validation
+export const VALIDATE_AGENTS = new Set([
+  'mpl-pre-execution-analyzer',
+  'mpl-verification-planner',
+  'mpl-worker',
+  'mpl-phase-runner',
+  'mpl-interviewer',
+  'mpl-doctor',
+  // mpl-critic: absorbed into mpl-decomposer risk_assessment (v3.1)
+  'mpl-test-agent',
+  'mpl-code-reviewer',
+  'mpl-decomposer',
+  'mpl-git-master',
+  'mpl-compound',
+]);
+
+// Expected output sections per agent
+export const EXPECTED_SECTIONS = {
+  'mpl-pre-execution-analyzer': [
+    '1. Missing Requirements',
+    '2. AI Pitfalls',
+    '3. Must NOT Do',
+    '4. Recommended Questions',
+    '5. Overall Risk Assessment',
+    '6. Change-Level Analysis',
+    '7. Recommended Execution Order',
+  ],
+  'mpl-verification-planner': [
+    '1. Test Infrastructure',
+    '2. A-items',
+    '3. S-items',
+    '4. H-items',
+    '5. Verification Gaps',
+    '6. External Dependencies',
+  ],
+  'mpl-worker': [
+    'todo_id',
+    'status',
+    'outputs',
+    'acceptance_criteria',
+  ],
+  'mpl-phase-runner': [
+    'status',
+    'state_summary',
+    'verification',
+  ],
+  'mpl-interviewer': [
+    'PP-',
+    'Priority Order',
+    'Interview Metadata',
+  ],
+  'mpl-critic': [
+    'Risk Register',
+    'Design Drift Vectors',
+    'Cross-Phase Dependency Risks',
+    'Verification Coverage Gaps',
+    'Recommendations',
+    'Go/No-Go Assessment',
+  ],
+  'mpl-test-agent': [
+    'phase_id',
+    'test_files_created',
+    'test_results',
+    'a_item_coverage',
+  ],
+  'mpl-code-reviewer': [
+    'Overall Verdict',
+    'Findings',
+    'Category Summary',
+    'Verdict Rationale',
+  ],
+  'mpl-decomposer': [
+    'architecture_anchor',
+    'phases',
+  ],
+  'mpl-git-master': [
+    'Commits Created',
+  ],
+  'mpl-compound': [
+    'Learnings',
+    'Decisions',
+    'Issues',
+    'Metrics',
+  ],
+  'mpl-doctor': [
+    'Results',
+    'Tool Availability Detail',
+    'Recommendations',
+    'Summary',
+  ],
+};
+
+/**
+ * Validate response text against expected sections (case-insensitive).
+ * @param {string[]} sections - Expected section names
+ * @param {string} responseText - Agent response text
+ * @returns {{ passed: boolean, missing: string[], found: string[], sectionList: string }}
+ */
+export function validateSections(sections, responseText) {
+  const missing = [];
+  const found = [];
+  const lower = responseText.toLowerCase();
+  for (const section of sections) {
+    if (lower.includes(section.toLowerCase())) {
+      found.push(section);
+    } else {
+      missing.push(section);
+    }
+  }
+  const sectionList = sections.map(s => {
+    const ok = found.includes(s);
+    return `  - ${ok ? '[PASS]' : '[MISSING]'} ${s}`;
+  }).join('\n');
+  return { passed: missing.length === 0, missing, found, sectionList };
+}
+
+/**
+ * Format validation result into a hook message string.
+ * @param {string} agentType
+ * @param {string[]} sections
+ * @param {boolean} passed
+ * @param {string[]} missing
+ * @param {string} sectionList
+ * @returns {string}
+ */
+export function formatValidationMessage(agentType, sections, passed, missing, sectionList) {
+  if (passed) {
+    return `[MPL VALIDATION PASSED] Agent "${agentType}" output contains all ${sections.length} required sections.`;
+  }
+  return `[VALIDATION FAILED] [MPL VALIDATION FAILED] Agent "${agentType}" output is missing ${missing.length}/${sections.length} required sections.
+
+Validation results:
+${sectionList}
+
+Missing sections: ${missing.join(', ')}
+
+ACTION REQUIRED: Re-run the agent with clarified instructions targeting the missing sections.
+Do NOT proceed to the next phase until all sections are present.`;
+}
+
+async function main() {
+  const input = await readStdin();
+
+  let data;
+  try {
+    data = JSON.parse(input);
+  } catch {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  const toolName = data.tool_name || data.toolName || '';
+
+  // Only intercept Task tool completions
+  if (!['Task', 'task'].includes(toolName)) {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  // Check if MPL is active
+  const cwd = data.cwd || data.directory || process.cwd();
+  if (!isMplActive(cwd)) {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  // Extract agent type from tool input
+  const toolInput = data.tool_input || data.toolInput || {};
+  const agentType = toolInput.subagent_type || toolInput.subagentType || '';
+
+  // Check if this agent requires validation
+  if (!VALIDATE_AGENTS.has(agentType)) {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  // Get expected sections for this agent
+  const sections = EXPECTED_SECTIONS[agentType] || [];
+
+  // Actually validate tool_response content against expected sections
+  const toolResponse = data.tool_response || data.toolResponse || '';
+  const responseText = typeof toolResponse === 'string'
+    ? toolResponse
+    : JSON.stringify(toolResponse);
+
+  const { passed, missing, found, sectionList } = validateSections(sections, responseText);
+
+  // H2: Estimate token usage from response length and update state
+  try {
+    const estimatedTokens = Math.ceil(responseText.length / 4);
+    if (estimatedTokens > 0) {
+      const currentState = readState(cwd);
+      if (currentState) {
+        const currentTokens = currentState.cost?.total_tokens || 0;
+        writeState(cwd, { cost: { total_tokens: currentTokens + estimatedTokens } });
+      }
+    }
+  } catch {
+    // Token tracking is best-effort; do not block on failure
+  }
+
+  const message = formatValidationMessage(agentType, sections, passed, missing, sectionList);
+
+  // C3: Block (continue: false) when validation fails
+  console.log(JSON.stringify({
+    continue: passed,
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      additionalContext: message
+    }
+  }));
+}
+
+main().catch(() => {
+  console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+});
