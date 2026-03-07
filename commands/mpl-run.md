@@ -37,6 +37,7 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
   "run_mode": "mpl",
   "current_phase": "mpl-phase-running",
   "maturity_mode": "standard",
+  "tool_mode": "full",
   "started_at": "2026-03-02T10:00:00Z"
 }
 ```

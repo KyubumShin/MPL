@@ -19,6 +19,7 @@ const STATE_FILE = 'state.json';
 const DEFAULT_STATE = {
   pipeline_id: null,
   run_mode: 'full',
+  tool_mode: 'full',         // F-04: "full" | "partial" | "standalone"
   pipeline_tier: null,       // F-20: "frugal" | "standard" | "frontier" (set by Triage)
   tier_hint: null,           // F-20: user keyword hint ("frugal" | "standard" | null)
   escalation_history: [],    // F-21: [{from, to, reason, preserved_work, timestamp}]

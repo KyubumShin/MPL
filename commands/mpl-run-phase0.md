@@ -56,6 +56,35 @@ if lsp_hover fails for a language:
   remove language from lsp_servers list
 ```
 
+### Standalone Mode Detection (F-04)
+
+After LSP warm-up attempts, determine tool_mode:
+
+```
+active_tools = { lsp: lsp_servers.length > 0, ast_grep: false }
+
+// Test ast_grep availability
+try:
+  ast_grep_search(pattern="$X", language=detected_language)
+  active_tools.ast_grep = true
+catch:
+  Report: "[MPL] ast_grep unavailable."
+
+// Determine tool_mode
+if active_tools.lsp AND active_tools.ast_grep:
+  tool_mode = "full"
+elif active_tools.lsp:
+  tool_mode = "partial"  // LSP only, no ast_grep
+else:
+  tool_mode = "standalone"  // Grep/Glob only
+
+writeState(cwd, { tool_mode: tool_mode })
+Announce: "[MPL] Tool mode: {tool_mode}. LSP: {active_tools.lsp}, ast_grep: {active_tools.ast_grep}."
+```
+
+All subsequent Phase 0 steps check `tool_mode` before using LSP/ast_grep tools.
+If tool_mode is "standalone" or "partial", use the fallbacks defined in `docs/standalone.md`.
+
 ---
 
 ## Step 0: Triage
@@ -334,6 +363,26 @@ Save confirmation timestamp to `.mpl/mpl/state.json` as `pp_confirmed_at`.
 
 Done by the orchestrator using built-in tools (NOT an agent). No separate script.
 Saves result to `.mpl/mpl/codebase-analysis.json`.
+
+### Scout-Assisted Analysis (F-16)
+
+For Phase 0 codebase analysis, the orchestrator MAY delegate initial structure
+discovery to mpl-scout (haiku) to save sonnet/opus tokens:
+
+```
+scout_result = Task(subagent_type="mpl-scout", model="haiku",
+     prompt="""
+     Explore project structure for MPL Phase 0:
+     1. Glob("**/*.{ts,tsx,js,jsx,py,go,rs,java}") — file listing
+     2. Identify entry points (main.*, index.*, app.*)
+     3. Sample import depth for top 5 files
+     4. Check test infrastructure (frameworks, coverage)
+     5. List config files
+     """)
+```
+
+Scout results feed into Module 1-6 analysis, reducing orchestrator tool calls.
+If mpl-scout is unavailable, orchestrator performs analysis directly (existing behavior).
 
 ### Module 1: Structure Analysis (Glob)
 

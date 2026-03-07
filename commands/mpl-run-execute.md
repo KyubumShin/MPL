@@ -414,6 +414,27 @@ else:
 
 After all phases complete, apply the 3-Gate Quality system before finalization.
 
+#### Gate 0.5: Project-Wide Type Check (F-17)
+
+Before running tests, perform project-level type checking:
+
+```
+diagnostics = lsp_diagnostics_directory(path=".", strategy="auto")
+// strategy="auto": uses tsc when tsconfig.json exists, falls back to LSP iteration
+// Standalone fallback (F-04): Bash("npx tsc --noEmit") or Bash("python -m py_compile *.py")
+
+if diagnostics.errors > 0:
+  Report: "[MPL] Type check: {errors} errors found. Entering fix loop."
+  -> Enter fix loop targeting type errors before Gate 1
+
+if diagnostics.warnings > 5:
+  Report: "[MPL] Type check: {warnings} warnings. Proceeding with caution."
+
+Report: "[MPL] Type check: clean. Proceeding to Gate 1."
+```
+
+This catches type errors before test execution, reducing fix loop iterations.
+
 #### Gate 1: Automated Tests
 
 Run the full test suite:
@@ -462,6 +483,7 @@ Report: `[MPL] 3-Gate Quality: Gate 1 {pass_rate}%, Gate 2 {verdict}, Gate 3 {pa
 **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
 ## 3-Gate Quality Results
+- **Gate 0.5 (Type Check)**: {errors} errors, {warnings} warnings
 - **Gate 1 (Tests)**: {pass_rate}%
 - **Gate 2 (Code Review)**: {verdict}
 - **Gate 3 (PP Compliance)**: {pass/fail}
@@ -474,7 +496,13 @@ Report: `[MPL] 3-Gate Quality: Gate 1 {pass_rate}%, Gate 2 {verdict}, Gate 3 {pa
 When any gate fails, enter the fix loop:
 
 1. Analyze failure: which gate failed, what specifically failed
-2. Dispatch targeted fixes via mpl-worker
+2. (F-16) Optionally dispatch mpl-scout for root cause exploration:
+   ```
+   Task(subagent_type="mpl-scout", model="haiku",
+        prompt="Trace failure: {failure_description}. Find root cause in: {affected_files}")
+   ```
+   Use scout findings to inform fix strategy before dispatching worker.
+3. Dispatch targeted fixes via mpl-worker
 3. Re-run the failed gate + all subsequent gates
 4. Track pass_rate in convergence history
 
