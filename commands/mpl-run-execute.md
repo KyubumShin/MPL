@@ -115,9 +115,16 @@ For each file in `phase.impact.{create, modify, affected_tests, affected_config}
 - Total budget: ~5000 tokens
 
 Over budget strategies:
-1. `modify` files: `location_hint` +/- 50 lines only
+1. `modify` files: send file paths + `location_hint` only — Phase Runner reads as needed (F-24)
 2. `affected_tests`: test file names + describe/it block names only
 3. `affected_config`: relevant sections only
+
+#### Self-Directed Context Note (F-24)
+
+Phase Runner is authorized to Read/Grep within the impact scope directly.
+Therefore, the orchestrator MAY provide file paths only (without full content)
+for large files, letting the Phase Runner load relevant sections on demand.
+This reduces context assembly cost while maintaining Phase Runner accuracy.
 
 ### 4.2: Phase Runner Execution (Fresh Session)
 
@@ -140,6 +147,8 @@ result = Task(subagent_type="mpl-phase-runner", model="sonnet",
      8. State Summary: Write thorough summary including pass_rate. This is the ONLY thing the next phase sees.
      9. Retry on failure: Same session retry (max 3). Change approach each time. After 3 -> circuit_break.
      10. Phase 0 reference on failure: When tests fail, consult Phase 0 artifacts (error-spec, type-policy, api-contracts) before fixing. Most failures stem from Phase 0 spec misalignment.
+     11. Self-directed context (F-24): You may use Read/Grep within scope-bounded files (impact files listed below) to gather additional context. Do NOT search outside the phase's impact scope. This replaces passive "given context" with active exploration.
+     12. Task-based TODO (F-23): Use TaskCreate to register TODOs instead of writing mini-plan.md checkboxes. Track TODO status via TaskUpdate (in_progress -> completed/failed). This enables worker dependency tracking and parallel dispatch readiness.
 
      ---
      ## Pivot Points
@@ -187,10 +196,20 @@ result = Task(subagent_type="mpl-phase-runner", model="sonnet",
      ## Past Run Learnings (F-11)
      {learnings or "N/A — first run, no accumulated learnings"}
 
+     ## Scope-Bounded Search (F-24)
+     You are authorized to Read/Grep the following files directly for additional context.
+     Stay within this scope — do NOT explore files outside the impact boundary.
+     Allowed files: {phase.impact.create + phase.impact.modify + phase.impact.affected_tests}
+     Use this when:
+     - The provided context is insufficient to implement a TODO
+     - You need to understand how a function is called elsewhere within scope
+     - Test files need inspection for assertion patterns
+
      ## Expected Output
      Return structured JSON:
      {
        "status": "complete" | "circuit_break",
+       "task_ids": ["task-1", "task-2"],  // F-23: IDs from TaskCreate
        "state_summary": "markdown (required sections: 구현된 것, Phase Decisions, 검증 결과)",
        "new_decisions": [{ "id": "PD-N", "title": "...", "reason": "...", "affected_files": [...], "type": "..." }],
        "discoveries": [{ "id": "D-N", "description": "...", "pp_conflict": null | "PP-N", "recommendation": "..." }],
@@ -229,6 +248,70 @@ Merge test_result into Phase Runner's verification data:
 - Update pass_rate with Test Agent's independent results
 - Record any bugs_found for potential fix cycle
 - If Test Agent pass_rate < Phase Runner's pass_rate: flag discrepancy
+
+### 4.2.2: Task-based TODO Protocol (F-23)
+
+Phase Runner uses Task tool instead of mini-plan.md for TODO management:
+
+```
+// Instead of writing mini-plan.md:
+// - [ ] TODO 1: implement X
+// - [ ] TODO 2: add tests for X
+
+// Use Task tool:
+TaskCreate(description="TODO 1: implement X", priority="high")
+TaskCreate(description="TODO 2: add tests for X", priority="medium")
+
+// Before delegating to worker:
+TaskUpdate(id=task_id, status="in_progress")
+
+// After worker completes:
+TaskUpdate(id=task_id, status="completed")  // or "failed"
+```
+
+Benefits over mini-plan.md:
+- Worker dependency tracking via Task metadata
+- Parallel dispatch: independent Tasks can run simultaneously (F-13)
+- Status synchronization: orchestrator can poll Task status
+- No model-generated checkbox parsing errors
+
+Backward compatibility: mini-plan.md is still written as a human-readable artifact,
+but Task tool is the SSOT for TODO state during execution.
+
+### 4.2.3: Background Execution for Independent TODOs (F-13)
+
+When Phase Runner identifies independent TODOs (no file overlap), dispatch workers in parallel:
+
+```
+// File conflict detection (v3.1):
+for each pair of pending TODOs:
+  files_a = todo_a.impact_files
+  files_b = todo_b.impact_files
+  if intersection(files_a, files_b) is EMPTY:
+    -> mark as independent, eligible for parallel dispatch
+
+// Parallel dispatch:
+for each independent TODO group:
+  Task(subagent_type="mpl-worker", model="sonnet",
+       prompt="...", run_in_background=true)
+
+// Sequential fallback:
+for each TODO with file conflicts:
+  Task(subagent_type="mpl-worker", model="sonnet",
+       prompt="...", run_in_background=false)
+
+// Wait and collect:
+for each background task:
+  result = await task completion
+  TaskUpdate(id=task_id, status=result.status)
+```
+
+Constraints:
+- Maximum 3 concurrent background workers per phase
+- File conflict detection uses v3.1's existing overlap logic
+- If any parallel worker fails, remaining workers continue
+- Failed worker results feed into fix cycle (existing behavior)
+- Phase Runner must wait for ALL workers before proceeding to verification
 
 ### 4.3: Result Processing
 
