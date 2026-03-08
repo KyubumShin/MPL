@@ -118,8 +118,8 @@ describe('EXPECTED_SECTIONS', () => {
     assert.strictEqual(EXPECTED_SECTIONS['mpl-pre-execution-analyzer'].length, 7);
   });
 
-  it('critic should have 6 sections', () => {
-    assert.strictEqual(EXPECTED_SECTIONS['mpl-critic'].length, 6);
+  it('critic should be removed (absorbed into decomposer v3.1)', () => {
+    assert.strictEqual(EXPECTED_SECTIONS['mpl-critic'], undefined);
   });
 
   it('worker should require todo_id, status, outputs, acceptance_criteria', () => {

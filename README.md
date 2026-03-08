@@ -272,7 +272,7 @@ Not all verification is equal. MPL classifies every criterion:
 
 ### 3-Gate Quality System
 
-Four gates, four levels of confidence:
+Three gates + a pre-gate type check:
 
 | Gate | Method | Pass Criteria |
 |------|--------|---------------|

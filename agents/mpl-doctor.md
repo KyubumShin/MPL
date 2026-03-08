@@ -39,9 +39,9 @@ disallowedTools: Write, Edit, Task
     - List all .md files in `MPL/agents/`
     - For each: verify YAML frontmatter has `name`, `description`, `model`
     - Verify `model` is one of: haiku, sonnet, opus
-    - Expected count: 10 active agents
+    - Expected count: 12 active agents
     - FAIL if any agent has invalid frontmatter
-    - WARN if count != 10
+    - WARN if count != 12
 
     ### Category 4: Skills
     - List all directories in `MPL/skills/`

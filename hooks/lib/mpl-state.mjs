@@ -21,12 +21,13 @@ const DEFAULT_STATE = {
   run_mode: 'full',
   tool_mode: 'full',         // F-04: "full" | "partial" | "standalone"
   pipeline_tier: null,       // F-20: "frugal" | "standard" | "frontier" (set by Triage)
+  pipeline_score: null,      // F-20: float 0.0~1.0 (set by Quick Scope Scan)
   tier_hint: null,           // F-20: user keyword hint ("frugal" | "standard" | null)
   escalation_history: [],    // F-21: [{from, to, reason, preserved_work, timestamp}]
+  interview_depth: null,     // "skip" | "light" | "full" (set by Triage Step 0.2)
   current_phase: 'phase1-plan',
   started_at: null,
-  plan_approved: false,
-  plan_approved_at: null,
+  finalize_done: false,
   sprint_status: {
     total_todos: 0,
     completed_todos: 0,

@@ -78,14 +78,7 @@ export const EXPECTED_SECTIONS = {
     'Priority Order',
     'Interview Metadata',
   ],
-  'mpl-critic': [
-    'Risk Register',
-    'Design Drift Vectors',
-    'Cross-Phase Dependency Risks',
-    'Verification Coverage Gaps',
-    'Recommendations',
-    'Go/No-Go Assessment',
-  ],
+  // mpl-critic: removed in v3.1 (absorbed into mpl-decomposer risk_assessment)
   'mpl-test-agent': [
     'phase_id',
     'test_files_created',
