@@ -233,9 +233,9 @@ Keyword hints still work as manual overrides: `"mpl bugfix"` → frugal, `"mpl s
 
 ---
 
-## The Eleven Minds
+## The Twelve Minds
 
-Eleven agents, each with a single purpose. Loaded on-demand, never preloaded:
+Twelve agents, each with a single purpose. Loaded on-demand, never preloaded:
 
 | Agent | Role | Core Principle |
 |-------|------|---------------|
@@ -247,6 +247,7 @@ Eleven agents, each with a single purpose. Loaded on-demand, never preloaded:
 | **Worker** | Implement a single TODO | "Write the code, run the test" |
 | **Test Agent** | Independent test writing | "I didn't write the code, so I'll test what it claims" |
 | **Code Reviewer** | 8-category quality gate | "Would I approve this PR?" |
+| **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
 | **Compound** | Learning extraction and distillation | "What did we learn that future runs should know?" |
 | **Git Master** | Atomic commits | "Each commit tells one story" |
 | **Doctor** | Installation diagnostics | "Is everything wired correctly?" |
@@ -271,10 +272,11 @@ Not all verification is equal. MPL classifies every criterion:
 
 ### 3-Gate Quality System
 
-Three gates, three levels of confidence:
+Four gates, four levels of confidence:
 
 | Gate | Method | Pass Criteria |
 |------|--------|---------------|
+| **Gate 0.5** | Project-wide type check (`lsp_diagnostics_directory`) | Zero type errors (F-17) |
 | **Gate 1** | Automated tests (A + S items) | pass_rate ≥ 95% |
 | **Gate 2** | Code review (8 categories) | PASS verdict |
 | **Gate 3** | PP compliance + H-item resolution | No violations + all H-items resolved |
@@ -294,11 +296,12 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>11 agents · 4 hooks · 7 skills · 4 protocol files</strong></summary>
+<summary><strong>12 agents · 4 hooks · 7 skills · 4 protocol files</strong></summary>
 
 ```
 MPL/
-├── agents/                 # 11 agent definitions (YAML)
+├── agents/                 # 12 agent definitions (YAML)
+│   └── mpl-scout.md        # Haiku-based read-only exploration (F-16)
 ├── commands/               # Orchestration protocols (split for token efficiency)
 │   ├── mpl-run.md          # Router: which protocol file to load
 │   ├── mpl-run-phase0.md   # Steps -1 ~ 2.5: Triage, PP, Phase 0
@@ -314,7 +317,8 @@ MPL/
 │       ├── mpl-state.mjs         # State management + escalation
 │       ├── mpl-scope-scan.mjs    # Pipeline score calculation (F-20)
 │       ├── mpl-cache.mjs         # Phase 0 caching
-│       └── mpl-profile.mjs       # Token profiling
+│       ├── mpl-profile.mjs       # Token profiling
+│       └── mpl-routing-patterns.mjs # Routing pattern learning (F-22)
 ├── skills/                 # 7 skills
 │   ├── mpl/                # Main pipeline (single entry point)
 │   ├── mpl-pivot/          # PP interview
@@ -325,6 +329,7 @@ MPL/
 │   └── mpl-setup/          # Setup wizard
 └── docs/
     ├── design.md           # Full specification
+    ├── standalone.md       # Standalone mode fallback matrix (F-04)
     └── roadmap/            # Evolution history + future plans
 ```
 
@@ -333,6 +338,15 @@ MPL/
 - **Adaptive Router (F-20)** — Quick Scope Scan + 4-factor pipeline score → 3-tier auto-classification
 - **Dynamic Escalation (F-21)** — frugal → standard → frontier on circuit break, preserving completed work
 - **RUNBOOK (F-10)** — Integrated execution log, auto-updated at 9 pipeline points, enables session resume
+- **Session Persistence (F-12)** — `<remember priority>` tags at phase transitions + RUNBOOK dual safety net
+- **Run-to-Run Learning (F-11)** — mpl-compound distills RUNBOOK → `.mpl/memory/learnings.md`
+- **Routing Pattern Learning (F-22)** — Jaccard similarity matching on past execution patterns
+- **Self-Directed Context (F-24)** — Phase Runner can Read/Grep within scope-bounded impact files
+- **Task-based TODO (F-23)** — TaskCreate/TaskUpdate as primary TODO state manager during execution
+- **Background Execution (F-13)** — Independent TODOs dispatched with `run_in_background: true`
+- **mpl-scout (F-16)** — Haiku-based read-only exploration agent for lightweight codebase analysis
+- **Gate 0.5 Type Check (F-17)** — Project-wide `lsp_diagnostics_directory` before Gate 1
+- **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable
 - **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)
 - **3-Tier PD** — Phase Decisions classified Active/Summary/Archived per phase for constant token budget
 - **Convergence Detection** — Stagnation (variance < 5%), regression (delta < -10%), strategy suggestions
@@ -343,17 +357,18 @@ MPL/
 
 | Path | Purpose |
 |------|---------|
-| `.mpl/state.json` | Pipeline state (run_mode, current_phase, pipeline_tier) |
+| `.mpl/state.json` | Pipeline state (run_mode, current_phase, pipeline_tier, tool_mode) |
 | `.mpl/pivot-points.md` | Immutable constraints (Pivot Points) |
 | `.mpl/config.json` | User configuration overrides |
 | `.mpl/mpl/state.json` | MPL execution state (phases, statistics) |
-| `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity |
+| `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
 | `.mpl/mpl/decomposition.yaml` | Phase decomposition output |
 | `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (3-Tier) |
 | `.mpl/mpl/phase0/` | Phase 0 Enhanced artifacts |
 | `.mpl/mpl/phases/phase-N/` | Per-phase artifacts (mini-plan, state-summary, verification) |
 | `.mpl/mpl/profile/` | Token/timing profile (phases.jsonl, run-summary.json) |
-| `.mpl/memory/` | Routing patterns + accumulated learnings |
+| `.mpl/memory/learnings.md` | Run-to-Run accumulated learnings (F-11) |
+| `.mpl/memory/routing-patterns.jsonl` | Past execution patterns for tier prediction (F-22) |
 | `.mpl/cache/phase0/` | Phase 0 cached artifacts |
 
 ---
@@ -388,6 +403,7 @@ node --test hooks/__tests__/*.test.mjs
 - Full specification: [`docs/design.md`](./docs/design.md)
 - Roadmap: [`docs/roadmap/overview.md`](./docs/roadmap/overview.md)
 - Adaptive Router plan: [`docs/roadmap/adaptive-router-plan.md`](./docs/roadmap/adaptive-router-plan.md)
+- Standalone mode: [`docs/standalone.md`](./docs/standalone.md)
 
 ---
 
