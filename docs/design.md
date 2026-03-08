@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v3.0 설계 문서
+# MPL (Micro-Phase Loop) v3.2 설계 문서
 
 ## 1. 개요
 

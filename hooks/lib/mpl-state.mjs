@@ -27,7 +27,7 @@ const DEFAULT_STATE = {
   interview_depth: null,     // "skip" | "light" | "full" (set by Triage Step 0.2)
   current_phase: 'phase1-plan',
   started_at: null,
-  finalize_done: false,
+  finalize_done: false,      // Set to true when Step 5 finalization completes
   sprint_status: {
     total_todos: 0,
     completed_todos: 0,

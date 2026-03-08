@@ -180,7 +180,7 @@ After tier is determined, subsequent steps are selected per tier:
 
 | Step | Frugal | Standard | Frontier |
 |------|--------|----------|----------|
-| Step 0.2 Interview Depth | skip | skip or light | full detection |
+| Step 0.2 Interview Depth | skip | light | full detection |
 | Step 0.5 Maturity | skip | read config | read config |
 | Step 1 PP Interview | skip (extract from prompt) | light (Round 1+2) | full (4 rounds) |
 | Step 1-B Pre-Execution | skip | skip | full |
@@ -195,7 +195,7 @@ if pipeline_tier == "frugal":
   -> Then proceed directly to Phase Execution (single fix cycle)
 
 if pipeline_tier == "standard":
-  -> Continue to Step 0.2 (interview_depth forced to "light" or "skip")
+  -> Continue to Step 0.2 (interview_depth forced to "light")
   -> Then Steps 1 → 2.5.5 → Phase Execution (single phase)
 
 if pipeline_tier == "frontier":

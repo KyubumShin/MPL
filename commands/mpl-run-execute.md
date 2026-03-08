@@ -131,7 +131,10 @@ This reduces context assembly cost while maintaining Phase Runner accuracy.
 Each Phase Runner is a Task agent = fresh session. This naturally prevents context accumulation.
 
 ```
-result = Task(subagent_type="mpl-phase-runner", model="sonnet",
+// Model routing: sonnet by default, opus for L complexity or architecture changes
+phase_model = (phase.complexity == "L" || phase.tags.includes("architecture")) ? "opus" : "sonnet"
+
+result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      prompt="""
      You are a Phase Runner for MPL.
      Execute this single phase: plan TODOs, delegate to Workers, verify, summarize.
@@ -215,7 +218,9 @@ result = Task(subagent_type="mpl-phase-runner", model="sonnet",
        "discoveries": [{ "id": "D-N", "description": "...", "pp_conflict": null | "PP-N", "recommendation": "..." }],
        "verification": {
          "criteria_results": [{ "criterion": "...", "pass": true|false, "evidence": "..." }],
-         "regression_results": [{ "from_phase": "...", "test": "...", "pass": true|false }]
+         "regression_results": [{ "from_phase": "...", "test": "...", "pass": true|false }],
+         "micro_cycle_fixes": 0,
+         "pass_rate": 100
        },
        "failure_summary": "... (only if circuit_break)",
        "attempted_fixes": ["... (only if circuit_break)"]
@@ -292,12 +297,15 @@ for each pair of pending TODOs:
 
 // Parallel dispatch:
 for each independent TODO group:
-  Task(subagent_type="mpl-worker", model="sonnet",
+  // Model routing: opus for architecture changes or 3+ retry failures
+  worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
+  Task(subagent_type="mpl-worker", model=worker_model,
        prompt="...", run_in_background=true)
 
 // Sequential fallback:
 for each TODO with file conflicts:
-  Task(subagent_type="mpl-worker", model="sonnet",
+  worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
+  Task(subagent_type="mpl-worker", model=worker_model,
        prompt="...", run_in_background=false)
 
 // Wait and collect:
@@ -329,6 +337,8 @@ Constraints:
    phase_details[N].criteria_passed, pass_rate, micro_fixes, pd_count, discoveries
    totals.total_micro_fixes += result.verification.micro_cycle_fixes
    cumulative_pass_rate = result.verification.pass_rate
+   // M-5: Populate pass_rate_history for convergence detection
+   convergence.pass_rate_history.push(result.verification.pass_rate)
 7. Update pipeline state: current_phase = "mpl-phase-complete"
 8. Profile: Record phase execution profile to .mpl/mpl/profile/phases.jsonl:
    {
