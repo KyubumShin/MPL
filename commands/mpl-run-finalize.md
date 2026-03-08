@@ -9,6 +9,35 @@ Load this when `current_phase` is `mpl-finalize` or when resuming a session.
 
 ---
 
+## Debug Logging (Protocol Level)
+
+All decision points in Finalize MUST emit debug logs when `.mpl/config.json` has `"debug": { "enabled": true }`.
+Use the `debugLog`, `debugDecision`, and `debugTransition` functions from `hooks/lib/mpl-debug.mjs`.
+
+| Decision Point | Category | What to Log |
+|----------------|----------|-------------|
+| E2E test result | `gate` | scenarios_passed, scenarios_total |
+| AD verification | `gate` | complete_count, total_count, incomplete_ads |
+| Final verification | `gate` | build_pass, test_pass, overall |
+| Learning extraction | `state-change` | learnings_count, decisions_count, issues_count |
+| Learning distillation | `state-change` | new_entries added to memory |
+| Atomic commits | `state-change` | commit_count, files_committed |
+| Routing pattern record | `routing` | tier, result, tokens, files_count |
+| Pipeline completion | `phase-transition` | status (completed/partial/failed), elapsed_ms, total_phases |
+
+Example usage in orchestrator:
+```
+// Pipeline completion
+debugTransition(cwd, 'mpl-finalize', 'completed', 'All gates passed, finalization done')
+
+// Learning distillation
+debugLog(cwd, 'state-change', `Learnings distilled: ${newEntries} new patterns`, {
+  new_entries: newEntries, total_learnings: totalLearnings,
+})
+```
+
+---
+
 ## Step 5: E2E & Finalize
 
 ### 5.0: E2E Test (Final)

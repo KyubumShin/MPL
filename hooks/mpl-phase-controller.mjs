@@ -31,6 +31,11 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+// Import debug logger
+const { debugLog, debugDecision, debugTransition, debugError } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-debug.mjs')).href
+);
+
 /**
  * Check PLAN.md checkbox completion status
  */
@@ -133,6 +138,8 @@ async function main() {
 
       // BUG-6 fix: handle research error state to prevent infinite loop
       if (research.error) {
+        debugError(cwd, `Research failed: ${research.error}`, { phase: 'phase1a-research' });
+        debugTransition(cwd, 'phase1a-research', 'phase1b-plan', 'research error → skip');
         writeState(cwd, { current_phase: 'phase1b-plan', research: { status: 'skipped' } });
         console.log(JSON.stringify({
           continue: true,
@@ -146,6 +153,7 @@ async function main() {
 
       if (research.status === 'completed' || research.status === 'skipped') {
         // Research done → transition to Phase 1-B: Plan Generation
+        debugTransition(cwd, 'phase1a-research', 'phase1b-plan', `research ${research.status}`);
         writeState(cwd, { current_phase: 'phase1b-plan' });
         const msg = research.status === 'skipped'
           ? '[MPL] Research skipped. Transitioning to Phase 1-B: Plan Generation.'
@@ -218,6 +226,7 @@ async function main() {
 
       if (remaining === 0) {
         // All TODOs resolved (completed or failed) → Phase 3
+        debugTransition(cwd, 'phase2-sprint', 'phase3-gate', `${completed}/${total} completed, ${failed} failed`);
         writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
@@ -244,6 +253,8 @@ async function main() {
 
       if (gateResults.allPassed) {
         // All gates passed → Phase 5
+        debugTransition(cwd, 'phase3-gate', 'phase5-finalize', 'all gates passed');
+        debugLog(cwd, 'gate', 'All gates passed', gateResults.details);
         writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
@@ -254,6 +265,8 @@ async function main() {
         }));
       } else if (gateResults.anyFailed) {
         // Gate failed → Phase 4
+        debugTransition(cwd, 'phase3-gate', 'phase4-fix', 'gate failed');
+        debugLog(cwd, 'gate', 'Gate failure details', gateResults.details);
         // Preserve existing fix_loop_count to prevent infinite loop bypass
         // (only initialize to 0 on first entry, not on re-entry from Phase 3)
         const currentFixCount = state.fix_loop_count || 0;
@@ -291,6 +304,7 @@ async function main() {
             max_fix: maxFix
           });
           if (esc) {
+            debugDecision(cwd, 'escalation', `Tier escalated: ${esc.from} → ${esc.to}`, { fix_count: fixCount, max_fix: maxFix }, 'Fix loop exhausted');
             console.log(JSON.stringify({
               continue: true,
               hookSpecificOutput: {
@@ -313,6 +327,7 @@ async function main() {
       } else {
         // H1: Check convergence before continuing
         const convergenceResult = checkConvergence(state);
+        debugLog(cwd, 'convergence', `Fix loop ${fixCount}/${maxFix}: convergence=${convergenceResult.status}`, { delta: convergenceResult.delta, suggestion: convergenceResult.suggestion });
         if (convergenceResult.status === 'stagnating' || convergenceResult.status === 'regressing') {
           // F-21: Try escalation on convergence failure
           const tier = state.pipeline_tier;
@@ -360,6 +375,7 @@ async function main() {
       // and then manually set current_phase to 'completed' via writeState.
       const finalized = state.finalize_done === true;
       if (finalized) {
+        debugTransition(cwd, 'phase5-finalize', 'completed', 'finalize_done=true');
         writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,

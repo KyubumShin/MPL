@@ -9,6 +9,41 @@ Load this when `current_phase` is in the pre-execution stages (before decomposit
 
 ---
 
+## Debug Logging (Protocol Level)
+
+All decision points in Phase 0 MUST emit debug logs when `.mpl/config.json` has `"debug": { "enabled": true }`.
+Use the `debugLog`, `debugDecision`, and `debugTransition` functions from `hooks/lib/mpl-debug.mjs`.
+
+| Decision Point | Category | What to Log |
+|----------------|----------|-------------|
+| LSP warm-up result | `routing` | Languages detected, servers available/unavailable |
+| Tool mode determination | `routing` | tool_mode (full/partial/standalone), active_tools |
+| Quick Scope Scan result | `triage` | pipeline_score, breakdown (file_scope, test_complexity, dependency_depth, risk_signal) |
+| Tier classification | `triage` | tier, source (score/hint/pattern), score |
+| Routing pattern match | `routing` | similarity, recommendation, whether score overrode pattern |
+| Interview depth | `triage` | depth (skip/light/full), information_density score |
+| Maturity mode | `triage` | mode (explore/standard/strict) |
+| Complexity detection | `triage` | score, grade (Simple/Medium/Complex), selected_steps |
+| Phase 0 cache hit/miss | `triage` | cache_key, hit/miss, saved tokens |
+| PP extraction method | `triage` | interview_depth, method (direct/interviewer) |
+
+Example usage in orchestrator:
+```
+// After Quick Scope Scan
+debugDecision(cwd, 'triage', `Pipeline tier: ${tier} (source=${source})`, {
+  pipeline_score: score,
+  breakdown: { file_scope, test_complexity, dependency_depth, risk_signal },
+  tier_hint: state.tier_hint,
+}, `Score ${score} maps to ${tier}; hint was ${state.tier_hint || 'none'}`)
+
+// After complexity detection
+debugLog(cwd, 'triage', `Phase 0 Enhanced: grade=${grade}, steps=${selectedSteps.join(',')}`, {
+  score: complexityScore, grade, selected_steps: selectedSteps, token_budget: budget
+})
+```
+
+---
+
 ## Step -1: LSP Warm-up (Non-blocking)
 
 파이프라인 시작 시 LSP 서버를 사전 워밍업한다. Step 0 Triage와 병렬로 실행되므로 지연 없음.

@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from '
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { loadConfig } from './mpl-config.mjs';
+import { debugLog, debugDecision, debugTransition } from './mpl-debug.mjs';
 
 const STATE_DIR = '.mpl';
 const STATE_FILE = 'state.json';
@@ -108,6 +109,12 @@ export function writeState(cwd, patch) {
   writeFileSync(tmpPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
   renameSync(tmpPath, join(stateDir, STATE_FILE));
 
+  debugLog(cwd, 'state-change', `State updated: ${Object.keys(patch).join(', ')}`, {
+    patched_keys: Object.keys(patch),
+    current_phase: merged.current_phase,
+    pipeline_tier: merged.pipeline_tier,
+  });
+
   return merged;
 }
 
@@ -160,6 +167,13 @@ export function escalateTier(cwd, reason, preservedWork = {}) {
 
   const history = [...(state.escalation_history || []), entry];
   writeState(cwd, { pipeline_tier: next, escalation_history: history });
+
+  debugDecision(cwd, 'escalation', `Tier escalated: ${current} → ${next}`, {
+    from: current,
+    to: next,
+    reason,
+    preserved_work: preservedWork,
+  }, `Escalation triggered by: ${reason}`);
 
   return { from: current, to: next };
 }

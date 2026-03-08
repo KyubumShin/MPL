@@ -9,6 +9,48 @@ Load this when `current_phase` is `mpl-phase-running`.
 
 ---
 
+## Debug Logging (Protocol Level)
+
+All decision points in Phase Execution MUST emit debug logs when `.mpl/config.json` has `"debug": { "enabled": true }`.
+Use the `debugLog`, `debugDecision`, and `debugTransition` functions from `hooks/lib/mpl-debug.mjs`.
+
+| Decision Point | Category | What to Log |
+|----------------|----------|-------------|
+| Context assembly | `context-assembly` | Loaded artifacts, PD tier counts, impact file count, token budget |
+| Phase model routing | `model-selection` | phase_model (sonnet/opus), reason (complexity/architecture) |
+| Worker model routing | `model-selection` | worker_model (sonnet/opus), retry_count, architecture tag |
+| Phase Runner dispatch | `agent-dispatch` | phase_id, phase_name, model, context size estimate |
+| Phase Runner result | `phase-transition` | status (complete/circuit_break), pass_rate, micro_fixes |
+| Gate 0.5 result | `gate` | errors, warnings, action (fix loop/proceed) |
+| Gate 1 result | `gate` | pass_rate, threshold, action (proceed/fix loop) |
+| Gate 2 result | `gate` | verdict (PASS/NEEDS_FIXES/REJECT) |
+| Gate 3 result | `gate` | pp_violations, h_items_resolved |
+| Fix loop iteration | `convergence` | iteration, pass_rate, delta, convergence_status |
+| Convergence detection | `convergence` | status (improving/stagnating/regressing), suggestion |
+| Circuit break | `escalation` | phase_id, failure_summary, escalation target |
+| Redecomposition | `escalation` | redecompose_count, remaining_phases |
+| Parallel TODO dispatch | `routing` | independent_count, sequential_count, concurrent_workers |
+
+Example usage in orchestrator:
+```
+// Phase model routing
+debugDecision(cwd, 'model-selection', `Phase Runner model: ${phase_model}`, {
+  phase_id, complexity: phase.complexity, tags: phase.tags,
+}, phase.complexity === 'L' ? 'L complexity → opus' : 'Default → sonnet')
+
+// Gate result
+debugLog(cwd, 'gate', `Gate 1: pass_rate=${pass_rate}%`, {
+  pass_rate, threshold: 95, action: pass_rate >= 95 ? 'proceed' : 'fix_loop'
+})
+
+// Convergence
+debugDecision(cwd, 'convergence', `Fix loop: ${convergence_result.status}`, {
+  iteration: fix_loop_count, pass_rate, delta: convergence_result.delta,
+}, convergence_result.suggestion || 'Improving — continue')
+```
+
+---
+
 ## Step 4: Phase Execution Loop (CORE)
 
 For each phase in order:

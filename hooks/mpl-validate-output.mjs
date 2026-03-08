@@ -27,6 +27,11 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+// Import debug logger
+const { debugLog } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-debug.mjs')).href
+);
+
 // Agents that require output validation
 export const VALIDATE_AGENTS = new Set([
   'mpl-pre-execution-analyzer',
@@ -222,6 +227,14 @@ async function main() {
   }
 
   const message = formatValidationMessage(agentType, sections, passed, missing, sectionList);
+
+  debugLog(cwd, 'agent-dispatch', `Validation ${passed ? 'PASSED' : 'FAILED'}: ${agentType}`, {
+    agent: agentType,
+    passed,
+    found: found.length,
+    missing: missing.length,
+    missing_sections: missing,
+  });
 
   // C3: Block (continue: false) when validation fails
   console.log(JSON.stringify({

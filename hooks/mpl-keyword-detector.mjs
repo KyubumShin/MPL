@@ -27,6 +27,11 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+// Import debug logger
+const { debugLog, debugDecision } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-debug.mjs')).href
+);
+
 /**
  * Extract prompt text from hook input JSON
  */
@@ -179,6 +184,12 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
     // Initialize MPL state — always single entry point
     const featureName = extractFeatureName(prompt);
     initState(cwd, featureName, 'auto', tierHint);
+
+    debugDecision(cwd, 'triage', `Pipeline initialized: tier_hint=${tierHint || 'auto'}`, {
+      feature: featureName,
+      tier_hint: tierHint,
+      prompt_length: prompt.length,
+    }, tierHint ? `Keyword hint detected: ${tierHint}` : 'No keyword hint — Triage will auto-determine tier');
 
     // F-20: Always use single 'mpl' skill — Triage determines tier
     const hintDesc = tierHint ? ` (hint: ${tierHint})` : '';
