@@ -373,6 +373,31 @@ MPL/
 
 ---
 
+## HUD (Statusline)
+
+MPL provides a real-time statusline that shows pipeline progress at a glance:
+
+```
+harness_lab | main | claude-opus-4-6 | ctx:67%
+MPL Frontier | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
+```
+
+**Displayed info:**
+- Project folder, branch, model, context remaining, session duration
+- Pipeline tier (Frugal/Standard/Frontier), current phase
+- TODO progress, Gate results (✓/✗/-), Fix loop count
+- Token usage vs budget, tool mode
+
+**Color coding:** Context, fix loop, and token usage turn yellow at 50%+ and red at 80%+ thresholds.
+
+**Activate:** Run `/mpl:mpl-setup` → enable HUD, or manually:
+```json
+// ~/.claude/settings.json
+{ "statusLine": { "type": "command", "command": "node <MPL_ROOT>/hooks/mpl-hud.mjs" } }
+```
+
+---
+
 ## Usage
 
 ```bash
