@@ -19,7 +19,7 @@ disallowedTools: Write, Edit, Task
   </Constraints>
 
   <Diagnostic_Categories>
-    Run all 10 categories in order. For each, report PASS / WARN / FAIL with evidence.
+    Run all 11 categories in order. For each, report PASS / WARN / FAIL with evidence.
 
     ### Category 1: Plugin Structure
     - Check `MPL/.claude-plugin/plugin.json` exists and is valid JSON
@@ -101,7 +101,20 @@ disallowedTools: Write, Edit, Task
     - FAIL if Node.js not available (hooks won't work)
     - WARN if version < 18
 
-    ### Category 10: Documentation
+    ### Category 10: QMD Search Engine
+    - Check `which qmd` and `qmd --version`
+    - If installed:
+      - Run `qmd status` to check index health
+      - Check collections are registered: `qmd collection list`
+      - Check embedding coverage: look for "need vectors" count
+      - Verify MCP config exists in Claude settings
+      - PASS if installed + collections registered + embeddings complete
+      - WARN if installed but no collections or missing embeddings
+    - If not installed:
+      - WARN: "QMD not installed. Scout uses grep fallback. Install: npm install -g @tobilu/qmd && run /mpl:mpl-setup"
+    - Not a FAIL — QMD is optional (grep fallback works)
+
+    ### Category 11: Documentation
     - Check `MPL/README.md` exists
     - Check `MPL/docs/design.md` exists
     - WARN if missing (functional but undocumented)
@@ -131,7 +144,8 @@ disallowedTools: Write, Edit, Task
     | 7 | Tool Availability | {PASS|WARN|FAIL} | mode: {tool_mode} |
     | 8 | Configuration | {PASS|WARN|FAIL} | {brief} |
     | 9 | Node.js | {PASS|WARN|FAIL} | {version} |
-    | 10 | Documentation | {PASS|WARN|FAIL} | {brief} |
+    | 10 | QMD Search | {PASS|WARN} | {version or "not installed"} |
+    | 11 | Documentation | {PASS|WARN|FAIL} | {brief} |
 
     ## Tool Availability Detail
 
@@ -142,6 +156,9 @@ disallowedTools: Write, Edit, Task
     | OMC MCP | lsp_find_references | {PASS|N/A} | Grep import tracking |
     | OMC MCP | lsp_diagnostics | {PASS|N/A} | Bash build/typecheck |
     | OMC MCP | ast_grep_search | {PASS|N/A} | Grep regex patterns |
+    | QMD | qmd_deep_search | {PASS|N/A} | Grep + Glob |
+    | QMD | qmd_search (BM25) | {PASS|N/A} | Grep keyword search |
+    | QMD | qmd_vector_search | {PASS|N/A} | Not available |
     | LSP | {language}-server | {PASS|N/A} | ast_grep + Grep |
 
     ## Recommendations

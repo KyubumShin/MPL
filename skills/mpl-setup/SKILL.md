@@ -105,6 +105,100 @@ If `MPL/.claude/settings.local.json` doesn't have minimum permissions, create/up
 }
 ```
 
+### Step 3g: QMD Search Engine (Optional, Recommended)
+
+QMD is a local hybrid search engine that replaces grep-heavy exploration with BM25 + semantic + LLM reranking. It enables MPL Scout to recall past analysis results and search the codebase semantically instead of string-matching.
+
+#### Detection
+
+```
+qmd_available = Bash("which qmd 2>/dev/null && qmd --version")
+```
+
+#### Auto-Install (if not present)
+
+```
+if NOT qmd_available:
+  AskUserQuestion: "QMD 검색 엔진을 설치할까요? Scout 에이전트의 탐색 품질과 속도가 크게 향상됩니다."
+    - "설치 (권장)" → proceed to install
+    - "건너뛰기" → skip, set qmd_available = false
+
+  if user chose install:
+    1. Check Node.js >= 22:
+       node_version = Bash("node --version")
+       if node_version < 22:
+         Report: "QMD requires Node.js >= 22. Current: {node_version}. Skipping QMD setup."
+         skip QMD setup
+
+    2. Check macOS SQLite:
+       if platform == "darwin":
+         Bash("brew list sqlite 2>/dev/null || brew install sqlite")
+
+    3. Install QMD:
+       Bash("npm install -g @tobilu/qmd")
+       // ~1.9GB of GGUF models auto-download on first use
+
+    4. Verify:
+       Bash("qmd --version")
+       if fails: Report warning and skip QMD setup
+```
+
+#### Collection Registration
+
+```
+if qmd_available:
+  // Register project source and MPL artifacts as collections
+  project_root = CWD
+
+  1. Register source code:
+     Bash("qmd collection add {project_root}/src --name project-src --mask '**/*.{ts,tsx,js,jsx,py,go,rs}'")
+     // If src/ doesn't exist, try project root with appropriate mask
+
+  2. Register MPL artifacts (past analysis, learnings):
+     if exists(".mpl/"):
+       Bash("qmd collection add {project_root}/.mpl --name mpl-artifacts --mask '**/*.{md,json}'")
+
+  3. Register test files:
+     Bash("qmd collection add {project_root} --name project-tests --mask '**/*.{test,spec}.{ts,tsx,js,jsx,py}'")
+     // Skip if no test files found
+
+  4. Generate embeddings:
+     Bash("qmd embed")
+     // First run downloads models (~1.9GB), takes 2-5 minutes
+     // Subsequent runs are fast (delta only)
+
+  5. Verify:
+     Bash("qmd status")
+```
+
+#### MCP Integration
+
+```
+if qmd_available:
+  // Configure QMD as MCP server for Claude Code
+  settings_file = find_claude_settings()  // ~/.claude/settings.json or project-level
+
+  ensure mcpServers.qmd exists:
+    {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+
+  // For long-running sessions, recommend daemon mode:
+  Report: "QMD MCP configured. For faster searches, run: qmd mcp --http --daemon"
+```
+
+#### Save QMD Config
+
+```
+Write to .mpl/config.json:
+  "qmd": {
+    "enabled": true,
+    "collections": ["project-src", "mpl-artifacts", "project-tests"],
+    "mcp_configured": true
+  }
+```
+
 ### Step 4: Tool Detection (Standalone Check)
 
 Detect available tool tiers to determine `tool_mode`:
@@ -170,7 +264,7 @@ Save to `.mpl/config.json`: `"tool_mode": "{mode}"`
 Task(
   subagent_type="mpl-doctor",
   model="haiku",
-  prompt="Run full MPL diagnostics on {MPL_ROOT}. Report all 10 categories. Project directory: {CWD}."
+  prompt="Run full MPL diagnostics on {MPL_ROOT}. Report all 11 categories. Project directory: {CWD}."
 )
 ```
 
@@ -190,6 +284,7 @@ Status:     {HEALTHY|REPAIRED|ISSUES_REMAIN}
 Tool Availability:
   Built-in (Tier 1) : OK (Read, Write, Edit, Bash, Glob, Grep)
   OMC MCP (Tier 2)  : {OK|N/A — standalone fallback active}
+  QMD Search (Tier 2b): {OK v{version}|N/A — grep fallback active}
   LSP Servers (Tier 3):
     {language}: {OK|N/A}
     ...
@@ -208,6 +303,18 @@ Standalone Mode Active:
   MPL is running without OMC. LSP tools are replaced with
   Grep/Glob/Bash fallbacks. All pipeline features are functional.
   Install OMC for enhanced analysis (lsp_hover, ast_grep).
+{/if}
+
+{if qmd_available}
+QMD Search Engine:
+  Version:      {qmd_version}
+  Collections:  {collection_count} registered ({total_docs} documents)
+  Embeddings:   {embedded_count}/{total_docs} embedded
+  MCP:          {configured|not configured}
+{else}
+QMD Search Engine: Not installed
+  Install QMD for semantic codebase search and past-analysis recall.
+  Run: npm install -g @tobilu/qmd
 {/if}
 
 {if REPAIRED}
@@ -236,6 +343,12 @@ If "Customize" selected, ask about:
 3. **Token budget** (default 500K): Maximum token spend per pipeline run?
 4. **HITL timeout** (default 30s): How long to wait for human approval?
 5. **Gate 1 strategy** (auto/docker/native/skip): How to run automated tests?
+6. **QMD search engine** (default: auto-detect):
+   - AskUserQuestion: "QMD 시맨틱 검색 엔진을 사용할까요? Scout 에이전트의 코드베이스 탐색이 50-60% 빨라집니다."
+     - "설치하고 사용 (권장)" → Install QMD + register collections + enable
+     - "이미 설치됨 — 활성화만" → Skip install, register collections + enable
+     - "사용 안 함" → Set qmd.enabled = false, Scout uses Grep fallback
+   - If enabled, run Step 3g (QMD setup) if not already done
 
 Write answers to `.mpl/config.json`.
 

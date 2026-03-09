@@ -86,6 +86,56 @@
 
 ---
 
+### QMD + "Grep Is Dead" (ArtemXTech / Tobi Lütke)
+
+- **QMD Repository**: https://github.com/tobi/qmd
+- **Article**: https://x.com/ArtemXTech/status/2028330693659332615
+- **분석일**: 2026-03-09
+- **영향 범위**: F-25 (Scout QMD 통합), mpl-setup Step 3g
+
+#### 참조한 개념
+
+| 개념 | MPL 적응 | 적용 위치 |
+|------|---------|----------|
+| **BM25 + Semantic + LLM Reranking** — 3단계 하이브리드 검색 파이프라인 | Scout의 Available_Tools에 qmd_search, qmd_deep_search, qmd_vector_search 추가 | `agents/mpl-scout.md` |
+| **/recall 패턴** — 세션 시작 전 과거 컨텍스트를 먼저 로드 | Scout 2-layer 검색: QMD recall (Layer 1) → Live tools (Layer 2) | `agents/mpl-scout.md` Search_Strategy |
+| **세션 간 학습 축적** — JSONL → 마크다운 → QMD 인덱싱 자동화 | .mpl/ 아티팩트를 QMD 컬렉션으로 등록, 과거 분석 결과 recall | `skills/mpl-setup/SKILL.md` Step 3g |
+| **MCP 서버 통합** — qmd mcp로 Claude Code에 6개 도구 노출 | Scout가 MCP를 통해 QMD 검색, 0 LLM 토큰 | `agents/mpl-doctor.md` Category 10 |
+
+#### 차이점
+
+| 영역 | ArtemXTech 접근 | MPL 접근 |
+|------|----------------|---------|
+| 인덱싱 대상 | Obsidian vault + Claude Code 세션 | 코드베이스 + MPL 아티팩트 (.mpl/) |
+| 주 사용처 | 범용 /recall 스킬 | Scout 에이전트 전용 (Phase 0, Fix Loop) |
+| 폴백 전략 | 없음 (QMD 필수) | Grep/Glob 자동 폴백 (QMD 선택사항) |
+| 임베딩 갱신 | 세션 종료 훅 자동 | 현재 수동 (자동화 계획 중) |
+
+---
+
+### SG-Loop (Test Design & Specification Philosophy)
+
+- **출처**: 독립 레포 없음 — UAM 플러그인에 직접 통합 (`UAM/docs/design_unified_agent_methodology.md`)
+- **저자**: kbshin (본 프로젝트와 동일 저자)
+- **분석일**: 2026-02 ~ 2026-03
+- **영향 범위**: Phase 0 Enhanced 전체, 실험 설계 방법론
+- **선행 영향**: Hoyeon의 테스트 설계 사상에서 영감을 받아 SG-Loop 개발
+
+#### 참조한 개념
+
+| 개념 | MPL 적응 | 적용 위치 |
+|------|---------|----------|
+| **실험 기반 검증** — 가설 → 실험 → 측정 → 반복 | 7개 실험(Exp 1~8)으로 Phase 0 기법을 개별 검증 | `docs/roadmap/experiments-summary.md` |
+| **명세 우선 철학** — 테스트에서 명세를 먼저 추출 | Phase 0: API 계약 → 예제 패턴 → 타입 정책 → 에러 명세 순서 | `commands/mpl-run-phase0.md` Step 2.5 |
+| **누적 통과율 단조 증가** — 기법 추가 시 점수가 단조 증가해야 함 | Exp 1(38%) → Exp 7(100%) 검증, 역행 시 기법 제거 | Phase 0 step 선택 근거 |
+| **코드 작성자 ≠ 테스트 작성자** — 분리 원칙 | Worker ≠ Test Agent, Orchestrator ≠ Worker | Agent Separation Principle |
+
+#### 선행 영향: Hoyeon
+
+Hoyeon의 테스트 설계 사상 — 특히 "테스트가 명세다"라는 관점과 검증 주도 개발 접근 — 이 SG-Loop의 설계 철학에 영향을 주었다. SG-Loop은 이를 에이전트 파이프라인 맥락으로 확장하여 "예방이 치료보다 낫다" 원칙을 도출했고, 이것이 MPL의 두 번째 법칙("Phase 0에 투자하는 토큰이 Phase 5의 디버깅 비용을 완전히 제거한다")의 직접적인 근원이다.
+
+---
+
 ## v3.0~v3.1 — 내부 실험 기반
 
 ### 7개 실험 (Exp 1~8, Exp 2 제외)

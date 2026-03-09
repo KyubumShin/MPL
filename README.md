@@ -247,7 +247,7 @@ Twelve agents, each with a single purpose. Loaded on-demand, never preloaded:
 | **Worker** | Implement a single TODO | "Write the code, run the test" |
 | **Test Agent** | Independent test writing | "I didn't write the code, so I'll test what it claims" |
 | **Code Reviewer** | 8-category quality gate | "Would I approve this PR?" |
-| **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
+| **Scout** | Lightweight codebase exploration with QMD semantic recall (haiku) | "Find it fast, spend nothing" — *inspired by [QMD](https://github.com/tobi/qmd) + [ArtemXTech's recall pattern](https://x.com/ArtemXTech/status/2028330693659332615)* |
 | **Compound** | Learning extraction and distillation | "What did we learn that future runs should know?" |
 | **Git Master** | Atomic commits | "Each commit tells one story" |
 | **Doctor** | Installation diagnostics | "Is everything wired correctly?" |
@@ -344,7 +344,7 @@ MPL/
 - **Self-Directed Context (F-24)** — Phase Runner can Read/Grep within scope-bounded impact files
 - **Task-based TODO (F-23)** — TaskCreate/TaskUpdate as primary TODO state manager during execution
 - **Background Execution (F-13)** — Independent TODOs dispatched with `run_in_background: true`
-- **mpl-scout (F-16)** — Haiku-based read-only exploration agent for lightweight codebase analysis
+- **mpl-scout (F-16, F-25)** — Haiku-based exploration with QMD semantic search (BM25 + vector + reranking), Grep fallback — *[inspired by "Grep Is Dead"](https://x.com/ArtemXTech/status/2028330693659332615)*
 - **Gate 0.5 Type Check (F-17)** — Project-wide `lsp_diagnostics_directory` before Gate 1
 - **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable
 - **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)
@@ -404,6 +404,24 @@ node --test hooks/__tests__/*.test.mjs
 - Roadmap: [`docs/roadmap/overview.md`](./docs/roadmap/overview.md)
 - Adaptive Router plan: [`docs/roadmap/adaptive-router-plan.md`](./docs/roadmap/adaptive-router-plan.md)
 - Standalone mode: [`docs/standalone.md`](./docs/standalone.md)
+- Full references: [`docs/REFERENCES.md`](./docs/REFERENCES.md)
+
+---
+
+## References
+
+MPL은 다양한 외부 프로젝트와 아티클에서 영감을 받았습니다.
+
+| 영역 | 출처 | MPL 적용 |
+|------|------|---------|
+| **Pipeline Router** | [Ouroboros (Q00)](https://github.com/Q00/ouroboros) — PAL Router 3-tier 비용 모델 | Adaptive Pipeline Router (F-20, F-21, F-22) |
+| **Test Design** | SG-Loop (UAM에 통합) — 실험 기반 검증 설계, Phase 0 명세 철학 *(Hoyeon의 테스트 설계 사상에서 영향)* | Phase 0 Enhanced (7개 실험 → 4-step 명세) |
+| **Session Memory** | [QMD (Tobi Lütke)](https://github.com/tobi/qmd) — 로컬 하이브리드 검색 (BM25+벡터+리랭킹) | Scout QMD 통합 (F-25) |
+| **Grep Is Dead** | [ArtemXTech](https://x.com/ArtemXTech/status/2028330693659332615) — /recall 패턴, 세션 간 컨텍스트 지속 | Scout 2-layer 검색 전략 |
+| **Long-Horizon Tasks** | [Codex docs pattern](https://www.linkedin.com/posts/gb-jeong_run-long-horizon-tasks-with-codex-activity-7435825294554484736-hBEX) — 4-Document 매핑 | RUNBOOK.md (F-10) |
+| **Agent Design** | [Seeing like an Agent (Thariq, Anthropic)](https://x.com/trq212/status/2027463795355095314) — self-directed search, progressive disclosure | F-23, F-24, F-16 |
+
+상세 분석: [`docs/REFERENCES.md`](./docs/REFERENCES.md)
 
 ---
 
