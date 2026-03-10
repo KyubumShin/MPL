@@ -328,47 +328,53 @@ Quick Start:
   Run "/mpl:mpl-doctor" to re-check health
 ```
 
-### Step 7: Optional Configuration Interview
+### Step 7: QMD Search Engine Setup
 
-After basic setup, ask the user if they want to customize:
+AskUserQuestion: "QMD 시맨틱 검색 엔진을 사용할까요? Scout 에이전트의 코드베이스 탐색이 50-60% 빨라집니다."
+  - "설치하고 사용 (권장)" → Install QMD + register collections + enable (run Step 3g)
+  - "이미 설치됨 — 활성화만" → Skip install, register collections + enable
+  - "사용 안 함" → Set qmd.enabled = false, Scout uses Grep fallback
 
-Use AskUserQuestion:
-- "Would you like to customize MPL settings?"
-  - "Use defaults (Recommended)" - Skip customization
-  - "Customize" - Proceed to customization questions
+### Step 8: HUD Statusline Setup
 
-If "Customize" selected, ask about:
+AskUserQuestion: "MPL HUD(상태표시줄)를 활성화할까요? 파이프라인 진행률, 토큰 사용량, Gate 상태를 실시간으로 볼 수 있습니다."
+  - "활성화 (권장)" → Configure statusLine in Claude settings
+  - "사용 안 함" → Skip HUD setup
+
+If enabled:
+```
+// Find MPL plugin root
+MPL_ROOT = resolve(CLAUDE_PLUGIN_ROOT or "MPL/")
+HUD_PATH = join(MPL_ROOT, "hooks/mpl-hud.mjs")
+
+// Configure in ~/.claude/settings.json
+settings.statusLine = {
+  "type": "command",
+  "command": "node " + HUD_PATH
+}
+```
+
+Note: This replaces any existing statusLine config (e.g. OMC HUD).
+If user has OMC HUD active, warn and ask for confirmation.
+
+### Step 9: Optional Advanced Configuration
+
+AskUserQuestion: "고급 설정을 커스터마이즈할까요?"
+  - "기본값 사용 (권장)" → Skip to Step 10
+  - "커스터마이즈" → Ask the following:
+
+If "커스터마이즈" selected:
 1. **Maturity mode** (default standard): explore / standard / strict
 2. **Max fix loops** (default 10): How many fix attempts before circuit breaker?
 3. **Token budget** (default 500K): Maximum token spend per pipeline run?
 4. **HITL timeout** (default 30s): How long to wait for human approval?
 5. **Gate 1 strategy** (auto/docker/native/skip): How to run automated tests?
-6. **QMD search engine** (default: auto-detect):
-   - AskUserQuestion: "QMD 시맨틱 검색 엔진을 사용할까요? Scout 에이전트의 코드베이스 탐색이 50-60% 빨라집니다."
-     - "설치하고 사용 (권장)" → Install QMD + register collections + enable
-     - "이미 설치됨 — 활성화만" → Skip install, register collections + enable
-     - "사용 안 함" → Set qmd.enabled = false, Scout uses Grep fallback
-   - If enabled, run Step 3g (QMD setup) if not already done
-7. **MPL HUD** (default: enable):
-   - AskUserQuestion: "MPL HUD(상태표시줄)를 활성화할까요? 파이프라인 진행률, 토큰 사용량, Gate 상태를 실시간으로 볼 수 있습니다."
-     - "활성화 (권장)" → Configure statusLine in Claude settings
-     - "사용 안 함" → Skip HUD setup
-   - If enabled:
-     ```
-     // Find MPL plugin root
-     MPL_ROOT = resolve(CLAUDE_PLUGIN_ROOT or "MPL/")
-     HUD_PATH = join(MPL_ROOT, "hooks/mpl-hud.mjs")
 
-     // Configure in ~/.claude/settings.json
-     settings.statusLine = {
-       "type": "command",
-       "command": "node " + HUD_PATH
-     }
-     ```
-   - Note: This replaces any existing statusLine config (e.g. OMC HUD).
-     If user has OMC HUD active, warn and ask for confirmation.
+Write all answers to `.mpl/config.json`.
 
-Write answers to `.mpl/config.json`.
+### Step 10: Setup Complete
+
+Display final summary (same as Step 6 output) and Quick Start instructions.
 
 ## Error Handling
 
