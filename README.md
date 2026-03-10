@@ -62,18 +62,51 @@ The moment the orchestrator touches source files, it becomes invested in its own
 
 ## Quick Start
 
-**Step 1 — Clone into your project:**
+**Step 1 — Add marketplace & install:**
 
 ```bash
+# Register the MPL marketplace (one-time)
+claude plugin marketplace add https://github.com/KyubumShin/mpl-marketplace.git
+
+# Install the plugin
+claude plugin install mpl
+```
+
+Or from inside Claude Code:
+
+```
+/plugin marketplace add https://github.com/KyubumShin/mpl-marketplace.git
+/plugin install mpl
+```
+
+<details>
+<summary><strong>Alternative: Direct GitHub install / Manual</strong></summary>
+
+```bash
+# Install directly from GitHub repository
+claude plugin install https://github.com/KyubumShin/MPL.git
+
+# As a git submodule (manual)
 cd /path/to/your-project
-git clone https://github.com/<your-org>/MPL.git
+git submodule add https://github.com/KyubumShin/MPL.git
+
+# Load locally for testing
+claude --plugin-dir ./MPL
 ```
 
-**Step 2 — Create runtime directories:**
+</details>
 
-```bash
-mkdir -p .mpl/mpl/{phase0,phases,profile} .mpl/cache/phase0 .mpl/memory
+**Step 2 — Run setup:**
+
 ```
+/mpl:mpl-setup
+```
+
+The setup wizard automatically:
+- Creates runtime directories (`.mpl/`)
+- Detects available tools (LSP, AST, QMD)
+- Configures standalone fallbacks if needed
+- Optionally enables the HUD statusline
 
 **Step 3 — Start building:**
 

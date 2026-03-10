@@ -215,6 +215,26 @@ async function main() {
       if (currentState) {
         const currentTokens = currentState.cost?.total_tokens || 0;
         writeState(cwd, { cost: { total_tokens: currentTokens + estimatedTokens } });
+
+        // Experiment: append compaction_count to phases.jsonl for correlation analysis
+        try {
+          const { appendFileSync, mkdirSync, existsSync: dirExists } = await import('fs');
+          const { join: pathJoin } = await import('path');
+          const profileDir = pathJoin(cwd, '.mpl/mpl/profile');
+          if (!dirExists(profileDir)) mkdirSync(profileDir, { recursive: true });
+          const phaseRecord = {
+            step: currentState.current_phase || 'unknown',
+            name: agentType || '',
+            pass_rate: null,
+            micro_fixes: 0,
+            estimated_tokens: { context: 0, output: estimatedTokens, total: estimatedTokens },
+            compaction_count: currentState.compaction_count || 0,
+            timestamp: new Date().toISOString(),
+          };
+          appendFileSync(pathJoin(profileDir, 'phases.jsonl'), JSON.stringify(phaseRecord) + '\n');
+        } catch {
+          // Profile logging is best-effort
+        }
       }
     }
   } catch {

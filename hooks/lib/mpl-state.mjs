@@ -41,6 +41,7 @@ const DEFAULT_STATE = {
   },
   fix_loop_count: 0,
   max_fix_loops: 10,
+  compaction_count: 0,
   cost: {
     total_tokens: 0,
     max_total_tokens: 500000,
