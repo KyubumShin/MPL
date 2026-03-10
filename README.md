@@ -408,17 +408,22 @@ MPL/
 MPL provides a real-time statusline that shows pipeline progress at a glance:
 
 ```
-harness_lab | main | claude-opus-4-6 | ctx:67%
+harness_lab | 5h:45%(3h42m) | wk:12%(2d5h) | ctx:67% | 12m
 MPL Frontier | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
 ```
 
-**Displayed info:**
-- Project folder, branch, model, context remaining, session duration
+**Line 1 — Project & Usage:**
+- Project folder, API rate limits (5-hour / 7-day from Anthropic OAuth API), context window %, session duration
+
+**Line 2 — Pipeline Status (MPL active only):**
 - Pipeline tier (Frugal/Standard/Frontier), current phase
 - TODO progress, Gate results (✓/✗/-), Fix loop count
 - Token usage vs budget, tool mode
 
-**Color coding:** Context, fix loop, and token usage turn yellow at 50%+ and red at 80%+ thresholds.
+**Color coding:**
+- Rate limits: green <70%, yellow 70-90%, red ≥90% (with reset countdown)
+- Context: green <70%, yellow 70-85%, red ≥85%
+- Fix loop & tokens: yellow at 50%+, red at 80%+
 
 **Activate:** Run `/mpl:mpl-setup` → enable HUD, or manually:
 ```json
