@@ -199,18 +199,20 @@ async function main() {
   const state = readMplState(cwd);
   const folder = getProjectFolder(cwd);
 
-  // Debug: log stdin keys to find context_window structure
-  const stdinKeys = Object.keys(stdin).join(',');
-
   // Context percent from Claude Code stdin
-  // Try multiple possible field structures
   let contextPercent = null;
-  if (stdin.context_window && stdin.context_window.total > 0) {
-    contextPercent = (stdin.context_window.used / stdin.context_window.total) * 100;
-  } else if (stdin.contextWindow && stdin.contextWindow.total > 0) {
-    contextPercent = (stdin.contextWindow.used / stdin.contextWindow.total) * 100;
-  } else if (typeof stdin.context_percent === 'number') {
-    contextPercent = stdin.context_percent;
+  const cw = stdin.context_window;
+  if (cw) {
+    // Prefer native used_percentage (Claude Code v2.1.6+)
+    if (typeof cw.used_percentage === 'number' && !Number.isNaN(cw.used_percentage)) {
+      contextPercent = Math.min(100, Math.max(0, Math.round(cw.used_percentage)));
+    } else if (cw.context_window_size > 0 && cw.current_usage) {
+      // Fallback: calculate from current_usage tokens
+      const totalTokens = (cw.current_usage.input_tokens || 0)
+        + (cw.current_usage.cache_creation_input_tokens || 0)
+        + (cw.current_usage.cache_read_input_tokens || 0);
+      contextPercent = Math.min(100, Math.round((totalTokens / cw.context_window_size) * 100));
+    }
   }
 
   // Usage tracking
@@ -225,9 +227,6 @@ async function main() {
   parts1.push(`${c.magenta}week:${c.reset}${formatWeeklyUsage(weeklyTokens)}`);
   if (contextPercent != null) {
     parts1.push(`${c.cyan}ctx:${c.reset}${formatContext(contextPercent)}`);
-  } else {
-    // Debug: show stdin keys to diagnose missing context_window
-    parts1.push(`${c.gray}ctx:[${stdinKeys}]${c.reset}`);
   }
 
   const duration = state ? formatDuration(state.started_at) : null;
