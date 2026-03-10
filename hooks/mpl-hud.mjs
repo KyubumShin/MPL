@@ -9,8 +9,10 @@
  * Claude Code calls this command periodically (~500ms) with JSON on stdin.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { execSync } from 'child_process';
+import { homedir } from 'os';
 
 // ── ANSI Colors ──────────────────────────────────────────────────────────────
 
@@ -64,28 +66,105 @@ function getProjectFolder(cwd) {
   return cwd.split('/').pop();
 }
 
-function getSessionUsage(state) {
-  if (!state) return 0;
-  return state.cost?.total_tokens || 0;
+// ── OAuth Usage API ─────────────────────────────────────────────────────────
+
+const CACHE_TTL_SUCCESS = 30_000;
+const CACHE_TTL_FAILURE = 15_000;
+const API_TIMEOUT = 10_000;
+
+let usageCache = { timestamp: 0, data: null, error: false };
+
+function getOAuthToken() {
+  // Try macOS Keychain first
+  if (process.platform === 'darwin') {
+    try {
+      const raw = execSync(
+        'security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
+        { timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }
+      ).toString().trim();
+      const parsed = JSON.parse(raw);
+      const creds = parsed.claudeAiOauth || parsed;
+      if (creds.accessToken) return creds.accessToken;
+    } catch { /* fall through */ }
+  }
+
+  // Fallback: credentials file
+  try {
+    const credPath = join(homedir(), '.claude', '.credentials.json');
+    if (!existsSync(credPath)) return null;
+    const parsed = JSON.parse(readFileSync(credPath, 'utf-8'));
+    const creds = parsed.claudeAiOauth || parsed;
+    return creds.accessToken || null;
+  } catch { return null; }
 }
 
-function getWeeklyUsage(cwd) {
+async function fetchUsage() {
+  // Check cache
+  const now = Date.now();
+  const ttl = usageCache.error ? CACHE_TTL_FAILURE : CACHE_TTL_SUCCESS;
+  if (now - usageCache.timestamp < ttl && usageCache.data !== undefined) {
+    return usageCache.data;
+  }
+
+  const token = getOAuthToken();
+  if (!token) {
+    usageCache = { timestamp: now, data: null, error: true };
+    return null;
+  }
+
   try {
-    const usagePath = join(cwd, '.mpl', 'usage', 'weekly.jsonl');
-    if (!existsSync(usagePath)) return 0;
-    const lines = readFileSync(usagePath, 'utf-8').split('\n').filter(l => l.trim());
-    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    let total = 0;
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-        if (new Date(entry.timestamp).getTime() >= oneWeekAgo) {
-          total += entry.tokens || 0;
-        }
-      } catch { /* skip malformed */ }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      usageCache = { timestamp: now, data: null, error: true };
+      return null;
     }
-    return total;
-  } catch { return 0; }
+
+    const body = await res.json();
+    const data = {
+      fiveHour: body.five_hour?.utilization ?? null,
+      fiveHourResetsAt: body.five_hour?.resets_at || null,
+      weekly: body.seven_day?.utilization ?? null,
+      weeklyResetsAt: body.seven_day?.resets_at || null,
+    };
+
+    usageCache = { timestamp: now, data, error: false };
+    return data;
+  } catch {
+    usageCache = { timestamp: now, data: null, error: true };
+    return null;
+  }
+}
+
+function formatTimeUntil(isoDate) {
+  if (!isoDate) return '';
+  const ms = new Date(isoDate).getTime() - Date.now();
+  if (ms <= 0) return 'now';
+  const mins = Math.floor(ms / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d${hours % 24}h`;
+  if (hours > 0) return `${hours}h${mins % 60}m`;
+  return `${mins}m`;
+}
+
+function formatRateLimit(percent, resetsAt, label) {
+  if (percent == null) return null;
+  const pct = Math.round(percent);
+  const color = pct >= 90 ? c.red : pct >= 70 ? c.yellow : c.green;
+  const reset = resetsAt ? `${c.gray}(${formatTimeUntil(resetsAt)})${c.reset}` : '';
+  return `${color}${pct}%${c.reset}${reset}`;
 }
 
 // ── Formatters ───────────────────────────────────────────────────────────────
@@ -160,24 +239,6 @@ function formatTokens(used, max) {
   return `${color}${k(used)}/${k(max)}${c.reset}`;
 }
 
-function formatSessionUsage(tokens) {
-  const str = tokens >= 1000000 ? `${(tokens / 1000000).toFixed(1)}M`
-    : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}K`
-    : `${tokens}`;
-  // session: green < 100K, yellow 100K-300K, red > 300K
-  const color = tokens >= 300000 ? c.red : tokens >= 100000 ? c.yellow : c.green;
-  return `${color}${str}${c.reset}`;
-}
-
-function formatWeeklyUsage(tokens) {
-  const str = tokens >= 1000000 ? `${(tokens / 1000000).toFixed(1)}M`
-    : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}K`
-    : `${tokens}`;
-  // weekly: green < 500K, yellow 500K-2M, red > 2M
-  const color = tokens >= 2000000 ? c.red : tokens >= 500000 ? c.yellow : c.green;
-  return `${color}${str}${c.reset}`;
-}
-
 function formatTodos(sprint) {
   if (!sprint || sprint.total_todos === 0) return null;
   const { completed_todos: done, total_todos: total, failed_todos: fail } = sprint;
@@ -203,11 +264,9 @@ async function main() {
   let contextPercent = null;
   const cw = stdin.context_window;
   if (cw) {
-    // Prefer native used_percentage (Claude Code v2.1.6+)
     if (typeof cw.used_percentage === 'number' && !Number.isNaN(cw.used_percentage)) {
       contextPercent = Math.min(100, Math.max(0, Math.round(cw.used_percentage)));
     } else if (cw.context_window_size > 0 && cw.current_usage) {
-      // Fallback: calculate from current_usage tokens
       const totalTokens = (cw.current_usage.input_tokens || 0)
         + (cw.current_usage.cache_creation_input_tokens || 0)
         + (cw.current_usage.cache_read_input_tokens || 0);
@@ -215,16 +274,24 @@ async function main() {
     }
   }
 
-  // Usage tracking
-  const sessionTokens = getSessionUsage(state);
-  const weeklyTokens = getWeeklyUsage(cwd);
+  // OAuth usage from Anthropic API
+  const usage = await fetchUsage();
 
   // ── Line 1: Project info ──────────────────────────────────────────────────
 
   const parts1 = [];
   parts1.push(`${c.bold}${c.white}${folder}${c.reset}`);
-  parts1.push(`${c.blue}session:${c.reset}${formatSessionUsage(sessionTokens)}`);
-  parts1.push(`${c.magenta}week:${c.reset}${formatWeeklyUsage(weeklyTokens)}`);
+
+  // Rate limits from OAuth API
+  if (usage) {
+    const fh = formatRateLimit(usage.fiveHour, usage.fiveHourResetsAt);
+    const wk = formatRateLimit(usage.weekly, usage.weeklyResetsAt);
+    if (fh) parts1.push(`${c.blue}5h:${c.reset}${fh}`);
+    if (wk) parts1.push(`${c.magenta}wk:${c.reset}${wk}`);
+  } else {
+    parts1.push(`${c.gray}usage:--${c.reset}`);
+  }
+
   if (contextPercent != null) {
     parts1.push(`${c.cyan}ctx:${c.reset}${formatContext(contextPercent)}`);
   }
