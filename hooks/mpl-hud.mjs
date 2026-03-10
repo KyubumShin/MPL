@@ -199,10 +199,19 @@ async function main() {
   const state = readMplState(cwd);
   const folder = getProjectFolder(cwd);
 
+  // Debug: log stdin keys to find context_window structure
+  const stdinKeys = Object.keys(stdin).join(',');
+
   // Context percent from Claude Code stdin
-  const contextPercent = (stdin.context_window && stdin.context_window.total > 0)
-    ? ((stdin.context_window.used / stdin.context_window.total) * 100)
-    : null;
+  // Try multiple possible field structures
+  let contextPercent = null;
+  if (stdin.context_window && stdin.context_window.total > 0) {
+    contextPercent = (stdin.context_window.used / stdin.context_window.total) * 100;
+  } else if (stdin.contextWindow && stdin.contextWindow.total > 0) {
+    contextPercent = (stdin.contextWindow.used / stdin.contextWindow.total) * 100;
+  } else if (typeof stdin.context_percent === 'number') {
+    contextPercent = stdin.context_percent;
+  }
 
   // Usage tracking
   const sessionTokens = getSessionUsage(state);
@@ -214,7 +223,12 @@ async function main() {
   parts1.push(`${c.bold}${c.white}${folder}${c.reset}`);
   parts1.push(`${c.blue}session:${c.reset}${formatSessionUsage(sessionTokens)}`);
   parts1.push(`${c.magenta}week:${c.reset}${formatWeeklyUsage(weeklyTokens)}`);
-  if (contextPercent != null) parts1.push(`${c.cyan}ctx:${c.reset}${formatContext(contextPercent)}`);
+  if (contextPercent != null) {
+    parts1.push(`${c.cyan}ctx:${c.reset}${formatContext(contextPercent)}`);
+  } else {
+    // Debug: show stdin keys to diagnose missing context_window
+    parts1.push(`${c.gray}ctx:[${stdinKeys}]${c.reset}`);
+  }
 
   const duration = state ? formatDuration(state.started_at) : null;
   if (duration) parts1.push(`${c.gray}${duration}${c.reset}`);
