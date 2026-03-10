@@ -200,7 +200,7 @@ async function main() {
   const folder = getProjectFolder(cwd);
 
   // Context percent from Claude Code stdin
-  const contextPercent = stdin.context_window
+  const contextPercent = (stdin.context_window && stdin.context_window.total > 0)
     ? ((stdin.context_window.used / stdin.context_window.total) * 100)
     : null;
 

@@ -190,22 +190,11 @@ async function main() {
   const toolInput = data.tool_input || data.toolInput || {};
   const agentType = toolInput.subagent_type || toolInput.subagentType || '';
 
-  // Check if this agent requires validation
-  if (!VALIDATE_AGENTS.has(agentType)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Get expected sections for this agent
-  const sections = EXPECTED_SECTIONS[agentType] || [];
-
-  // Actually validate tool_response content against expected sections
+  // Track token usage for ALL Task completions (not just validated agents)
   const toolResponse = data.tool_response || data.toolResponse || '';
   const responseText = typeof toolResponse === 'string'
     ? toolResponse
     : JSON.stringify(toolResponse);
-
-  const { passed, missing, found, sectionList } = validateSections(sections, responseText);
 
   // H2: Estimate token usage from response length and update state
   try {
@@ -253,6 +242,14 @@ async function main() {
     // Token tracking is best-effort; do not block on failure
   }
 
+  // Validation only applies to agents in VALIDATE_AGENTS
+  if (!VALIDATE_AGENTS.has(agentType)) {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  const sections = EXPECTED_SECTIONS[agentType] || [];
+  const { passed, missing, found, sectionList } = validateSections(sections, responseText);
   const message = formatValidationMessage(agentType, sections, passed, missing, sectionList);
 
   // C3: Block (continue: false) when validation fails
