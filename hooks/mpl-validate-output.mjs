@@ -216,6 +216,18 @@ async function main() {
         const currentTokens = currentState.cost?.total_tokens || 0;
         writeState(cwd, { cost: { total_tokens: currentTokens + estimatedTokens } });
 
+        // Weekly usage tracking for HUD
+        try {
+          const { appendFileSync: af, mkdirSync: md, existsSync: de } = await import('fs');
+          const { join: jp } = await import('path');
+          const usageDir = jp(cwd, '.mpl/usage');
+          if (!de(usageDir)) md(usageDir, { recursive: true });
+          af(jp(usageDir, 'weekly.jsonl'), JSON.stringify({
+            timestamp: new Date().toISOString(),
+            tokens: estimatedTokens,
+          }) + '\n');
+        } catch { /* best-effort */ }
+
         // Experiment: append compaction_count to phases.jsonl for correlation analysis
         try {
           const { appendFileSync, mkdirSync, existsSync: dirExists } = await import('fs');

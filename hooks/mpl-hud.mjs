@@ -11,7 +11,6 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
 
 // ── ANSI Colors ──────────────────────────────────────────────────────────────
 
@@ -61,14 +60,32 @@ function readMplState(cwd) {
   } catch { return null; }
 }
 
-function getGitInfo(cwd) {
+function getProjectFolder(cwd) {
+  return cwd.split('/').pop();
+}
+
+function getSessionUsage(state) {
+  if (!state) return 0;
+  return state.cost?.total_tokens || 0;
+}
+
+function getWeeklyUsage(cwd) {
   try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd, timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-    const folder = cwd.split('/').pop();
-    return { branch, folder };
-  } catch {
-    return { branch: null, folder: cwd.split('/').pop() };
-  }
+    const usagePath = join(cwd, '.mpl', 'usage', 'weekly.jsonl');
+    if (!existsSync(usagePath)) return 0;
+    const lines = readFileSync(usagePath, 'utf-8').split('\n').filter(l => l.trim());
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let total = 0;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (new Date(entry.timestamp).getTime() >= oneWeekAgo) {
+          total += entry.tokens || 0;
+        }
+      } catch { /* skip malformed */ }
+    }
+    return total;
+  } catch { return 0; }
 }
 
 // ── Formatters ───────────────────────────────────────────────────────────────
@@ -143,6 +160,24 @@ function formatTokens(used, max) {
   return `${color}${k(used)}/${k(max)}${c.reset}`;
 }
 
+function formatSessionUsage(tokens) {
+  const str = tokens >= 1000000 ? `${(tokens / 1000000).toFixed(1)}M`
+    : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}K`
+    : `${tokens}`;
+  // session: green < 100K, yellow 100K-300K, red > 300K
+  const color = tokens >= 300000 ? c.red : tokens >= 100000 ? c.yellow : c.green;
+  return `${color}${str}${c.reset}`;
+}
+
+function formatWeeklyUsage(tokens) {
+  const str = tokens >= 1000000 ? `${(tokens / 1000000).toFixed(1)}M`
+    : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}K`
+    : `${tokens}`;
+  // weekly: green < 500K, yellow 500K-2M, red > 2M
+  const color = tokens >= 2000000 ? c.red : tokens >= 500000 ? c.yellow : c.green;
+  return `${color}${str}${c.reset}`;
+}
+
 function formatTodos(sprint) {
   if (!sprint || sprint.total_todos === 0) return null;
   const { completed_todos: done, total_todos: total, failed_todos: fail } = sprint;
@@ -162,23 +197,27 @@ async function main() {
 
   const cwd = stdin.cwd || process.cwd();
   const state = readMplState(cwd);
-  const git = getGitInfo(cwd);
+  const folder = getProjectFolder(cwd);
 
   // Context percent from Claude Code stdin
   const contextPercent = stdin.context_window
     ? ((stdin.context_window.used / stdin.context_window.total) * 100)
     : null;
 
+  // Usage tracking
+  const sessionTokens = getSessionUsage(state);
+  const weeklyTokens = getWeeklyUsage(cwd);
+
   // ── Line 1: Project info ──────────────────────────────────────────────────
 
   const parts1 = [];
-  parts1.push(`${c.bold}${git.folder}${c.reset}`);
-  if (git.branch) parts1.push(`${c.cyan}${git.branch}${c.reset}`);
-  if (stdin.model) parts1.push(`${c.dim}${stdin.model}${c.reset}`);
-  if (contextPercent != null) parts1.push(`ctx:${formatContext(contextPercent)}`);
+  parts1.push(`${c.bold}${c.white}${folder}${c.reset}`);
+  parts1.push(`${c.blue}session:${c.reset}${formatSessionUsage(sessionTokens)}`);
+  parts1.push(`${c.magenta}week:${c.reset}${formatWeeklyUsage(weeklyTokens)}`);
+  if (contextPercent != null) parts1.push(`${c.cyan}ctx:${c.reset}${formatContext(contextPercent)}`);
 
   const duration = state ? formatDuration(state.started_at) : null;
-  if (duration) parts1.push(`${c.dim}${duration}${c.reset}`);
+  if (duration) parts1.push(`${c.gray}${duration}${c.reset}`);
 
   // ── Line 2: MPL pipeline status (only when MPL active) ────────────────────
 
@@ -191,26 +230,26 @@ async function main() {
 
     // TODOs
     const todos = formatTodos(state.sprint_status);
-    if (todos) parts2.push(`TODO:${todos}`);
+    if (todos) parts2.push(`${c.cyan}TODO:${c.reset}${todos}`);
 
     // Gates
     const gr = state.gate_results;
     if (gr && (gr.gate1_passed != null || gr.gate2_passed != null || gr.gate3_passed != null)) {
-      parts2.push(`Gate:${formatGate(gr.gate1_passed, gr.gate2_passed, gr.gate3_passed)}`);
+      parts2.push(`${c.blue}Gate:${c.reset}${formatGate(gr.gate1_passed, gr.gate2_passed, gr.gate3_passed)}`);
     }
 
     // Fix loop
     if (state.fix_loop_count > 0) {
-      parts2.push(`Fix:${formatFixLoop(state.fix_loop_count, state.max_fix_loops)}`);
+      parts2.push(`${c.yellow}Fix:${c.reset}${formatFixLoop(state.fix_loop_count, state.max_fix_loops)}`);
     }
 
     // Tokens
     const tokens = formatTokens(state.cost?.total_tokens || 0, state.cost?.max_total_tokens);
-    if (tokens) parts2.push(`tok:${tokens}`);
+    if (tokens) parts2.push(`${c.magenta}tok:${c.reset}${tokens}`);
 
     // Tool mode (compact)
     if (state.tool_mode && state.tool_mode !== 'full') {
-      parts2.push(`${c.dim}[${state.tool_mode}]${c.reset}`);
+      parts2.push(`${c.gray}[${state.tool_mode}]${c.reset}`);
     }
 
     console.log(parts1.join(' | '));
