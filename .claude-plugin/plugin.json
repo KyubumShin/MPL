@@ -16,7 +16,7 @@
     "orchestration",
     "autonomous-coding"
   ],
-  "commands": ["commands/mpl-run.md"],
+  "commands": "./commands/",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"
 }
