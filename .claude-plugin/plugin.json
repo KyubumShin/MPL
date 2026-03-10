@@ -1,7 +1,21 @@
 {
   "name": "mpl",
-  "version": "3.0.0",
+  "version": "3.2.0",
   "description": "Micro-Phase Loop - Coherence-first autonomous coding pipeline with decomposition, phase execution, and verification",
+  "author": {
+    "name": "KyubumShin"
+  },
+  "repository": "https://github.com/KyubumShin/MPL",
+  "homepage": "https://github.com/KyubumShin/MPL",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "micro-phase",
+    "pipeline",
+    "orchestration",
+    "autonomous-coding"
+  ],
   "commands": ["commands/mpl-run.md"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"

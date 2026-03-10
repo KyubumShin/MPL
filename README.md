@@ -66,7 +66,7 @@ The moment the orchestrator touches source files, it becomes invested in its own
 
 ```bash
 # Register the MPL marketplace (one-time)
-claude plugin marketplace add https://github.com/KyubumShin/mpl-marketplace.git
+claude plugin marketplace add https://github.com/KyubumShin/MPL.git
 
 # Install the plugin
 claude plugin install mpl
@@ -75,22 +75,19 @@ claude plugin install mpl
 Or from inside Claude Code:
 
 ```
-/plugin marketplace add https://github.com/KyubumShin/mpl-marketplace.git
+/plugin marketplace add https://github.com/KyubumShin/MPL.git
 /plugin install mpl
 ```
 
 <details>
-<summary><strong>Alternative: Direct GitHub install / Manual</strong></summary>
+<summary><strong>Alternative: Manual installation</strong></summary>
 
 ```bash
-# Install directly from GitHub repository
-claude plugin install https://github.com/KyubumShin/MPL.git
-
-# As a git submodule (manual)
+# As a git submodule
 cd /path/to/your-project
 git submodule add https://github.com/KyubumShin/MPL.git
 
-# Load locally for testing
+# Load locally for testing without installing
 claude --plugin-dir ./MPL
 ```
 
