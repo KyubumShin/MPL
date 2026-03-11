@@ -247,6 +247,22 @@ function formatTodos(sprint) {
   return s;
 }
 
+// ── Fixed-width output ──────────────────────────────────────────────────────
+
+const HUD_WIDTH = 90;
+
+/** Strip ANSI escape codes to get visible character length. */
+function visibleLength(str) {
+  return str.replace(/\x1b\[[0-9;]*m/g, '').length;
+}
+
+/** Pad line with spaces to fixed width. */
+function padLine(str) {
+  const vLen = visibleLength(str);
+  if (vLen >= HUD_WIDTH) return str;
+  return str + ' '.repeat(HUD_WIDTH - vLen);
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -332,18 +348,18 @@ async function main() {
       parts2.push(`${c.gray}[${state.tool_mode}]${c.reset}`);
     }
 
-    console.log(parts1.join(' | '));
-    console.log(parts2.join(' | '));
+    console.log(padLine(parts1.join(' | ')));
+    console.log(padLine(parts2.join(' | ')));
   } else if (state && (state.current_phase === 'completed' || state.current_phase === 'cancelled')) {
     // Completed/cancelled — show minimal
     const status = state.current_phase === 'completed'
       ? `${c.green}${c.bold}✓ Complete${c.reset}`
       : `${c.yellow}Cancelled${c.reset}`;
-    console.log(parts1.join(' | '));
-    console.log(`${c.bold}MPL${c.reset} ${status} | ${formatTier(state.pipeline_tier)}`);
+    console.log(padLine(parts1.join(' | ')));
+    console.log(padLine(`${c.bold}MPL${c.reset} ${status} | ${formatTier(state.pipeline_tier)}`));
   } else {
     // No MPL state — show basic info only
-    console.log(parts1.join(' | '));
+    console.log(padLine(parts1.join(' | ')));
   }
 }
 
