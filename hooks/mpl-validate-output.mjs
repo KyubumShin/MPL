@@ -173,8 +173,8 @@ async function main() {
 
   const toolName = data.tool_name || data.toolName || '';
 
-  // Only intercept Task tool completions
-  if (!['Task', 'task'].includes(toolName)) {
+  // Only intercept Task/Agent tool completions
+  if (!['Task', 'task', 'Agent', 'agent'].includes(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }

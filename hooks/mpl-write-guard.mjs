@@ -107,16 +107,16 @@ async function main() {
 
   // Check if it's a source file
   if (isSourceFile(filePath)) {
-    // BLOCK: source files must be edited by worker agents
-    const message = `[MPL WRITE GUARD] Blocked: ${toolName} on ${filePath}
+    // SOFT BLOCK: warn and recommend delegation (OMC-style)
+    const message = `[MPL DELEGATION NOTICE] Direct ${toolName} on source file: ${filePath}
 
-Source files must be edited by mpl-worker agents, not the orchestrator.
-Delegate via: Task(subagent_type="mpl-worker", prompt="Edit ${filePath} to ...")
+Source files should be edited by mpl-worker agents, not the orchestrator.
+Delegate via: Agent(subagent_type="mpl-worker", prompt="Edit ${filePath} to ...")
 
-This is a HARD block. The operation will not proceed.`;
+Next time, delegate to mpl-worker instead of editing directly.`;
 
     console.log(JSON.stringify({
-      continue: false,
+      continue: true,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         additionalContext: message
