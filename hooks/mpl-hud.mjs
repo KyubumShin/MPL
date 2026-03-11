@@ -68,8 +68,8 @@ function getProjectFolder(cwd) {
 
 // ── OAuth Usage API ─────────────────────────────────────────────────────────
 
-const CACHE_TTL_SUCCESS = 30_000;
-const CACHE_TTL_FAILURE = 15_000;
+const CACHE_TTL_SUCCESS = 300_000; // 5 minutes — usage data doesn't change fast
+const CACHE_TTL_FAILURE = 60_000;  // 1 minute retry on failure
 const API_TIMEOUT = 3_000;
 
 // File-based cache so it persists across HUD invocations
