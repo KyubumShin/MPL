@@ -70,9 +70,24 @@ function getProjectFolder(cwd) {
 
 const CACHE_TTL_SUCCESS = 30_000;
 const CACHE_TTL_FAILURE = 15_000;
-const API_TIMEOUT = 10_000;
+const API_TIMEOUT = 3_000;
 
-let usageCache = { timestamp: 0, data: null, error: false };
+// File-based cache so it persists across HUD invocations
+function getUsageCachePath() {
+  return join(homedir(), '.claude', '.mpl-usage-cache.json');
+}
+
+function readUsageCache() {
+  try {
+    const p = getUsageCachePath();
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, 'utf-8'));
+  } catch { return null; }
+}
+
+function writeUsageCache(cache) {
+  try { writeFileSync(getUsageCachePath(), JSON.stringify(cache)); } catch { /* best-effort */ }
+}
 
 function getOAuthToken() {
   // Try macOS Keychain first
@@ -80,7 +95,7 @@ function getOAuthToken() {
     try {
       const raw = execSync(
         'security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
-        { timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] }
+        { timeout: 1500, stdio: ['pipe', 'pipe', 'pipe'] }
       ).toString().trim();
       const parsed = JSON.parse(raw);
       const creds = parsed.claudeAiOauth || parsed;
@@ -98,52 +113,54 @@ function getOAuthToken() {
   } catch { return null; }
 }
 
-async function fetchUsage() {
-  // Check cache
+function fetchUsage() {
+  // Return cached data if fresh enough
+  const cache = readUsageCache();
   const now = Date.now();
-  const ttl = usageCache.error ? CACHE_TTL_FAILURE : CACHE_TTL_SUCCESS;
-  if (now - usageCache.timestamp < ttl && usageCache.data !== undefined) {
-    return usageCache.data;
+
+  if (cache) {
+    const ttl = cache.error ? CACHE_TTL_FAILURE : CACHE_TTL_SUCCESS;
+    if (now - cache.timestamp < ttl) {
+      return cache.data;
+    }
   }
 
+  // Cache expired or missing — do synchronous refresh (curl with tight timeout)
+  // Must be synchronous because Node.js process exits after stdout, killing async fetches
   const token = getOAuthToken();
   if (!token) {
-    usageCache = { timestamp: now, data: null, error: true };
-    return null;
+    writeUsageCache({ timestamp: now, data: null, error: true });
+    return cache?.data || null;
   }
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), API_TIMEOUT);
+    const result = execSync(
+      `curl -s -w '\\n%{http_code}' --max-time 2 -H "Authorization: Bearer ${token}" -H "anthropic-beta: oauth-2025-04-20" -H "Content-Type: application/json" https://api.anthropic.com/api/oauth/usage`,
+      { timeout: 2500, stdio: ['pipe', 'pipe', 'pipe'] }
+    ).toString().trim();
 
-    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    // Parse response: body + HTTP status code on last line
+    const lines = result.split('\n');
+    const httpCode = parseInt(lines.pop(), 10);
+    const bodyStr = lines.join('\n');
+    const body = JSON.parse(bodyStr);
 
-    if (!res.ok) {
-      usageCache = { timestamp: now, data: null, error: true };
-      return null;
+    if (httpCode !== 200 || body.error) {
+      throw new Error(`API ${httpCode}`);
     }
 
-    const body = await res.json();
     const data = {
       fiveHour: body.five_hour?.utilization ?? null,
       fiveHourResetsAt: body.five_hour?.resets_at || null,
       weekly: body.seven_day?.utilization ?? null,
       weeklyResetsAt: body.seven_day?.resets_at || null,
     };
-
-    usageCache = { timestamp: now, data, error: false };
+    writeUsageCache({ timestamp: now, data, error: false });
     return data;
   } catch {
-    usageCache = { timestamp: now, data: null, error: true };
-    return null;
+    // API call failed — cache the failure, return stale data
+    writeUsageCache({ timestamp: now, data: null, error: true });
+    return cache?.data || null;
   }
 }
 
