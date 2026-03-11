@@ -119,10 +119,7 @@ async function main() {
       // Phase 1: Quick Plan (legacy/backward-compat when research is skipped)
       console.log(JSON.stringify({
         continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'Stop',
-          additionalContext: '[MPL] Phase 1: Quick Plan in progress. Complete planning and HITL before proceeding.'
-        }
+        stopReason: '[MPL] Phase 1: Quick Plan in progress. Complete planning and HITL before proceeding.'
       }));
       break;
     }
@@ -136,10 +133,7 @@ async function main() {
         writeState(cwd, { current_phase: 'phase1b-plan', research: { status: 'skipped' } });
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL] Research failed: ${research.error}. Skipping to Phase 1-B: Plan Generation (without research).`
-          }
+          stopReason: `[MPL] Research failed: ${research.error}. Skipping to Phase 1-B: Plan Generation (without research).`
         }));
         break;
       }
@@ -152,10 +146,7 @@ async function main() {
           : `[MPL] Research completed (${research.stages_completed?.length || 0} stages, ${research.findings_count || 0} findings, ${research.sources_count || 0} sources). Transitioning to Phase 1-B: Plan Generation.`;
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: msg
-          }
+          stopReason: msg
         }));
       } else {
         // Research in progress — guide orchestrator
@@ -163,10 +154,7 @@ async function main() {
         const stagesCompleted = research.stages_completed?.length || 0;
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL] Phase 1-A: Deep Research in progress (stage: ${currentStage}, ${stagesCompleted}/3 stages completed). Complete all research stages or skip to proceed.`
-          }
+          stopReason: `[MPL] Phase 1-A: Deep Research in progress (stage: ${currentStage}, ${stagesCompleted}/3 stages completed). Complete all research stages or skip to proceed.`
         }));
       }
       break;
@@ -179,10 +167,7 @@ async function main() {
       const reportNote = reportPath ? ` Research report: ${reportPath}.` : '';
       console.log(JSON.stringify({
         continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'Stop',
-          additionalContext: `[MPL] Phase 1-B: Plan Generation in progress.${reportNote} Use research findings as input for planning agents. Complete PLAN.md and HITL before proceeding.`
-        }
+        stopReason: `[MPL] Phase 1-B: Plan Generation in progress.${reportNote} Use research findings as input for planning agents. Complete PLAN.md and HITL before proceeding.`
       }));
       break;
     }
@@ -192,10 +177,7 @@ async function main() {
       if (!state.interview_depth) {
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL] Triage guard: interview_depth not recorded in state. Run Triage (Step 0) to set interview_depth (skip/light/full) before proceeding to Sprint.'
-          }
+          stopReason: '[MPL] Triage guard: interview_depth not recorded in state. Run Triage (Step 0) to set interview_depth (skip/light/full) before proceeding to Sprint.'
         }));
         break;
       }
@@ -205,10 +187,7 @@ async function main() {
       if (!planStatus || planStatus.total === 0) {
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL] Phase 2: Sprint in progress. No PLAN.md found or no TODOs defined.'
-          }
+          stopReason: '[MPL] Phase 2: Sprint in progress. No PLAN.md found or no TODOs defined.'
         }));
         break;
       }
@@ -221,18 +200,12 @@ async function main() {
         writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to Phase 3: Quality Gate.`
-          }
+          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to Phase 3: Quality Gate.`
         }));
       } else {
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL] Phase 2: Sprint in progress. ${completed}/${total} TODOs completed, ${failed} failed, ${remaining} remaining.`
-          }
+          stopReason: `[MPL] Phase 2: Sprint in progress. ${completed}/${total} TODOs completed, ${failed} failed, ${remaining} remaining.`
         }));
       }
       break;
@@ -247,10 +220,7 @@ async function main() {
         writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL] All Quality Gates passed! Transitioning to Phase 5: Finalize.'
-          }
+          stopReason: '[MPL] All Quality Gates passed! Transitioning to Phase 5: Finalize.'
         }));
       } else if (gateResults.anyFailed) {
         // Gate failed → Phase 4
@@ -260,19 +230,13 @@ async function main() {
         writeState(cwd, { current_phase: 'phase4-fix', fix_loop_count: currentFixCount });
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL] Quality Gate failed. Gate results: G1=${gateResults.details.gate1}, G2=${gateResults.details.gate2}, G3=${gateResults.details.gate3}. Transitioning to Phase 4: Fix Loop.`
-          }
+          stopReason: `[MPL] Quality Gate failed. Gate results: G1=${gateResults.details.gate1}, G2=${gateResults.details.gate2}, G3=${gateResults.details.gate3}. Transitioning to Phase 4: Fix Loop.`
         }));
       } else {
         // Gates not yet evaluated
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.'
-          }
+          stopReason: '[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.'
         }));
       }
       break;
@@ -293,10 +257,7 @@ async function main() {
           if (esc) {
             console.log(JSON.stringify({
               continue: true,
-              hookSpecificOutput: {
-                hookEventName: 'Stop',
-                additionalContext: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Escalating tier: ${esc.from} → ${esc.to}. Re-running with expanded pipeline.`
-              }
+              stopReason: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Escalating tier: ${esc.from} → ${esc.to}. Re-running with expanded pipeline.`
             }));
             break;
           }
@@ -305,10 +266,7 @@ async function main() {
         writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Transitioning to Phase 5: Finalize (partial completion).`
-          }
+          stopReason: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Transitioning to Phase 5: Finalize (partial completion).`
         }));
       } else {
         // H1: Check convergence before continuing
@@ -324,10 +282,7 @@ async function main() {
             if (esc) {
               console.log(JSON.stringify({
                 continue: true,
-                hookSpecificOutput: {
-                  hookEventName: 'Stop',
-                  additionalContext: `[MPL] Convergence ${convergenceResult.status} (delta: ${convergenceResult.delta?.toFixed(3)}). Escalating tier: ${esc.from} → ${esc.to}.`
-                }
+                stopReason: `[MPL] Convergence ${convergenceResult.status} (delta: ${convergenceResult.delta?.toFixed(3)}). Escalating tier: ${esc.from} → ${esc.to}.`
               }));
               break;
             }
@@ -335,19 +290,13 @@ async function main() {
           writeState(cwd, { current_phase: 'phase5-finalize' });
           console.log(JSON.stringify({
             continue: true,
-            hookSpecificOutput: {
-              hookEventName: 'Stop',
-              additionalContext: `[MPL] Convergence ${convergenceResult.status} detected (delta: ${convergenceResult.delta?.toFixed(3)}). Fix loop is not improving. Transitioning to Phase 5: Finalize (partial completion).`
-            }
+            stopReason: `[MPL] Convergence ${convergenceResult.status} detected (delta: ${convergenceResult.delta?.toFixed(3)}). Fix loop is not improving. Transitioning to Phase 5: Finalize (partial completion).`
           }));
         } else {
           // Continue fix loop
           console.log(JSON.stringify({
             continue: true,
-            hookSpecificOutput: {
-              hookEventName: 'Stop',
-              additionalContext: `[MPL] Phase 4: Fix Loop ${fixCount}/${maxFix}. Continue fixing or re-run Quality Gate.`
-            }
+            stopReason: `[MPL] Phase 4: Fix Loop ${fixCount}/${maxFix}. Continue fixing or re-run Quality Gate.`
           }));
         }
       }
@@ -363,18 +312,12 @@ async function main() {
         writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL] Phase 5: Finalize complete. MPL pipeline finished.'
-          }
+          stopReason: '[MPL] Phase 5: Finalize complete. MPL pipeline finished.'
         }));
       } else {
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL] Phase 5: Finalize in progress. Extract learnings, commit, then set state.finalize_done = true to complete.'
-          }
+          stopReason: '[MPL] Phase 5: Finalize in progress. Extract learnings, commit, then set state.finalize_done = true to complete.'
         }));
       }
       break;
@@ -386,10 +329,7 @@ async function main() {
       // Small Plan: orchestrator handles, no auto-transition
       console.log(JSON.stringify({
         continue: true,
-        hookSpecificOutput: {
-          hookEventName: 'Stop',
-          additionalContext: '[MPL-Small] Phase 1: Small Plan in progress. Complete planning and HITL before proceeding.'
-        }
+        stopReason: '[MPL-Small] Phase 1: Small Plan in progress. Complete planning and HITL before proceeding.'
       }));
       break;
     }
@@ -400,10 +340,7 @@ async function main() {
       if (!smallPlanStatus || smallPlanStatus.total === 0) {
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL-Small] Phase 2: Sprint in progress. No PLAN.md found or no TODOs defined.'
-          }
+          stopReason: '[MPL-Small] Phase 2: Sprint in progress. No PLAN.md found or no TODOs defined.'
         }));
         break;
       }
@@ -416,18 +353,12 @@ async function main() {
         writeState(cwd, { current_phase: 'small-verify' });
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL-Small] All TODOs resolved (${sCompleted} completed, ${sFailed} failed). Transitioning to Phase 3: Verify.`
-          }
+          stopReason: `[MPL-Small] All TODOs resolved (${sCompleted} completed, ${sFailed} failed). Transitioning to Phase 3: Verify.`
         }));
       } else {
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: `[MPL-Small] Phase 2: Sprint in progress. ${sCompleted}/${sTotal} TODOs completed, ${sFailed} failed, ${sRemaining} remaining.`
-          }
+          stopReason: `[MPL-Small] Phase 2: Sprint in progress. ${sCompleted}/${sTotal} TODOs completed, ${sFailed} failed, ${sRemaining} remaining.`
         }));
       }
       break;
@@ -442,10 +373,7 @@ async function main() {
         writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL-Small] Verification passed. Pipeline complete. Extract learnings and commit.'
-          }
+          stopReason: '[MPL-Small] Verification passed. Pipeline complete. Extract learnings and commit.'
         }));
       } else if (smallGate.gate2_passed === false) {
         const smallFixCount = state.fix_loop_count || 0;
@@ -456,30 +384,21 @@ async function main() {
           writeState(cwd, { current_phase: 'completed' });
           console.log(JSON.stringify({
             continue: false,
-            hookSpecificOutput: {
-              hookEventName: 'Stop',
-              additionalContext: `[MPL-Small] Fix loop limit reached (${smallFixCount}/${smallMaxFix}). Completing with partial results. Extract learnings.`
-            }
+            stopReason: `[MPL-Small] Fix loop limit reached (${smallFixCount}/${smallMaxFix}). Completing with partial results. Extract learnings.`
           }));
         } else {
           // Review failed, retries remaining → back to small-sprint
           writeState(cwd, { current_phase: 'small-sprint', fix_loop_count: smallFixCount + 1 });
           console.log(JSON.stringify({
             continue: true,
-            hookSpecificOutput: {
-              hookEventName: 'Stop',
-              additionalContext: `[MPL-Small] Code review failed. Retry ${smallFixCount + 1}/${smallMaxFix}. Returning to Sprint for fixes.`
-            }
+            stopReason: `[MPL-Small] Code review failed. Retry ${smallFixCount + 1}/${smallMaxFix}. Returning to Sprint for fixes.`
           }));
         }
       } else {
         // Gate not yet evaluated
         console.log(JSON.stringify({
           continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'Stop',
-            additionalContext: '[MPL-Small] Phase 3: Verify in progress. Run code review before proceeding.'
-          }
+          stopReason: '[MPL-Small] Phase 3: Verify in progress. Run code review before proceeding.'
         }));
       }
       break;
