@@ -7,7 +7,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, appendFileSync, mkdirSync } from 'fs';
+import { existsSync, appendFileSync, mkdirSync, writeFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,6 +22,7 @@ const { readStdin } = await import(
 
 const PROFILE_DIR = '.mpl/mpl/profile';
 const COMPACTIONS_FILE = 'compactions.jsonl';
+const CHECKPOINTS_DIR = '.mpl/mpl/checkpoints';
 
 async function main() {
   const input = await readStdin();
@@ -65,6 +66,35 @@ async function main() {
     join(profileDir, COMPACTIONS_FILE),
     JSON.stringify(record) + '\n'
   );
+
+  // Create compaction checkpoint file
+  const checkpointsDir = join(cwd, CHECKPOINTS_DIR);
+  if (!existsSync(checkpointsDir)) {
+    mkdirSync(checkpointsDir, { recursive: true });
+  }
+
+  const checkpointContent = [
+    `# Compaction Checkpoint #${newCount}`,
+    `- **Timestamp**: ${record.timestamp}`,
+    `- **Current Phase**: ${record.current_phase}`,
+    `- **Compaction Count**: ${newCount}`,
+    `- **Context Usage**: triggered at ~83.5%`,
+    ``,
+    `## Recovery Instructions`,
+    `Resume from current phase. Read state-summary.md from previous phases if context was lost.`,
+  ].join('\n');
+
+  writeFileSync(
+    join(checkpointsDir, `compaction-${newCount}.md`),
+    checkpointContent + '\n'
+  );
+
+  // Compaction count warnings
+  if (newCount >= 4) {
+    console.error(`🚨 Compaction limit approaching. Auto session reset recommended.`);
+  } else if (newCount >= 3) {
+    console.error(`⚠️ Compaction count high (${newCount}). Consider session split.`);
+  }
 }
 
 main().catch(() => {

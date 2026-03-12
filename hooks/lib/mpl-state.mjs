@@ -42,6 +42,8 @@ const DEFAULT_STATE = {
   fix_loop_count: 0,
   max_fix_loops: 10,
   compaction_count: 0,
+  last_phase_compaction_count: 0,
+  session_id: null,
   cost: {
     total_tokens: 0,
     max_total_tokens: 500000,

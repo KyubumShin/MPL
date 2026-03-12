@@ -26,7 +26,8 @@ context = {
   prev_summary:     Read previous phase's state-summary.md (if available),
   dep_summaries:    load_dependency_summaries(current_phase),  // All phases referenced in interface_contract.requires
   verification_plan:  load_phase_verification_plan(current_phase),  // A/S/H items for this phase
-  learnings:        load_learnings()                // F-11: Past run learnings (optional)
+  learnings:        load_learnings(),               // F-11: Past run learnings (optional)
+  error_files:      load_error_files(current_phase) // F-30: Error files from previous attempts (optional)
 }
 ```
 
@@ -42,6 +43,22 @@ load_learnings():
     return truncate(content, max_lines=100)
   return null  // No learnings yet — first run
 ```
+
+#### Error File Loading (F-30)
+
+```
+load_error_files(current_phase):
+  errors_dir = ".mpl/mpl/phases/{current_phase.id}/errors/"
+  if exists(errors_dir):
+    files = list(errors_dir)  // todo-{n}-error.md, gate-{n}-error.md
+    if files is not empty:
+      return { path: errors_dir, files: files, contents: Read each file }
+  return null  // No prior errors — first attempt or clean run
+```
+
+If error files exist for the current phase, include them in the Phase Runner context so the runner has full error history without relying on compacted conversation memory.
+
+> **QMD Integration**: Fix loop 진입 시 에러 파일이 있으면 QMD에 경로를 전달하여 정밀 진단 수행. 예: `Task(subagent_type="mpl-scout", prompt="Diagnose error at {errors_dir}...")`.
 
 #### Phase 0 Artifacts Loading
 
@@ -126,6 +143,31 @@ Therefore, the orchestrator MAY provide file paths only (without full content)
 for large files, letting the Phase Runner load relevant sections on demand.
 This reduces context assembly cost while maintaining Phase Runner accuracy.
 
+#### Context Assembly 분기 (F-32: Adaptive Loading)
+
+Phase Runner 호출 전 context 로드량을 상황에 따라 조절한다:
+
+**Case 1: 동일 세션, compaction 없음** (compaction_count == last_phase_compaction_count)
+- prev_summary만 로드 (이전 분석이 context에 남아있음)
+- dependency_summaries, phase0_artifacts 스킵
+- 최소 토큰 사용
+
+**Case 2: Compaction 발생 후** (compaction_count > last_phase_compaction_count)
+- prev_summary + dependency_summaries 로드
+- checkpoint 파일이 있으면 로드 (F-31)
+- error 파일이 있으면 로드 (F-30)
+- Complex grade일 때만 phase0_artifacts 로드
+
+**Case 3: 새 세션에서 resume** (session_id 변경)
+- 전체 context assembly 수행
+- prev_summary + dependency_summaries + phase0_artifacts + learnings
+- RUNBOOK.md tail + error files + checkpoint
+
+context assembly 완료 후 state 갱신:
+```
+state.last_phase_compaction_count = state.compaction_count
+```
+
 ### 4.2: Phase Runner Execution (Fresh Session)
 
 Each Phase Runner is a Task agent = fresh session. This naturally prevents context accumulation.
@@ -198,6 +240,9 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
 
      ## Past Run Learnings (F-11)
      {learnings or "N/A — first run, no accumulated learnings"}
+
+     ## Prior Error Files (F-30)
+     {error_files contents or "N/A — no prior errors for this phase"}
 
      ## Scope-Bounded Search (F-24)
      You are authorized to Read/Grep the following files directly for additional context.

@@ -146,6 +146,50 @@ disallowedTools: []
     - Retry 3: last attempt before circuit break — document all approaches tried
     - After 3 failures: report circuit_break with failure_info (do not continue)
 
+    #### Error File Preservation (F-30)
+
+    When a TODO fails (circuit_break or retry exhaustion), Write the full error output to a file:
+
+    ```
+    path: .mpl/mpl/phases/phase-{N}/errors/todo-{n}-error.md
+    ```
+
+    When a Gate (1/2/3) fails after the fix loop is exhausted, Write to:
+
+    ```
+    path: .mpl/mpl/phases/phase-{N}/errors/gate-{n}-error.md
+    ```
+
+    Error file format:
+
+    ```markdown
+    # Error: {todo_name}
+    - **Phase**: {phase_name}
+    - **Attempt**: {attempt_number}/3
+    - **Timestamp**: {ISO timestamp}
+    - **Pass Rate**: {pass_rate}%
+
+    ## Error Output (전문)
+    ```
+    {test_runner_output_verbatim}
+    ```
+
+    ## Failed Tests
+    | Test | Error Type | Message |
+    |------|-----------|---------|
+
+    ## Context
+    - **Modified Files**: {files_changed}
+    - **Last Edit Summary**: {what_was_changed}
+    ```
+
+    **When to skip the Write**: If subagent context is still alive (no compaction), the error file Write can be skipped and retry can proceed immediately. Error files are for compaction resilience — preserving error context that would be distorted by context compression. Write them when crossing a session boundary or when context is large enough that compression is likely.
+
+    **Return to orchestrator**: Return only the file path + 1-line summary. Do NOT return the full error text in the JSON output. Example:
+    ```json
+    { "error_file": ".mpl/mpl/phases/phase-2/errors/todo-3-error.md", "summary": "auth test timeout on retry 3" }
+    ```
+
     ### Step 6: Summarize
 
     Generate the state summary with all required sections (see State_Summary_Required_Sections).
