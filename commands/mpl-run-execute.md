@@ -31,7 +31,10 @@ context = {
 }
 ```
 
-#### Run-to-Run Learnings Loading (F-11)
+#### Run-to-Run Learnings Loading (F-11) — Legacy
+
+> **참고**: F-25 4-Tier Adaptive Memory가 이 단일 learnings 로딩을 대체한다.
+> semantic.md가 존재하면 4-Tier 로딩을 사용하고, semantic.md가 없고 learnings.md만 존재하면 아래 레거시 로직을 사용한다.
 
 ```
 load_learnings():
@@ -42,6 +45,62 @@ load_learnings():
     // Prioritize Failure Patterns section (most actionable)
     return truncate(content, max_lines=100)
   return null  // No learnings yet — first run
+```
+
+#### Layer 8: 4-Tier Adaptive Memory (F-25)
+
+기존 learnings.md 단일 로딩을 4-Tier 선택적 로딩으로 확장한다.
+
+```
+load_adaptive_memory(task_description):
+  1. **semantic.md** (항상 로드): 프로젝트 지식 — 일반화된 규칙, 컨벤션
+     - 전체 로드, 최대 500 토큰
+     - 최초 실행(파일 없음) 시 스킵
+
+  2. **procedural.jsonl** (관련 항목만): 도구 사용 패턴
+     - task_description에서 키워드 추출 → 태그 매칭
+     - 매칭된 항목만 로드, 최대 500 토큰 (최근 10건)
+     - 태그 예: type_mismatch, dependency_conflict, test_flake, api_contract_violation
+
+  3. **episodic.md** (최근만): 이전 Phase 실행 요약
+     - 최근 2 Phase 상세 + 이전 압축 1줄씩
+     - 최대 800 토큰
+     - 첫 Phase 실행 시: 없음 (episodic이 비어있음)
+
+  4. **working.md** (현재 Phase만): 현재 Phase TODO 상태
+     - Phase Runner가 자율 갱신
+     - Context assembly에서는 Phase 시작 시 초기화
+
+  총 메모리 예산: 최대 2000 토큰 (semantic 500 + procedural 500 + episodic 800 + working 200)
+
+  기존 learnings.md는 semantic.md + procedural.jsonl로 대체되나,
+  하위 호환을 위해 learnings.md가 존재하고 semantic.md가 없으면 learnings.md를 로드한다.
+```
+
+메모리 파일 경로:
+```
+.mpl/memory/
+├── semantic.md         # 프로젝트 지식 (일반화된 규칙)
+├── procedural.jsonl    # 도구 사용 패턴 (태그 기반 검색)
+├── episodic.md         # Phase 실행 이력 (시간순)
+├── working.md          # 현재 Phase 작업 상태 (휘발성)
+└── learnings.md        # 레거시 호환 (F-11)
+```
+
+Context assembly의 `learnings` 필드는 다음 로직으로 결정:
+```
+if exists(".mpl/memory/semantic.md"):
+  // F-25 활성: 4-Tier 로딩
+  context.adaptive_memory = load_adaptive_memory(phase.description)
+  context.learnings = null  // 레거시 비활성
+else if exists(".mpl/memory/learnings.md"):
+  // 레거시 폴백
+  context.adaptive_memory = null
+  context.learnings = load_learnings()
+else:
+  // 첫 실행
+  context.adaptive_memory = null
+  context.learnings = null
 ```
 
 #### Error File Loading (F-30)
@@ -150,23 +209,89 @@ Phase Runner 호출 전 context 로드량을 상황에 따라 조절한다:
 **Case 1: 동일 세션, compaction 없음** (compaction_count == last_phase_compaction_count)
 - prev_summary만 로드 (이전 분석이 context에 남아있음)
 - dependency_summaries, phase0_artifacts 스킵
+- 메모리 재로드 스킵 (이미 context에 존재)
 - 최소 토큰 사용
 
 **Case 2: Compaction 발생 후** (compaction_count > last_phase_compaction_count)
 - prev_summary + dependency_summaries 로드
-- checkpoint 파일이 있으면 로드 (F-31)
+- checkpoint 파일이 있으면 로드 (F-31) <!-- F-31 checkpoint: write-side spec TBD (roadmap Sprint 7+). Currently `if exists` check safely skips when absent. -->
 - error 파일이 있으면 로드 (F-30)
 - Complex grade일 때만 phase0_artifacts 로드
+- **F-25 메모리 재로드**: semantic.md + 최근 procedural (태그 매칭) + episodic 요약 (최근 2 Phase)
 
 **Case 3: 새 세션에서 resume** (session_id 변경)
 - 전체 context assembly 수행
 - prev_summary + dependency_summaries + phase0_artifacts + learnings
 - RUNBOOK.md tail + error files + checkpoint
+- **F-25 전체 메모리 로드**: semantic.md 전체 + procedural 전체 (최근 10건) + episodic 전체 + working.md
 
 context assembly 완료 후 state 갱신:
 ```
 state.last_phase_compaction_count = state.compaction_count
 ```
+
+### 4.1.5: Worktree 격리 판정 (F-15)
+
+Pre-Execution Analysis(Step 1-B)에서 risk=HIGH로 판정된 페이즈는 worktree에서 격리 실행한다.
+
+> **적용 조건**: Worktree 격리는 **Frontier tier에서만** 활성화된다. Frugal/Standard tier는 단일 Phase로 worktree 오버헤드가 이점을 초과하므로 이 단계를 스킵한다.
+
+#### 판정 기준
+
+state.json의 현재 Phase 정보에서 risk_level을 참조:
+- `risk_level == "HIGH"` → worktree 격리 실행
+- `risk_level != "HIGH"` → 일반 실행 (기존 동작, Step 4.2로 진행)
+
+#### 격리 실행 프로토콜
+
+1. **Worktree 생성**:
+   ```
+   branch_name = "mpl-isolated-{phase_id}-{timestamp}"
+   git worktree add /tmp/mpl-worktree-{phase_id} -b {branch_name}
+   ```
+
+2. **Phase Runner 디스패치**:
+   - Task 도구에 `isolation: "worktree"` 파라미터 추가
+   - Phase Runner는 worktree 경로에서 실행
+   - `.mpl/` 상태 파일은 원본에서 읽되, 코드 변경은 worktree에서
+
+3. **결과 판정**:
+
+   | 결과 | 대응 |
+   |------|------|
+   | Phase 성공 (모든 criteria pass) | worktree → main branch 머지 (`git merge --no-ff`) |
+   | Phase 실패 (circuit_break) | worktree 삭제, 원본 코드 무변경 |
+   | 부분 성공 (일부 TODO 완료) | 사용자에게 선택 요청 (AskUserQuestion): 머지/폐기/수동검토 |
+
+4. **정리**:
+   ```
+   git worktree remove /tmp/mpl-worktree-{phase_id}
+   git branch -d {branch_name}  # 머지 완료 시
+   git branch -D {branch_name}  # 폐기 시
+   ```
+
+5. **State 추적**:
+   state.json에 기록:
+   ```json
+   {
+     "worktree_history": [{
+       "phase_id": "phase-3",
+       "branch": "mpl-isolated-phase-3-20260313",
+       "path": "/tmp/mpl-worktree-phase-3",
+       "risk_level": "HIGH",
+       "result": "merged",
+       "timestamp": "2026-03-13T14:00:00Z"
+     }]
+   }
+   ```
+   `result` 값: `"merged"` | `"discarded"` | `"manual_review"`
+
+#### 제한 사항
+
+- Worktree 격리는 Frontier tier에서만 활성 (Frugal/Standard는 단일 Phase로 worktree 오버헤드 > 이점)
+- 동시에 1개 worktree만 유지 (병렬 worktree 미지원)
+- `.mpl/` 디렉토리는 worktree에 복사하지 않음 (원본 참조)
+- Worktree 내에서 Phase Runner의 Read/Grep 범위는 worktree 경로 기준으로 재매핑
 
 ### 4.2: Phase Runner Execution (Fresh Session)
 
@@ -238,8 +363,16 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      ## Verification Plan (A/S/H items for this phase)
      {phase_verification_plan}
 
-     ## Past Run Learnings (F-11)
-     {learnings or "N/A — first run, no accumulated learnings"}
+     ## Adaptive Memory (F-25)
+     ### Semantic (프로젝트 지식)
+     {adaptive_memory.semantic or "N/A — 첫 실행"}
+     ### Procedural (관련 도구 패턴)
+     {adaptive_memory.procedural or "N/A — 매칭 항목 없음"}
+     ### Episodic (이전 Phase 요약)
+     {adaptive_memory.episodic or "N/A — 첫 Phase"}
+
+     ## Past Run Learnings (F-11) — Legacy
+     {learnings or "N/A — F-25 활성 시 Adaptive Memory 참조"}
 
      ## Prior Error Files (F-30)
      {error_files contents or "N/A — no prior errors for this phase"}
@@ -252,6 +385,12 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      - The provided context is insufficient to implement a TODO
      - You need to understand how a function is called elsewhere within scope
      - Test files need inspection for assertion patterns
+
+     ## Working Memory (F-25)
+     Phase 시작 시 working.md가 초기화되어 있다.
+     실행 중 TODO 상태 변경과 핵심 발견 사항을 working.md에 기록하라.
+     Phase 완료 시 working.md 내용을 episodic 형식으로 변환하여 반환하라.
+     {working_md_content or "N/A — 첫 Phase, working memory 비어있음"}
 
      ## Expected Output
      Return structured JSON:
@@ -275,7 +414,164 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      """)
 ```
 
-### 4.2.1: Test Agent (Independent Verification)
+#### Phase Runner 디스패치 시 working.md 라이프사이클 (F-25)
+
+Phase Runner 디스패치 전후로 working.md를 관리한다:
+
+```
+// 1. Phase 시작: working.md 초기화
+Write(".mpl/memory/working.md", """
+# Working Memory — Phase {N}: {phase_name}
+Updated: {timestamp}
+
+## TODOs
+(Phase Runner가 Mini-Plan 생성 후 채움)
+
+## Notes
+(Phase Runner가 실행 중 발견한 노트)
+""")
+
+// 2. Phase 실행 중: Phase Runner가 TODO 완료/실패 시 working.md 자율 갱신
+//    (Phase Runner 내부에서 처리 — 아래 mpl-phase-runner.md 참조)
+
+// 3. Phase 완료: working.md 내용을 episodic.md로 이전 후 초기화
+if result.status == "complete":
+  episodic_entry = format_episodic(result.working_memory_snapshot)
+  // "### Phase {N}: {name} ({timestamp})\n{구현 내용}\n{핵심 결정}\n{검증 결과}"
+  Append(".mpl/memory/episodic.md", episodic_entry)
+  Write(".mpl/memory/working.md", "")  // 초기화
+```
+
+### 4.2.1: Phase 도메인 기반 동적 라우팅 (F-28)
+
+Decomposer(Step 3)가 각 Phase에 `phase_domain` 태그를 부여한다.
+Phase Runner 디스패치 시 도메인에 따라 프롬프트와 모델을 동적 선택한다.
+
+#### phase_domain 태그 목록
+
+| 도메인 | 설명 | 특화 프롬프트 | 모델 |
+|--------|------|-------------|------|
+| `db` | DB 스키마, 마이그레이션, 쿼리 | SQL 안전성, 마이그레이션 롤백, 인덱스 | sonnet |
+| `api` | API 엔드포인트, 라우팅, 미들웨어 | RESTful 규칙, 에러 코드, 인증 | sonnet |
+| `ui` | 프론트엔드, 컴포넌트, 스타일링 | 접근성, 반응형, 상태 관리 | sonnet |
+| `algorithm` | 복잡 로직, 최적화, 데이터 구조 | 시간/공간 복잡도, 엣지 케이스 | **opus** |
+| `test` | 테스트 작성, 테스트 인프라 | 커버리지, 격리, 모킹 전략 | sonnet |
+| `infra` | 설정, CI/CD, 빌드, 배포 | 환경 변수, 도커, 보안 | sonnet |
+| `general` | 분류 불가 또는 혼합 | 범용 (기존 동작) | sonnet |
+
+#### 라우팅 프로토콜
+
+```pseudocode
+function dispatch_phase_runner(phase):
+  domain = phase.phase_domain || "general"
+
+  # 1. 모델 선택
+  if domain == "algorithm" and phase.complexity in ["L", "XL"]:
+    model = "opus"
+  else:
+    model = "sonnet"  # 기본값
+
+  # 2. 도메인 특화 프롬프트 로드
+  domain_prompt = load_domain_prompt(domain)
+  # 경로: .mpl/prompts/domains/{domain}.md (있으면 사용, 없으면 범용)
+
+  # 3. Phase Runner 디스패치
+  phase_runner = dispatch(
+    agent = "mpl-phase-runner",
+    model = model,
+    context = assemble_context(phase) + domain_prompt,
+    phase_definition = phase
+  )
+
+  return phase_runner
+```
+
+#### 도메인 특화 프롬프트 형식
+
+`.mpl/prompts/domains/{domain}.md` (오케스트레이터가 Phase Runner 컨텍스트에 주입):
+
+```markdown
+# Domain: {domain}
+## 핵심 원칙
+- {domain-specific principle 1}
+- {domain-specific principle 2}
+
+## 주의 사항
+- {common pitfall 1}
+- {common pitfall 2}
+
+## 검증 포인트
+- {what to verify for this domain}
+```
+
+예시 — `db.md`:
+```markdown
+# Domain: DB
+## 핵심 원칙
+- 마이그레이션은 항상 롤백 가능해야 한다
+- 인덱스 추가는 데이터 크기를 고려한다
+- 스키마 변경은 기존 데이터 호환성을 유지한다
+
+## 주의 사항
+- DROP TABLE/COLUMN은 되돌릴 수 없다 — 별도 Phase로 분리
+- ORM 마이그레이션과 raw SQL을 혼용하지 않는다
+- 트랜잭션 범위를 최소화한다
+
+## 검증 포인트
+- 마이그레이션 up/down 모두 성공하는가?
+- 기존 seed/fixture 데이터와 호환되는가?
+- 인덱스가 쿼리 패턴에 적절한가?
+```
+
+#### 도메인 프롬프트 경로 해석
+
+도메인 프롬프트는 두 위치에서 탐색한다 (우선순위 순):
+1. `.mpl/prompts/domains/{domain}.md` — 프로젝트별 커스텀 (사용자가 추가/수정 가능)
+2. `MPL/prompts/domains/{domain}.md` — MPL 플러그인 기본 제공
+
+`/mpl:mpl-setup` 실행 시 기본 프롬프트를 `.mpl/prompts/domains/`에 복사한다.
+복사되지 않은 경우에도 MPL 플러그인 경로에서 폴백 로드한다.
+두 위치 모두 없으면 범용 프롬프트 사용 (기존 동작).
+
+#### 도메인 프롬프트 없을 때
+
+`.mpl/prompts/domains/` 디렉토리나 해당 도메인 파일이 없으면:
+- 범용 프롬프트 사용 (기존 동작과 동일)
+- 도메인 프롬프트는 **선택적 확장** — 없어도 파이프라인 동작에 영향 없음
+
+#### F-22 Routing Pattern과의 연동
+
+실행 완료 후 routing-patterns.jsonl에 domain 정보도 기록:
+```jsonl
+{"ts":"...","desc":"...","tier":"frontier","domain_distribution":{"db":2,"api":3,"test":1},"result":"success","tokens":85000}
+```
+다음 실행 시 유사 태스크의 domain 분포를 참조하여 사전 프롬프트 캐싱 가능.
+
+#### Phase Runner 프롬프트에 도메인 컨텍스트 주입
+
+Step 4.2의 Phase Runner 디스패치 프롬프트에 도메인 섹션을 추가한다:
+
+```
+     ## Domain Context (F-28)
+     Domain: {phase.phase_domain or "general"}
+     {domain_prompt_content or "범용 — 도메인 특화 프롬프트 없음"}
+```
+
+기존 `phase_model` 로직과의 통합:
+```
+// 기존 복잡도 기반 라우팅과 도메인 기반 라우팅을 병합
+phase_model = determine_model(phase):
+  // 1. 기존 규칙: L complexity 또는 architecture 태그 → opus
+  if phase.complexity == "L" || phase.tags.includes("architecture"):
+    return "opus"
+  // 2. F-28 규칙: algorithm 도메인 + L/XL → opus
+  if phase.phase_domain == "algorithm" and phase.complexity in ["L", "XL"]:
+    return "opus"
+  // 3. 기본값
+  return "sonnet"
+```
+
+### 4.2.2: Test Agent (Independent Verification)
 
 After Phase Runner completes with status `"complete"`, dispatch the Test Agent for independent verification:
 
@@ -299,7 +595,7 @@ Merge test_result into Phase Runner's verification data:
 - Record any bugs_found for potential fix cycle
 - If Test Agent pass_rate < Phase Runner's pass_rate: flag discrepancy
 
-### 4.2.2: Task-based TODO Protocol (F-23)
+### 4.2.3: Task-based TODO Protocol (F-23)
 
 Phase Runner uses Task tool instead of mini-plan.md for TODO management:
 
@@ -328,7 +624,7 @@ Benefits over mini-plan.md:
 Backward compatibility: mini-plan.md is still written as a human-readable artifact,
 but Task tool is the SSOT for TODO state during execution.
 
-### 4.2.3: Background Execution for Independent TODOs (F-13)
+### 4.2.4: Background Execution for Independent TODOs (F-13)
 
 When Phase Runner identifies independent TODOs (no file overlap), dispatch workers in parallel:
 
@@ -664,6 +960,122 @@ Record convergence_status in state: "progressing" | "stagnating" | "regressing"
 Max fix loop iterations: controlled by max_fix_loops from config (default 10).
 Exceeding max -> mpl-failed state.
 
+### 4.6.1: Reflexion 기반 반성 (F-27)
+
+Fix Loop 진입 시 **즉각적 수정이 아닌 구조화된 반성(Self-Reflection)**을 먼저 수행한다.
+NeurIPS 2023 Reflexion + Multi-Agent Reflexion(MAR) 패턴 적용.
+
+#### Reflection Template
+
+Fix Loop 매 시도 전 Phase Runner에게 아래 템플릿 실행을 지시한다:
+
+```
+## Reflection — Fix Attempt {N}
+
+### 1. 증상 (Symptom)
+실패한 테스트/Gate 결과를 정확히 기술한다.
+- 어떤 테스트가 실패했는가?
+- 에러 메시지는?
+- 예상 vs 실제 동작?
+
+### 2. 근본 원인 (Root Cause)
+증상의 원인을 추적한다.
+- 코드의 어느 부분이 문제인가? (file:line)
+- 왜 이 코드가 잘못되었는가?
+- 이전 시도에서 이 원인을 놓친 이유는?
+
+### 3. 최초 이탈 지점 (Divergence Point)
+원래 계획(mini-plan/Phase 0)에서 어디서 벗어났는가?
+- Phase 0 명세와 실제 구현의 차이?
+- PP 위반 여부?
+- 가정 불일치?
+
+### 4. 수정 전략 (Fix Strategy)
+- 이전과 다른 접근 방식은?
+- 어떤 Phase 0 아티팩트를 재참조해야 하는가?
+- 수정의 부작용(side effect) 예측?
+
+### 5. 학습 추출 (Learning)
+- 이 실패에서 추출할 패턴은?
+- 패턴 분류 태그: {tag}
+- 다음 실행에서 이 실패를 예방하려면?
+```
+
+#### Reflection 실행 프로토콜
+
+```pseudocode
+function fix_loop_with_reflection(phase, failures, attempt):
+  # 1. Reflection 생성
+  reflection = phase_runner.generate_reflection(
+    template = REFLECTION_TEMPLATE,
+    failures = failures,
+    phase0_artifacts = load_phase0(),
+    previous_reflections = load_previous_reflections(phase),
+    attempt_number = attempt
+  )
+
+  # 2. Gate 2 실패 시 MAR 패턴: 코드 리뷰어 피드백 통합
+  if failure_source == "gate2":
+    reviewer_feedback = gate2_result.feedback
+    reflection.root_cause += "\n코드 리뷰 피드백: " + reviewer_feedback
+
+  # 3. 반성 결과 저장
+  save_reflection(phase, attempt, reflection)
+  # 경로: .mpl/mpl/phases/{phase_id}/reflections/attempt-{N}.md
+
+  # 4. 패턴 분류 + procedural.jsonl 저장 (F-25 연동)
+  appendProcedural(cwd, {
+    timestamp: now(),
+    phase: phase.id,
+    tool: "reflection",
+    action: reflection.fix_strategy,
+    result: "pending",  # 수정 후 success/failure로 갱신
+    tags: reflection.learning.tags,  # [type_mismatch, dependency_conflict, etc.]
+    context: reflection.root_cause
+  })
+
+  # 5. 반성 기반 수정 실행
+  fix_result = phase_runner.execute_fix(
+    strategy = reflection.fix_strategy,
+    phase0_refs = reflection.phase0_refs
+  )
+
+  # 6. 결과 반영
+  update_procedural_result(fix_result.success ? "success" : "failure")
+
+  return fix_result
+```
+
+#### 패턴 분류 태그 (Taxonomy)
+
+| 태그 | 설명 | 예시 |
+|------|------|------|
+| `type_mismatch` | 타입 불일치 | dict vs TypedDict, string vs number |
+| `dependency_conflict` | 의존성 충돌 | 버전 호환, import 순서 |
+| `test_flake` | 불안정 테스트 | 타이밍, 환경 의존 |
+| `api_contract_violation` | API 계약 위반 | 파라미터 순서, 반환 타입 |
+| `build_failure` | 빌드 실패 | 컴파일 에러, 린트 에러 |
+| `logic_error` | 로직 오류 | 조건 반전, 경계값 |
+| `missing_edge_case` | 엣지 케이스 누락 | null, 빈 배열, 동시성 |
+| `scope_violation` | 범위 위반 | PP/Must NOT Do 위반 |
+
+#### Convergence Detection과의 연동
+
+기존 Convergence Detection(improving/stagnating/regressing)에 Reflection 정보를 추가:
+- **stagnating + 동일 태그 반복**: 전략 전환 강제 (같은 접근 반복 방지)
+- **regressing**: 이전 Reflection의 fix_strategy를 역참조하여 되돌리기
+- **improving**: 현재 전략 유지, Reflection 생략 가능
+
+#### 이전 Reflection 참조 (누적 학습)
+
+Fix 시도 2회차부터는 이전 Reflection을 참조하여 같은 접근 반복을 방지:
+```
+load_previous_reflections(phase):
+  - .mpl/mpl/phases/{phase_id}/reflections/attempt-*.md 전체 로드
+  - 최대 3개 (토큰 예산 ~1500)
+  - 이전 실패 접근을 "하지 말아야 할 것" 목록으로 Phase Runner에 전달
+```
+
 **RUNBOOK Update (F-10)**: After each fix attempt, append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
 ## Fix Loop Iteration {N}
@@ -673,6 +1085,24 @@ Exceeding max -> mpl-failed state.
 - **Convergence**: {convergence_status}
 - **Timestamp**: {ISO timestamp}
 ```
+
+#### Reflexion 효과 측정 (관측 지표)
+
+Reflexion의 효과는 토큰 프로파일링(phases.jsonl)에 기록되어 사후 분석한다:
+
+```jsonl
+{"phase":"phase-3","fix_loop":true,"reflexion_applied":true,"attempts":2,"result":"success","tags":["type_mismatch"],"tokens_used":4500}
+```
+
+측정 항목:
+- `reflexion_applied`: true/false — Reflexion 적용 여부
+- `attempts`: Fix Loop 시도 횟수
+- `result`: 최종 성공/실패
+- `tags`: 패턴 분류
+
+**A/B 비교는 충분한 실행 데이터 축적 후 사후 분석으로 수행한다.**
+동일 프로젝트에서 Reflexion 적용/미적용 실행의 Fix Loop 성공률, 평균 시도 횟수, 토큰 비용을 비교한다.
+이는 런타임 기능이 아닌 **관측 지표(observability metric)**이다.
 
 ### 4.7: Partial Rollback on Circuit Break
 

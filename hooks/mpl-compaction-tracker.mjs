@@ -97,6 +97,6 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  // Best-effort tracking; do not block on failure
+main().catch((err) => {
+  process.stderr.write('[mpl-compaction-tracker] checkpoint write failed: ' + err.message + '\n');
 });

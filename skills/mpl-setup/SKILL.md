@@ -77,7 +77,7 @@ For each hook file referenced in `hooks/hooks.json`:
 For each .md file in `agents/`:
 1. Check YAML frontmatter has `name`, `description`, `model`
 2. Validate `model` is one of: haiku, sonnet, opus
-3. Expected: 11 agents (10 active + 1 doctor)
+3. Expected: 12 agents (11 active + 1 doctor)
 4. Report any malformed agents
 
 #### 3e: Verify Skill Definitions

@@ -24,6 +24,7 @@ const DEFAULT_STATE = {
   pipeline_score: null,      // F-20: float 0.0~1.0 (set by Quick Scope Scan)
   tier_hint: null,           // F-20: user keyword hint ("frugal" | "standard" | null)
   escalation_history: [],    // F-21: [{from, to, reason, preserved_work, timestamp}]
+  worktree_history: [],      // History of worktree switches
   interview_depth: null,     // "skip" | "light" | "full" (set by Triage Step 0.2)
   current_phase: 'phase1-plan',
   started_at: null,
@@ -66,6 +67,13 @@ const DEFAULT_STATE = {
     mode: 'full',           // 'full' (3-stage) | 'light' (stage 1 only) | 'standalone'
     error: null,            // failure error message
     degraded_stages: []     // stages with partial failures, e.g. ['stage2']
+  },
+  memory: {                  // F-25: 4-Tier Adaptive Memory 통계
+    episodic_entries: 0,
+    semantic_rules: 0,
+    procedural_entries: 0,
+    last_compression: null,       // ISO timestamp of last episodic compression
+    last_semantic_promotion: null  // ISO timestamp of last semantic promotion
   }
 };
 

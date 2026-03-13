@@ -5,7 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
-import { generateCacheKey, checkCache, validateCache, saveCache, readCachedArtifact, invalidateCache, DEFAULT_TTL_MS } from '../lib/mpl-cache.mjs';
+import { generateCacheKey, checkCache, validateCache, saveCache, readCachedArtifact, invalidateCache, DEFAULT_TTL_MS, analyzePartialInvalidation, partialCacheSave } from '../lib/mpl-cache.mjs';
 
 function createTempDir() {
   const dir = join(tmpdir(), `mpl-cache-test-${randomUUID()}`);
@@ -270,5 +270,142 @@ describe('invalidateCache', () => {
 
     invalidateCache(tempDir);
     assert.equal(checkCache(tempDir).hit, false);
+  });
+});
+
+describe('F-05: Partial Cache Invalidation', () => {
+  describe('analyzePartialInvalidation', () => {
+    let tempDir;
+
+    beforeEach(() => { tempDir = createTempDir(); });
+    afterEach(() => { rmSync(tempDir, { recursive: true, force: true }); });
+
+    it('should return scope: full when manifest does not exist', () => {
+      const result = analyzePartialInvalidation(tempDir);
+      assert.equal(result.scope, 'full');
+    });
+
+    it('should return scope: full when manifest has no commit_hash', () => {
+      const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(join(cacheDir, 'manifest.json'), JSON.stringify({
+        cache_key: 'test-key',
+        timestamp: new Date().toISOString(),
+        complexity_grade: 'Medium',
+        artifacts: [],
+      }));
+
+      const result = analyzePartialInvalidation(tempDir);
+      assert.equal(result.scope, 'full');
+    });
+
+    it('should return scope: full when git diff fails (non-git dir)', () => {
+      // tempDir is not a git repo, so git diff will fail
+      const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(join(cacheDir, 'manifest.json'), JSON.stringify({
+        cache_key: 'test-key',
+        commit_hash: 'deadbeef1234',
+        timestamp: new Date().toISOString(),
+        complexity_grade: 'Medium',
+        artifacts: [],
+      }));
+
+      const result = analyzePartialInvalidation(tempDir);
+      assert.equal(result.scope, 'full');
+    });
+  });
+
+  describe('partialCacheSave', () => {
+    let tempDir;
+
+    beforeEach(() => { tempDir = createTempDir(); });
+    afterEach(() => { rmSync(tempDir, { recursive: true, force: true }); });
+
+    it('should save new artifacts and write manifest with partial_rerun metadata', () => {
+      const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
+      mkdirSync(cacheDir, { recursive: true });
+
+      // 기존 캐시 아티팩트 (재사용 대상)
+      writeFileSync(join(cacheDir, 'api-contracts.md'), '# Cached API Contracts');
+      writeFileSync(join(cacheDir, 'type-policy.md'), '# Cached Type Policy');
+
+      const result = partialCacheSave(tempDir, {
+        newCacheKey: 'new-key-123',
+        complexityGrade: 'Medium',
+        newArtifacts: { 'examples.md': '# New Examples' },
+        reusedArtifacts: ['api-contracts.md', 'type-policy.md'],
+        originalKey: 'old-key-456',
+      });
+
+      assert.equal(result.saved, true);
+
+      const manifest = JSON.parse(readFileSync(join(cacheDir, 'manifest.json'), 'utf-8'));
+      assert.equal(manifest.cache_key, 'new-key-123');
+      assert.equal(manifest.partial_rerun, true);
+      assert.ok(Array.isArray(manifest.rerun_steps));
+      assert.ok(Array.isArray(manifest.reused_steps));
+      assert.equal(manifest.original_cache_key, 'old-key-456');
+    });
+
+    it('should include all artifact filenames in manifest artifacts array', () => {
+      const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(join(cacheDir, 'type-policy.md'), '# Type Policy');
+
+      partialCacheSave(tempDir, {
+        newCacheKey: 'key-abc',
+        complexityGrade: 'Simple',
+        newArtifacts: { 'error-spec.md': '# Error Spec' },
+        reusedArtifacts: ['type-policy.md'],
+        originalKey: 'key-old',
+      });
+
+      const manifest = JSON.parse(readFileSync(join(cacheDir, 'manifest.json'), 'utf-8'));
+      assert.ok(manifest.artifacts.includes('type-policy.md'));
+      assert.ok(manifest.artifacts.includes('error-spec.md'));
+    });
+
+    it('should copy reused artifact from phase0 output dir when not in cache', () => {
+      const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
+      const phase0Dir = join(tempDir, '.mpl', 'mpl', 'phase0');
+      mkdirSync(cacheDir, { recursive: true });
+      mkdirSync(phase0Dir, { recursive: true });
+
+      // 재사용 대상이 캐시에 없고 phase0 출력 디렉토리에만 존재
+      writeFileSync(join(phase0Dir, 'api-contracts.md'), '# API Contracts from phase0');
+
+      partialCacheSave(tempDir, {
+        newCacheKey: 'key-xyz',
+        complexityGrade: 'Medium',
+        newArtifacts: { 'examples.md': '# New Examples' },
+        reusedArtifacts: ['api-contracts.md'],
+        originalKey: 'key-prev',
+      });
+
+      // phase0 출력에서 캐시로 복사되었는지 확인
+      assert.ok(existsSync(join(cacheDir, 'api-contracts.md')));
+      assert.equal(
+        readFileSync(join(cacheDir, 'api-contracts.md'), 'utf-8'),
+        '# API Contracts from phase0'
+      );
+    });
+
+    it('should return saved=true and correct artifactCount', () => {
+      const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(join(cacheDir, 'type-policy.md'), '# Type Policy');
+
+      const result = partialCacheSave(tempDir, {
+        newCacheKey: 'key-count',
+        complexityGrade: 'Simple',
+        newArtifacts: { 'error-spec.md': '# Errors', 'examples.md': '# Examples' },
+        reusedArtifacts: ['type-policy.md'],
+        originalKey: 'key-old',
+      });
+
+      assert.equal(result.saved, true);
+      assert.equal(result.artifactCount, 3);
+    });
   });
 });

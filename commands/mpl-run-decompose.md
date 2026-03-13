@@ -43,12 +43,53 @@ Task(subagent_type="mpl-decomposer", model="opus",
 
      ## Task
      Break the user request into ordered phases. Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
-     Each phase: id, name, scope, impact (create/modify/affected_tests/affected_config),
+     Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|infra|general),
+     scope, impact (create/modify/affected_tests/affected_config),
      interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/description),
      estimated_complexity (S/M/L).
      Also: architecture_anchor (tech_stack, directory_pattern, naming_convention), shared_resources.
      """)
 ```
+
+### Step 3 확장: phase_domain 태그 부여 (F-28)
+
+Decomposer가 Phase 분해 시 각 Phase에 `phase_domain` 태그를 자동 부여한다.
+
+#### 프로토콜
+
+decomposition.yaml 생성 후:
+1. 각 Phase의 `scope` 파일 목록에서 디렉토리/확장자 기반 1차 분류
+2. Phase `name`과 `success_criteria` 의미 분석으로 2차 보정
+3. `phase_domain` 필드를 decomposition.yaml에 추가
+
+#### 예시
+
+```yaml
+phases:
+  - id: phase-1
+    name: "User 모델 + 마이그레이션"
+    phase_domain: db
+    scope: [src/models/user.py, migrations/001_create_user.py]
+    ...
+  - id: phase-2
+    name: "회원가입 API 엔드포인트"
+    phase_domain: api
+    scope: [src/routes/auth.py, src/controllers/signup.py]
+    ...
+  - id: phase-3
+    name: "비밀번호 해싱 유틸리티"
+    phase_domain: algorithm
+    scope: [src/utils/crypto.py]
+    complexity: M
+    ...
+```
+
+#### Decomposer 프롬프트 확장
+
+mpl-decomposer 에이전트에 다음 지시를 추가:
+> 각 Phase에 `phase_domain` 태그를 부여하라. 가능한 값: db, api, ui, algorithm, test, infra, general.
+> Phase의 scope 파일 경로와 작업 성격을 기반으로 가장 적합한 단일 도메인을 선택하라.
+> 2개 이상 도메인이 혼합되면 가장 비중 높은 것을 선택하되, 동률이면 general로 분류하라.
 
 ### After Receiving Output
 

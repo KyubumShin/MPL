@@ -98,7 +98,6 @@ Do NOT proceed with Phase execution without loading the corresponding protocol f
 | `/mpl:mpl` | MPL pipeline — single entry point with auto tier routing (this skill) |
 | `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to standard tier) |
 | `/mpl:mpl-pivot` | Pivot Points interview (immutable constraints) |
-| `/mpl:mpl-research` | Standalone deep research (independent of pipeline) |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last phase |

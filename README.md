@@ -4,7 +4,7 @@
 
 A Claude Code plugin that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-eleven-minds) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-twelve-minds) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -326,7 +326,7 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>12 agents · 4 hooks · 7 skills · 4 protocol files</strong></summary>
+<summary><strong>12 agents · 4 hooks · 11 skills · 4 protocol files</strong></summary>
 
 ```
 MPL/

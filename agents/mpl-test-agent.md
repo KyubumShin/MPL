@@ -2,7 +2,7 @@
 name: mpl-test-agent
 description: Independent test writer - creates and runs tests for phase implementations (separate from code author)
 model: sonnet
-disallowedTools: []
+disallowedTools: [Task]
 ---
 
 <Agent_Prompt>
@@ -40,6 +40,13 @@ disallowedTools: []
     - Read the interface_contract (what this phase produces/requires)
     - Read the implemented code to understand the public API (but test the contract, not internals)
     - Identify the project's test framework and conventions
+
+    #### F-26 Gherkin AC 입력 (선택적)
+
+    `.mpl/pm/requirements-{hash}.md`가 존재하면 Gherkin AC를 사전 시드(pre-seeded) 테스트 시나리오로 활용한다:
+    1. `acceptance_criteria` 섹션에서 `gherkin` 필드 추출
+    2. Given-When-Then을 테스트 함수 골격으로 변환
+    3. 파일 미존재 시 기존 동작 유지 (verification_plan의 A/S-items 기반)
 
     ### Step 2: Design Tests
     - For each A-item: translate the command/criterion into a test case

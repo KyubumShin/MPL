@@ -154,6 +154,117 @@ if exists(".mpl/memory/learnings.md"):
   Announce: "[MPL] Loaded learnings from past runs."
 ```
 
+#### 0.1.5c: 4-Tier Adaptive Memory 로드 (F-25)
+
+Phase 0 시작 시 이전 실행의 메모리를 선택적으로 로드한다.
+기존 learnings.md(F-11) 단일 로드를 4-Tier 구조로 확장한다.
+
+##### 로딩 우선순위 및 예산
+
+| Tier | 파일 | 로드 조건 | 최대 토큰 | 용도 |
+|------|------|----------|----------|------|
+| 1 | `semantic.md` | 항상 (파일 존재 시) | 500 | 프로젝트 지식, 일반화 규칙 |
+| 2 | `procedural.jsonl` | 태스크 설명 키워드 매칭 | 500 | 관련 도구 패턴, 실패 회피 |
+| 3 | `episodic.md` | 항상 (파일 존재 시) | 800 | 이전 실행 요약, 맥락 파악 |
+| 4 | `learnings.md` (하위 호환) | semantic.md 없을 때만 | 500 | F-11 레거시 호환 |
+
+총 예산: 최대 2000 토큰
+
+##### 선택적 로딩 알고리즘
+
+```pseudocode
+function load_phase0_memory(task_description):
+  memory_context = ""
+  remaining_budget = 2000
+  semantic_loaded = false
+
+  # Tier 1: Semantic (프로젝트 지식 — 항상 유용)
+  if exists(".mpl/memory/semantic.md"):
+    semantic = read_truncated(".mpl/memory/semantic.md", 500)
+    memory_context += "## 프로젝트 지식 (semantic)\n" + semantic
+    remaining_budget -= token_count(semantic)
+    semantic_loaded = true
+
+  # Tier 2: Procedural (관련 패턴만)
+  if exists(".mpl/memory/procedural.jsonl"):
+    keywords = extract_keywords(task_description)  # 간단 토큰화
+    relevant = query_by_tags(procedural, keywords, limit=10)
+    if relevant:
+      procedural_text = format_procedural(relevant)
+      memory_context += "## 관련 도구 패턴 (procedural)\n" + procedural_text
+      remaining_budget -= token_count(procedural_text)
+
+  # Tier 3: Episodic (최근 실행 맥락)
+  if exists(".mpl/memory/episodic.md"):
+    episodic = read_recent(".mpl/memory/episodic.md", max_tokens=min(800, remaining_budget))
+    memory_context += "## 이전 실행 요약 (episodic)\n" + episodic
+
+  # 하위 호환: semantic 없으면 기존 learnings.md 사용
+  elif exists(".mpl/memory/learnings.md") and not semantic_loaded:
+    learnings = read_truncated(".mpl/memory/learnings.md", 500)
+    memory_context += "## 축적 학습 (learnings)\n" + learnings
+
+  return memory_context
+```
+
+```
+loaded_memory = load_phase0_memory(user_request)
+if loaded_memory:
+  // Phase Runner context (Step 4.2) 및 Phase 0 Enhanced (Step 2.5)에 주입
+  Announce: "[MPL] 4-Tier memory loaded. Budget used: {2000 - remaining_budget}/2000 tokens."
+else:
+  Announce: "[MPL] No memory files found. Proceeding without prior context."
+```
+
+##### 토큰 절감 측정 기준
+
+**Baseline (F-11 기존 방식)**: learnings.md 전체 파일 로드 — 최대 2000 토큰, 선택성 없음.
+**4-Tier (F-25 신규 방식)**: 선택적 로드 — semantic(관련 규칙만) + procedural(매칭 태그만) + episodic(최근 2 Phase만).
+
+절감 비율 측정:
+- Phase 5+ 실행 시 episodic 압축 효과: 10 Phase 실행 → 2 Phase 상세 + 8줄 압축 = ~400 토큰 (vs 전체 ~2000)
+- procedural 태그 매칭: 100 entries 중 평균 5-10건 매칭 = ~200 토큰 (vs 전체 ~1500)
+- semantic 일반화: 반복 패턴 제거로 ~200 토큰 (vs episodic 전체 반복 포함 ~800)
+- **예상 총합**: ~800 토큰 / 기존 ~2000 토큰 = **60% 절감** (보수적)
+- 프로파일링(Step 2.5.9)에서 `memory_tokens_loaded` vs `legacy_learnings_tokens` 비교로 실측
+
+##### Phase 0 Enhanced와의 연동
+
+Phase 0 Enhanced(Step 2.5) 실행 시 메모리 참조:
+- **semantic.md의 "Project Conventions"** → Type Policy(Step 3) 생성 시 기존 컨벤션 반영
+- **procedural.jsonl의 api_contract_violation 태그** → API Contract(Step 1) 검증 시 과거 실패 패턴 회피
+- **episodic.md의 최근 Phase 0 결과** → 복잡도 판정 시 이전 실행 복잡도 참조
+
+#### semantic.md 활용 Phase 0 단축 메커니즘
+
+semantic.md에 축적된 프로젝트 지식이 Phase 0 Enhanced 단계를 단축한다:
+
+| semantic.md 항목 | Phase 0 단축 효과 | 예상 절감 |
+|-----------------|------------------|----------|
+| `## Project Conventions` 에 타입 규칙 존재 | Step 3 (Type Policy): 기존 컨벤션을 시드로 사용하여 분석 범위 축소 | ~30% |
+| `## Success Patterns` 에 API 패턴 존재 | Step 1 (API Contract): 기존 패턴 재활용, 신규 API만 추출 | ~20% |
+| `## Failure Patterns` 에 에러 패턴 존재 | Step 4 (Error Spec): 과거 실패 기반 에러 명세 보강 — 재분석 불필요 | ~15% |
+
+**단축 로직**:
+```pseudocode
+function phase0_with_semantic(semantic_content, complexity_grade):
+  # semantic 존재 시 각 Step에 시드 주입
+  if semantic_content.has("Project Conventions"):
+    step3_type_policy.seed = semantic_content["Project Conventions"]
+    step3_type_policy.scope = "incremental"  # 전체 분석 → 변경분만
+
+  if semantic_content.has("Success Patterns"):
+    step1_api_contracts.known_patterns = semantic_content["Success Patterns"]
+    step1_api_contracts.scope = "delta_only"  # 신규 API만 추출
+
+  if semantic_content.has("Failure Patterns"):
+    step4_error_spec.prior_failures = semantic_content["Failure Patterns"]
+    # 과거 실패 패턴은 자동 포함 — 재분석 불필요
+```
+
+**측정**: Phase 0 토큰 프로파일링(Step 2.5.9)에서 `semantic_seed_applied: true/false` 기록.
+반복 프로젝트에서 semantic.md 유무에 따른 Phase 0 토큰 비교로 20-30% 단축 검증.
+
 Classify tier from score (or override with user hint):
 
 | pipeline_tier | Score | Tier Hint | Pipeline Depth |
@@ -182,7 +293,7 @@ After tier is determined, subsequent steps are selected per tier:
 |------|--------|----------|----------|
 | Step 0.2 Interview Depth | skip | light | full detection |
 | Step 0.5 Maturity | skip | read config | read config |
-| Step 1 PP Interview | skip (extract from prompt) | light (Round 1+2) | full (4 rounds) |
+| Step 1 PP + 요구사항 인터뷰 (v2) | skip (extract from prompt) | light (Round 1+2 + 경량 요구사항) | full (4 rounds + 소크라틱 + JUSF) |
 | Step 1-B Pre-Execution | skip | skip | full |
 | Step 2 Codebase Analysis | skip (use scan) | structure + tests only | full (6 modules) |
 | Step 2.5 Phase 0 Enhanced | Step 4 only (Error Spec) | Step 4 only (Error Spec) | complexity-adaptive |
@@ -277,15 +388,61 @@ Announce: `[MPL] Maturity mode: {mode}. Phase sizing: {S/M/L}`
 
 ---
 
-## Step 1: PP Interview
+## Step 1: PP + 요구사항 통합 인터뷰 (mpl-interviewer v2) [F-26]
 
-Reuse existing `mpl-pivot` skill for Pivot Points.
+기존 PP Interview를 mpl-interviewer v2로 확장한다. interview_depth에 따라 PP 발견과 요구사항 구조화가 단일 인터뷰 세션에서 동시에 수행된다.
 
-When `interview_depth != "skip"` (from Step 0 Triage), the orchestrator spawns `mpl-interviewer` as a Task agent to conduct the interview. The interview rounds are controlled by `interview_depth`:
-- `"full"`: All 4 rounds of PP interview
-- `"light"`: Round 1 (What) + Round 2 (What NOT) only
+> **핵심 통찰**: PP 발견 과정 자체가 요구사항 정의의 핵심 요소이다. 분리하면 이중 인터뷰 피로가 발생한다.
 
-When `interview_depth == "skip"`, PPs are extracted directly from the user's prompt without spawning an interviewer agent. The orchestrator parses explicit constraints, success criteria, and tradeoff choices from the prompt and formats them as Pivot Points.
+interview_depth에 따라 인터뷰 범위가 자동 조절된다:
+
+### depth == "skip"
+
+기존 동작 유지: 프롬프트에서 PP 직접 추출.
+요구사항 구조화 없음.
+
+```
+-> Extract PPs directly from user prompt
+-> Save to .mpl/pivot-points.md
+-> Proceed to Step 1-B
+```
+
+### depth == "light"
+
+Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가:
+
+1. **Round 1**: "정확히 무엇을 원하는가?" (PP 후보 추출)
+2. **Round 2**: "절대 깨뜨리면 안 되는 것은?" (PP 제약 + 범위 경계)
+3. **[NEW] 경량 요구사항 구조화**:
+   - 소크라틱 질문 (명확화 + 가정 탐색에서 1-2개 선별)
+   - 사용자 응답에서 User Stories 추출
+   - 각 US에 Acceptance Criteria 부착 (Gherkin 없이 자연어)
+   - MoSCoW 분류 (Must/Should/Could)
+   - 증거 태깅 (🟢/🔴)
+   - 저장: `.mpl/pm/requirements-light.md`
+4. PP 확정: pivot-points.md 저장
+
+### depth == "full"
+
+전체 4 Round + 소크라틱 질문 + 솔루션 옵션 + JUSF:
+
+1. **Round 1-4**: 기존 PP 인터뷰 전체
+2. **[NEW] 소크라틱 질문** (Round 5): 6유형 중 태스크에 관련된 질문 2-4개 선별
+   - 코드베이스 컨텍스트 기반 질문 (기존 유사 기능, 의존성)
+   - AskUserQuestion으로 선택지 제공
+   - PP 라운드에서 이미 확인된 정보는 건너뜀
+3. **[NEW] 솔루션 옵션** (Round 6): 3개 이상 옵션 + 트레이드오프 매트릭스
+   - Minimal / Balanced / Comprehensive
+   - Impact / Complexity / Risk / Token Cost / Test Coverage 차원 평가
+   - 사용자 선택 -> selected_option 기록
+4. **[NEW] JUSF 출력**: JTBD + User Stories + Gherkin AC
+   - Dual-Layer: YAML frontmatter + Markdown body
+   - 증거 태깅 (🟢/🟡/🔴)
+   - 멀티 관점 리뷰 (엔지니어/아키텍트/사용자)
+   - 저장: `.mpl/pm/requirements-{hash}.md`
+5. PP 확정: pivot-points.md 저장
+
+### 라우팅 로직
 
 ```
 if .mpl/pivot-points.md exists -> Load PPs and proceed to Step 1-B
@@ -298,14 +455,39 @@ elif interview_depth == "skip":
 else:
   AskUserQuestion: "프로젝트의 핵심 제약사항(Pivot Points)을 정의할까요?"
   Options:
-    1. "인터뷰 시작" -> Run mpl-interviewer with interview_depth setting
+    1. "인터뷰 시작" -> Run mpl-interviewer v2 with interview_depth setting
     2. "건너뛰기"    -> Proceed without PPs (explore mode only)
     3. "기존 PP 로드" -> Read from .mpl/pivot-points.md
 
 if maturity_mode == "explore" -> PP is optional, skip if user declines
 ```
 
+### 모델 라우팅 (F-26)
+
+```
+if interview_depth == "skip":
+    model = "opus"              # PP 직접 추출 (기존과 동일, 빠르게 완료)
+elif interview_depth == "light":
+    model = "sonnet"            # PP Round 1-2 + 경량 요구사항 구조화
+elif interview_depth == "full":
+    model = "opus"              # PP 전체 + 깊은 소크라틱 추론 + 솔루션 옵션
+```
+
 PP States: **CONFIRMED** (hard constraint, auto-reject on conflict) / **PROVISIONAL** (soft, HITL on conflict)
+
+### Step 1 산출물 -> 다운스트림 연결 [F-26]
+
+| 산출물 | 소비자 | 사용 방식 |
+|--------|--------|----------|
+| pivot-points.md | Step 1-B, Step 3 | PP 준수 검증 기준 |
+| requirements.md (full) | Step 3 Decomposer | 실행 순서 힌트 + US->Phase 매핑 |
+| requirements-light.md (light) | Step 3 Decomposer | 경량 범위 참조 |
+| acceptance_criteria.gherkin | Step 3-B, Step 4 | Test Agent 자동 테스트 생성 |
+| out_of_scope | Step 1-B | "Must NOT Do" 보강 |
+| recommended_execution_order | Step 3 | Phase 순서 시드 |
+| moscow + sequence_score | Step 3 Decomposer | Must 우선 분해, sequence_score로 정렬 |
+| job_definition | Step 2.5 Phase 0 Enhanced | API Contract/Type Policy의 사용자 맥락 |
+| risks + dependencies | Step 1-B | 리스크 등급 입력 |
 
 ---
 
@@ -324,6 +506,7 @@ Task(subagent_type="mpl-pre-execution-analyzer", model="sonnet",
      {pivot_points from .mpl/pivot-points.md}
      ### Codebase Analysis
      {codebase_analysis from .mpl/mpl/codebase-analysis.json}
+     <!-- Note: codebase-analysis.json may not exist at this point (produced in Step 2). If absent, Pre-Execution Analyzer proceeds with pivot-points and project structure only. This analysis is refined after Step 2 completes. -->
 
      Analyze gaps, pitfalls, and constraints (Part 1).
      Then assess risk levels and recommend execution order (Part 2).
@@ -349,8 +532,8 @@ Present a unified summary of PPs + Pre-Execution Analysis for engineer confirmat
 ```
 AskUserQuestion with 4 options:
 1. "Approve All" -> proceed to Step 2
-2. "Modify PPs" -> edit specific PPs, then re-run 1-B/1-C with updated PPs, return to 1-D
-3. "Add New PP" -> add PP, then re-run 1-B/1-C, return to 1-D
+2. "Modify PPs" -> edit specific PPs, then re-run 1-B with updated PPs, return to 1-D
+3. "Add New PP" -> add PP, then re-run 1-B, return to 1-D
 4. "Re-interview" -> return to Step 1
 ```
 
@@ -433,9 +616,11 @@ Phase 0 Enhanced는 Step 2의 Codebase Analysis 결과를 기반으로 프로젝
 
 > **원칙**: "예방이 치료보다 낫다" — Phase 0에 투자하는 토큰이 Phase 5의 디버깅 비용을 완전히 제거한다.
 
-### 2.5.0: Cache Check (Phase 0 캐싱)
+### 2.5.0: Cache Check (Phase 0 캐싱, 확장: F-05 부분 무효화)
 
 Phase 0 실행 전에 캐시를 확인한다. 캐시 히트 시 Phase 0 전체를 스킵하여 8~25K 토큰을 절감한다.
+
+#### 기존 동작 (전체 무효화)
 
 ```
 cache_dir = ".mpl/cache/phase0/"
@@ -448,9 +633,119 @@ if cache_dir exists AND cache_key matches:
     → Report: "[MPL] Phase 0 cache HIT. Skipping analysis. Saved ~{budget}K tokens."
     → Skip to Step 3 (Phase Decomposition)
   else:
-    → Cache stale, proceed with Phase 0
+    → Cache stale — 부분 무효화 시도 (아래 확장 참조)
 else:
   → No cache, proceed with Phase 0
+```
+
+#### 확장: git diff 기반 부분 무효화 (F-05)
+
+캐시 키가 불일치하더라도, 변경 범위가 제한적이면 **변경 모듈만 재분석**한다.
+
+```pseudocode
+function check_cache_with_partial(cwd):
+  cache_result = checkCache(cwd)
+
+  if cache_result.hit:
+    return { action: "skip", artifacts: cache_result.manifest.artifacts }
+
+  if not cache_result.manifest:
+    return { action: "full_rerun" }  # 캐시 없음 — 전체 실행
+
+  # 캐시 존재하지만 키 불일치 — 부분 무효화 시도
+  diff_result = analyze_diff(cwd, cache_result.manifest)
+
+  if diff_result.scope == "none":
+    return { action: "skip" }  # diff가 캐시 범위 밖 (문서 변경 등)
+
+  if diff_result.scope == "partial":
+    return {
+      action: "partial_rerun",
+      reuse_artifacts: diff_result.unaffected_artifacts,
+      rerun_steps: diff_result.affected_steps
+    }
+
+  return { action: "full_rerun" }  # 전면 변경
+```
+
+#### diff 범위 분석
+
+```pseudocode
+function analyze_diff(cwd, manifest):
+  changed_files = git_diff_names(cwd, since=manifest.commit_hash or manifest.timestamp)
+
+  # 변경 파일을 Phase 0 단계별로 분류
+  affected = {
+    api_contracts: false,   # Step 1
+    examples: false,        # Step 2
+    type_policy: false,     # Step 3
+    error_spec: false       # Step 4
+  }
+
+  for file in changed_files:
+    if is_public_api(file):       # 함수 시그니처 변경
+      affected.api_contracts = true
+    if is_test_file(file):        # 테스트 패턴 변경
+      affected.examples = true
+    if is_type_definition(file):  # 타입 정의 변경
+      affected.type_policy = true
+    if is_error_handler(file):    # 에러 처리 변경
+      affected.error_spec = true
+
+  affected_count = count_true(affected)
+
+  if affected_count == 0:
+    return { scope: "none" }
+  elif affected_count <= 2:
+    return {
+      scope: "partial",
+      affected_steps: [step for step, flag in affected if flag],
+      unaffected_artifacts: [artifact for step, flag in affected if not flag]
+    }
+  else:
+    return { scope: "full" }  # 3+ 단계 영향 → 전체 재실행이 효율적
+```
+
+#### 부분 재실행 프로토콜
+
+partial_rerun 시:
+1. 캐시된 unaffected_artifacts를 `.mpl/mpl/phase0/`에 복사
+2. affected_steps만 Phase 0 Enhanced에서 재실행
+3. 재실행 결과를 기존 캐시에 병합
+4. 새 cache_key로 manifest 갱신
+
+예시:
+```
+캐시 존재 + test 파일만 변경 →
+  affected: { examples: true } →
+  partial_rerun: Step 2만 재실행 →
+  Step 1(api_contracts), Step 3(type_policy), Step 4(error_spec)는 캐시 재사용 →
+  토큰 절감: ~60-70% (4단계 중 1단계만 실행)
+```
+
+#### 파일 분류 규칙
+
+```
+is_public_api(file):
+  - src/**/*.{ts,js,py,go,rs} (test 제외)
+  - 함수/클래스 export 포함 파일
+
+is_test_file(file):
+  - **/*.test.{ts,js}
+  - **/*.spec.{ts,js}
+  - **/test_*.py
+  - **/*_test.{go,rs}
+
+is_type_definition(file):
+  - **/*.d.ts
+  - **/types.{ts,py}
+  - **/interfaces.{ts}
+  - **/models.{py}
+
+is_error_handler(file):
+  - **/error*.{ts,js,py}
+  - **/exception*.{py}
+  - 파일 내 "throw", "raise", "Error" 패턴 포함
 ```
 
 #### Cache Key Generation
@@ -470,11 +765,15 @@ generate_cache_key(codebase_analysis):
 
 | 변경 사항 | 캐시 동작 |
 |----------|----------|
-| 테스트 파일 내용 변경 | 전체 캐시 무효화 |
-| 소스 파일 공개 API 변경 | 전체 캐시 무효화 |
-| 의존성 버전 변경 | 관련 계약만 무효화 |
-| 디렉토리 구조 변경 | 구조 관련 캐시만 무효화 |
+| 테스트 파일 내용 변경 | 부분 무효화 시도 (examples 단계) |
+| 소스 파일 공개 API 변경 | 부분 무효화 시도 (api_contracts 단계) |
+| 타입 정의 파일 변경 | 부분 무효화 시도 (type_policy 단계) |
+| 에러 처리 파일 변경 | 부분 무효화 시도 (error_spec 단계) |
+| 3+ 단계 동시 영향 | 전체 캐시 무효화 (부분 재실행 비효율) |
+| 의존성 버전 변경 | 전체 캐시 무효화 |
+| 디렉토리 구조 변경 | 전체 캐시 무효화 |
 | `--no-cache` 플래그 | 강제 캐시 무시 |
+| git diff 실패 | 전체 캐시 무효화 (안전 폴백) |
 
 ### 2.5.1: Complexity Detection
 
@@ -761,6 +1060,7 @@ Phase 0 실행이 완료되면 결과를 캐시에 저장한다:
 ```
 cache_dir = ".mpl/cache/phase0/"
 cache_key = generate_cache_key(codebase_analysis)
+commit_hash = git_rev_parse("HEAD")  # 부분 무효화(F-05)에서 diff 기준점으로 사용
 
 save_to_cache:
   1. Create cache_dir if not exists
@@ -768,13 +1068,36 @@ save_to_cache:
   3. Write manifest.json:
      {
        "cache_key": cache_key,
-       "created_at": timestamp,
-       "grade": complexity_grade,
+       "commit_hash": commit_hash,
+       "timestamp": ISO timestamp,
+       "complexity_grade": complexity_grade,
        "artifacts": ["api-contracts.md", "examples.md", ...],
        "validation_result": { passed: N, total: M }
      }
   4. Report: "[MPL] Phase 0 artifacts cached. Key: {short_key}."
 ```
+
+#### 2.5.8 확장: 부분 재실행 시 캐시 저장 (F-05)
+
+부분 재실행(partial_rerun) 완료 후:
+1. 재사용된 캐시 아티팩트 + 새로 생성된 아티팩트를 병합
+2. 새 cache_key 생성 (현재 시점의 전체 해시)
+3. manifest.json 갱신: partial_rerun_info 필드 추가
+   ```json
+   {
+     "cache_key": "new_full_hash",
+     "commit_hash": "current_HEAD",
+     "timestamp": "2026-03-13T...",
+     "complexity_grade": "Complex",
+     "artifacts": ["api-contracts.md", "examples.md", "type-policy.md", "error-spec.md"],
+     "validation_result": { "passed": 4, "total": 4 },
+     "partial_rerun": true,
+     "rerun_steps": ["examples"],
+     "reused_steps": ["api_contracts", "type_policy", "error_spec"],
+     "original_cache_key": "previous_hash"
+   }
+   ```
+4. Report: `"[MPL] Partial cache save. Rerun: {rerun_steps}. Reused: {reused_steps}. New key: {short_key}."`
 
 ### 2.5.9: Token Profiling (Phase 0)
 

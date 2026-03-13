@@ -61,6 +61,7 @@ export function jaccardSimilarity(a, b) {
  * @param {string} pattern.result - "success" | "partial" | "failed"
  * @param {number} pattern.tokens - Estimated total tokens used
  * @param {number} pattern.files - Number of affected files
+ * @param {object} [pattern.domain_distribution] - Optional distribution of work across domains (e.g. { frontend: 0.4, backend: 0.6 })
  */
 export function appendPattern(cwd, pattern) {
   const dir = join(cwd, MEMORY_DIR);
@@ -76,6 +77,7 @@ export function appendPattern(cwd, pattern) {
     result: pattern.result,
     tokens: pattern.tokens || 0,
     files: pattern.files || 0,
+    ...(pattern.domain_distribution ? { domain_distribution: pattern.domain_distribution } : {}),
   };
 
   const filePath = join(dir, PATTERNS_FILE);
@@ -117,7 +119,7 @@ export function findSimilarPattern(cwd, description, threshold = 0.8) {
 
   if (bestSimilarity >= threshold && bestMatch) {
     // If the past pattern was escalated, recommend the escalated tier
-    const recommendedTier = bestMatch.escalated_from ? bestMatch.tier : bestMatch.tier;
+    const recommendedTier = bestMatch.escalated_from ? bestMatch.escalated_from : bestMatch.tier;
     return {
       match: bestMatch,
       similarity: Math.round(bestSimilarity * 1000) / 1000,

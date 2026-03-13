@@ -103,7 +103,11 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - Verify no phase violates a CONFIRMED PP
       - Note PROVISIONAL PP interactions for human review
 
-    Step 9: Risk assessment (pre-mortem)
+    Step 9: Domain classification (F-28)
+      - For each phase, assign phase_domain based on scope files and work description
+      - See phase_domain Classification section for rules
+
+    Step 10: Risk assessment (pre-mortem)
       - For each phase: imagine it failing. What's the most likely cause?
       - For each PP: trace compliance through all phases. Where could drift occur?
       - For each cross-phase dependency: what if the producing phase's output is incorrect?
@@ -125,6 +129,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     phases:
       - id: "phase-1"
         name: string           # short name
+        phase_domain: string   # F-28: domain tag (db|api|ui|algorithm|test|infra|general)
         scope: string          # 1-2 sentence scope description
         rationale: string      # why this phase is in this position
 
@@ -207,6 +212,51 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       advisory_issues: number
     ```
   </Output_Schema>
+
+  <Phase_Domain_Classification>
+    ### phase_domain 분류 (F-28)
+
+    각 Phase의 핵심 작업 성격에 따라 도메인 태그를 부여한다.
+    Phase Runner가 이 태그를 사용하여 도메인 특화 프롬프트와 모델을 선택한다.
+
+    | 도메인 | 분류 기준 | 예시 Phase |
+    |--------|----------|-----------|
+    | `db` | DB 스키마, 마이그레이션, ORM 모델, 쿼리 | "User 모델 생성", "인덱스 추가" |
+    | `api` | API 엔드포인트, 라우팅, 미들웨어, 직렬화 | "회원가입 API", "인증 미들웨어" |
+    | `ui` | 프론트엔드 컴포넌트, 스타일, 상태 관리 | "로그인 폼", "대시보드 레이아웃" |
+    | `algorithm` | 복잡 로직, 최적화, 데이터 구조, 수학 | "검색 알고리즘", "캐시 전략" |
+    | `test` | 테스트 작성, 테스트 인프라, 픽스처 | "통합 테스트 추가", "테스트 유틸리티" |
+    | `infra` | 설정, CI/CD, 빌드, 배포, 환경 | "Docker 설정", "환경 변수 관리" |
+    | `general` | 위 분류에 해당하지 않거나 2개 이상 혼합 | "리팩토링", "문서 갱신" |
+
+    #### 분류 규칙
+
+    1. Phase의 `scope` 파일 확장자와 디렉토리로 1차 분류
+       - `migrations/`, `models/`, `schema.` → `db`
+       - `routes/`, `controllers/`, `api/`, `endpoints/` → `api`
+       - `components/`, `pages/`, `styles/`, `.css`, `.vue`, `.svelte` → `ui`
+       - `tests/`, `__tests__/`, `.test.`, `.spec.` → `test`
+       - `Dockerfile`, `.yml`, `.yaml`, `config/`, `.env` → `infra`
+
+    2. Phase의 `name`과 `success_criteria`에서 의미 분석으로 2차 보정
+       - "최적화", "O(n)", "정렬", "탐색" → `algorithm`
+       - 혼합 시 가장 비중 높은 도메인 선택, 동률이면 `general`
+
+    3. `phase_domain`은 **힌트**이지 강제가 아님
+       - Phase Runner는 도메인 프롬프트를 참조하되 무시할 수 있음
+       - 도메인 프롬프트 파일이 없으면 범용 동작
+
+    #### 도메인과 리스크 상관관계
+
+    | 도메인 | 일반적 복잡도 | 리스크 경향 |
+    |--------|-------------|-----------|
+    | `db` | M | 비가역적 변경 리스크 (마이그레이션) |
+    | `api` | S-M | 하위 호환성 리스크 |
+    | `ui` | S-M | 주관적 검증 (H-item 빈도 높음) |
+    | `algorithm` | M-L | 높은 로직 복잡도, opus 모델 권장 |
+    | `test` | S | 낮은 리스크 |
+    | `infra` | S-M | 환경 의존적 실패 리스크 |
+  </Phase_Domain_Classification>
 
   <Failure_Modes_To_Avoid>
     - Over-decomposition: too many tiny phases where orchestration overhead exceeds implementation benefit. Merge adjacent phases with low inter-dependency.

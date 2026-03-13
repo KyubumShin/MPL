@@ -63,6 +63,9 @@ disallowedTools: []
     - Layer 2.5 (verification plan): Read verification_plan for this phase from context — A/S/H-items classification that determines what to verify and how
     - Layer 3 (this phase): Parse phase_definition — scope, impact, interface_contract, success_criteria, inherited_criteria
     - Layer 4 (actual state): Survey impact files listed in phase_definition.impact
+    - Layer 5 (working memory, F-25): `.mpl/memory/working.md` 읽기
+      - 이전 Phase에서 남긴 노트, 인터페이스 정보 참조
+      - 없거나 비어있으면 스킵 (첫 Phase)
 
     ### Step 2: Mini-Plan Generation
 
@@ -73,6 +76,22 @@ disallowedTools: []
     - **File conflict detection**: For TODOs marked as parallel, verify their target files do not overlap. If two TODOs modify the same file, they MUST be sequential (add dependency edge). Log: `[Phase {N}] File conflict: {file} touched by TODO-{A} and TODO-{B}. Forcing sequential.`
     - Format as markdown checklist with explicit dependency declarations
 
+    **Working Memory 기록 (F-25)**: Mini-Plan 생성 후 working.md에 현재 Phase 상태를 기록한다:
+    ```
+    Write(".mpl/memory/working.md", """
+    # Working Memory — Phase {N}: {phase_name}
+    Updated: {timestamp}
+
+    ## TODOs
+    - [ ] TODO-1: {description} — pending
+    - [ ] TODO-2: {description} — pending
+    ...
+
+    ## Notes
+    (실행 중 발견한 노트를 여기에 추가)
+    """)
+    ```
+
     ### Step 3: Worker Execution (Build-Test-Fix Micro-Cycles)
 
     Dispatch TODOs to mpl-worker via Task tool using incremental Build-Test-Fix cycles:
@@ -82,6 +101,11 @@ disallowedTools: []
     #### 3a. Build — Dispatch to worker
     - Each worker call must include: Phase 0 artifacts (relevant sections), PP summary, relevant PD summary, TODO detail, target file contents, interface_contract.produces spec to comply with
     - Collect worker JSON outputs: status, changes, discoveries, notes
+
+    **Working Memory 갱신 (F-25)**: Worker 완료 시 working.md를 갱신한다:
+    - TODO 상태 업데이트: `pending` → `complete` / `failed`
+    - Worker가 보고한 핵심 발견 사항을 Notes 섹션에 추가
+    - 예: `- [x] TODO-1: implement auth middleware — complete (3 files changed)`
 
     #### 3b. Test — Immediate verification after each TODO
     - Run the relevant module test(s) immediately after worker completes
@@ -146,6 +170,58 @@ disallowedTools: []
     - Retry 3: last attempt before circuit break — document all approaches tried
     - After 3 failures: report circuit_break with failure_info (do not continue)
 
+    #### Step 5 확장: Reflexion 기반 수정 (F-27)
+
+    Fix 시도 전 구조화된 반성을 수행한다.
+
+    **Retry 1 이전**:
+    1. Reflection Template 작성 (증상 → 근본 원인 → 이탈 지점 → 수정 전략 → 학습)
+    2. Phase 0 아티팩트 재참조 (error-spec, api-contracts)
+    3. 반성 기반 수정 전략 수립 후 Worker 디스패치
+
+    **Retry 2 이전**:
+    1. 이전 Reflection 참조 → "하지 말아야 할 것" 목록 생성
+    2. 다른 접근 방식 강제 (이전 전략과 다른 방향)
+    3. Gate 2 실패 시: mpl-code-reviewer 피드백을 반성에 통합 (MAR 패턴)
+
+    **Retry 3 이전**:
+    1. 이전 2회 Reflection 전체 참조
+    2. 최후 시도 — 가장 보수적 접근 (최소 변경)
+    3. 실패 시 circuit_break + 전체 Reflection을 에러 파일로 보존
+
+    **Reflection 저장**:
+    - 반성 파일: `.mpl/mpl/phases/{phase_id}/reflections/attempt-{N}.md` (Phase Runner가 직접 Write)
+    - **procedural.jsonl 즉시 기록**: 반성 완료 즉시 `appendProcedural()` 호출하여 패턴 저장
+      - 저장 시점: 각 Fix 시도 직후 (Finalize까지 지연하지 않음)
+      - 형식: `{timestamp, phase, tool: "reflection", action: fix_strategy, result: "pending", tags: [분류태그], context: root_cause}`
+      - Fix 결과 확인 후 result를 "success" 또는 "failure"로 갱신
+    - Finalize 시 mpl-compound가 procedural 엔트리를 learnings.md로 증류 (F-25 M-4.5)
+
+    **Reflection Template**:
+    ```
+    ## Reflection — Fix Attempt {N}
+
+    ### 1. 증상 (Symptom)
+    - 실패한 테스트/Gate와 에러 메시지
+    - 예상 vs 실제 동작
+
+    ### 2. 근본 원인 (Root Cause)
+    - 문제 코드 위치 (file:line)
+    - 이전 시도에서 놓친 이유
+
+    ### 3. 최초 이탈 지점 (Divergence Point)
+    - Phase 0 명세와 실제 구현의 차이
+    - PP 위반 여부
+
+    ### 4. 수정 전략 (Fix Strategy)
+    - 이전과 다른 접근 방식
+    - 부작용 예측
+
+    ### 5. 학습 추출 (Learning)
+    - 패턴 분류 태그: {tag}
+    - 예방 전략
+    ```
+
     #### Error File Preservation (F-30)
 
     When a TODO fails (circuit_break or retry exhaustion), Write the full error output to a file:
@@ -194,7 +270,40 @@ disallowedTools: []
 
     Generate the state summary with all required sections (see State_Summary_Required_Sections).
     This summary is the ONLY artifact the next phase receives about this phase's work.
+
+    **Working Memory → Episodic 변환 (F-25)**: State Summary 생성 후, working.md 내용을 episodic 형식으로 변환한다:
+    - 형식: `### Phase {N}: {name} ({timestamp})\n{구현 내용 요약}\n{핵심 결정}\n{검증 결과}`
+    - 이 변환 결과를 output JSON의 `working_memory_snapshot` 필드에 포함
+    - Orchestrator의 Finalize(Step 5)에서 이 내용을 `.mpl/memory/episodic.md`에 추가
+    - working.md 자체의 초기화는 Orchestrator가 다음 Phase 시작 시 수행
   </Execution_Flow>
+
+  <Domain_Awareness>
+    #### Phase Runner 도메인 인식 (F-28)
+
+    Phase 정의에 `phase_domain` 태그가 있으면:
+    1. 도메인 특화 프롬프트를 컨텍스트에 포함 (오케스트레이터가 주입)
+    2. 도메인별 검증 포인트를 verification에 추가
+    3. Worker 디스패치 시 도메인 컨텍스트 전달
+
+    도메인 없으면 기존 범용 동작 유지 (하위 호환).
+
+    **도메인별 추가 검증 항목**:
+
+    | 도메인 | 추가 검증 |
+    |--------|----------|
+    | `db` | 마이그레이션 롤백 가능성, 인덱스 적절성, 데이터 호환성 |
+    | `api` | RESTful 규칙 준수, 에러 코드 일관성, 인증/인가 |
+    | `ui` | 접근성(a11y), 반응형 레이아웃, 상태 관리 패턴 |
+    | `algorithm` | 시간/공간 복잡도, 엣지 케이스, 경계값 |
+    | `test` | 커버리지 임계값, 테스트 격리, 모킹 적절성 |
+    | `infra` | 환경 변수 보안, 빌드 재현성, 배포 롤백 |
+    | `general` | 범용 검증만 (기존 동작) |
+
+    **컨텍스트 주입 위치**: Step 1 Context Loading에서 Layer 3 (this phase) 파싱 시,
+    `phase_definition.phase_domain` 값을 읽어 도메인 프롬프트를 Layer에 추가한다.
+    도메인 프롬프트 경로: `.mpl/prompts/domains/{domain}.md` (없으면 스킵).
+  </Domain_Awareness>
 
   <Discovery_Handling>
     When a worker reports a discovery, apply this decision tree:
@@ -275,9 +384,13 @@ disallowedTools: []
           }
         ]
       },
+      "working_memory_snapshot": "### Phase {N}: {name} ({timestamp})\n{episodic format summary}",
       "failure_info": null
     }
     ```
+
+    `working_memory_snapshot` (F-25): working.md 내용을 episodic 형식으로 변환한 문자열.
+    Orchestrator가 이 값을 `.mpl/memory/episodic.md`에 추가한다. 없으면 `null`.
 
     When status is "circuit_break", failure_info must be populated:
 

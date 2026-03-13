@@ -91,6 +91,91 @@ Ensure .mpl/memory/ directory exists.
 Report: "[MPL] Learnings distilled: {new_entries} new patterns added to memory."
 ```
 
+### 5.2.6: 4-Tier Memory 갱신 (F-25)
+
+mpl-compound의 4-Tier Memory 프로토콜을 실행한다:
+
+1. **episodic.md 갱신**: 각 완료 Phase의 요약을 episodic.md에 추가
+   - 형식: `### Phase {N}: {name} ({timestamp})\n{2-3줄 요약: 구현 내용, 핵심 결정, 결과}`
+   - Phase 0 요약도 포함 (complexity grade, 적용 step 등)
+
+2. **episodic 압축**: 시간 기반 압축 실행
+   - 최근 2 Phase: 상세 유지 (2-3줄)
+   - 이전 Phase: 1줄 압축 (`- Phase N: {name} — {결과}`)
+   - 100줄 상한 유지
+
+3. **semantic.md 승격**: episodic에서 3회+ 반복 패턴 감지 → 일반화
+   - 반복 실패 패턴 → "## Failure Patterns" 섹션에 규칙화
+   - 반복 성공 패턴 → "## Success Patterns" 섹션에 규칙화
+   - 반복 컨벤션 → "## Project Conventions" 섹션에 규칙화
+   - episodic의 해당 항목은 1줄로 축약 + semantic 참조 링크
+
+4. **procedural.jsonl 정리**: mpl-compound가 추출한 도구 패턴 저장
+   - 분류 태그: type_mismatch, dependency_conflict, test_flake, api_contract_violation 등
+   - 100 entries 초과 시 가장 오래된 항목부터 삭제 (FIFO)
+
+5. **state.json memory 필드 갱신**: 메모리 통계 업데이트
+
+```
+Task(subagent_type="mpl-compound", model="sonnet",
+     prompt="Execute 4-Tier Memory protocol (F-25).
+     Phase summaries: {all state-summary.md contents}
+     RUNBOOK: {runbook contents}
+     Follow Steps M-1 through M-5 from the mpl-compound protocol.")
+
+Report: "[MPL] 4-Tier Memory updated: episodic={N} entries, semantic={N} rules, procedural={N} entries."
+```
+
+### 5.2.7: working.md 정리
+
+파이프라인 완료 시 working.md를 비운다 (다음 실행을 위해).
+
+```
+clearWorkingMemory(cwd)
+Report: "[MPL] Working memory cleared."
+```
+
+### Step 5.2.8: Good/Bad Examples 아카이브 분류 (F-26)
+
+파이프라인 완료 시 mpl-interviewer v2가 생성한 요구사항 문서의 효과를 평가하고 아카이브한다.
+
+#### 분류 기준
+
+| 지표 | Good Example | Bad Example |
+|------|-------------|------------|
+| Phase 0 반복 횟수 | 0-1 | 3+ |
+| 재분해 횟수 | 0 | 1+ |
+| Gate 통과율 | 95%+ (1회) | 2회 이상 시도 |
+| 사용자 수정 요청 | 0 | 2+ |
+
+#### 프로토콜
+
+```pseudocode
+if exists(".mpl/pm/requirements-*.md"):
+  metrics = {
+    phase0_iterations: state.phase0_retry_count or 0,
+    redecompose_count: state.redecompose_count or 0,
+    gate_attempts: count_gate_retries(state),
+    user_corrections: count_side_interview_corrections(state)
+  }
+
+  score = (metrics.phase0_iterations <= 1) + (metrics.redecompose_count == 0) + (metrics.gate_attempts <= 1) + (metrics.user_corrections == 0)
+
+  if score >= 3:
+    copy requirements to ".mpl/pm/good-examples/{date}-{topic}.md"
+  elif score <= 1:
+    copy requirements to ".mpl/pm/bad-examples/{date}-{topic}.md"
+  # score 2: 중간 — 아카이브하지 않음
+```
+
+오케스트레이터가 Step 5 Finalize에서 직접 수행한다 (별도 에이전트 불필요).
+
+**F-25 Memory 연동:**
+아카이브 분류 후 procedural.jsonl에 품질 신호를 기록한다:
+- Good → `appendProcedural(cwd, { tool: "mpl-interviewer", result: "success", tags: ["prd_quality_good", depth], context: filename })`
+- Bad → `appendProcedural(cwd, { tool: "mpl-interviewer", result: "failure", tags: ["prd_quality_bad", depth, reason], context: filename })`
+이를 통해 향후 실행에서 interviewer가 이전 PRD 품질 패턴을 참조할 수 있다.
+
 ### 5.3: Atomic Commits
 
 Reuse `mpl-git-master`:
