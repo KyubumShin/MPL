@@ -308,6 +308,7 @@ After: 시스템이 자동 판정 + 동적 전환
 | F-30 | **Error Context File Preservation** | ✅ **S5 완료** | Worker 실패 시 에러 전문을 `.mpl/mpl/phases/phase-N/errors/` 파일로 보존. Compaction 후에도 정확한 에러 정보로 fix loop 수렴. Phase Runner가 에러 파일 Write, orchestrator는 경로만 수신 |
 | F-31 | **Compaction-Aware Context Recovery** | 부분 구현 | PreCompact 훅에서 `.mpl/mpl/checkpoints/compaction-{N}.md` checkpoint 생성. compaction_count 3회 시 경고, 4회+ 시 세션 리셋 권장. Write-side 구현 완료, orchestrator read-side 경로 명시 TBD |
 | F-32 | **Adaptive Context Loading** | ✅ **S5 완료** | Phase 전환 시 context 상태 판단하여 로드량 3-way 분기: 동일 세션(최소 로드) / compaction 후(선택적 로드+checkpoint) / 새 세션(전체 로드). `last_phase_compaction_count` 필드로 compaction 감지 |
+| F-33 | **Session Budget Prediction & Auto-Continue** | 미구현 | Phase 완료 시 HUD context_window 데이터 기반으로 남은 Phase 예산을 예측. 부족 시 graceful pause → `.mpl/signals/session-handoff.json` 생성 → external watcher가 새 세션에서 자동 resume. Fail-open 설계: context-usage.json 없으면 기존 동작 유지. 15% safety margin |
 
 #### LOW — 유지
 

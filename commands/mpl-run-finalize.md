@@ -317,6 +317,30 @@ On session start:
       Continue from Step 4.1 for nextPhase
 ```
 
+#### F-33: Budget Pause Resume
+
+```python
+if state.session_status == "paused_budget":
+    print(f"[MPL] Resuming from budget pause (paused at {state.pause_timestamp})")
+    print(f"[MPL] Previous session: context {state.budget_at_pause.context_pct}% remaining")
+
+    # Clear pause state
+    writeState(cwd, {
+        "session_status": "active",
+        "pause_reason": None,
+        "pause_timestamp": None,
+        "budget_at_pause": None
+        # resume_from_phase는 유지 — Step 6의 기존 로직이 사용
+    })
+
+    # Handoff 신호 정리
+    rm -f ".mpl/signals/session-handoff.json"
+
+    # 기존 Resume 로직으로 진행 (resume_from_phase 기반)
+```
+
+이 처리는 기존 Resume 로직 **이전**에 실행되며, `session_status`를 정리한 후 기존 Phase 복원 로직이 `resume_from_phase`를 사용하여 정상 이어하기를 수행한다.
+
 | Data | Source |
 |------|--------|
 | Completed results | `.mpl/mpl/phases/phase-N/state-summary.md` |

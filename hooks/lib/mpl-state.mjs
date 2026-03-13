@@ -74,7 +74,13 @@ const DEFAULT_STATE = {
     procedural_entries: 0,
     last_compression: null,       // ISO timestamp of last episodic compression
     last_semantic_promotion: null  // ISO timestamp of last semantic promotion
-  }
+  },
+  // F-33: Session budget prediction
+  session_status: null,          // null | "active" | "paused_budget"
+  pause_reason: null,            // human-readable pause reason
+  resume_from_phase: null,       // phase ID to resume from
+  pause_timestamp: null,         // ISO timestamp of pause
+  budget_at_pause: null,         // { context_pct, estimated_needed_pct }
 };
 
 // Prototype pollution guard keys

@@ -307,6 +307,26 @@ async function main() {
     }
   }
 
+  // F-33: Write context usage to file for budget predictor
+  if (contextPercent != null && cwd) {
+    try {
+      const mplDir = join(cwd, '.mpl');
+      if (existsSync(mplDir)) {
+        const usageData = {
+          pct: contextPercent,
+          total_tokens: cw?.context_window_size || 0,
+          used_tokens: cw?.current_usage
+            ? (cw.current_usage.input_tokens || 0)
+              + (cw.current_usage.cache_creation_input_tokens || 0)
+              + (cw.current_usage.cache_read_input_tokens || 0)
+            : 0,
+          timestamp: Date.now(),
+        };
+        writeFileSync(join(mplDir, 'context-usage.json'), JSON.stringify(usageData));
+      }
+    } catch { /* non-blocking — HUD must never slow down */ }
+  }
+
   // OAuth usage from Anthropic API
   const usage = await fetchUsage();
 

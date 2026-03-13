@@ -219,6 +219,17 @@ Phase Runner 호출 전 context 로드량을 상황에 따라 조절한다:
 - Complex grade일 때만 phase0_artifacts 로드
 - **F-25 메모리 재로드**: semantic.md + 최근 procedural (태그 매칭) + episodic 요약 (최근 2 Phase)
 
+**Post-Compaction Budget Check (F-33)**:
+Compaction 발생 후 context-usage.json을 다시 읽어 예산을 확인한다:
+```python
+if compaction_since_last_phase:
+    budget = predictBudget(cwd)
+    if budget.recommendation == "pause_now":
+        execute_graceful_pause(budget, current_phase_id, completed, remaining)
+        return
+    # "pause_after_current"는 Phase 진행 중이므로 현재 Phase 완료 후 판단
+```
+
 **Case 3: 새 세션에서 resume** (session_id 변경)
 - 전체 context assembly 수행
 - prev_summary + dependency_summaries + phase0_artifacts + learnings
@@ -704,7 +715,27 @@ Constraints:
     - **Timestamp**: {ISO timestamp}
     ```
 11. More phases -> current_phase = "mpl-phase-running", continue 4.1
+    → **Budget Check (F-33)**: Step 4.3 확장 참조 — 다음 Phase 시작 전에 세션 예산을 확인한다.
 12. All done -> proceed to Step 4.5 (3-Gate Quality)
+
+#### Step 4.3 확장: Budget Check (F-33)
+
+Phase 완료 후 다음 Phase 시작 전에 세션 예산을 확인한다:
+
+```python
+budget = predictBudget(cwd)  # .mpl/context-usage.json 기반
+
+if budget.recommendation == "pause_now" or budget.recommendation == "pause_after_current":
+    # 현재 Phase는 완료됨 — Graceful Pause 실행
+    execute_graceful_pause(budget, next_phase_id, completed_phases, remaining_phases)
+    return  # 오케스트레이션 루프 종료
+else:
+    # 예산 충분 — 다음 Phase 계속
+    current_phase = "mpl-phase-running"
+    continue  # Step 4.1로 복귀
+```
+
+**Fail-open**: `context-usage.json`이 없거나 stale(>30s)이면 budget check를 건너뛰고 계속 진행한다.
 ```
 
 **On `"circuit_break"`**:
@@ -1137,5 +1168,101 @@ on circuit_break(phase_id, failure_info):
 ```
 
 The recovery context is saved to `.mpl/mpl/phases/phase-N/recovery.md` and used by the decomposer if redecomposition is triggered.
+
+### Step 4.8: Graceful Pause Protocol (F-33)
+
+Budget prediction이 pause를 권장할 때 실행하는 프로토콜.
+
+**트리거 조건**:
+- `predictBudget(cwd).recommendation` == `"pause_now"` (context < 10%)
+- `predictBudget(cwd).recommendation` == `"pause_after_current"` (남은 Phase 예산 부족)
+
+**프로토콜**:
+
+```python
+def execute_graceful_pause(budget, next_phase_id, completed_phases, remaining_phases):
+    # 1. Handoff 신호 파일 생성
+    mkdir -p ".mpl/signals/"
+    handoff = {
+        "version": 1,
+        "pipeline_id": state.pipeline_id,
+        "paused_at": now_iso(),
+        "resume_from_phase": next_phase_id,
+        "completed_phases": completed_phases,
+        "remaining_phases": remaining_phases,
+        "budget_snapshot": {
+            "context_pct_used": 100 - budget.remaining_pct,
+            "remaining_pct": budget.remaining_pct,
+            "estimated_needed_pct": budget.estimated_needed_pct,
+            "avg_tokens_per_phase": budget.avg_tokens_per_phase
+        },
+        "state_file": ".mpl/state.json",
+        "runbook_file": ".mpl/mpl/RUNBOOK.md"
+    }
+    Write(".mpl/signals/session-handoff.json", JSON.stringify(handoff))
+
+    # 2. State 업데이트
+    writeState(cwd, {
+        "session_status": "paused_budget",
+        "pause_reason": f"Context budget insufficient: {budget.remaining_pct}% remaining, {budget.estimated_needed_pct}% needed for {len(remaining_phases)} phases",
+        "resume_from_phase": next_phase_id,
+        "pause_timestamp": now_iso(),
+        "budget_at_pause": {
+            "context_pct": budget.remaining_pct,
+            "estimated_needed_pct": budget.estimated_needed_pct
+        }
+    })
+
+    # 3. RUNBOOK 기록
+    Append to RUNBOOK.md:
+    """
+    ## Session Paused — Budget Prediction (F-33)
+    - **Timestamp**: {ISO}
+    - **Context Used**: {100 - budget.remaining_pct}%
+    - **Estimated Needed**: {budget.estimated_needed_pct}% for {len(remaining_phases)} phases
+    - **Resume From**: {next_phase_id}
+    - **Action**: `/mpl:mpl-resume` in new session or auto-watcher
+    """
+
+    # 4. <remember priority> 태그
+    <remember priority>
+    [MPL Session Paused — Budget F-33]
+    Pipeline: {pipeline_id}
+    Paused at: {next_phase_id}
+    Completed: {len(completed_phases)}/{total} phases
+    Resume: /mpl:mpl-resume
+    </remember>
+
+    # 5. 사용자 메시지
+    Print:
+    "[MPL] ⏸ Session pausing — context {100-budget.remaining_pct}% used, estimated {budget.estimated_needed_pct}% needed for {len(remaining_phases)} remaining phases."
+    "[MPL] Resume: run `/mpl:mpl-resume` in a new session, or auto-watcher will continue."
+```
+
+**Budget Prediction 데이터 소스**:
+
+| 데이터 | 파일 | 갱신 주기 |
+|--------|------|----------|
+| Context 사용률 | `.mpl/context-usage.json` | HUD ~500ms |
+| Phase당 평균 토큰 | `.mpl/mpl/profile/phases.jsonl` | Phase 완료 시 |
+| 전체 Phase 수 | `.mpl/mpl/decomposition.yaml` | Step 3 완료 시 |
+| 완료 Phase 수 | `.mpl/state.json` | Phase 완료 시 |
+
+**Prediction 알고리즘**:
+```
+remaining_pct = 100 - context_usage.pct
+estimated_needed = remaining_phases × avg_tokens_per_phase × 1.15 (safety margin)
+estimated_needed_pct = estimated_needed / total_context_tokens × 100
+
+IF remaining_pct < 10%: → pause_now
+IF estimated_needed_pct > remaining_pct: → pause_after_current
+ELSE: → continue
+```
+
+**안전 장치**:
+- `context-usage.json` 없음 또는 stale(>30s) → fail-open (계속 진행)
+- Phase 0개 남음 → continue (할 일 없음)
+- 히스토리 데이터 없음 → 보수적 기본값 15K tokens/phase
+- Watcher 없이도 수동 `/mpl:mpl-resume`으로 이어하기 가능
 
 ---
