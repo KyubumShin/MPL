@@ -368,7 +368,7 @@ interview_depth = classify_prompt(user_request):
 |-----------------|-----------|-------------------|
 | `"full"` | Vague/broad requests (density < 4) | PP 4-round full interview (default) |
 | `"light"` | Specific but incomplete (density 4-7) | What + What NOT only |
-| `"skip"` | Very detailed with constraints (density 8+) | Extract PPs directly from prompt |
+| `"skip"` | Very detailed with constraints (density 8+) | Extract PPs directly, then **Uncertainty Scan** (0~3 targeted questions on uncertain areas only) |
 
 Announce: `[MPL] Triage: interview_depth={depth}. Prompt density: {score}.`
 
@@ -396,16 +396,40 @@ Announce: `[MPL] Maturity mode: {mode}. Phase sizing: {S/M/L}`
 
 interview_depth에 따라 인터뷰 범위가 자동 조절된다:
 
-### depth == "skip"
+### depth == "skip" (+ Uncertainty Scan)
 
-기존 동작 유지: 프롬프트에서 PP 직접 추출.
-요구사항 구조화 없음.
+프롬프트에서 PP 직접 추출 후, **Uncertainty Scan**으로 불확실 영역을 식별한다.
+문서가 상세해도(information_density >= 8) 암묵적 가정, 모호한 기준, PP 간 충돌 가능성은 존재할 수 있다.
+Uncertainty Scan이 HIGH 항목을 발견하면 해당 항목에 대해서만 타겟 소크라틱 질문을 수행한다(최대 3개).
 
 ```
--> Extract PPs directly from user prompt
--> Save to .mpl/pivot-points.md
--> Proceed to Step 1-B
+1. Extract PPs directly from user prompt → draft PPs
+2. Run Uncertainty Scan on draft PPs + full prompt:
+   - U-1: 모호한 판단 기준 (측정 불가능한 PP criteria)
+   - U-2: 암묵적 가정 (명시되지 않은 환경/데이터/동시성 가정)
+   - U-3: PP 간 충돌 가능성 (2+ PP의 충돌 시나리오)
+   - U-4: 엣지 케이스 공백 (정상 경로만 기술, 예외 미정의)
+   - U-5: 기술적 결정 미확정 (구현 방향 영향, 선택 미명시)
+3. Classify: HIGH (circuit break 예상) / MED (PROVISIONAL로 진행 가능) / LOW (자연 해소)
+4. if HIGH == 0:
+     → 질문 없이 진행 (기존 skip과 동일)
+     → MED/LOW는 Step 1-B pre-execution-analysis에 uncertainty_notes로 전달
+   elif HIGH >= 1:
+     → HIGH 항목을 우선순위순으로 정렬
+     → 각 항목에 대해 Hypothesis-as-Options 질문 1개씩 수행
+     → 소프트 리밋(3개) 도달 시 Continue Gate:
+       - "계속 진행" → 남은 HIGH 항목에 대해 추가 질문
+       - "여기서 멈추기" → 남은 항목은 Deferred Uncertainties로:
+         PP PROVISIONAL 태깅 + Side Interview 대상 등록 + Step 1-B 전달
+       - "전체 종료" → 현재 상태로 진행
+     → 응답으로 PP criteria 구체화, priority 확정, 또는 새 PP 추가
+5. Save finalized PPs to .mpl/pivot-points.md
+   (하단에 Uncertainty Resolution Log + Deferred Uncertainties 포함)
+6. Proceed to Step 1-B
 ```
+
+질문 소프트 리밋: **3개** (skip 모드의 경량성 유지, Continue Gate로 사용자가 연장 가능).
+모델: **opus** (불확실성 판별에 추론 깊이 필요).
 
 ### depth == "light"
 

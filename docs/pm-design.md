@@ -177,7 +177,51 @@ elif interview_depth == "full":
 | **엣지 케이스 무시** | US별 엣지 케이스 0건 | US당 최소 1개 엣지 케이스 필수 |
 | **침묵 충돌** | 상충하는 요구사항을 조용히 선택 | 충돌 명시 + 사용자 확인 요청 |
 | **이중 질문** | PP와 PM에서 같은 질문 반복 | PP 라운드에서 수집된 정보를 요구사항 구조화에 직접 재활용 |
-| **인터뷰 피로** | 질문이 너무 많아 사용자가 지침 | depth별 질문 상한 준수 (light: 4개, full: 10개) |
+| **인터뷰 피로** | 질문이 너무 많아 사용자가 지침 | depth별 소프트 리밋 + Continue Gate (사용자가 계속/중단 선택) |
+| **질문 상한 자동 종료** | 사용자 의사와 무관하게 인터뷰가 끊김 | 소프트 리밋 도달 시 Continue Gate 제시 — 사용자가 연장 가능 |
+| **불확실성 묵살 (skip)** | 상세 프롬프트에서 암묵적 가정/모호한 기준을 놓침 | skip 모드에서도 Uncertainty Scan으로 HIGH 불확실성 사전 식별 |
+
+---
+
+### 3.4 Continue Gate 설계
+
+질문 상한은 **소프트 리밋**이다. 상한 도달 시 자동 종료 대신 사용자에게 선택권을 부여한다:
+
+| depth | 소프트 리밋 | Continue Gate 동작 |
+|-------|-----------|-------------------|
+| skip | 3개 | Uncertainty Scan HIGH 항목 3개 후 → 남은 항목 있으면 Continue Gate |
+| light | 4개 | PP Round 1-2 + 소크라틱 2개 후 → 남은 불확실성 있으면 Continue Gate |
+| full | 10개 | PP 4 Round + 소크라틱 + 옵션 후 → 남은 불확실성 있으면 Continue Gate |
+
+#### Continue Gate 선택지
+
+| 선택 | 동작 |
+|------|------|
+| **계속 진행** | 남은 불확실 항목에 대해 추가 질문 수행. 다시 리밋 도달 시 Continue Gate 재제시. |
+| **여기서 멈추기** | 남은 불확실 항목을 **Deferred Uncertainties**로 분류: |
+| | - 관련 PP에 PROVISIONAL 태깅 + 불확실 사유 메모 |
+| | - Side Interview 대상 목록에 등록 (실행 중 해당 Phase 진입 전 확인) |
+| | - Pre-Execution Analysis에 uncertainty_notes로 전달 |
+| **전체 종료** | 불확실 항목을 무시하고 현재 상태로 진행 |
+
+#### Deferred Uncertainties 후속 해소 경로
+
+```
+인터뷰 중단
+  ↓
+pivot-points.md 하단에 "Deferred Uncertainties" 섹션 기록
+  ↓
+Step 1-B Pre-Execution Analysis에서 참조
+  → 추가 risk 요인으로 반영
+  → 해당 Phase의 risk_assessment에 +0.1 가산
+  ↓
+Step 4 Phase Execution 중 Side Interview 트리거
+  → Deferred Uncertainties 목록의 해당 Phase 항목이 존재하면
+  → Phase Runner 실행 전에 사용자에게 확인 질문
+  → 응답으로 PROVISIONAL → CONFIRMED 승격 또는 PP 수정
+```
+
+이 설계의 핵심: **사용자가 인터뷰 피로를 느끼면 즉시 멈출 수 있고, 남은 불확실성은 실행 과정에서 필요한 시점에 just-in-time으로 해소**된다. 인터뷰에서 모든 것을 완벽하게 정의할 필요가 없다.
 
 ---
 
@@ -187,10 +231,16 @@ elif interview_depth == "full":
 
 ### 4.1 interview_depth별 통합 흐름
 
-#### skip 모드 (기존과 동일)
+#### skip 모드 (+ Uncertainty Scan)
 ```
-프롬프트에서 PP 직접 추출 → PP 명세 출력
-(요구사항 구조화 없음 — 프롬프트가 이미 충분히 상세)
+프롬프트에서 PP 직접 추출
+  → Uncertainty Scan (5차원: 모호한 기준, 암묵적 가정, PP 충돌, 엣지 케이스, 미확정 기술 결정)
+  → HIGH 0건: 질문 없이 진행 (MED/LOW는 Step 1-B에 uncertainty_notes 전달)
+  → HIGH 1~3건: 각 항목에 대해 타겟 소크라틱 질문 (Hypothesis-as-Options)
+  → HIGH 4건+: 상위 3건만 질문, 나머지는 PROVISIONAL 태깅
+  → PP 보강 (criteria 구체화, priority 확정, 새 PP 추가)
+  → Uncertainty Resolution Log 기록
+  → PP 명세 출력
 ```
 
 #### light 모드 (PP Round 1-2 + 경량 PM)
@@ -716,8 +766,9 @@ Test Agent
 | 차원 | skip | light | full |
 |------|------|-------|------|
 | **PP Rounds** | 프롬프트 직접 추출 | Round 1-2 | Round 1-4 전체 |
+| **Uncertainty Scan** | **✅ PP 추출 후 5차원 불확실성 검사** | PP 라운드에서 자연 해소 | PP 라운드에서 자연 해소 |
 | **Job Definition** | 없음 | PP Round 1에서 자동 도출 | Full JTBD |
-| **소크라틱 질문** | 없음 | 명확화 + 가정 탐색 (2유형) | 6유형 전체 |
+| **소크라틱 질문** | **불확실 HIGH 항목 한정 (0~3개)** | 명확화 + 가정 탐색 (2유형) | 6유형 전체 |
 | **User Stories** | 없음 | 경량 구조화 | 전체 작성 |
 | **Gherkin AC** | 없음 | 핵심 AC만 | 전체 + Edge Cases |
 | **솔루션 옵션** | 없음 | 없음 | 3개+ |
@@ -725,7 +776,7 @@ Test Agent
 | **MoSCoW** | 없음 | 암시적 (Must만) | 명시적 분류 |
 | **증거 태깅** | 없음 | 🟢/🔴만 | 🟢/🟡/🔴 전체 |
 | **다관점 검토** | 없음 | 없음 | 3관점 전체 |
-| **예상 토큰** | ~0.5K | ~2K | ~5K |
+| **예상 토큰** | ~0.5K (불확실 0건) ~ ~1.5K (3건) | ~2K | ~5K |
 | **모델** | Opus | Sonnet | Opus |
 
 ### 8.2 interview_depth 결정 기준 (Triage 기존 로직)
@@ -735,12 +786,14 @@ Test Agent
 ```
 interview_depth =
   if information_density >= 7:
-    "skip"        # 요청이 이미 상세 → PP 직접 추출, PM 불필요
+    "skip"        # 요청이 이미 상세 → PP 직접 추출 + Uncertainty Scan
   elif information_density >= 4:
     "light"       # 적당히 상세 → PP 핵심 + 경량 요구사항
   else:
     "full"        # 모호한 요청 → PP 전체 + 완전 PM
 ```
+
+> **Uncertainty Scan (skip 모드 보강)**: "정보 밀도가 높다"는 것은 양이 많다는 의미이지, 모든 것이 명확하다는 의미가 아니다. skip 모드에서도 PP 추출 후 5차원 불확실성 검사(모호한 기준, 암묵적 가정, PP 충돌, 엣지 케이스, 미확정 기술 결정)를 수행하고, HIGH 불확실성이 발견되면 해당 항목에 대해서만 타겟 소크라틱 질문을 수행한다(최대 3개). 이는 skip의 경량성을 유지하면서도 실행 단계의 circuit break/재분해를 예방한다. 상세 프로토콜은 `agents/mpl-interviewer.md`의 `<Uncertainty_Scan>` 섹션 참조.
 
 ### 8.3 Pipeline Tier와의 상호작용
 

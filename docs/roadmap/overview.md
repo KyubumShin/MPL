@@ -297,7 +297,7 @@ After: 시스템이 자동 판정 + 동적 전환
 
 | ID | 항목 | 상태 | 설명 |
 |----|------|------|------|
-| F-26 | **mpl-interviewer v2: 소크라틱 통합 인터뷰** | ✅ **S6 완료** | 기존 mpl-interviewer를 확장하여 PP 발견 + 요구사항 구조화를 **단일 인터뷰로 통합**. 별도 PM 단계(Step 0.5-PM) 추가 대신, 기존 `interview_depth`(skip/light/full)에 따라 PM 역할 범위를 자동 조절. **skip**: PP 직접 추출 (PM 없음, 기존 동작 유지). **light**: Round 1-2 (PP) + 경량 요구사항 구조화(User Stories + AC). **full**: **소크라틱 6유형 질문** + **솔루션 옵션 3+ 제시** + PP 발견 + JUSF 출력(JTBD + User Stories + Gherkin AC) 통합. AI_PM(kimsanguine/AI_PM) 레포의 소크라틱 접근법 차용: 사용자 가정을 도전하고, 반드시 3개 이상 옵션 비교 후 요구사항 확정. 멀티 관점 리뷰(엔지니어/아키텍트/사용자). 증거 태깅(🟢데이터/🟡유추/🔴가정). **Dual-Layer 출력**: YAML frontmatter + Markdown body. **MoSCoW + sequence_score** 우선순위. good/bad examples 아카이브로 자기 개선. 사용자 인터뷰 1회로 PP+요구사항 동시 해결 — 인터뷰 피로 제거. Net 5-10K 토큰 절감(Phase 0 반복 감소). **AI_PM + UAM uam-pm + mpl-interviewer 통합 설계: pm-design.md 참조** |
+| F-26 | **mpl-interviewer v2: 소크라틱 통합 인터뷰** | ✅ **S6 완료** | 기존 mpl-interviewer를 확장하여 PP 발견 + 요구사항 구조화를 **단일 인터뷰로 통합**. `interview_depth`(skip/light/full)에 따라 PM 역할 범위를 자동 조절. **skip**: PP 직접 추출 + **Uncertainty Scan**(5차원 불확실성 검사 → HIGH 항목만 타겟 질문). **light**: Round 1-2 + 경량 요구사항. **full**: 소크라틱 6유형 + 솔루션 옵션 3+ + JUSF. 질문 상한은 **소프트 리밋** — 도달 시 **Continue Gate**로 사용자가 계속/중단 선택. 중단 시 남은 불확실성은 **Deferred Uncertainties**로 PP PROVISIONAL 태깅 + Side Interview 대상 등록하여 실행 중 just-in-time 해소. AI_PM 소크라틱 접근법 차용. Dual-Layer 출력(YAML+Markdown). MoSCoW + sequence_score. good/bad examples 자기 개선. **Ouroboros "From Wonder to Ontology" 영감: 문서가 상세해도 불확실성은 존재한다** — pm-design.md, mpl-interviewer.md 참조 |
 | F-27 | **Reflexion 기반 Fix Loop 학습** | ✅ **S6 완료** | Fix Loop 진입 시 구조화된 반성(Self-Reflection) 단계 추가. Reflexion(NeurIPS 2023) + MAR(Multi-Agent Reflexion) 패턴 적용. **Reflection Template**: 실패 TODO → 증상 → 근본 원인 → 최초 이탈 지점 → 수정 전략 → 학습 추출. 반성 결과를 패턴 분류(type_mismatch, dependency_conflict, test_flake 등)하여 procedural.jsonl에 저장. 다음 실행 Phase 0에서 태스크 설명 유사도 기반으로 관련 패턴만 선택적 로드. Gate 2 실패 시 mpl-code-reviewer 피드백을 반성에 통합(MAR 패턴). HumanEval pass@1 +8.1% 개선 실적(Reflexion). F-25(procedural.jsonl)과 직접 시너지. **Reflexion + MAR 논문 참조** |
 | F-28 | **Phase별 동적 에이전트 라우팅** | ✅ **S6 완료** | Phase 특성에 따라 worker 프롬프트/모델을 동적 조정. 현재 모든 Phase에 동일한 mpl-worker 할당 → Phase 도메인별 특화 프롬프트 자동 선택. TDAG(Task Decomposition and Agent Generation) 패턴 참조. 예: DB 스키마 Phase → DB 특화 프롬프트, UI Phase → 디자인 인식 프롬프트, 복잡 알고리즘 Phase → opus 모델. Decomposer 출력에 `phase_domain` 태그 추가 → Phase Runner가 매칭 프롬프트 선택. **TDAG + Anthropic 모델 라우팅 권장사항 참조** |
 
@@ -308,7 +308,7 @@ After: 시스템이 자동 판정 + 동적 전환
 | F-30 | **Error Context File Preservation** | ✅ **S5 완료** | Worker 실패 시 에러 전문을 `.mpl/mpl/phases/phase-N/errors/` 파일로 보존. Compaction 후에도 정확한 에러 정보로 fix loop 수렴. Phase Runner가 에러 파일 Write, orchestrator는 경로만 수신 |
 | F-31 | **Compaction-Aware Context Recovery** | 부분 구현 | PreCompact 훅에서 `.mpl/mpl/checkpoints/compaction-{N}.md` checkpoint 생성. compaction_count 3회 시 경고, 4회+ 시 세션 리셋 권장. Write-side 구현 완료, orchestrator read-side 경로 명시 TBD |
 | F-32 | **Adaptive Context Loading** | ✅ **S5 완료** | Phase 전환 시 context 상태 판단하여 로드량 3-way 분기: 동일 세션(최소 로드) / compaction 후(선택적 로드+checkpoint) / 새 세션(전체 로드). `last_phase_compaction_count` 필드로 compaction 감지 |
-| F-33 | **Session Budget Prediction & Auto-Continue** | 미구현 | Phase 완료 시 HUD context_window 데이터 기반으로 남은 Phase 예산을 예측. 부족 시 graceful pause → `.mpl/signals/session-handoff.json` 생성 → external watcher가 새 세션에서 자동 resume. Fail-open 설계: context-usage.json 없으면 기존 동작 유지. 15% safety margin |
+| F-33 | **Session Budget Prediction & Auto-Continue** | 부분 구현 | Phase 완료 시 HUD context_window 데이터 기반으로 남은 Phase 예산을 예측. 부족 시 graceful pause → `.mpl/signals/session-handoff.json` 생성. **구현 완료**: budget predictor 라이브러리(`hooks/lib/mpl-budget-predictor.mjs`), HUD bridge(`context-usage.json` 기록), 오케스트레이터 커맨드(Step 4.8 Graceful Pause Protocol). **미완료**: 외부 session watcher(`mpl-session-watcher.sh`), hooks.json 등록, end-to-end 통합 테스트 |
 
 #### LOW — 유지
 
@@ -406,9 +406,11 @@ Triage (Step 0) — 확장
 
 PP + 요구사항 통합 인터뷰 (Step 1) — mpl-interviewer v2      [F-26]
 ├── interview_depth에 따라 자동 범위 조절
-│   ├── skip: PP 직접 추출 (기존 동작 유지)
+│   ├── skip: PP 직접 추출 + Uncertainty Scan (HIGH만 타겟 질문)
 │   ├── light: Round 1-2 (PP) + 경량 요구사항 구조화
 │   └── full: 소크라틱 질문 + 옵션 3+ + PP + JUSF 출력
+├── Continue Gate: 소프트 리밋 도달 시 사용자 선택 (계속/멈추기)
+├── Deferred Uncertainties: 중단 시 PP PROVISIONAL + Side Interview 등록
 ├── Dual-Layer 출력: YAML frontmatter + Markdown body
 ├── Gherkin AC → Test Agent 입력
 └── good/bad examples 아카이브로 자기 개선

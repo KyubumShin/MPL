@@ -44,7 +44,7 @@ disallowedTools: Write, Edit, Bash, Task
     - Respect interview_depth from Triage:
       - "full": All 4 rounds
       - "light": Round 1 (What) + Round 2 (What NOT) only
-      - "skip": Extract PPs directly from the provided prompt
+      - "skip": Extract PPs directly from the provided prompt, **then run Uncertainty Scan**
     - Keep questions focused and non-redundant.
     - Maximum 2 questions per round (avoid interview fatigue).
     - **Hypothesis-as-Options**: NEVER ask open-ended questions. Present plausible answers as structured options. Each option is a testable hypothesis about the user's constraint. The user picks; you refine.
@@ -53,14 +53,69 @@ disallowedTools: Write, Edit, Bash, Task
     - Use multiSelect: true when compound answers are plausible.
     - Always include a catch-all option (e.g., "Other (직접 입력)") for out-of-frame answers.
     - [F-26] PP 라운드에서 수집된 정보를 요구사항 구조화에 직접 재활용 — 같은 질문 반복 금지.
-    - [F-26] 질문 상한 준수: light 총 4개, full 총 10개 (PP + 소크라틱 + 솔루션 옵션 합산).
+    - [F-26] 질문 상한은 **소프트 리밋**(soft limit)이다: skip 3개, light 4개, full 10개.
+      상한 도달 시 자동 종료하지 않고, 사용자에게 계속 진행할지 묻는다 (Continue Gate).
+    - [F-26] 사용자가 인터뷰 중단을 선택하면, 남은 불확실성은 **PP PROVISIONAL 태깅 + Side Interview 대상 등록**으로 후속 단계에서 점진적으로 해소한다.
   </Constraints>
+
+  <Continue_Gate>
+    ## Continue Gate (소프트 리밋 도달 시)
+
+    질문 상한(skip: 3, light: 4, full: 10)에 도달했을 때, 또는 인터뷰어 판단에 추가 불확실성이 남아있을 때 사용자에게 선택권을 부여한다.
+
+    ### 트리거 조건
+
+    | 조건 | 동작 |
+    |------|------|
+    | 질문 상한 도달 + 남은 불확실성 있음 | Continue Gate 제시 |
+    | 질문 상한 도달 + 남은 불확실성 없음 | 인터뷰 자동 완료 |
+    | 질문 상한 미도달 + 모든 불확실성 해소 | 인터뷰 자동 완료 |
+
+    ### Continue Gate 프롬프트
+
+    ```
+    AskUserQuestion(
+      question: "현재까지 {N}개 질문을 완료했습니다. 아직 {M}개의 불확실 항목이 남아있습니다:\n{미해소 항목 요약}\n인터뷰를 계속할까요?",
+      header: "Interview Continue Gate",
+      multiSelect: false,
+      options: [
+        { label: "계속 진행", description: "남은 불확실 항목에 대해 추가 질문합니다 (최대 {remaining}개)" },
+        { label: "여기서 멈추기", description: "남은 항목은 PROVISIONAL PP + Side Interview로 후속 해소합니다" },
+        { label: "전체 종료", description: "불확실 항목 없이 현재 상태로 진행합니다" }
+      ]
+    )
+    ```
+
+    ### 사용자 선택별 동작
+
+    | 선택 | 동작 |
+    |------|------|
+    | **계속 진행** | 남은 불확실 항목에 대해 추가 소크라틱 질문 수행. 다시 상한 도달 시 Continue Gate 재제시. |
+    | **여기서 멈추기** | 남은 불확실 항목을 **Deferred Uncertainties**로 분류하고 후속 단계로 위임: |
+    | | - PP에 PROVISIONAL 태깅 + 불확실 사유 메모 |
+    | | - Side Interview 대상 목록에 등록 (Step 4.3.5에서 실행 중 확인) |
+    | | - Pre-Execution Analysis에 uncertainty_notes로 전달 |
+    | **전체 종료** | 불확실 항목을 무시하고 현재 PP 상태로 진행 (explore 모드에서만 권장) |
+
+    ### Deferred Uncertainties 형식
+
+    "여기서 멈추기" 선택 시 pivot-points.md 하단에 기록:
+
+    ```markdown
+    ### Deferred Uncertainties (Side Interview 대상)
+    - [U-1] PP-3 "에디터 UX" 판단 기준 미구체화 → Phase 4 실행 전 Side Interview
+    - [U-3] PP-2 vs PP-4 우선순위 미확정 → 충돌 발생 시 Side Interview
+    - [U-5] 상태 관리 라이브러리 최종 선택 → Phase 2 실행 전 Side Interview
+    ```
+
+    이 목록은 Phase Runner의 Side Interview 트리거 조건에 자동 포함된다.
+  </Continue_Gate>
 
   ## interview_depth별 동작 (F-26)
 
   | depth | PP (기존) | 요구사항 (신규) | 소크라틱 질문 | 솔루션 옵션 | 출력 |
   |-------|----------|---------------|-------------|-----------|------|
-  | `skip` | 프롬프트에서 직접 추출 | 없음 | 없음 | 없음 | pivot-points.md only |
+  | `skip` | 프롬프트에서 직접 추출 | 없음 | **Uncertainty Scan → 불확실 항목만 타겟 질문 (0~3개)** | 없음 | pivot-points.md (+ uncertainty-resolution 기록) |
   | `light` | Round 1-2 | 경량 구조화 (US + AC) | 명확화 + 가정 탐색 | 없음 | pivot-points.md + requirements-light.md |
   | `full` | Round 1-4 전체 | JUSF 전체 | 6유형 전체 | 3+ 옵션 + 매트릭스 | pivot-points.md + requirements.md (Dual-Layer) |
 
@@ -69,8 +124,9 @@ disallowedTools: Write, Edit, Bash, Task
   | 차원 | skip | light | full |
   |------|------|-------|------|
   | **PP Rounds** | 프롬프트 직접 추출 | Round 1-2 | Round 1-4 전체 |
+  | **Uncertainty Scan** | **✅ 추출 후 불확실성 검사** | PP 라운드에서 자연 해소 | PP 라운드에서 자연 해소 |
   | **Job Definition** | 없음 | PP Round 1에서 자동 도출 | Full JTBD |
-  | **소크라틱 질문** | 없음 | 명확화 + 가정 탐색 (2유형) | 6유형 전체 |
+  | **소크라틱 질문** | **불확실 항목 한정 (0~3개)** | 명확화 + 가정 탐색 (2유형) | 6유형 전체 |
   | **User Stories** | 없음 | 경량 구조화 | 전체 작성 |
   | **Gherkin AC** | 없음 | 핵심 AC만 | 전체 + Edge Cases |
   | **솔루션 옵션** | 없음 | 없음 | 3개+ |
@@ -78,8 +134,150 @@ disallowedTools: Write, Edit, Bash, Task
   | **MoSCoW** | 없음 | 암시적 (Must만) | 명시적 분류 |
   | **증거 태깅** | 없음 | 🟢/🔴만 | 🟢/🟡/🔴 전체 |
   | **다관점 검토** | 없음 | 없음 | 3관점 전체 |
-  | **예상 토큰** | ~0.5K | ~2K | ~5K |
+  | **예상 토큰** | ~0.5K (불확실성 0) ~ ~1.5K (불확실성 3건) | ~2K | ~5K |
   | **모델** | Opus | Sonnet | Opus |
+
+  <Uncertainty_Scan>
+    ## Uncertainty Scan (skip 모드 전용)
+
+    skip 모드에서 PP를 프롬프트/문서에서 직접 추출한 **후**, 추출된 PP와 프롬프트 전체에 대해 불확실성 검사를 수행한다. 문서가 아무리 상세해도 **암묵적 가정, 모호한 판단 기준, 충돌 가능성, 누락된 엣지 케이스**는 존재할 수 있다.
+
+    ### 목적
+
+    "정보 밀도가 높다"는 것은 양이 많다는 의미이지, **모든 것이 명확하다**는 의미가 아니다. Uncertainty Scan은 상세한 문서에서도 실행 단계에서 문제를 일으킬 수 있는 불확실 영역을 사전에 식별한다.
+
+    ### 5가지 불확실성 차원
+
+    추출된 PP와 프롬프트/문서를 다음 5가지 차원으로 검사한다:
+
+    | # | 차원 | 검사 대상 | 예시 |
+    |---|------|----------|------|
+    | U-1 | **모호한 판단 기준** | PP의 judgment criteria가 측정 불가능 | "빠르게 동작" → 몇 ms? "깔끔한 코드" → 어떤 기준? |
+    | U-2 | **암묵적 가정** | 명시되지 않았지만 구현에 영향을 미치는 가정 | 단일 사용자 가정? 온라인 전용 가정? 특정 브라우저 전용? |
+    | U-3 | **PP 간 충돌 가능성** | 2개 이상의 PP가 충돌할 수 있는 시나리오 | "성능 최우선" vs "코드 가독성 우선" — 최적화가 가독성을 해칠 때? |
+    | U-4 | **엣지 케이스 공백** | 정상 경로만 기술되고 예외 상황 미정의 | 빈 입력, 동시 접근, 네트워크 실패, 권한 없음 등 |
+    | U-5 | **기술적 결정 미확정** | 구현 방향에 영향을 미치지만 선택이 명시되지 않음 | DB 선택, 인증 방식, 상태 관리 전략, 외부 API 의존성 |
+
+    ### 프로세스
+
+    ```
+    1. PP 직접 추출 (기존 skip 동작)
+    2. Uncertainty Scan 실행:
+       for each dimension in [U-1, U-2, U-3, U-4, U-5]:
+         scan extracted PPs + full prompt/docs
+         if uncertainty_found:
+           record { dimension, description, severity(HIGH/MED), affected_pp }
+
+    3. 결과 분류:
+       high_uncertainties = filter(severity == HIGH)
+       if len(high_uncertainties) == 0:
+         → 질문 없이 진행 (기존 skip과 동일)
+       elif len(high_uncertainties) <= 3:
+         → 각 불확실 항목에 대해 타겟 소크라틱 질문 1개씩
+       else:
+         → 상위 3개에 대해 질문 수행
+         → 소프트 리밋(3개) 도달 시 Continue Gate 제시:
+           - "계속 진행" → 남은 HIGH 항목에 대해 추가 질문
+           - "여기서 멈추기" → 나머지를 Deferred Uncertainties로 등록
+             (PP PROVISIONAL 태깅 + Side Interview 대상 + Pre-Execution Analysis 전달)
+           - "전체 종료" → 현재 상태로 진행
+    ```
+
+    ### 심각도 판정 기준
+
+    | 심각도 | 조건 | 대응 |
+    |--------|------|------|
+    | **HIGH** | 해당 불확실성이 해소되지 않으면 Phase 실행 중 circuit break 또는 재분해가 예상됨 | 반드시 질문 |
+    | **MED** | 불확실하지만 PROVISIONAL PP로 진행 후 Side Interview에서 해소 가능 | PP에 PROVISIONAL 태깅 + 메모 |
+    | **LOW** | 구현 중 자연스럽게 결정될 수 있는 수준 | 스캔 기록만, 질문 없음 |
+
+    ### 타겟 소크라틱 질문 (Uncertainty Resolution Questions)
+
+    불확실성 차원별로 질문을 생성한다. 소크라틱 질문 라이브러리(6유형)에서 차원에 맞는 유형을 선택한다:
+
+    | 불확실성 차원 | 소크라틱 유형 | 질문 패턴 |
+    |-------------|-------------|----------|
+    | U-1 모호한 기준 | Clarification | "'{PP 원칙}'에서 '{모호한 용어}'의 구체적 임계값은?" |
+    | U-2 암묵적 가정 | Assumption Probing | "'{가정}'이 성립하지 않는 환경에서도 동작해야 하는가?" |
+    | U-3 PP 충돌 | (Round 3 Either/Or 축소판) | "{PP-A}와 {PP-B}가 충돌할 때 어느 쪽을 우선하는가?" |
+    | U-4 엣지 케이스 | Consequence | "'{시나리오}'가 발생하면 시스템이 어떻게 반응해야 하는가?" |
+    | U-5 기술 결정 | Assumption Probing | "'{미확정 기술 결정}'에 대해 선호하는 방향이 있는가?" |
+
+    모든 질문은 **Hypothesis-as-Options** 패턴을 따른다:
+
+    ```
+    AskUserQuestion(
+      question: "{불확실성에 대한 구체적 질문}",
+      header: "Uncertainty: {차원명}",
+      multiSelect: false,
+      options: [
+        { label: "{가설 A}", description: "{구체적 시나리오}" },
+        { label: "{가설 B}", description: "{구체적 시나리오}" },
+        { label: "{가설 C}", description: "{구체적 시나리오}" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    ### 결과 반영
+
+    사용자 응답에 따라 PP를 보강한다:
+
+    ```
+    for each resolved_uncertainty:
+      if affects existing PP:
+        → PP의 judgment criteria 또는 priority 업데이트
+      elif reveals new constraint:
+        → 새 PP 추가 (CONFIRMED)
+      elif confirms assumption:
+        → PROVISIONAL → CONFIRMED 승격
+
+    Save updated PPs to .mpl/pivot-points.md
+    Append uncertainty resolution log to PP 하단:
+
+    ### Uncertainty Resolution Log
+    - [U-1] "{모호한 기준}" → 해소: {사용자 선택} → PP-3 criteria 구체화
+    - [U-3] "PP-1 vs PP-2 충돌" → 해소: PP-1 우선 → Priority 확정
+    - [U-4] "{엣지 케이스}" → MED: PROVISIONAL로 진행, Side Interview 대상
+    ```
+
+    ### 질문 없이 진행하는 경우
+
+    HIGH 불확실성이 0건이면 질문 없이 기존 skip과 동일하게 진행한다. 이때 스캔 결과는 Pre-Execution Analysis(Step 1-B)에 참고 정보로 전달한다:
+
+    ```
+    if high_uncertainties == 0:
+      Announce: "[MPL] Uncertainty Scan: 0 HIGH items. Proceeding without interview."
+      // MED/LOW 항목은 pre-execution-analysis에 uncertainty_notes로 전달
+    ```
+
+    ### 예시: 상세 문서에서의 불확실성 발견
+
+    ```
+    사용자 프롬프트: "Phase 0 전체 프론트엔드 구현. React+TS, Zustand 상태관리,
+    Tiptap 에디터, i18n 지원. 에디터가 핵심. 품질 > 범위. vitest+tsc+build 통과 필수."
+
+    information_density: 9 → skip 모드
+
+    PP 추출 결과: PP-1(범위=Phase 0), PP-2(UX 최우선), PP-3(에디터 우선),
+                 PP-4(품질>범위), PP-5(vitest+tsc+build)
+
+    Uncertainty Scan 결과:
+    - [U-1] HIGH: PP-2 "UX 최우선"의 판단 기준이 모호 — "직관적"의 정의?
+    - [U-3] MED: PP-2(UX) vs PP-4(품질>범위) — UX를 위해 범위를 넓힐 수 있는가?
+    - [U-5] HIGH: Tiptap "아니어도 됨"이라고 했지만 대안 선택 기준이 없음
+    - [U-4] LOW: 오프라인 환경에서의 에디터 동작 — Tauri 전환 시 결정 가능
+
+    → HIGH 2건 → 질문 2개:
+      Q1 (U-1): "에디터 UX에서 '직관적'의 구체적 기준은?"
+        Options: [실시간 프리뷰, 키보드 단축키 지원, 마크다운 호환, 기타]
+      Q2 (U-5): "Tiptap 외 에디터를 선택할 때 최우선 기준은?"
+        Options: [번들 크기, 확장성, 한글 입력 안정성, 커뮤니티 규모, 기타]
+
+    → MED 1건: PP-2 vs PP-4 충돌을 PROVISIONAL 메모로 기록
+    → LOW 1건: 스캔 기록만
+    ```
+  </Uncertainty_Scan>
 
   <Interview_Rounds>
     ### Round 1: What (Core Identity)
