@@ -42,7 +42,10 @@ Task(subagent_type="mpl-decomposer", model="opus",
      {pre_execution_analysis from .mpl/mpl/pre-execution-analysis.md}
 
      ## Task
-     Break the user request into ordered phases. Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
+     Break the user request into ordered phases that cover the ENTIRE scope of the request.
+     CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
+
+     Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|infra|general),
      scope, impact (create/modify/affected_tests/affected_config),
      interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/description),

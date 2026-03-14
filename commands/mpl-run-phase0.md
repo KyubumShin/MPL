@@ -291,9 +291,9 @@ After tier is determined, subsequent steps are selected per tier:
 
 | Step | Frugal | Standard | Frontier |
 |------|--------|----------|----------|
-| Step 0.2 Interview Depth | skip | light | full detection |
+| Step 0.2 Interview Depth | light (+ Uncertainty Scan) | light | full detection |
 | Step 0.5 Maturity | skip | read config | read config |
-| Step 1 PP + 요구사항 인터뷰 (v2) | skip (extract from prompt) | light (Round 1+2 + 경량 요구사항) | full (4 rounds + 소크라틱 + JUSF) |
+| Step 1 PP + 요구사항 인터뷰 (v2) | light (Round 1+2 + Uncertainty Scan) | light (Round 1+2 + 경량 요구사항) | full (4 rounds + 소크라틱 + JUSF) |
 | Step 1-B Pre-Execution | skip | skip | full |
 | Step 2 Codebase Analysis | skip (use scan) | structure + tests only | full (6 modules) |
 | Step 2.5 Phase 0 Enhanced | Step 4 only (Error Spec) | Step 4 only (Error Spec) | complexity-adaptive |
@@ -302,7 +302,8 @@ After tier is determined, subsequent steps are selected per tier:
 
 ```
 if pipeline_tier == "frugal":
-  -> Skip to Step 2.5.5 (Error Spec only)
+  -> Continue to Step 0.2 (interview_depth = "light" + Uncertainty Scan)
+  -> Then Step 1 (light interview) → Step 2.5.5 (Error Spec only)
   -> Then proceed directly to Phase Execution (single fix cycle)
 
 if pipeline_tier == "standard":
@@ -352,23 +353,31 @@ Write(".mpl/mpl/RUNBOOK.md"):
 
 ### 0.2: Interview Depth
 
+**인터뷰는 항상 실행된다.** 전체 스펙 구현을 위해 사전 불확실성 해소가 필수적이다.
+인터뷰를 생략하면 실행 중 CRITICAL discovery가 빈발하여 Side Interview로 파이프라인이 느려진다.
+
 ```
 interview_depth = classify_prompt(user_request):
   information_density = count(explicit_constraints, specific_files, measurable_criteria, tradeoff_choices)
 
   if information_density >= 8 AND has_explicit_constraints AND has_success_criteria:
-    -> "skip" (prompt is PP-grade; extract PPs directly)
+    -> "light" (Round 1 + Round 2 + Uncertainty Scan for HIGH items)
   elif information_density >= 4 AND has_some_constraints:
     -> "light" (Round 1 + Round 2 only)
   else:
     -> "full" (all 4 rounds)
 ```
 
+> **NOTE**: `"skip"` 옵션은 제거되었다. 아무리 상세한 프롬프트라도 암묵적 가정, PP 간 충돌,
+> 스펙 모호성이 존재할 수 있다. 최소 light 인터뷰(Round 1+2)를 통해 이를 사전 검출한다.
+> 고밀도 프롬프트(density ≥ 8)의 경우, light 인터뷰 후 Uncertainty Scan을 추가 실행하여
+> HIGH 불확실성 항목에 대해 타겟 질문(최대 3개)을 수행한다.
+
 | interview_depth | Condition | Interview Behavior |
 |-----------------|-----------|-------------------|
 | `"full"` | Vague/broad requests (density < 4) | PP 4-round full interview (default) |
 | `"light"` | Specific but incomplete (density 4-7) | What + What NOT only |
-| `"skip"` | Very detailed with constraints (density 8+) | Extract PPs directly, then **Uncertainty Scan** (0~3 targeted questions on uncertain areas only) |
+| `"light"` | Very detailed with constraints (density 8+) | What + What NOT + **Uncertainty Scan** (0~3 targeted questions on HIGH items) |
 
 Announce: `[MPL] Triage: interview_depth={depth}. Prompt density: {score}.`
 
@@ -396,43 +405,10 @@ Announce: `[MPL] Maturity mode: {mode}. Phase sizing: {S/M/L}`
 
 interview_depth에 따라 인터뷰 범위가 자동 조절된다:
 
-### depth == "skip" (+ Uncertainty Scan)
-
-프롬프트에서 PP 직접 추출 후, **Uncertainty Scan**으로 불확실 영역을 식별한다.
-문서가 상세해도(information_density >= 8) 암묵적 가정, 모호한 기준, PP 간 충돌 가능성은 존재할 수 있다.
-Uncertainty Scan이 HIGH 항목을 발견하면 해당 항목에 대해서만 타겟 소크라틱 질문을 수행한다(최대 3개).
-
-```
-1. Extract PPs directly from user prompt → draft PPs
-2. Run Uncertainty Scan on draft PPs + full prompt (3축 × 3 = 9차원 + 축 간 교차):
-   [기획] U-P1: 타겟 사용자 불명확, U-P2: 핵심 가치/우선순위 불명확, U-P3: 성공 측정 기준 부재
-   [디자인] U-D1: 비주얼 디자인 시스템 부재, U-D2: 사용자 플로우 미정의, U-D3: 정보 계층 불명확
-   [개발] U-E1: 모호한 판단 기준, U-E2: 암묵적 가정, U-E3: 기술적 결정 미확정
-   [교차] 기획↔디자인, 디자인↔개발, 기획↔개발 일치성 + PP 축 편향 체크
-3. Classify: HIGH (circuit break 예상) / MED (PROVISIONAL로 진행 가능) / LOW (자연 해소)
-4. if HIGH == 0:
-     → 질문 없이 진행 (기존 skip과 동일)
-     → MED/LOW는 Step 1-B pre-execution-analysis에 uncertainty_notes로 전달
-   elif HIGH >= 1:
-     → HIGH 항목을 우선순위순으로 정렬
-     → 각 항목에 대해 Hypothesis-as-Options 질문 1개씩 수행
-     → 소프트 리밋(3개) 도달 시 Continue Gate:
-       - "계속 진행" → 남은 HIGH 항목에 대해 추가 질문
-       - "여기서 멈추기" → 남은 항목은 Deferred Uncertainties로:
-         PP PROVISIONAL 태깅 + Side Interview 대상 등록 + Step 1-B 전달
-       - "전체 종료" → 현재 상태로 진행
-     → 응답으로 PP criteria 구체화, priority 확정, 또는 새 PP 추가
-5. Save finalized PPs to .mpl/pivot-points.md
-   (하단에 Uncertainty Resolution Log + Deferred Uncertainties 포함)
-6. Proceed to Step 1-B
-```
-
-질문 소프트 리밋: **3개** (skip 모드의 경량성 유지, Continue Gate로 사용자가 연장 가능).
-모델: **opus** (불확실성 판별에 추론 깊이 필요).
-
 ### depth == "light"
 
-Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가:
+Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가.
+**고밀도 프롬프트(density ≥ 8)의 경우**, Round 1-2 후 Uncertainty Scan을 추가 실행한다:
 
 1. **Round 1**: "정확히 무엇을 원하는가?" (PP 후보 추출)
 2. **Round 2**: "절대 깨뜨리면 안 되는 것은?" (PP 제약 + 범위 경계)
@@ -443,7 +419,21 @@ Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가:
    - MoSCoW 분류 (Must/Should/Could)
    - 증거 태깅 (🟢/🔴)
    - 저장: `.mpl/pm/requirements-light.md`
-4. PP 확정: pivot-points.md 저장
+4. **[고밀도 전용] Uncertainty Scan** (information_density ≥ 8일 때만):
+   - Round 1-2에서 추출한 draft PPs + 전체 프롬프트에 대해 Uncertainty Scan 실행
+   - 3축 × 3 = 9차원 + 축 간 교차 분석:
+     [기획] U-P1: 타겟 사용자 불명확, U-P2: 핵심 가치/우선순위 불명확, U-P3: 성공 측정 기준 부재
+     [디자인] U-D1: 비주얼 디자인 시스템 부재, U-D2: 사용자 플로우 미정의, U-D3: 정보 계층 불명확
+     [개발] U-E1: 모호한 판단 기준, U-E2: 암묵적 가정, U-E3: 기술적 결정 미확정
+     [교차] 기획↔디자인, 디자인↔개발, 기획↔개발 일치성 + PP 축 편향 체크
+   - Classify: HIGH (circuit break 예상) / MED (PROVISIONAL로 진행 가능) / LOW (자연 해소)
+   - if HIGH == 0: MED/LOW는 Step 1-B에 uncertainty_notes로 전달
+   - elif HIGH >= 1: HIGH 항목에 대해 Hypothesis-as-Options 질문 (최대 3개)
+     → 소프트 리밋(3개) 도달 시 Continue Gate:
+       - "계속 진행" → 남은 HIGH 항목에 대해 추가 질문
+       - "여기서 멈추기" → 남은 항목은 Deferred Uncertainties (PP PROVISIONAL 태깅)
+       - "전체 종료" → 현재 상태로 진행
+5. PP 확정: pivot-points.md 저장
 
 ### depth == "full"
 
@@ -470,11 +460,6 @@ Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가:
 ```
 if .mpl/pivot-points.md exists -> Load PPs and proceed to Step 1-B
 
-elif interview_depth == "skip":
-  -> Extract PPs directly from user prompt
-  -> Save to .mpl/pivot-points.md
-  -> Proceed to Step 1-B
-
 else:
   AskUserQuestion: "프로젝트의 핵심 제약사항(Pivot Points)을 정의할까요?"
   Options:
@@ -482,14 +467,17 @@ else:
     2. "건너뛰기"    -> Proceed without PPs (explore mode only)
     3. "기존 PP 로드" -> Read from .mpl/pivot-points.md
 
+  // NOTE: "skip" 분기 제거됨. 인터뷰는 항상 최소 "light" 수준으로 실행.
+  // 고밀도 프롬프트도 Round 1+2 인터뷰를 거친 후 Uncertainty Scan 실행.
+
 if maturity_mode == "explore" -> PP is optional, skip if user declines
 ```
 
 ### 모델 라우팅 (F-26)
 
 ```
-if interview_depth == "skip":
-    model = "opus"              # PP 직접 추출 (기존과 동일, 빠르게 완료)
+if interview_depth == "light" AND information_density >= 8:
+    model = "opus"              # Round 1-2 + Uncertainty Scan (불확실성 판별에 추론 깊이 필요)
 elif interview_depth == "light":
     model = "sonnet"            # PP Round 1-2 + 경량 요구사항 구조화
 elif interview_depth == "full":

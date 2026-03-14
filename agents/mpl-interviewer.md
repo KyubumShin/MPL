@@ -19,6 +19,9 @@ disallowedTools: Write, Edit, Bash, Task
 
     Requirements structuring (F-26) extends this foundation: 불명확한 요구사항은 Phase 전체 토큰 낭비(~15-30K), Fix Loop 진입(~20-40K), 범위 확산으로 이어진다. 소크라틱 질문으로 이러한 비용을 Phase 0 이전에 ~1-4K 토큰 투자로 예방한다.
 
+    **CRITICAL: 인터뷰 품질이 Side Interview 빈도를 결정한다.**
+    실행 중 Side Interview(Step 4.3.5)는 CRITICAL + PP 충돌일 때만 발생한다. 인터뷰에서 불확실성을 충분히 해소하지 못하면, 실행 중 CRITICAL discovery가 빈발하여 전체 파이프라인이 느려진다. **사전 인터뷰에서 가능한 한 모든 불확실성을 해소**하는 것이 핵심이다.
+
     PP 발견 과정 자체가 요구사항 정의의 핵심 요소이다:
     - Round 1(What): 핵심 정체성 = PM의 "목적 정의"
     - Round 2(What NOT): 불변 경계 = PM의 "범위 정의"

@@ -762,35 +762,52 @@ else:
 5. Proceed to Redecomposition (4.4) if no escalation
 ```
 
-### 4.3.5: Side Interview (Conditional)
+### 4.3.5: Side Interview (Conditional — CRITICAL Only)
 
 After processing phase results, check if a Side Interview is needed before the next phase.
+Side Interview는 **실행 흐름을 blocking**하므로, 사전 인터뷰(Step 1)에서 충분히 해소하여 여기서의 발생을 최소화해야 한다.
 
-Trigger conditions (ANY triggers the interview):
-1. Phase reported a CRITICAL discovery
-2. Phase has 1+ H-items in verification_plan (human confirmation required)
-3. AD (After Decision) marker was created in this phase
+Trigger conditions — **CRITICAL 기준 강화**:
+1. Phase reported a **CRITICAL** discovery that **directly conflicts with a CONFIRMED PP** or makes further execution impossible
+2. ~~Phase has 1+ H-items in verification_plan~~ → H-items는 best-effort 자동 검증 시도 후, **검증 불가 + PP 위반 가능성**일 때만 트리거
+3. ~~AD marker was created~~ → AD marker는 로깅만 하고 **자동 진행**. PP 충돌이 있을 때만 Side Interview
 
-If NO triggers -> skip Side Interview, proceed to next phase.
+Non-CRITICAL items (H-items without PP conflict, AD markers, MED/LOW discoveries) are:
+- Logged to `.mpl/mpl/phases/phase-N/deferred-items.md`
+- Included in finalize report for post-hoc review
+- **NOT blocking** — execution continues automatically
 
-If triggered:
+If NO CRITICAL triggers -> skip Side Interview, proceed to next phase.
+
+If triggered (CRITICAL only):
 
 ```
 interview_role = determine_role(triggers):
-  - CRITICAL discovery -> "Issue Resolution": present discovery and ask for resolution
-  - H-items present -> "H-items Verification": present H-items for human judgment
-  - AD marker -> "AD Sufficiency Check": confirm AD interface definition is adequate
+  - CRITICAL discovery + PP conflict -> "Issue Resolution": present discovery and ask for resolution
+  - H-item + PP violation risk -> "PP Compliance Check": present conflict for human judgment
 
 AskUserQuestion based on interview_role:
-  - Issue Resolution: "Phase {N}에서 CRITICAL discovery가 발생했습니다: {description}. 어떻게 처리할까요?"
-    Options: "수용" | "반려" | "수정 후 계속"
-  - H-items: "Phase {N}의 H-items를 확인해주세요: {h_items_list}"
-    Options: "모두 확인됨" | "문제 있음 (수정 필요)"
-  - AD Sufficiency: "AD-{N}의 인터페이스 정의가 충분한가요? {ad_details}"
-    Options: "충분함" | "보완 필요"
+  - Issue Resolution: "Phase {N}에서 CRITICAL discovery가 발생했습니다: {description}. PP-{M}와 충돌합니다. 어떻게 처리할까요?"
+    Options: "수용 (PP 수정)" | "반려 (현재 PP 유지)" | "수정 후 계속"
+  - PP Compliance: "Phase {N}의 결과가 PP-{M}을 위반할 수 있습니다: {details}"
+    Options: "위반 아님 (계속)" | "위반 맞음 (수정 필요)"
 
 Record Side Interview results in `.mpl/mpl/phases/phase-N/side-interview.md`
 Report: "[MPL] Side Interview (Phase {N}): {role}. Result: {outcome}."
+```
+
+### Deferred Items (Non-Blocking)
+
+```
+// H-items, AD markers, MED/LOW discoveries → 자동 진행 + 로깅
+for each non_critical_item in phase_results:
+  append to `.mpl/mpl/phases/phase-N/deferred-items.md`:
+    - Type: {H-item|AD|Discovery}
+    - Summary: {description}
+    - PP Impact: {None|PP-N (low risk)}
+    - Action: Deferred to finalize review
+
+Report: "[MPL] Phase {N}: {count} items deferred (non-critical). Continuing."
 ```
 
 ### 4.3.6: Session Context Persistence (F-12)
