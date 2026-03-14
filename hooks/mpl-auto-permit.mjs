@@ -4,9 +4,12 @@
  * Auto-approves non-critical tool calls during MPL execution,
  * so the user is only prompted for critical/plan-related operations.
  *
+ * Supports learned allowlist: tools approved by the user once are
+ * auto-approved in subsequent calls within the same pipeline.
+ *
  * When MPL inactive: no interference (pass through)
  * When MPL active:
- *   - Auto-approve: Read, Glob, Grep, Agent, Task, safe Bash, WebSearch, WebFetch
+ *   - Auto-approve: Read, Glob, Grep, Agent, Task, safe Bash, learned tools
  *   - Pass through (user decides): destructive Bash, Edit/Write (handled by write-guard)
  */
 
@@ -24,6 +27,10 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+const { isLearnedTool, isLearnedBashCommand } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'permit-store.mjs')).href
+);
+
 // Tools that are always safe to auto-approve
 const ALWAYS_SAFE_TOOLS = new Set([
   'Read', 'Glob', 'Grep',
@@ -38,7 +45,7 @@ const ALWAYS_SAFE_TOOLS = new Set([
 // Tools handled by other hooks (write-guard) — don't interfere
 const DEFER_TOOLS = new Set(['Edit', 'Write']);
 
-// Destructive Bash patterns — must NOT auto-approve
+// Destructive Bash patterns — must NOT auto-approve (even if learned)
 const DANGEROUS_BASH_PATTERNS = [
   /git\s+push\s+.*--force/,
   /git\s+push\s+-f\b/,
@@ -73,6 +80,9 @@ const SAFE_BASH_PREFIXES = [
   'cd ',
   'date', 'whoami', 'env',
 ];
+
+// Export for permit-learner to check
+export { ALWAYS_SAFE_TOOLS, DEFER_TOOLS, SAFE_BASH_PREFIXES, DANGEROUS_BASH_PATTERNS };
 
 function isDangerousBash(command) {
   if (!command) return false;
@@ -119,30 +129,41 @@ async function main() {
     return;
   }
 
+  // Check learned allowlist (tools approved by user in this pipeline)
+  if (isLearnedTool(cwd, toolName)) {
+    console.log(JSON.stringify({ decision: 'approve' }));
+    return;
+  }
+
   // Bash: check command safety
   if (toolName === 'Bash') {
     const toolInput = data.tool_input || data.toolInput || {};
     const command = toolInput.command || '';
 
+    // Dangerous patterns always block (even if learned)
     if (isDangerousBash(command)) {
-      // Dangerous: let user decide
       console.log(JSON.stringify({}));
       return;
     }
 
+    // Built-in safe prefixes
     if (isSafeBash(command)) {
-      // Safe: auto-approve
+      console.log(JSON.stringify({ decision: 'approve' }));
+      return;
+    }
+
+    // Learned Bash prefixes
+    if (isLearnedBashCommand(cwd, command)) {
       console.log(JSON.stringify({ decision: 'approve' }));
       return;
     }
 
     // Unknown bash command: auto-approve (fail-open for productivity)
-    // Most MPL bash commands are tests/builds which are safe
     console.log(JSON.stringify({ decision: 'approve' }));
     return;
   }
 
-  // Unknown tool: pass through (user decides)
+  // Unknown tool: pass through (user decides) → learner will capture if approved
   console.log(JSON.stringify({}));
 }
 

@@ -42,6 +42,15 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-permit-learner.mjs\"",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "Stop": [
