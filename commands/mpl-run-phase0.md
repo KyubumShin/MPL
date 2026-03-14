@@ -407,23 +407,21 @@ interview_depth에 따라 인터뷰 범위가 자동 조절된다:
 
 ### depth == "light"
 
-Round 1-2 (What + What NOT) 실행 후, **Clarity Reinforcement**(약한 차원 보강) → 경량 요구사항 구조화.
-**고밀도 프롬프트(density ≥ 8)의 경우**, Uncertainty Scan도 추가 실행한다:
+```
+Phase 1 (mpl-interviewer):
+  Round 1 (What) + Round 2 (What NOT) + [고밀도 전용: Uncertainty Scan]
+  → Output: pivot-points.md + user_responses_summary
+
+Phase 2 (mpl-weak-interviewer):
+  Clarity Reinforcement → 경량 요구사항 구조화
+  → Output: clarity score + requirements-light.md
+```
+
+**Phase 1 상세**:
 
 1. **Round 1**: "정확히 무엇을 원하는가?" (PP 후보 추출)
 2. **Round 2**: "절대 깨뜨리면 안 되는 것은?" (PP 제약 + 범위 경계)
-3. **[F-37] Phase 2: Clarity Reinforcement** (약한 차원 보강):
-   - Phase 1에서 수집된 PP 응답을 5차원(Goal/Boundary/Priority/Criteria/Context)으로 점수화
-   - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 2개)
-   - 점수 재계산 → PP 업데이트
-4. **[NEW] 경량 요구사항 구조화**:
-   - 소크라틱 질문 (명확화 + 가정 탐색에서 1-2개 선별)
-   - 사용자 응답에서 User Stories 추출
-   - 각 US에 Acceptance Criteria 부착 (Gherkin 없이 자연어)
-   - MoSCoW 분류 (Must/Should/Could)
-   - 증거 태깅 (🟢/🔴)
-   - 저장: `.mpl/pm/requirements-light.md`
-4. **[고밀도 전용] Uncertainty Scan** (information_density ≥ 8일 때만):
+3. **[고밀도 전용] Uncertainty Scan** (information_density ≥ 8일 때만):
    - Round 1-2에서 추출한 draft PPs + 전체 프롬프트에 대해 Uncertainty Scan 실행
    - 3축 × 3 = 9차원 + 축 간 교차 분석:
      [기획] U-P1: 타겟 사용자 불명확, U-P2: 핵심 가치/우선순위 불명확, U-P3: 성공 측정 기준 부재
@@ -433,35 +431,53 @@ Round 1-2 (What + What NOT) 실행 후, **Clarity Reinforcement**(약한 차원 
    - Classify: HIGH (circuit break 예상) / MED (PROVISIONAL로 진행 가능) / LOW (자연 해소)
    - if HIGH == 0: MED/LOW는 Step 1-B에 uncertainty_notes로 전달
    - elif HIGH >= 1: HIGH 항목에 대해 Hypothesis-as-Options 질문 (최대 3개)
-     → 소프트 리밋(3개) 도달 시 Continue Gate:
-       - "계속 진행" → 남은 HIGH 항목에 대해 추가 질문
-       - "여기서 멈추기" → 남은 항목은 Deferred Uncertainties (PP PROVISIONAL 태깅)
-       - "전체 종료" → 현재 상태로 진행
-5. PP 확정: pivot-points.md 저장
+4. PP 확정: pivot-points.md 저장 + user_responses_summary 생성
+
+**Phase 2 상세** (mpl-weak-interviewer):
+
+1. **[F-37] Clarity Reinforcement**: PP 응답을 5차원(Goal/Boundary/Priority/Criteria/Context)으로 점수화
+   - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 2개)
+   - 점수 재계산 → PP 업데이트
+2. **경량 요구사항 구조화**:
+   - 소크라틱 질문 (명확화 + 가정 탐색에서 1-2개 선별)
+   - 사용자 응답에서 User Stories 추출
+   - 각 US에 Acceptance Criteria 부착 (Gherkin 없이 자연어)
+   - MoSCoW 분류 (Must/Should/Could)
+   - 증거 태깅 (🟢/🔴)
+   - 저장: `.mpl/pm/requirements-light.md`
 
 ### depth == "full"
 
-전체 4 Round + **Clarity Reinforcement** + 소크라틱 질문 + 솔루션 옵션 + JUSF:
+```
+Phase 1 (mpl-interviewer):
+  Round 1-4 전체
+  → Output: pivot-points.md + user_responses_summary
+
+Phase 2 (mpl-weak-interviewer):
+  Clarity Reinforcement → 소크라틱 질문 → 솔루션 옵션 → JUSF
+  → Output: clarity score + requirements-{hash}.md
+```
+
+**Phase 1 상세**:
 
 1. **Round 1-4**: 기존 PP 인터뷰 전체
-2. **[F-37] Phase 2: Clarity Reinforcement** (약한 차원 보강):
-   - Phase 1에서 수집된 PP 응답을 5차원(Goal/Boundary/Priority/Criteria/Context)으로 점수화
+2. PP 확정: pivot-points.md 저장 + user_responses_summary 생성
+
+**Phase 2 상세** (mpl-weak-interviewer):
+
+1. **[F-37] Clarity Reinforcement**: PP 응답을 5차원으로 점수화
    - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 4개)
    - 점수 재계산 → PP 업데이트
-3. **[NEW] 소크라틱 질문** (Round 5+): 6유형 중 태스크에 관련된 질문 2-4개 선별
-   - 코드베이스 컨텍스트 기반 질문 (기존 유사 기능, 의존성)
-   - AskUserQuestion으로 선택지 제공
-   - PP 라운드에서 이미 확인된 정보는 건너뜀
-4. **[NEW] 솔루션 옵션** (Round 6+): 3개 이상 옵션 + 트레이드오프 매트릭스
+2. **소크라틱 질문** (Round 5+): 6유형 중 태스크에 관련된 질문 2-4개 선별
+   - AskUserQuestion으로 선택지 제공; PP 라운드에서 이미 확인된 정보는 건너뜀
+3. **솔루션 옵션**: 3개 이상 옵션 + 트레이드오프 매트릭스
    - Minimal / Balanced / Comprehensive
-   - Impact / Complexity / Risk / Token Cost / Test Coverage 차원 평가
-   - 사용자 선택 -> selected_option 기록
-5. **[NEW] JUSF 출력**: JTBD + User Stories + Gherkin AC
+   - 사용자 선택 → selected_option 기록
+4. **JUSF 출력**: JTBD + User Stories + Gherkin AC
    - Dual-Layer: YAML frontmatter + Markdown body
    - 증거 태깅 (🟢/🟡/🔴)
-   - 멀티 관점 리뷰 (엔지니어/아키텍트/사용자)
+   - 멀티 관점 리뷰 (기획/디자인/개발)
    - 저장: `.mpl/pm/requirements-{hash}.md`
-6. PP 확정: pivot-points.md 저장
 
 ### 라우팅 로직
 
@@ -471,7 +487,7 @@ if .mpl/pivot-points.md exists -> Load PPs and proceed to Step 1-B
 else:
   AskUserQuestion: "프로젝트의 핵심 제약사항(Pivot Points)을 정의할까요?"
   Options:
-    1. "인터뷰 시작" -> Run mpl-interviewer v2 with interview_depth setting
+    1. "인터뷰 시작" -> Run two-phase interview (below)
     2. "건너뛰기"    -> Proceed without PPs (explore mode only)
     3. "기존 PP 로드" -> Read from .mpl/pivot-points.md
 
@@ -479,17 +495,31 @@ else:
   // 고밀도 프롬프트도 Round 1+2 인터뷰를 거친 후 Uncertainty Scan 실행.
 
 if maturity_mode == "explore" -> PP is optional, skip if user declines
+
+// Two-phase interview execution:
+Task(subagent_type="mpl-interviewer", ...)  // Phase 1: PP Discovery
+→ save pivot-points.md + user_responses_summary
+
+Task(subagent_type="mpl-weak-interviewer", ...)  // Phase 2: Clarity Reinforcement + Requirements
+→ save requirements-light.md or requirements-{hash}.md + clarity score
 ```
 
 ### 모델 라우팅 (F-26)
 
 ```
+// Phase 1 (mpl-interviewer):
 if interview_depth == "light" AND information_density >= 8:
     model = "opus"              # Round 1-2 + Uncertainty Scan (불확실성 판별에 추론 깊이 필요)
 elif interview_depth == "light":
-    model = "sonnet"            # PP Round 1-2 + 경량 요구사항 구조화
+    model = "sonnet"            # PP Round 1-2
 elif interview_depth == "full":
-    model = "opus"              # PP 전체 + 깊은 소크라틱 추론 + 솔루션 옵션
+    model = "opus"              # PP 전체 4 Round
+
+// Phase 2 (mpl-weak-interviewer):
+if interview_depth == "light":
+    model = "sonnet"            # Clarity Reinforcement + 경량 요구사항 구조화
+elif interview_depth == "full":
+    model = "opus"              # Clarity Reinforcement + 소크라틱 + 솔루션 옵션 + JUSF
 ```
 
 PP States: **CONFIRMED** (hard constraint, auto-reject on conflict) / **PROVISIONAL** (soft, HITL on conflict)

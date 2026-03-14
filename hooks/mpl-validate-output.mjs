@@ -34,6 +34,7 @@ export const VALIDATE_AGENTS = new Set([
   'mpl-worker',
   'mpl-phase-runner',
   'mpl-interviewer',
+  'mpl-weak-interviewer',
   'mpl-doctor',
   // mpl-critic: absorbed into mpl-decomposer risk_assessment (v3.1)
   'mpl-test-agent',
@@ -77,6 +78,10 @@ export const EXPECTED_SECTIONS = {
     'PP-',
     'Priority Order',
     'Interview Metadata',
+  ],
+  'mpl-weak-interviewer': [
+    'Clarity Score',
+    'Dimension Scores',
   ],
   // mpl-critic: removed in v3.1 (absorbed into mpl-decomposer risk_assessment)
   'mpl-test-agent': [
