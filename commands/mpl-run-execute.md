@@ -647,31 +647,40 @@ for each pair of pending TODOs:
   if intersection(files_a, files_b) is EMPTY:
     -> mark as independent, eligible for parallel dispatch
 
-// Parallel dispatch:
-for each independent TODO group:
-  // Model routing: opus for architecture changes or 3+ retry failures
-  worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
-  Task(subagent_type="mpl-worker", model=worker_model,
-       prompt="...", run_in_background=true)
+// Parallel dispatch with HARD LIMIT (F-36):
+MAX_CONCURRENT_WORKERS = 3  // UI 안정성을 위한 하드 리밋
 
-// Sequential fallback:
+independent_todos = todos.filter(independent)
+batches = chunk(independent_todos, MAX_CONCURRENT_WORKERS)  // 3개씩 배치
+
+for each batch in batches:
+  // 배치 내 worker들을 병렬 dispatch
+  for each todo in batch:
+    worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
+    Task(subagent_type="mpl-worker", model=worker_model,
+         prompt="...", run_in_background=true)
+
+  // 현재 배치의 모든 worker가 완료될 때까지 대기
+  // 다음 배치는 현재 배치 완료 후에만 시작
+  for each background task in batch:
+    result = await task completion
+    TaskUpdate(id=task_id, status=result.status)
+
+// Sequential fallback (파일 충돌 TODO):
 for each TODO with file conflicts:
   worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
   Task(subagent_type="mpl-worker", model=worker_model,
        prompt="...", run_in_background=false)
-
-// Wait and collect:
-for each background task:
-  result = await task completion
-  TaskUpdate(id=task_id, status=result.status)
 ```
 
 Constraints:
-- Maximum 3 concurrent background workers per phase
+- **HARD LIMIT: 최대 3개 동시 background worker** — 초과 시 배치 큐잉으로 대기
+  (Claude Code UI 안정성을 위한 제한. config로 조정 불가)
+- 배치 단위 실행: 3개 완료 → 다음 3개 시작 (동시 실행 수가 절대 3 초과하지 않음)
 - File conflict detection uses v3.1's existing overlap logic
 - If any parallel worker fails, remaining workers continue
 - Failed worker results feed into fix cycle (existing behavior)
-- Phase Runner must wait for ALL workers before proceeding to verification
+- Phase Runner must wait for ALL workers in current batch before starting next batch
 
 ### 4.3: Result Processing
 

@@ -27,6 +27,7 @@ disallowedTools: []
     - Scope discipline: ONLY work within this phase's scope. Do not implement features from other phases.
     - Impact awareness: primarily touch files listed in the impact section. If you need to touch a file not in the impact list, create a Discovery.
     - Worker delegation: delegate actual code changes to mpl-worker via Task tool. You plan and verify; workers implement.
+    - **Worker 동시 실행 제한: 최대 3개**. 독립 TODO가 4개 이상이면 3개씩 배치로 나누어 실행. 현재 배치의 모든 worker가 완료된 후 다음 배치를 시작. 이 제한은 Claude Code UI 안정성을 위한 하드 리밋이며 절대 초과하지 않는다.
     - Do not modify .mpl/state.json (orchestrator manages pipeline state).
     - Max 3 retries on verification failure in the same session. After 3 failures, report circuit_break.
     - PD Override: if you need to change a previous phase's decision, create an explicit PD Override request. Never silently change past decisions.
