@@ -307,6 +307,12 @@ After: 시스템이 자동 판정 + 동적 전환
 |----|------|------|------|
 | F-35 | **Full Scope Implementation** | ✅ **완료** | MPL이 주어진 스펙의 전체 범위를 구현하도록 보장. **4가지 핵심 변경**: (1) Decomposer의 Max Phases 하드캡 제거 → Typical Phases 가이드라인으로 변경, "core function" 스코핑 제거. (2) 인터뷰 필수화 — `skip` interview_depth 제거, 최소 `light`(Round 1+2) 보장. 고밀도 프롬프트(density ≥8)도 light + Uncertainty Scan 실행. (3) Side Interview를 CRITICAL + PP 충돌 시에만 트리거. H-items, AD 마커 등 비차단 항목은 `deferred-items.md`로 로그. (4) Interviewer에 인터뷰 품질 = Side Interview 빈도 감소 인사이트 추가. **변경 파일**: `mpl-decomposer.md`, `mpl-run-decompose.md`, `mpl-run-execute.md`, `mpl-run-phase0.md`, `mpl-interviewer.md` |
 
+#### Plan-Phase Compaction 방지 (2026-03-14)
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-36 | **Plan-Phase Context Offloading** | ✅ **완료** | Plan 단계(Step 0~3B)에서 compaction 발생을 방지. **3가지 변경**: (1) Step 2 Codebase Analysis를 `mpl-codebase-analyzer`(sonnet) 서브에이전트로 위임 (~5-10K 절감). (2) Step 2.5 Phase 0 Enhanced를 `mpl-phase0-analyzer`(sonnet) 서브에이전트로 위임 (~8-25K 절감). (3) Step 1-E Interview Snapshot — 인터뷰 완료 후 핵심 결과를 `.mpl/mpl/interview-snapshot.md`에 백업하여 compaction 후에도 복원 가능. 오케스트레이터 Plan 단계 토큰: ~29-65K → ~11-16K. **변경 파일**: `mpl-run-phase0.md`, 신규 에이전트 `mpl-codebase-analyzer.md`, `mpl-phase0-analyzer.md` |
+
 #### Compaction Resilience (2026-03-12 실험 기반)
 
 | ID | 항목 | 상태 | 설명 |

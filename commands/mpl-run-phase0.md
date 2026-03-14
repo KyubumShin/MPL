@@ -553,79 +553,157 @@ Save confirmation timestamp to `.mpl/mpl/state.json` as `pp_confirmed_at`.
 
 ---
 
-## Step 2: Codebase Analysis
+## Step 1-E: Interview Snapshot 저장 (Compaction 방어) [F-36]
 
-Done by the orchestrator using built-in tools (NOT an agent). No separate script.
-Saves result to `.mpl/mpl/codebase-analysis.json`.
-
-### Scout-Assisted Analysis (F-16)
-
-For Phase 0 codebase analysis, the orchestrator MAY delegate initial structure
-discovery to mpl-scout (haiku) to save sonnet/opus tokens:
+Step 1 완료 후, 인터뷰 결과를 파일로 백업한다. 이후 Step 2/2.5에서 compaction이 발생해도
+인터뷰에서 수집한 핵심 정보가 파일로 보존된다.
 
 ```
-scout_result = Task(subagent_type="mpl-scout", model="haiku",
-     prompt="""
-     Explore project structure for MPL Phase 0:
-     1. Glob("**/*.{ts,tsx,js,jsx,py,go,rs,java}") — file listing
-     2. Identify entry points (main.*, index.*, app.*)
-     3. Sample import depth for top 5 files
-     4. Check test infrastructure (frameworks, coverage)
-     5. List config files
-     """)
+Write(".mpl/mpl/interview-snapshot.md"):
+  # Interview Snapshot
+  Generated: {ISO timestamp}
+  Interview Depth: {interview_depth}
+  Information Density: {information_density}
+
+  ## Pivot Points Summary
+  {pivot-points.md 핵심 요약 — CONFIRMED/PROVISIONAL 목록}
+
+  ## User Request (Original)
+  {user_request 원문}
+
+  ## Key Decisions from Interview
+  {인터뷰에서 확정된 핵심 결정사항 3-5개}
+
+  ## Requirements (if generated)
+  {requirements-light.md 또는 requirements-{hash}.md 경로 참조}
+
+  ## Deferred Uncertainties
+  {있으면 목록, 없으면 "없음"}
+
+  ## Pre-Execution Analysis Summary
+  {pre-execution-analysis.md 핵심 요약 — 리스크, 갭, 권장 실행 순서}
 ```
 
-Scout results feed into Module 1-6 analysis, reducing orchestrator tool calls.
-If mpl-scout is unavailable, orchestrator performs analysis directly (existing behavior).
-
-### Module 1: Structure Analysis (Glob)
-
-```
-Glob("**/*.{ts,tsx,js,jsx,py,go,rs,java}")
-```
-Output: `directories` (path, files), `entry_points` (file, type), `file_stats` (total, by_type)
-
-### Module 2: Dependency Graph (ast_grep_search or Grep)
-
-```
-ast_grep_search(pattern="import $$$IMPORTS from '$MODULE'", language="typescript")
-```
-Output: `modules` (file, imports[], imported_by[]), `external_deps` (name, used_in[]), module clusters
-
-### Module 3: Interface Extraction (lsp_document_symbols)
-
-```
-lsp_document_symbols(file="src/main.ts")
-```
-Output: `types` (name, file, fields, exported), `functions` (name, file, signature), `endpoints` (if applicable)
-
-### Module 4: Centrality Analysis (derived from Module 2)
-
-Output: `high_impact` files (many importers, risk: high), `isolated` files (few importers, risk: low)
-
-Decomposer guidance: high_impact files -> smaller phases, stronger verification. Isolated files -> safe for parallel.
-
-### Module 5: Test Infrastructure (Glob + Read)
-
-```
-Glob("**/*.{test,spec}.{ts,tsx,js,jsx}")
-Read("package.json") -> scripts.test, scripts.build
-```
-Output: `framework`, `run_command`, `test_files` (path, covers[]), `current_status` (build/tests/lint)
-
-### Module 6: Configuration (Read)
-
-Output: `env_vars` (name, used_in[]), `config_files` (path, purpose), `package_json` (scripts, key_deps)
-
-**Note**: This is prompt-based guidance. The orchestrator follows these steps using available tools. For greenfield (empty) projects, most modules return empty structures -- that is expected.
+> **목적**: Step 2/2.5가 서브에이전트로 실행되므로 오케스트레이터 컨텍스트 부담이 줄었지만,
+> 장시간 인터뷰나 복잡한 PP 논의 후 compaction이 발생할 수 있다.
+> 이 스냅샷이 있으면 compaction 후에도 `Read(".mpl/mpl/interview-snapshot.md")`로 복원 가능.
 
 ---
 
-## Step 2.5: Phase 0 Enhanced (Complexity-Adaptive Analysis)
+## Step 2: Codebase Analysis (서브에이전트 위임) [F-36]
+
+> **v3.3 변경**: 오케스트레이터가 직접 6개 모듈을 분석하던 방식에서
+> `mpl-codebase-analyzer` 서브에이전트에 위임하는 방식으로 변경.
+> 오케스트레이터 컨텍스트에서 ~5-10K 토큰을 절감하여 Plan 단계 compaction을 방지한다.
+
+```
+Task(subagent_type="mpl-codebase-analyzer", model="sonnet",
+     prompt="""
+     Perform full 6-module codebase analysis for MPL Phase 0.
+
+     ## Configuration
+     - Output path: .mpl/mpl/codebase-analysis.json
+     - Tool mode: {tool_mode}
+     - Project root: {cwd}
+
+     ## Modules to Analyze
+     1. Structure Analysis (directories, entry points, file stats)
+     2. Dependency Graph (imports, external deps, module clusters)
+     3. Interface Extraction (types, functions, endpoints)
+     4. Centrality Analysis (high-impact vs isolated files)
+     5. Test Infrastructure (framework, test files, run commands)
+     6. Configuration (env vars, config files, scripts, key deps)
+
+     Save the full JSON to .mpl/mpl/codebase-analysis.json.
+     Return only a concise summary (~500 tokens).
+     """)
+```
+
+### After Receiving Output
+
+1. 서브에이전트의 요약을 확인 (전체 JSON은 파일에 저장됨)
+2. Report: `[MPL] Codebase Analysis: {files} files, {modules} modules, {deps} deps. Tool mode: {tool_mode}.`
+3. Proceed to Step 2.5
+
+> **폴백**: mpl-codebase-analyzer 에이전트가 실패하면, 오케스트레이터가 직접 분석한다 (기존 동작).
+> 이 경우 6개 모듈의 도구 호출이 오케스트레이터 컨텍스트에 누적되므로 compaction 리스크 증가.
+
+### 6-Module 상세 명세 (에이전트 참조용)
+
+에이전트 정의(`agents/mpl-codebase-analyzer.md`)에 전체 명세가 포함되어 있다.
+요약:
+
+| Module | 도구 | 산출물 |
+|--------|------|--------|
+| 1. Structure | Glob | directories, entry_points, file_stats |
+| 2. Dependencies | ast_grep / Grep | modules, external_deps, module_clusters |
+| 3. Interfaces | lsp_document_symbols / Grep | types, functions, endpoints |
+| 4. Centrality | (Module 2에서 파생) | high_impact, isolated |
+| 5. Tests | Glob + Read | framework, run_command, test_files |
+| 6. Config | Read | env_vars, config_files, scripts |
+
+---
+
+## Step 2.5: Phase 0 Enhanced (서브에이전트 위임) [F-36]
+
+> **v3.3 변경**: 오케스트레이터가 직접 복잡도 측정 + 4단계 분석을 수행하던 방식에서
+> `mpl-phase0-analyzer` 서브에이전트에 위임하는 방식으로 변경.
+> 오케스트레이터 컨텍스트에서 ~8-25K 토큰을 절감하여 Plan 단계 compaction을 방지한다.
 
 Phase 0 Enhanced는 Step 2의 Codebase Analysis 결과를 기반으로 프로젝트 복잡도를 측정하고, 복잡도에 따라 사전 명세를 생성한다. 이 명세는 후속 Phase(Decomposition, Execution)의 정확도를 높이고 디버깅 Phase를 불필요하게 만든다.
 
 > **원칙**: "예방이 치료보다 낫다" — Phase 0에 투자하는 토큰이 Phase 5의 디버깅 비용을 완전히 제거한다.
+
+### 서브에이전트 위임
+
+```
+loaded_memory = load_phase0_memory(user_request)  // F-25 4-Tier Memory
+
+Task(subagent_type="mpl-phase0-analyzer", model="sonnet",
+     prompt="""
+     Perform Phase 0 Enhanced analysis for MPL.
+
+     ## Input
+     - Codebase analysis: .mpl/mpl/codebase-analysis.json
+     - Output directory: .mpl/mpl/phase0/
+     - Cache directory: .mpl/cache/phase0/
+     - Tool mode: {tool_mode}
+
+     ## Context
+     ### Pivot Points
+     {pivot_points from .mpl/pivot-points.md}
+
+     ### Memory (4-Tier)
+     {loaded_memory}
+
+     ## Task
+     1. Check cache (full hit → skip, partial → rerun affected only)
+     2. Detect complexity grade (Simple/Medium/Complex)
+     3. Run analysis steps per grade
+     4. Validate artifacts
+     5. Save cache
+     6. Return concise summary (~300 tokens)
+
+     Save all artifacts to .mpl/mpl/phase0/.
+     Return only the summary. Do NOT return full artifact content.
+     """)
+```
+
+### After Receiving Output
+
+1. 서브에이전트의 요약을 확인 (artifact 파일은 이미 저장됨)
+2. Report: `[MPL] Phase 0 Enhanced complete. Grade: {grade}. Artifacts: {count}/4. Cache: {HIT|MISS|PARTIAL}.`
+3. Proceed to Step 3 (Phase Decomposition)
+
+> **폴백**: mpl-phase0-analyzer 에이전트가 실패하면, 오케스트레이터가 직접 분석한다 (아래 상세 명세 참조).
+> 이 경우 도구 호출이 오케스트레이터 컨텍스트에 누적되므로 compaction 리스크 증가.
+
+---
+
+### Phase 0 Enhanced 상세 명세 (에이전트 참조용 / 폴백용)
+
+아래 명세는 `agents/mpl-phase0-analyzer.md`에 내장되어 있으며,
+에이전트 실패 시 오케스트레이터가 직접 수행하는 폴백 프로토콜이기도 하다.
 
 ### 2.5.0: Cache Check (Phase 0 캐싱, 확장: F-05 부분 무효화)
 

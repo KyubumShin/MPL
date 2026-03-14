@@ -95,10 +95,17 @@ If `MPL/.claude/settings.local.json` doesn't have minimum permissions, create/up
 {
   "permissions": {
     "allow": [
+      "Bash(git add*)",
       "Bash(git commit*)",
-      "Bash(gh pr*)",
+      "Bash(git push*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
       "Bash(git checkout*)",
+      "Bash(gh pr*)",
       "Bash(node*)",
+      "Bash(which *)",
+      "Bash(qmd *)",
       "Bash(cat*)"
     ]
   }
