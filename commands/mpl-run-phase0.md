@@ -407,12 +407,16 @@ interview_depth에 따라 인터뷰 범위가 자동 조절된다:
 
 ### depth == "light"
 
-Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가.
-**고밀도 프롬프트(density ≥ 8)의 경우**, Round 1-2 후 Uncertainty Scan을 추가 실행한다:
+Round 1-2 (What + What NOT) 실행 후, **Clarity Reinforcement**(약한 차원 보강) → 경량 요구사항 구조화.
+**고밀도 프롬프트(density ≥ 8)의 경우**, Uncertainty Scan도 추가 실행한다:
 
 1. **Round 1**: "정확히 무엇을 원하는가?" (PP 후보 추출)
 2. **Round 2**: "절대 깨뜨리면 안 되는 것은?" (PP 제약 + 범위 경계)
-3. **[NEW] 경량 요구사항 구조화**:
+3. **[F-37] Phase 2: Clarity Reinforcement** (약한 차원 보강):
+   - Phase 1에서 수집된 PP 응답을 5차원(Goal/Boundary/Priority/Criteria/Context)으로 점수화
+   - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 2개)
+   - 점수 재계산 → PP 업데이트
+4. **[NEW] 경량 요구사항 구조화**:
    - 소크라틱 질문 (명확화 + 가정 탐색에서 1-2개 선별)
    - 사용자 응답에서 User Stories 추출
    - 각 US에 Acceptance Criteria 부착 (Gherkin 없이 자연어)
@@ -437,23 +441,27 @@ Round 1-2 (What + What NOT) 실행 후, 경량 요구사항 구조화 추가.
 
 ### depth == "full"
 
-전체 4 Round + 소크라틱 질문 + 솔루션 옵션 + JUSF:
+전체 4 Round + **Clarity Reinforcement** + 소크라틱 질문 + 솔루션 옵션 + JUSF:
 
 1. **Round 1-4**: 기존 PP 인터뷰 전체
-2. **[NEW] 소크라틱 질문** (Round 5): 6유형 중 태스크에 관련된 질문 2-4개 선별
+2. **[F-37] Phase 2: Clarity Reinforcement** (약한 차원 보강):
+   - Phase 1에서 수집된 PP 응답을 5차원(Goal/Boundary/Priority/Criteria/Context)으로 점수화
+   - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 4개)
+   - 점수 재계산 → PP 업데이트
+3. **[NEW] 소크라틱 질문** (Round 5+): 6유형 중 태스크에 관련된 질문 2-4개 선별
    - 코드베이스 컨텍스트 기반 질문 (기존 유사 기능, 의존성)
    - AskUserQuestion으로 선택지 제공
    - PP 라운드에서 이미 확인된 정보는 건너뜀
-3. **[NEW] 솔루션 옵션** (Round 6): 3개 이상 옵션 + 트레이드오프 매트릭스
+4. **[NEW] 솔루션 옵션** (Round 6+): 3개 이상 옵션 + 트레이드오프 매트릭스
    - Minimal / Balanced / Comprehensive
    - Impact / Complexity / Risk / Token Cost / Test Coverage 차원 평가
    - 사용자 선택 -> selected_option 기록
-4. **[NEW] JUSF 출력**: JTBD + User Stories + Gherkin AC
+5. **[NEW] JUSF 출력**: JTBD + User Stories + Gherkin AC
    - Dual-Layer: YAML frontmatter + Markdown body
    - 증거 태깅 (🟢/🟡/🔴)
    - 멀티 관점 리뷰 (엔지니어/아키텍트/사용자)
    - 저장: `.mpl/pm/requirements-{hash}.md`
-5. PP 확정: pivot-points.md 저장
+6. PP 확정: pivot-points.md 저장
 
 ### 라우팅 로직
 

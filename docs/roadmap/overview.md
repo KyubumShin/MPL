@@ -313,6 +313,12 @@ After: 시스템이 자동 판정 + 동적 전환
 |----|------|------|------|
 | F-36 | **Plan-Phase Context Offloading** | ✅ **완료** | Plan 단계(Step 0~3B)에서 compaction 발생을 방지. **3가지 변경**: (1) Step 2 Codebase Analysis를 `mpl-codebase-analyzer`(sonnet) 서브에이전트로 위임 (~5-10K 절감). (2) Step 2.5 Phase 0 Enhanced를 `mpl-phase0-analyzer`(sonnet) 서브에이전트로 위임 (~8-25K 절감). (3) Step 1-E Interview Snapshot — 인터뷰 완료 후 핵심 결과를 `.mpl/mpl/interview-snapshot.md`에 백업하여 compaction 후에도 복원 가능. 오케스트레이터 Plan 단계 토큰: ~29-65K → ~11-16K. **변경 파일**: `mpl-run-phase0.md`, 신규 에이전트 `mpl-codebase-analyzer.md`, `mpl-phase0-analyzer.md` |
 
+#### 2-Phase Interview (2026-03-14)
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-37 | **Clarity Reinforcement (2-Phase Interview)** | ✅ **완료** | PP 기반 인터뷰(Phase 1) 후 약한 차원 보강(Phase 2) 추가. OMC Deep Interview의 수학적 모호성 점수 개념을 MPL PP 체계에 적용. **핵심**: 5-Dimension Clarity Scoring (Goal/Boundary/Priority/Criteria/Context, 가중치 합산) → 0.6 미만 차원에 타겟 보강 질문 → PP 업데이트. Greenfield/Brownfield 가중치 차별화. light 미실행 라운드는 응답에서 추론. 질문 상한: light 2개, full 4개. **변경 파일**: `mpl-interviewer.md`, `mpl-run-phase0.md` |
+
 #### Compaction Resilience (2026-03-12 실험 기반)
 
 | ID | 항목 | 상태 | 설명 |

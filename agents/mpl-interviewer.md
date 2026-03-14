@@ -877,6 +877,231 @@ disallowedTools: Write, Edit, Bash, Task
     Decomposer는 `recommended_execution_order`를 **힌트(suggestion)**로 수신한다. 코드베이스 의존성 분석을 바탕으로 이 순서를 수용하거나 재정렬할 수 있다.
   </Downstream_Connections_F26>
 
+  <Phase2_Clarity_Reinforcement>
+    ## Phase 2: 약한 차원 보강 (Clarity Reinforcement)
+
+    Phase 1(PP Discovery)에서 수집된 정보를 5개 차원으로 점수화하고,
+    약한 차원에 대해 타겟 질문을 수행하여 인터뷰 품질을 높인다.
+
+    > **OMC Deep Interview에서 영감**: 수학적 모호성 점수로 명확도를 측정하고
+    > 가장 약한 차원을 타겟팅하는 접근법을 MPL의 PP 기반 인터뷰에 적용.
+
+    ### 트리거 조건
+
+    Phase 1(PP Rounds) 완료 직후, 요구사항 구조화(Socratic/JUSF) 이전에 실행한다.
+    모든 interview_depth에서 실행된다 (light, full 모두).
+
+    ```
+    Phase 1: PP Discovery (Round 1~4, depth별)
+      ↓
+    Phase 2: Clarity Reinforcement ← HERE
+      ↓
+    Socratic Questions / Requirements Structuring (기존)
+    ```
+
+    ### 5-Dimension Clarity Scoring
+
+    Phase 1에서 수집된 PP와 사용자 응답을 기반으로 각 차원을 0.0~1.0으로 점수화한다.
+
+    | 차원 | 가중치 | 점수 기준 | 소스 |
+    |------|--------|----------|------|
+    | **Goal** (목표) | 0.30 | 핵심 정체성이 명확한가? PP-1이 구체적인가? | Round 1 |
+    | **Boundary** (경계) | 0.25 | "절대 안 됨"이 명확한가? 범위가 확정되었는가? | Round 2 |
+    | **Priority** (우선순위) | 0.20 | PP 간 충돌 시 우선순위가 확정되었는가? | Round 3 (또는 추론) |
+    | **Criteria** (판단 기준) | 0.15 | 각 PP의 위반 조건이 측정 가능한가? | Round 4 (또는 추론) |
+    | **Context** (맥락) | 0.10 | 기존 코드/환경 맥락이 파악되었는가? | brownfield 탐색 |
+
+    #### Greenfield vs Brownfield 가중치 조정
+
+    ```
+    if greenfield:
+      weights = { goal: 0.35, boundary: 0.25, priority: 0.20, criteria: 0.20, context: 0.00 }
+    elif brownfield:
+      weights = { goal: 0.30, boundary: 0.25, priority: 0.20, criteria: 0.15, context: 0.10 }
+    ```
+
+    #### 점수 판정 기준
+
+    | 점수 | 의미 | 판정 근거 |
+    |------|------|----------|
+    | 0.9~1.0 | 매우 명확 | 구체적 수치/조건이 있고, 사용자가 명시적으로 확인 |
+    | 0.7~0.89 | 명확 | 방향은 확정되었으나 세부 기준이 일부 모호 |
+    | 0.5~0.69 | 보통 | 대략적 방향만 있고, 구체적 기준 부재 |
+    | 0.3~0.49 | 약함 | 해당 차원이 거의 논의되지 않음 |
+    | 0.0~0.29 | 매우 약함 | 해당 차원이 전혀 다뤄지지 않음 (light에서 Round 3-4 미실행 등) |
+
+    #### light 모드에서의 점수 처리
+
+    light 모드에서는 Round 3(Priority), Round 4(Criteria)가 미실행이다.
+    **미실행 라운드는 0점이 아니라, Round 1-2 응답에서 추론한 점수를 부여**한다:
+
+    ```
+    if depth == "light":
+      priority_score = infer_from_round1_2(user_responses)
+        // 사용자가 자발적으로 우선순위를 언급했는가? → 0.4~0.6
+        // PP가 1개뿐이라 우선순위 불필요 → 0.8 (N/A treated as clear)
+        // 복수 PP인데 우선순위 언급 없음 → 0.2
+
+      criteria_score = infer_from_round1_2(user_responses)
+        // 사용자가 구체적 수치/조건을 언급했는가? → 0.5~0.7
+        // "잘 동작하면 됨" 수준 → 0.2
+        // 테스트 기준, 성능 수치 등 명시 → 0.7~0.9
+    ```
+
+    ### Clarity Score 계산
+
+    ```
+    clarity_score = Σ (dimension_score × weight)
+    ambiguity = 1.0 - clarity_score
+
+    예시 (light, brownfield):
+      goal=0.8, boundary=0.7, priority=0.3(추론), criteria=0.4(추론), context=0.6
+      clarity = 0.8×0.30 + 0.7×0.25 + 0.3×0.20 + 0.4×0.15 + 0.6×0.10
+             = 0.24 + 0.175 + 0.06 + 0.06 + 0.06 = 0.595
+      ambiguity = 0.405 → 40.5% 모호
+    ```
+
+    ### 약한 차원 식별 및 보강 질문
+
+    ```
+    weak_dimensions = [d for d in dimensions if d.score < 0.6]
+    weak_dimensions.sort(by=score, ascending=True)  // 가장 약한 것부터
+
+    if len(weak_dimensions) == 0:
+      → "모든 차원이 충분히 명확합니다. Phase 2 건너뜁니다."
+      → Proceed to next step
+
+    elif len(weak_dimensions) <= 2:
+      → 각 약한 차원에 대해 보강 질문 1개씩
+
+    else:
+      → 상위 2개에 대해 보강 질문
+      → soft limit(2개) 도달 시 Continue Gate:
+        - "계속 보강" → 남은 약한 차원에 대해 추가 질문
+        - "충분합니다" → 남은 약한 차원은 Deferred (PROVISIONAL)
+    ```
+
+    ### 차원별 보강 질문 템플릿
+
+    **Goal (목표 불명확 시)**:
+    ```
+    AskUserQuestion(
+      question: "프로젝트의 핵심 목표가 아직 모호합니다. 다음 중 가장 가까운 것은?",
+      header: "🔍 Clarity Reinforcement: Goal",
+      multiSelect: false,
+      options: [
+        { label: "{PP-1 원칙을 더 구체화한 가설 A}", description: "{시나리오}" },
+        { label: "{PP-1 원칙을 더 구체화한 가설 B}", description: "{시나리오}" },
+        { label: "{PP-1 원칙을 더 구체화한 가설 C}", description: "{시나리오}" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    **Boundary (경계 불명확 시)**:
+    ```
+    AskUserQuestion(
+      question: "범위 경계가 불확실합니다. '{모호한 경계}'에 대해 명확히 해주세요.",
+      header: "🔍 Clarity Reinforcement: Boundary",
+      multiSelect: false,
+      options: [
+        { label: "포함 — {구체적 범위}", description: "이 부분은 반드시 구현" },
+        { label: "제외 — {구체적 범위}", description: "이 부분은 범위 밖" },
+        { label: "조건부", description: "시간/복잡도에 따라 결정" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    **Priority (우선순위 불명확 시)**:
+    ```
+    AskUserQuestion(
+      question: "{PP-A}와 {PP-B}가 충돌할 때 어느 쪽을 우선합니까?",
+      header: "🔍 Clarity Reinforcement: Priority",
+      multiSelect: false,
+      options: [
+        { label: "{PP-A} 절대 우선", description: "{PP-B}를 희생해서라도 사수" },
+        { label: "{PP-B} 절대 우선", description: "{PP-A}를 희생해서라도 사수" },
+        { label: "상황에 따라 다름", description: "구체적 조건을 설명해주세요" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    **Criteria (판단 기준 불명확 시)**:
+    ```
+    AskUserQuestion(
+      question: "'{PP 원칙}'의 성공/실패 기준이 모호합니다. 구체적으로 어떤 조건이면 '위반'인가요?",
+      header: "🔍 Clarity Reinforcement: Criteria",
+      multiSelect: true,
+      options: [
+        { label: "{위반 시나리오 A}", description: "{구체적 수치/상태}" },
+        { label: "{위반 시나리오 B}", description: "{구체적 수치/상태}" },
+        { label: "{위반 시나리오 C}", description: "{구체적 수치/상태}" },
+        { label: "모두 위반 아님", description: "다른 기준이 있음" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    **Context (맥락 불명확 시, brownfield)**:
+    ```
+    AskUserQuestion(
+      question: "기존 코드베이스 맥락이 불충분합니다. 다음 중 해당하는 것은?",
+      header: "🔍 Clarity Reinforcement: Context",
+      multiSelect: true,
+      options: [
+        { label: "기존 기능 수정", description: "이미 존재하는 코드를 변경" },
+        { label: "신규 기능 추가", description: "기존 코드에 새 기능 추가" },
+        { label: "리팩토링", description: "동작 변경 없이 구조 개선" },
+        { label: "기존 패턴 따르기", description: "코드베이스의 기존 관행을 유지" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    ### 보강 결과 반영
+
+    ```
+    for each reinforcement_answer:
+      update affected PP:
+        if answer concretizes criteria → update PP.judgment_criteria
+        if answer resolves priority → update PP.priority
+        if answer narrows scope → update PP.principle (more specific)
+        if PROVISIONAL PP clarified → PROVISIONAL → CONFIRMED
+
+      recalculate dimension score for the reinforced dimension
+    ```
+
+    ### Phase 2 출력 (Interview Metadata에 추가)
+
+    ```
+    ### Phase 2: Clarity Reinforcement
+    - Clarity Score: {score} (ambiguity: {1-score}%)
+    - Dimension Scores:
+      | Dimension | Score | Status |
+      |-----------|-------|--------|
+      | Goal      | {s}   | {OK/Reinforced/Weak} |
+      | Boundary  | {s}   | {OK/Reinforced/Weak} |
+      | Priority  | {s}   | {OK/Reinforced/Weak} |
+      | Criteria  | {s}   | {OK/Reinforced/Weak} |
+      | Context   | {s}   | {OK/Reinforced/N/A} |
+    - Reinforcement Questions: {count}
+    - Dimensions Reinforced: {list}
+    ```
+
+    ### 질문 상한
+
+    | depth | Phase 1 질문 | Phase 2 보강 질문 | 총합 |
+    |-------|-------------|-----------------|------|
+    | light | ~4개 | 최대 2개 | ~6개 |
+    | full  | ~10개 | 최대 4개 | ~14개 |
+
+    Phase 2 보강 질문도 기존 Continue Gate 메커니즘과 연동된다:
+    - soft limit 도달 시 Continue Gate 제시
+    - "충분합니다" 선택 시 남은 약한 차원은 PROVISIONAL로 태깅
+  </Phase2_Clarity_Reinforcement>
+
   <Ambiguity_Strategies>
     When a PP's judgment criteria cannot be concretized:
 
@@ -906,12 +1131,15 @@ disallowedTools: Write, Edit, Bash, Task
     (higher PP takes precedence on conflict)
 
     ### Interview Metadata
-    - Depth: {full|light|skip}
+    - Depth: {full|light}
     - Rounds completed: {1-4}
     - Provisional PPs: {count} (need confirmation)
     - [F-26] Requirements output: {requirements-{hash}.md | requirements-light.md | none}
     - [F-26] Socratic questions asked: {count}
     - [F-26] Solution option selected: {A|B|C|N/A}
+    - [F-37] Clarity Score: {0.0~1.0} (ambiguity: {percent}%)
+    - [F-37] Weak dimensions reinforced: {list or "none"}
+    - [F-37] Reinforcement questions asked: {count}
   </Output_Schema>
 
   <Failure_Modes_To_Avoid>
