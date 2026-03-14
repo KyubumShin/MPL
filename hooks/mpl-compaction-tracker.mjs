@@ -89,11 +89,52 @@ async function main() {
     checkpointContent + '\n'
   );
 
-  // Compaction count warnings
-  if (newCount >= 4) {
-    console.error(`🚨 Compaction limit approaching. Auto session reset recommended.`);
-  } else if (newCount >= 3) {
-    console.error(`⚠️ Compaction count high (${newCount}). Consider session split.`);
+  // F-38: Auto context rotation — write handoff signal on high compaction count
+  // or when budget predictor recommends pause
+  if (newCount >= 3) {
+    try {
+      // Import budget predictor
+      const { predictBudget } = await import(
+        pathToFileURL(join(__dirname, 'lib', 'mpl-budget-predictor.mjs')).href
+      );
+
+      const budget = predictBudget(cwd);
+
+      // Write handoff signal if budget is insufficient or compaction is excessive
+      if (budget.recommendation !== 'continue' || newCount >= 4) {
+        const signalsDir = join(cwd, '.mpl', 'signals');
+        if (!existsSync(signalsDir)) mkdirSync(signalsDir, { recursive: true });
+
+        const handoff = {
+          pipeline_id: state.pipeline_id || null,
+          resume_from_phase: state.current_phase,
+          completed_phases: state.phases_completed || 0,
+          remaining_phases: [], // will be filled by orchestrator if available
+          rotation_count: state.rotation_count || 0,
+          pause_reason: newCount >= 4
+            ? `compaction_limit_exceeded (${newCount})`
+            : `budget_insufficient (${budget.remaining_pct}% remaining, ${budget.estimated_needed_pct}% needed)`,
+          budget_snapshot: budget,
+          timestamp: new Date().toISOString(),
+        };
+
+        writeFileSync(
+          join(signalsDir, 'session-handoff.json'),
+          JSON.stringify(handoff, null, 2) + '\n'
+        );
+
+        // Update state for resume
+        writeState(cwd, {
+          session_status: 'paused_budget',
+          pause_reason: handoff.pause_reason,
+          rotation_count: (state.rotation_count || 0) + 1,
+        });
+
+        console.error(`[MPL] Context rotation triggered: ${handoff.pause_reason}`);
+      }
+    } catch (err) {
+      console.error(`[mpl-compaction-tracker] rotation signal failed: ${err.message}`);
+    }
   }
 }
 

@@ -15,7 +15,15 @@ Read `.mpl/state.json`:
 - If current_phase = "completed" → "Pipeline already completed. Start new with 'mpl'."
 - If current_phase is active (phase1-5) → "Pipeline is already active. Use /mpl:mpl-status to check progress."
 
-Expected state: `current_phase = "cancelled"` with `resume_point` field.
+Expected states for resume:
+- `current_phase = "cancelled"` with `resume_point` field (manual cancel)
+- `session_status = "paused_budget"` (automatic context rotation via F-38)
+
+For `paused_budget` state:
+- The pipeline was NOT cancelled — it was paused due to context window limits
+- `current_phase` still reflects the active phase at pause time
+- Resume from `current_phase` directly (no need for `resume_point` field)
+- Clear `session_status` and `pause_reason` on resume
 
 ### Step 2: Restore Context
 

@@ -319,6 +319,12 @@ After: 시스템이 자동 판정 + 동적 전환
 |----|------|------|------|
 | F-37 | **Clarity Reinforcement (2-Phase Interview)** | ✅ **완료** | PP 기반 인터뷰(Phase 1) 후 약한 차원 보강(Phase 2) 추가. OMC Deep Interview의 수학적 모호성 점수 개념을 MPL PP 체계에 적용. **핵심**: 5-Dimension Clarity Scoring (Goal/Boundary/Priority/Criteria/Context, 가중치 합산) → 0.6 미만 차원에 타겟 보강 질문 → PP 업데이트. Greenfield/Brownfield 가중치 차별화. light 미실행 라운드는 응답에서 추론. 질문 상한: light 2개, full 4개. **변경 파일**: `mpl-interviewer.md`, `mpl-run-phase0.md` |
 
+#### Auto Context Rotation (2026-03-14)
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-38 | **Auto Context Rotation** | ✅ **완료** | 컨텍스트 윈도우가 거의 찬 상태에서 자동 세션 로테이션. Compaction 이벤트 감지 → 핸드오프 시그널 작성 → 터미널 백엔드(kitty/tmux/osascript)를 통해 `/clear` 전송 → 파이프라인 자동 재개. `mpl-setup`에서 설정 가능. **파일**: `hooks/lib/rotation-backends.mjs`(터미널 백엔드 추상화), `hooks/lib/mpl-rotator.mjs`(백그라운드 워처), `hooks/mpl-session-init.mjs`(SessionStart 훅), `hooks/mpl-compaction-tracker.mjs`(수정: 핸드오프 시그널 작성), `hooks/hooks.json`(수정: SessionStart 등록). **설정**: `.mpl/config.json` → `context_rotation.backend` |
+
 #### Compaction Resilience (2026-03-12 실험 기반)
 
 | ID | 항목 | 상태 | 설명 |
