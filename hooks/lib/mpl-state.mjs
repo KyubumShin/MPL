@@ -5,7 +5,7 @@
  * Based on design document section 12.2
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, rmSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { loadConfig } from './mpl-config.mjs';
@@ -192,7 +192,122 @@ export function getEscalationTarget(currentTier) {
   return null; // frontier → no further escalation
 }
 
+/**
+ * Pipeline-scoped paths that must be RESET on new pipeline start.
+ * These are relative to cwd.
+ */
+const PIPELINE_SCOPE_PATHS = [
+  // Root-level pipeline artifacts
+  '.mpl/state.json',
+  '.mpl/PLAN.md',
+  '.mpl/auto-permit-learned.json',
+  // Signals (transient)
+  '.mpl/signals',
+  // MPL pipeline artifacts (entire subtree except profile)
+  '.mpl/mpl/state.json',
+  '.mpl/mpl/decomposition.yaml',
+  '.mpl/mpl/phase-decisions.md',
+  '.mpl/mpl/codebase-analysis.json',
+  '.mpl/mpl/RUNBOOK.md',
+  '.mpl/mpl/phase0',
+  '.mpl/mpl/phases',
+  '.mpl/mpl/checkpoints',
+  // Research artifacts
+  '.mpl/research',
+  // Working memory (ephemeral per pipeline)
+  '.mpl/memory/working.md',
+  // Context usage (transient)
+  '.mpl/context-usage.json',
+];
+
+/**
+ * Project-scoped paths that must NEVER be deleted.
+ * Listed here for documentation; cleanPipelineScope only touches PIPELINE_SCOPE_PATHS.
+ *
+ * PERSIST:
+ *   .mpl/config.json              - user settings
+ *   .mpl/pivot-points.md          - reusable interview constraints
+ *   .mpl/discoveries.md           - master discovery log
+ *   .mpl/memory/semantic.md       - generalized patterns (3+ repetitions)
+ *   .mpl/memory/procedural.jsonl  - tool usage patterns
+ *   .mpl/memory/episodic.md       - phase history (time-compressed)
+ *   .mpl/memory/learnings.md      - distilled project knowledge
+ *   .mpl/memory/routing-patterns.jsonl - tier prediction history
+ *   .mpl/cache/                   - phase0 cache (7-day TTL, self-expiring)
+ *   .mpl/mpl/profile/             - token usage metrics (append-only)
+ */
+
+/**
+ * Archive previous pipeline run before cleanup.
+ * Moves key artifacts to .mpl/archive/{pipeline_id}/ for traceability.
+ * @param {string} cwd
+ */
+function archivePreviousRun(cwd) {
+  const prevState = readState(cwd);
+  if (!prevState || !prevState.pipeline_id) return;
+
+  const archiveDir = join(cwd, '.mpl', 'archive', prevState.pipeline_id);
+  try {
+    mkdirSync(archiveDir, { recursive: true });
+
+    // Archive key files (best-effort, skip missing)
+    const toArchive = [
+      ['state.json', '.mpl/state.json'],
+      ['PLAN.md', '.mpl/PLAN.md'],
+    ];
+
+    for (const [name, relPath] of toArchive) {
+      const src = join(cwd, relPath);
+      if (existsSync(src)) {
+        writeFileSync(
+          join(archiveDir, name),
+          readFileSync(src, 'utf-8')
+        );
+      }
+    }
+
+    // Write archive metadata
+    writeFileSync(
+      join(archiveDir, 'meta.json'),
+      JSON.stringify({
+        pipeline_id: prevState.pipeline_id,
+        archived_at: new Date().toISOString(),
+        final_phase: prevState.current_phase,
+        phases_completed: prevState.phases_completed || 0,
+        gate_results: prevState.gate_results,
+      }, null, 2) + '\n'
+    );
+  } catch {
+    // Archive failure is non-fatal
+  }
+}
+
+/**
+ * Clean pipeline-scoped artifacts before starting a new pipeline.
+ * Preserves all project-scoped data (config, memories, cache, profile).
+ * @param {string} cwd - Working directory
+ */
+export function cleanPipelineScope(cwd) {
+  // Archive previous run first
+  archivePreviousRun(cwd);
+
+  for (const relPath of PIPELINE_SCOPE_PATHS) {
+    const fullPath = join(cwd, relPath);
+    if (!existsSync(fullPath)) continue;
+
+    try {
+      rmSync(fullPath, { recursive: true, force: true });
+    } catch {
+      // Non-fatal: log but continue
+      process.stderr.write(`[mpl-state] cleanup failed: ${relPath}\n`);
+    }
+  }
+}
+
 export function initState(cwd, featureName, runMode = 'full', tierHint = null) {
+  // F-39: Clean pipeline-scoped artifacts before initializing new pipeline
+  cleanPipelineScope(cwd);
+
   // H5: Load config overrides
   let config = {};
   try {
