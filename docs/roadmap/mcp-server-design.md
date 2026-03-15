@@ -102,7 +102,7 @@ MPL/
 
 ---
 
-## 3. MCP Tool 정의 (7개, 전체 v3.7 구현)
+## 3. MCP Tool 정의 (9개, 전체 v3.7 구현)
 
 ### 전체 도구 요약
 
@@ -115,6 +115,10 @@ MPL/
 | 5 | `mpl_estimate_budget` | 운영 | `mpl-budget-predictor.mjs` | 컨텍스트 예산 예측 |
 | 6 | `mpl_analyze_tests` | 분석 | `mpl-test-analyzer.mjs` | 테스트 파일 API 계약 추출 |
 | 7 | `mpl_check_convergence` | 운영 | `mpl-state.mjs` | Fix Loop 수렴/정체/회귀 판정 |
+| 8 | `mpl_extract_assertions` | 검증 | 신규 (Ouroboros extractor 영감) | AC를 4-Tier SpecAssertion으로 자동 분해 |
+| 9 | `mpl_verify_spec` | 검증 | 신규 (Ouroboros verifier 영감) | T1/T2 assertion을 regex로 소스 스캔 검증 ($0) |
+
+> 도구 8, 9의 상세 스펙은 `docs/roadmap/test-strategy-redesign.md` 섹션 2.2 참조.
 
 ### Tier 1: 인터뷰 + 상태 + 분류
 
