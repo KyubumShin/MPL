@@ -113,7 +113,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - Verify no phase violates a CONFIRMED PP
       - Note PROVISIONAL PP interactions for human review
 
-    Step 8.5: Mandatory Test Infrastructure Phase Insertion (F-39)
+    Step 8.5: Mandatory Test Infrastructure Phase Insertion (F-44)
       - Check ALL of these conditions:
         A. Any phase targets UI files (components/, .tsx, .jsx, .vue, .svelte)
         B. codebase_analysis.test_infrastructure.framework == null

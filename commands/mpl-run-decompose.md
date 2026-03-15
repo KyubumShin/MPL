@@ -47,6 +47,9 @@ Task(subagent_type="mpl-decomposer", model="opus",
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
+     phase_subdomain (F-39, optional: tech-stack e.g. react, prisma, langchain),
+     phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
+     phase_lang (F-39, optional: rust|go|python|typescript|java),
      scope, impact (create/modify/affected_tests/affected_config),
      interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/description),
      estimated_complexity (S/M/L).
@@ -90,9 +93,13 @@ phases:
 #### Decomposer 프롬프트 확장
 
 mpl-decomposer 에이전트에 다음 지시를 추가:
-> 각 Phase에 `phase_domain` 태그를 부여하라. 가능한 값: db, api, ui, algorithm, test, infra, general.
+> 각 Phase에 `phase_domain` 태그를 부여하라. 가능한 값: db, api, ui, algorithm, test, ai, infra, general.
 > Phase의 scope 파일 경로와 작업 성격을 기반으로 가장 적합한 단일 도메인을 선택하라.
 > 2개 이상 도메인이 혼합되면 가장 비중 높은 것을 선택하되, 동률이면 general로 분류하라.
+> 추가로 F-39 필드를 부여하라 (모두 optional, 감지되지 않으면 생략):
+> - `phase_subdomain`: 기술스택 (e.g. react, nextjs, prisma, langchain). 프로젝트 파일/의존성에서 감지.
+> - `phase_task_type`: 작업 유형 (greenfield|refactor|migration|bugfix|performance|security). Phase 성격에서 감지.
+> - `phase_lang`: 대상 언어 (rust|go|python|typescript|java). 파일 확장자에서 감지.
 
 ### After Receiving Output
 

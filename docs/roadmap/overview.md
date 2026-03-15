@@ -325,6 +325,12 @@ After: 시스템이 자동 판정 + 동적 전환
 |----|------|------|------|
 | F-38 | **Auto Context Rotation** | ✅ **완료** | 컨텍스트 윈도우가 거의 찬 상태에서 자동 세션 로테이션. Compaction 이벤트 감지 → 핸드오프 시그널 작성 → 터미널 백엔드(kitty/tmux/osascript)를 통해 `/clear` 전송 → 파이프라인 자동 재개. `mpl-setup`에서 설정 가능. **파일**: `hooks/lib/rotation-backends.mjs`(터미널 백엔드 추상화), `hooks/lib/mpl-rotator.mjs`(백그라운드 워처), `hooks/mpl-session-init.mjs`(SessionStart 훅), `hooks/mpl-compaction-tracker.mjs`(수정: 핸드오프 시그널 작성), `hooks/hooks.json`(수정: SessionStart 등록). **설정**: `.mpl/config.json` → `context_rotation.backend` |
 
+#### Semi-TDAG 4-Layer Template (2026-03-15)
+
+| ID | 항목 | 상태 | 설명 |
+|----|------|------|------|
+| F-39 | **Semi-TDAG 4-Layer Template Composition** | ✅ **완료** | F-28 도메인 라우팅을 4계층으로 확장. Decomposer가 `phase_subdomain`(기술스택), `phase_task_type`(작업유형), `phase_lang`(언어) 3개 optional 필드를 추가 출력. Phase Runner가 `domains/` + `subdomains/{domain}/` + `tasks/` + `langs/` 4-Layer 프롬프트를 조합하여 worker 컨텍스트에 주입. 총 37개 사전 정의 템플릿: 도메인 7 + 서브도메인 19(react, nextjs, vue, svelte, graphql, websocket, trpc, nosql, orm-prisma, orm-drizzle, langchain, vercel-ai, raw-sdk, optimization, data-structure, docker, cicd, e2e, unit) + 태스크 타입 6(greenfield, refactor, migration, bugfix, performance, security) + 언어 5(rust, go, python, typescript, java). TDAG 패턴의 "에이전트 동적 생성" 대신 "프롬프트 템플릿 동적 조합"으로 안정성과 유연성 균형. 각 레이어는 선택적 — 파일 없으면 해당 레이어 건너뜀(F-28 하위 호환). |
+
 #### Compaction Resilience (2026-03-12 실험 기반)
 
 | ID | 항목 | 상태 | 설명 |

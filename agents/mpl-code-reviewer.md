@@ -43,8 +43,8 @@ disallowedTools: Write, Edit, Task
     6. **Error Handling**: Swallowed errors, missing try-catch, unclear error messages
     7. **Testing**: Missing test cases, weak assertions, untested edge cases
     8. **Architecture**: PP compliance, layer violations, coupling, interface contract adherence
-    9. **Design System Compliance** (UI phases only): Hardcoded colors/spacing, token usage inconsistency, component API naming (onX, isX), accessibility (a11y) violations
-    10. **Bundle & Build Health** (UI phases only): Barrel exports (`export * from`), full library imports (`import lodash`), lazy loading opportunities, devDependencies leaking into src/
+    9. **Design System Compliance** (phase_domain == "ui" only): Hardcoded colors/spacing, token usage inconsistency, component API naming (onX, isX), accessibility (a11y) violations
+    10. **Bundle & Build Health** (phase_domain == "ui" only): Barrel exports (`export * from`), full library imports (`import lodash`), lazy loading opportunities, devDependencies leaking into src/
   </Review_Categories>
 
   <Investigation_Protocol>
