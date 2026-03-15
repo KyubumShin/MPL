@@ -393,6 +393,62 @@ disallowedTools: Write, Edit, Bash, Task
     )
     ```
 
+    ### Round 1-C: Design Infrastructure (F-47, UI Phase 존재 시 자동 추가)
+
+    **트리거 조건**: 사용자 요청 또는 프로젝트 구조에서 UI 작업이 감지될 때 자동으로 Round 1 뒤에 삽입.
+    감지 신호: `components/`, `.tsx`, `.jsx`, `.vue`, `.svelte` 파일 존재 또는 요청에 "UI", "프론트엔드", "화면", "대시보드" 등 키워드.
+
+    **Q-C1: CSS Strategy** -- How should we handle styling?
+    ```
+    AskUserQuestion(
+      question: "디자인 시스템/CSS 전략을 선택해주세요.",
+      header: "Design Infrastructure",
+      multiSelect: false,
+      options: [
+        { label: "Tailwind CSS", description: "유틸리티 클래스, 최적 번들 크기, AI 생성 친화" },
+        { label: "CSS Modules", description: "스코프 격리, 기존 CSS 지식 활용" },
+        { label: "CSS-in-JS (styled-components 등)", description: "동적 테마, 런타임 오버헤드 있음" },
+        { label: "컴포넌트 라이브러리 (shadcn/ui, MUI 등)", description: "기본 제공 컴포넌트 활용" },
+        { label: "Vanilla CSS + Custom Properties", description: "최소 의존성, 직접 관리" },
+        { label: "기타 (직접 입력)", description: "위 항목에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    **Q-C2: Bundle Budget** -- What's your bundle size tolerance?
+    ```
+    AskUserQuestion(
+      question: "번들 사이즈 예산이 있나요?",
+      header: "Bundle Budget",
+      multiSelect: false,
+      options: [
+        { label: "엄격 (<200KB JS, <50KB CSS)", description: "성능 최우선, 모바일/저사양 고려" },
+        { label: "보통 (<500KB JS)", description: "합리적 수준, 코드 스플리팅 활용" },
+        { label: "제한 없음", description: "MVP 우선, 나중에 최적화" },
+        { label: "기타 (직접 입력)", description: "구체적 수치 입력" }
+      ]
+    )
+    ```
+
+    **Q-C3: Dark Mode** -- Do you need theme switching?
+    ```
+    AskUserQuestion(
+      question: "다크 모드 / 테마 전환이 필요한가요?",
+      header: "Theme Support",
+      multiSelect: false,
+      options: [
+        { label: "필수 (시스템 설정 추종)", description: "prefers-color-scheme 반응 + 수동 토글" },
+        { label: "나중에 추가", description: "구조만 준비, 라이트 모드만 구현" },
+        { label: "불필요", description: "단일 테마로 진행" }
+      ]
+    )
+    ```
+
+    Round 1-C 결과는 PP로 등록된다:
+    - CSS 전략 → PP "Design System" (CONFIRMED)
+    - 번들 예산 → PP "Bundle Budget" (CONFIRMED, "제한 없음" 선택 시 PROVISIONAL)
+    - 다크 모드 → PP에 포함 (필수일 경우) 또는 Phase 0 메모 (나중에 추가일 경우)
+
     ### Round 2: What NOT (Boundaries)
     Discover immutable boundaries -- what must never change.
 

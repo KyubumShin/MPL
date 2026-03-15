@@ -58,7 +58,24 @@ disallowedTools: Edit, Task
     external_deps = external_deps.length
     test_files = test_files.length
 
-    complexity_score = (modules × 10) + (external_deps × 5) + (test_files × 3)
+    // Base formula
+    base_score = (modules × 10) + (external_deps × 5) + (test_files × 3)
+
+    // F-43: Architecture-Derived Extensions (from PP and specs)
+    schema_entities = count of DB tables/collections from PP or schema files
+    ipc_endpoints = count of API routes/IPC commands from PP or spec
+    frontend_stores = count of state stores (Zustand/Redux/Pinia) from PP
+    architectural_layers = count of runtime layers (frontend/backend/sidecar/worker)
+
+    extended_score = base_score
+                   + (schema_entities × 4)
+                   + (ipc_endpoints × 3)
+                   + (frontend_stores × 5)
+                   + (architectural_layers × 8)
+
+    // Use extended_score when PP/specs provide architectural info
+    // Fall back to base_score for projects without specs
+    complexity_score = has_architectural_info ? extended_score : base_score
     ```
 
     | Score | Grade | Steps to Run | Token Budget |
@@ -109,13 +126,36 @@ disallowedTools: Edit, Task
 
     #### Step 3 — Type Policy Definition (Complex+)
 
+    **Dual-Path Design (F-42)**:
+
     ```
-    1. Collect existing type hints:
-       ast_grep_search(pattern="def $NAME($$$ARGS) -> $RET:", language="python")
-       # Fallback: Grep(pattern="->|: [A-Z]")
-    2. Infer expected types from tests:
-       Grep(pattern="isinstance|type\\(", path="tests/")
-    3. Define type policy rules
+    // Path A: Brownfield Extraction (existing code exists)
+    if modules > 0:
+      1. Collect existing type hints:
+         ast_grep_search(pattern="def $NAME($$$ARGS) -> $RET:", language="python")
+         # Fallback: Grep(pattern="->|: [A-Z]")
+      2. Infer expected types from tests:
+         Grep(pattern="isinstance|type\\(", path="tests/")
+      3. Define type policy rules
+
+    // Path B: Architecture-Derived (F-42, greenfield with rich specs)
+    elif has_db_schema OR has_ipc_protocol OR has_framework_spec:
+      1. Identify architectural layers from PP (frontend/backend/sidecar)
+      2. Extract Enum Registry from DB schema columns (enumerated values)
+      3. Extract JSON column schemas (TEXT type with documented JSON structure)
+      4. Define per-layer type rules:
+         - Backend (Rust/Python): snake_case, Option<T>, enum types
+         - Frontend (TypeScript): camelCase, T | null, union types
+         - IPC boundary: serde rename or mapper functions
+      5. Define Prohibited Patterns:
+         - `string` where union type should be used (e.g., role: string → role: CharacterRole)
+         - `any` type usage
+         - `string | null` for JSON columns (should be parsed interface)
+      6. Define conversion points (where types transform between layers)
+
+    // Path C: Skip (no code, no specs)
+    else:
+      Skip type policy generation
     ```
 
     Save to `{output_dir}/type-policy.md`
@@ -134,6 +174,50 @@ disallowedTools: Edit, Task
     ```
 
     Save to `{output_dir}/error-spec.md`
+
+    #### Step 4-B — Frontend Build Constraints (F-48, UI projects only)
+
+    **Trigger**: Codebase analysis shows frontend framework (React, Vue, Svelte, etc.) OR PP contains bundle budget.
+
+    ```
+    // Check PP for design decisions from Interview Round 1-C (F-47)
+    pp_css_strategy = extract from pivot-points.md "Design System" PP
+    pp_bundle_budget = extract from pivot-points.md "Bundle Budget" PP
+    pp_dark_mode = extract from pivot-points.md theme-related PP
+
+    if has_frontend_framework OR pp_bundle_budget exists:
+      // Generate Frontend Build Constraints section in error-spec.md
+      Append to error-spec.md:
+
+      ## Frontend Build Constraints (F-48)
+
+      ### Bundle Size Budget
+      - Total JS budget: {pp_budget or "500KB" default} KB
+        - Main chunk: {budget * 0.7} KB
+        - CSS: {budget * 0.15} KB
+        - Vendor chunks: {budget * 0.15} KB
+      - Source: {PP reference or "default MVP budget"}
+
+      ### Code Splitting Strategy
+      - Strategy: {lazy_routes | manual_chunks | none}
+        - lazy_routes: React.lazy() per route, Suspense boundaries
+        - manual_chunks: manual import() for heavy dependencies
+        - none: single bundle (only for <200KB total)
+      - Tree-shaking: {framework_specific requirements}
+
+      ### Design System Contract
+      - CSS strategy: {pp_css_strategy or "not specified — worker decides"}
+      - Token file: {path to design tokens if exists}
+      - Theme support: {pp_dark_mode or "not specified"}
+      - Component naming: {detected convention or "not specified"}
+
+      ### Build Error Patterns
+      - Chunk size warning: vite/webpack "asset exceeds limit" → reduce imports or split
+      - CSS order issues: CSS Modules scope collision → rename or scope
+      - Tree-shaking failure: side-effect imports blocking dead code elimination
+    ```
+
+    Save updated error-spec to `{output_dir}/error-spec.md`
 
     ### Phase 4: Validation
 

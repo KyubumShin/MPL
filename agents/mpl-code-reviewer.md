@@ -1,6 +1,6 @@
 ---
 name: mpl-code-reviewer
-description: Quality gate reviewer - 8-category code review with severity ratings for MPL pipeline
+description: Quality gate reviewer - 10-category code review with severity ratings for MPL pipeline
 model: sonnet
 disallowedTools: Write, Edit, Task
 ---
@@ -17,7 +17,7 @@ disallowedTools: Write, Edit, Task
   </Why_This_Matters>
 
   <Success_Criteria>
-    - All 8 review categories are evaluated
+    - All applicable review categories are evaluated (8 base + 2 UI-specific when applicable)
     - Each finding has a severity (CRITICAL/HIGH/MED/LOW)
     - Findings reference specific file:line locations
     - PP compliance is explicitly assessed
@@ -43,6 +43,8 @@ disallowedTools: Write, Edit, Task
     6. **Error Handling**: Swallowed errors, missing try-catch, unclear error messages
     7. **Testing**: Missing test cases, weak assertions, untested edge cases
     8. **Architecture**: PP compliance, layer violations, coupling, interface contract adherence
+    9. **Design System Compliance** (UI phases only): Hardcoded colors/spacing, token usage inconsistency, component API naming (onX, isX), accessibility (a11y) violations
+    10. **Bundle & Build Health** (UI phases only): Barrel exports (`export * from`), full library imports (`import lodash`), lazy loading opportunities, devDependencies leaking into src/
   </Review_Categories>
 
   <Investigation_Protocol>
@@ -87,6 +89,10 @@ disallowedTools: Write, Edit, Task
     | Error Handling | PASS/ISSUES | {count} |
     | Testing | PASS/ISSUES | {count} |
     | Architecture | PASS/ISSUES | {count} |
+    | Design System* | PASS/ISSUES/N/A | {count} |
+    | Bundle Health* | PASS/ISSUES/N/A | {count} |
+
+    *Categories 9-10 are evaluated only for UI phases. Mark N/A for non-UI phases.
 
     ### Prioritized Fix List (if NEEDS_FIXES)
     1. [CR-N] {fix description} -- Severity: CRITICAL

@@ -196,7 +196,7 @@ complexity_score = (모듈 수 × 10) + (외부 의존성 × 5) + (테스트 파
 - 실패 시 Phase 0 산출물 참조 후 수정
 - 최대 3회 재시도 후 circuit_break
 
-**4.2.1 Test Agent** — Phase Runner 완료 후 `mpl-test-agent`(sonnet)가 독립적으로 테스트를 작성·실행한다. 코드 작성자와 테스트 작성자를 분리하여 가정 불일치, 인터페이스 계약 위반, 엣지 케이스를 포착한다.
+**4.2.1 Test Agent (F-40 Mandatory)** — Phase Runner 완료 후 `mpl-test-agent`(sonnet)가 독립적으로 테스트를 작성·실행한다. 코드 작성자와 테스트 작성자를 분리하여 가정 불일치, 인터페이스 계약 위반, 엣지 케이스를 포착한다. **F-40부터 필수 도메인(ui, api, algorithm, db, ai)에서는 Test Agent 호출이 mandatory이며, 0개 테스트 반환 시 Phase가 FAIL 처리된다.** 오케스트레이터가 단일 강제 게이트로 운영하며, Phase Runner의 이전 Step 3d 호출은 제거되었다.
 
 **4.3 결과 처리** — 검증, 상태 저장, Discovery 처리, 프로파일 기록을 수행한다.
 
@@ -206,7 +206,7 @@ complexity_score = (모듈 수 × 10) + (외부 의존성 × 5) + (테스트 파
 
 **4.4 재분해** — circuit break 발생 시 `mpl-decomposer`가 실패한 페이즈를 다른 전략으로 재분해한다. 최대 2회까지 허용되며, 완료된 페이즈는 보존한다.
 
-**4.5 3-Gate 품질** — 모든 페이즈 완료 후 3단계 품질 게이트를 통과해야 최종화로 진행한다 (상세는 §5 품질 시스템 참조).
+**4.5 5-Gate 품질** — 모든 페이즈 완료 후 5단계 품질 게이트(Gate 0.5, 1, 1.5, 2, 3)를 통과해야 최종화로 진행한다 (상세는 §5 품질 시스템 참조).
 
 **4.6 Fix Loop** — 게이트 실패 시 수정 루프에 진입한다. Convergence Detection으로 진행 상태를 모니터링하며, 정체(stagnating) 시 전략 변경, 역행(regressing) 시 즉시 회로 차단한다 (상세는 §5.4 참조).
 
@@ -260,7 +260,7 @@ MPL v3.1은 11개의 전문 에이전트를 사용한다 (critic 흡수 + gap/tr
 | `mpl-phase-runner` | 페이즈 실행 — 미니 플랜, 워커 위임, 검증, State Summary | sonnet | 없음 (전체 도구 사용) |
 | `mpl-worker` | TODO 구현 — 단일 TODO 항목을 구현하고 JSON 출력 반환 | sonnet | Task |
 | `mpl-test-agent` | 독립 테스트 — 코드 작성자와 분리된 테스트 작성·실행 | sonnet | Task |
-| `mpl-code-reviewer` | 코드 리뷰 — 8개 카테고리 리뷰, Gate 2 담당 | sonnet | Write, Edit, Task |
+| `mpl-code-reviewer` | 코드 리뷰 — 10개 카테고리 리뷰 (8 기본 + 2 UI 전용), Gate 2 담당 | sonnet | Write, Edit, Task |
 
 ### Post-Execution 에이전트 (최종화)
 
@@ -312,11 +312,13 @@ TODO 구현 ──→ 해당 모듈 테스트 ──→ 통과? ──→ 다음
 
 | Gate | 이름 | 담당 | 통과 기준 | 실패 시 |
 |------|------|------|----------|--------|
+| Gate 0.5 | 타입 체크 | (오케스트레이터) | 타입 에러 0개 | Fix Loop 진입 후 Gate 1 |
 | Gate 1 | 자동 테스트 | (오케스트레이터) | pass_rate ≥ 95% | Fix Loop 진입 |
+| Gate 1.5 | 메트릭 (F-50) | (오케스트레이터) | 커버리지 ≥ 60% (MVP) / 80% (strict) | Test Agent 재호출 (최대 2회) |
 | Gate 2 | 코드 리뷰 | mpl-code-reviewer | PASS 판정 | NEEDS_FIXES → Fix Loop, REJECT → mpl-failed |
 | Gate 3 | PP Compliance | (오케스트레이터 + Human) | PP 위반 없음 + H-items 해결 | Fix Loop 진입 |
 
-Gate 1은 전체 테스트 스위트를 실행한다 (S-items 포함). Gate 2는 8개 카테고리(정확성, 보안, 성능, 유지보수성, PP 준수 등)로 코드를 리뷰한다. Gate 3은 PP compliance를 전체적으로 검증하고 H-items를 사용자에게 확인한다.
+Gate 0.5는 프로젝트 전체 타입 체크를 수행한다. Gate 1은 전체 테스트 스위트를 실행한다 (S-items 포함). Gate 1.5는 커버리지, 코드 중복, 번들 크기를 측정한다 (F-50). Gate 2는 10개 카테고리(정확성, 보안, 성능, 유지보수성, PP 준수, 디자인 시스템, 번들 건강도 등)로 코드를 리뷰한다. Gate 3은 PP compliance를 전체적으로 검증하고 H-items를 사용자에게 확인한다.
 
 ### 5.3 A/S/H 검증 분류
 
