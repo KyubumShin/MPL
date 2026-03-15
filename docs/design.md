@@ -247,7 +247,7 @@ MPL v3.6은 15개의 전문 에이전트를 사용한다 (critic 흡수 + gap/tr
 | 에이전트 | 역할 | 모델 | 비허용 도구 |
 |---------|------|------|-----------|
 | `mpl-interviewer` | PP 인터뷰 — 구조화된 4라운드 인터뷰로 Pivot Point 발견 | opus | Write, Edit, Bash, Task |
-| `mpl-weak-interviewer` | 2-Phase 인터뷰 명확도 보강 — 메인 인터뷰어 이후 명확도 강화(clarity reinforcement) 실행 | opus | Write, Edit, Bash, Task |
+| `mpl-ambiguity-resolver` | Stage 2 Ambiguity Resolution — 스펙 리딩 + 메트릭 기반 소크라틱 루프 + 요구사항 구조화 | opus | Write, Edit, Bash, Task |
 | `mpl-codebase-analyzer` | 코드베이스 구조 분석 — 디렉토리 구조·의존성·인터페이스 정적 분석 | haiku | Edit, Task |
 | `mpl-phase0-analyzer` | Pre-Execution 깊이 분석 — 실행 전 Phase 0 Enhanced 심층 분석 | sonnet | Edit, Task |
 | `mpl-pre-execution-analyzer` | Pre-Execution 분석 — Gap(누락 요구사항, AI 함정, Must NOT Do) + Tradeoff(리스크 등급, 가역성, 실행 순서) 통합 | sonnet | Write, Edit, Bash, Task |

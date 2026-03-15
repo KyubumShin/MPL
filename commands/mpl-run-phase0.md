@@ -412,9 +412,9 @@ Phase 1 (mpl-interviewer):
   Round 1 (What) + Round 2 (What NOT) + [고밀도 전용: Uncertainty Scan]
   → Output: pivot-points.md + user_responses_summary
 
-Phase 2 (mpl-weak-interviewer):
-  Clarity Reinforcement → 경량 요구사항 구조화
-  → Output: clarity score + requirements-light.md
+Stage 2 (mpl-ambiguity-resolver):
+  Spec Reading → Ambiguity Scoring Loop → 요구사항 구조화
+  → Output: ambiguity score + requirements-light.md
 ```
 
 **Phase 1 상세**:
@@ -433,17 +433,15 @@ Phase 2 (mpl-weak-interviewer):
    - elif HIGH >= 1: HIGH 항목에 대해 Hypothesis-as-Options 질문 (최대 3개)
 4. PP 확정: pivot-points.md 저장 + user_responses_summary 생성
 
-**Phase 2 상세** (mpl-weak-interviewer):
+**Stage 2 상세** (mpl-ambiguity-resolver):
 
-1. **[F-37] Clarity Reinforcement**: PP 응답을 5차원(Goal/Boundary/Priority/Criteria/Context)으로 점수화
-   - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 2개)
-   - 점수 재계산 → PP 업데이트
-2. **경량 요구사항 구조화**:
-   - 소크라틱 질문 (명확화 + 가정 탐색에서 1-2개 선별)
-   - 사용자 응답에서 User Stories 추출
-   - 각 US에 Acceptance Criteria 부착 (Gherkin 없이 자연어)
-   - MoSCoW 분류 (Must/Should/Could)
-   - 증거 태깅 (🟢/🔴)
+1. **Spec Reading**: 제공된 스펙/문서를 PP와 대조하여 gap/conflict/hidden constraint 식별
+2. **Ambiguity Scoring**: PP 직교 4차원(Spec Completeness 35%/Edge Case 25%/Technical Decision 25%/Acceptance Testability 15%)으로 점수화
+3. **Socratic Loop**: ambiguity <= 0.2 될 때까지 가장 약한 차원을 타겟 소크라틱 질문 반복
+   - Pre-Research Protocol: 기술 선택 시 비교표 먼저 제시
+   - 매 응답 후 ambiguity 재측정
+4. **경량 요구사항 구조화**:
+   - User Stories + 자연어 AC + MoSCoW + 증거 태깅
    - 저장: `.mpl/pm/requirements-light.md`
 
 ### depth == "full"
@@ -453,9 +451,9 @@ Phase 1 (mpl-interviewer):
   Round 1-4 전체
   → Output: pivot-points.md + user_responses_summary
 
-Phase 2 (mpl-weak-interviewer):
-  Clarity Reinforcement → 소크라틱 질문 → 솔루션 옵션 → JUSF
-  → Output: clarity score + requirements-{hash}.md
+Stage 2 (mpl-ambiguity-resolver):
+  Spec Reading → Ambiguity Scoring Loop → 솔루션 옵션 → JUSF
+  → Output: ambiguity score + requirements-{hash}.md
 ```
 
 **Phase 1 상세**:
@@ -463,20 +461,21 @@ Phase 2 (mpl-weak-interviewer):
 1. **Round 1-4**: 기존 PP 인터뷰 전체
 2. PP 확정: pivot-points.md 저장 + user_responses_summary 생성
 
-**Phase 2 상세** (mpl-weak-interviewer):
+**Stage 2 상세** (mpl-ambiguity-resolver):
 
-1. **[F-37] Clarity Reinforcement**: PP 응답을 5차원으로 점수화
-   - 0.6 미만인 약한 차원에 대해 타겟 보강 질문 (최대 4개)
-   - 점수 재계산 → PP 업데이트
-2. **소크라틱 질문** (Round 5+): 6유형 중 태스크에 관련된 질문 2-4개 선별
-   - AskUserQuestion으로 선택지 제공; PP 라운드에서 이미 확인된 정보는 건너뜀
-3. **솔루션 옵션**: 3개 이상 옵션 + 트레이드오프 매트릭스
+1. **Spec Reading**: 제공된 스펙/문서를 PP와 대조하여 gap/conflict/hidden constraint 식별
+2. **Ambiguity Scoring**: PP 직교 4차원으로 점수화
+3. **Socratic Loop**: ambiguity <= 0.2 될 때까지 가장 약한 차원을 타겟 소크라틱 질문 반복
+   - Pre-Research Protocol: 기술 선택 시 비교표 먼저 제시
+   - 매 응답 후 ambiguity 재측정
+4. **솔루션 옵션**: 3개 이상 옵션 + 트레이드오프 매트릭스 (Pre-Research 포함)
    - Minimal / Balanced / Comprehensive
    - 사용자 선택 → selected_option 기록
-4. **JUSF 출력**: JTBD + User Stories + Gherkin AC
+5. **JUSF 출력**: JTBD + User Stories + Gherkin AC
    - Dual-Layer: YAML frontmatter + Markdown body
-   - 증거 태깅 (🟢/🟡/🔴)
+   - 증거 태깅 (High/Medium/Low)
    - 멀티 관점 리뷰 (기획/디자인/개발)
+   - Ambiguity Resolution Log 포함
    - 저장: `.mpl/pm/requirements-{hash}.md`
 
 ### 라우팅 로직
@@ -500,8 +499,8 @@ if maturity_mode == "explore" -> PP is optional, skip if user declines
 Task(subagent_type="mpl-interviewer", ...)  // Phase 1: PP Discovery
 → save pivot-points.md + user_responses_summary
 
-Task(subagent_type="mpl-weak-interviewer", ...)  // Phase 2: Clarity Reinforcement + Requirements
-→ save requirements-light.md or requirements-{hash}.md + clarity score
+Task(subagent_type="mpl-ambiguity-resolver", ...)  // Stage 2: Ambiguity Resolution + Requirements
+→ save requirements-light.md or requirements-{hash}.md + ambiguity score
 ```
 
 ### 모델 라우팅 (F-26)
@@ -515,11 +514,11 @@ elif interview_depth == "light":
 elif interview_depth == "full":
     model = "opus"              # PP 전체 4 Round
 
-// Phase 2 (mpl-weak-interviewer):
+// Stage 2 (mpl-ambiguity-resolver):
 if interview_depth == "light":
-    model = "sonnet"            # Clarity Reinforcement + 경량 요구사항 구조화
+    model = "sonnet"            # Ambiguity Resolution Loop + 경량 요구사항 구조화
 elif interview_depth == "full":
-    model = "opus"              # Clarity Reinforcement + 소크라틱 + 솔루션 옵션 + JUSF
+    model = "opus"              # Ambiguity Resolution Loop + 솔루션 옵션 + JUSF
 ```
 
 PP States: **CONFIRMED** (hard constraint, auto-reject on conflict) / **PROVISIONAL** (soft, HITL on conflict)
