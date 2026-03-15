@@ -25,8 +25,8 @@ Read all available sources in parallel:
 
 ```
 # Pipeline artifacts
-.mpl/state.json          → pipeline metrics, convergence data
-.mpl/PLAN.md              → original plan, TODO completion status
+.mpl/mpl/state.json          → pipeline metrics, convergence data
+.mpl/mpl/decomposition.yaml  → original plan, TODO completion status
 
 # Git history
 git log --oneline -20     → recent commits

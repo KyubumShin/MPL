@@ -1,10 +1,10 @@
-# MPL (Micro-Phase Loop) v3.2
+# MPL (Micro-Phase Loop) v3.6
 
 **Prevention over cure. Specification over debugging.**
 
 A Claude Code plugin that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-twelve-minds) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-fifteen-minds) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -56,7 +56,7 @@ No Phase 0            38% → debugging hell
 
 **Law 2: The orchestrator must never write code.**
 
-The moment the orchestrator touches source files, it becomes invested in its own implementation. It defends its code instead of objectively verifying it. MPL enforces separation with a PreToolUse hook that physically blocks the orchestrator from editing source files. All code flows through `mpl-worker` agents via Task delegation.
+The moment the orchestrator touches source files, it becomes invested in its own implementation. It defends its code instead of objectively verifying it. MPL enforces separation with a PreToolUse hook that warns the orchestrator when it attempts to edit source files directly. All code flows through `mpl-worker` agents via Task delegation.
 
 ---
 
@@ -121,7 +121,7 @@ PP Interview      → 6 Pivot Points extracted (3 CONFIRMED, 3 PROVISIONAL)
 Phase 0 Enhanced  → API contracts + type policy + error spec generated
 Decomposition     → 4 micro-phases with interface contracts
 Phase Execution   → 4 phases × (plan → worker → test → verify)
-3-Gate Quality    → Gate 1: 100% tests, Gate 2: PASS, Gate 3: no PP violations
+5-Gate Quality    → Gate 0.5: types, Gate 1: tests, Gate 1.5: coverage, Gate 2: review, Gate 3: PP
 RUNBOOK           → Full execution log for session continuity
 ```
 
@@ -154,8 +154,9 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
               └────────────────┬────────────────┘
                                │
                     ┌──────────▼──────────────┐
-                    │  3-Gate Quality Check    │
-                    │  Tests → Review → PP    │
+                    │  5-Gate Quality Check    │
+                    │  Types → Tests →        │
+                    │  Coverage → Review → PP │
                     └──────────┬──────────────┘
                                │
                            Complete
@@ -168,7 +169,7 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
 | **Phase 0** | Pre-specification: contracts, types, errors | Eliminate debugging |
 | **Decompose** | Break into ordered phases with interface contracts | Each phase is independently verifiable |
 | **Execute** | Fresh session per phase, worker delegation, micro-test cycles | No context pollution |
-| **3-Gate** | Automated tests → Code review → PP compliance | Evidence-based completion |
+| **5-Gate** | Type check → Tests → Coverage → Code review → PP compliance | Evidence-based completion |
 | **RUNBOOK** | Continuous audit log for human/agent session continuity | Pick up where you left off |
 
 ### State Summary: The Only Bridge
@@ -263,24 +264,27 @@ Keyword hints still work as manual overrides: `"mpl bugfix"` → frugal, `"mpl s
 
 ---
 
-## The Twelve Minds
+## The Fifteen Minds
 
-Twelve agents, each with a single purpose. Loaded on-demand, never preloaded:
+Fifteen agents, each with a single purpose. Loaded on-demand, never preloaded:
 
 | Agent | Role | Core Principle |
 |-------|------|---------------|
 | **Interviewer** | Socratic questioning for Pivot Points | "What are you NOT willing to compromise on?" |
+| **Weak Interviewer** | 2-Phase clarity reinforcement | "Are these PPs clear enough to build from?" |
+| **Codebase Analyzer** | Project structure analysis (haiku) | "What exists before we plan?" |
+| **Phase 0 Analyzer** | Pre-execution deep analysis | "Type policy, error spec, build constraints" |
 | **Pre-Execution Analyzer** | Gap + Tradeoff unified analysis | "What's missing? What's risky?" |
 | **Decomposer** | Break into ordered micro-phases | "What depends on what?" |
 | **Verification Planner** | A/S/H-items classification | "What can machines verify vs. what needs humans?" |
 | **Phase Runner** | Execute a single phase end-to-end | "Plan, delegate, verify, summarize" |
 | **Worker** | Implement a single TODO | "Write the code, run the test" |
 | **Test Agent** | Independent test writing | "I didn't write the code, so I'll test what it claims" |
-| **Code Reviewer** | 8-category quality gate | "Would I approve this PR?" |
-| **Scout** | Lightweight codebase exploration with QMD semantic recall (haiku) | "Find it fast, spend nothing" — *inspired by [QMD](https://github.com/tobi/qmd) + [ArtemXTech's recall pattern](https://x.com/ArtemXTech/status/2028330693659332615)* |
+| **Code Reviewer** | 10-category quality gate (8 base + 2 UI) | "Would I approve this PR?" |
+| **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
 | **Compound** | Learning extraction and distillation | "What did we learn that future runs should know?" |
 | **Git Master** | Atomic commits | "Each commit tells one story" |
-| **Doctor** | Installation diagnostics | "Is everything wired correctly?" |
+| **Doctor** | Installation diagnostics (11 categories) | "Is everything wired correctly?" |
 
 ### Agent Separation Principle
 
@@ -300,15 +304,16 @@ Not all verification is equal. MPL classifies every criterion:
 | **S-item** | Sandbox Testing | BDD scenarios, Given/When/Then | Integration test passes |
 | **H-item** | Human-Required | Side Interview with user | UX judgment, visual review |
 
-### 3-Gate Quality System
+### 5-Gate Quality System
 
-Three gates + a pre-gate type check:
+Five gates ensuring evidence-based completion:
 
 | Gate | Method | Pass Criteria |
 |------|--------|---------------|
 | **Gate 0.5** | Project-wide type check (`lsp_diagnostics_directory`) | Zero type errors (F-17) |
 | **Gate 1** | Automated tests (A + S items) | pass_rate ≥ 95% |
-| **Gate 2** | Code review (8 categories) | PASS verdict |
+| **Gate 1.5** | Coverage + metrics (F-50) | coverage ≥ 60% (MVP) / 80% (strict) |
+| **Gate 2** | Code review (10 categories) | PASS verdict |
 | **Gate 3** | PP compliance + H-item resolution | No violations + all H-items resolved |
 
 ### Convergence Detection
@@ -317,7 +322,7 @@ Fix loops track pass rate history for automatic decisions:
 
 | Status | Condition | Action |
 |--------|-----------|--------|
-| `improving` | delta > min_improvement | Continue fixing |
+| `progressing` | delta > min_improvement | Continue fixing |
 | `stagnating` | variance < 5% AND delta < threshold | Change strategy or escalate |
 | `regressing` | delta < -10% | Revert or review Phase 0 artifacts |
 
@@ -326,23 +331,32 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>12 agents · 4 hooks · 11 skills · 4 protocol files</strong></summary>
+<summary><strong>15 agents · 8 hooks · 11 skills · 5 protocol files</strong></summary>
 
 ```
 MPL/
-├── agents/                 # 12 agent definitions (YAML)
+├── agents/                 # 15 agent definitions (YAML frontmatter)
 │   └── mpl-scout.md        # Haiku-based read-only exploration (F-16)
 ├── commands/               # Orchestration protocols (split for token efficiency)
 │   ├── mpl-run.md          # Router: which protocol file to load
 │   ├── mpl-run-phase0.md   # Steps -1 ~ 2.5: Triage, PP, Phase 0
-│   ├── mpl-run-decompose.md # Steps 3 ~ 3-B: Decomposition
-│   ├── mpl-run-execute.md  # Step 4: Execution loop, 3-Gate, Fix loop
+│   ├── mpl-run-decompose.md # Steps 3 ~ 3-F: Decomposition + feedback loop
+│   ├── mpl-run-execute.md  # Step 4: Execution loop, 5-Gate, Fix loop
 │   └── mpl-run-finalize.md # Steps 5 ~ 6: Finalize, Resume
-├── hooks/                  # 4 hooks
-│   ├── mpl-write-guard.mjs       # Blocks orchestrator from editing source
+├── prompts/                # 4-Layer template system (F-39)
+│   ├── domains/            # 8 domain templates (base layer)
+│   ├── subdomains/         # 19 tech-stack templates
+│   ├── tasks/              # 6 task-type overlays
+│   └── langs/              # 5 language templates
+├── hooks/                  # 8 hooks across 6 events
+│   ├── mpl-write-guard.mjs       # Warns orchestrator on source file edits
 │   ├── mpl-validate-output.mjs   # Validates agent output schemas
 │   ├── mpl-phase-controller.mjs  # Phase transitions + escalation (F-21)
 │   ├── mpl-keyword-detector.mjs  # "mpl" keyword → pipeline init
+│   ├── mpl-auto-permit.mjs       # Learned auto-permission (F-34)
+│   ├── mpl-permit-learner.mjs    # Permission pattern learning (F-34)
+│   ├── mpl-compaction-tracker.mjs # Compaction checkpoint (F-31)
+│   ├── mpl-session-init.mjs      # Context rotation init (F-38)
 │   └── lib/
 │       ├── mpl-state.mjs         # State management + escalation
 │       ├── mpl-scope-scan.mjs    # Pipeline score calculation (F-20)
@@ -374,8 +388,9 @@ MPL/
 - **Self-Directed Context (F-24)** — Phase Runner can Read/Grep within scope-bounded impact files
 - **Task-based TODO (F-23)** — TaskCreate/TaskUpdate as primary TODO state manager during execution
 - **Background Execution (F-13)** — Independent TODOs dispatched with `run_in_background: true`
-- **mpl-scout (F-16, F-25)** — Haiku-based exploration with QMD semantic search (BM25 + vector + reranking), Grep fallback — *[inspired by "Grep Is Dead"](https://x.com/ArtemXTech/status/2028330693659332615)*
+- **mpl-scout (F-16)** — Haiku-based exploration with Grep/Glob/LSP, optional QMD semantic search
 - **Gate 0.5 Type Check (F-17)** — Project-wide `lsp_diagnostics_directory` before Gate 1
+- **4-Layer Templates (F-39)** — Domain + Subdomain + Task Type + Language prompt composition
 - **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable
 - **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)
 - **3-Tier PD** — Phase Decisions classified Active/Summary/Archived per phase for constant token budget

@@ -1,5 +1,5 @@
 ---
-description: MPL Execution Protocol - Phase Execution Loop, Context Assembly, 3-Gate Quality, Fix Loop
+description: MPL Execution Protocol - Phase Execution Loop, Context Assembly, 5-Gate Quality, Fix Loop
 ---
 
 # MPL Execution: Step 4 (Phase Execution Loop)
@@ -803,7 +803,7 @@ Constraints:
     ```
 11. More phases -> current_phase = "mpl-phase-running", continue 4.1
     → **Budget Check (F-33)**: Step 4.3 확장 참조 — 다음 Phase 시작 전에 세션 예산을 확인한다.
-12. All done -> proceed to Step 4.5 (3-Gate Quality)
+12. All done -> proceed to Step 4.5 (5-Gate Quality)
 
 #### Step 4.3 확장: Budget Check (F-33)
 
@@ -979,9 +979,9 @@ else:
   5. Resume from first new phase (back to 4.1)
 ```
 
-### 4.5: 3-Gate Quality
+### 4.5: 5-Gate Quality
 
-After all phases complete, apply the 3-Gate Quality system before finalization.
+After all phases complete, apply the 5-Gate Quality system before finalization.
 
 #### Gate 0.5: Project-Wide Type Check (F-17)
 
@@ -1094,7 +1094,7 @@ Report: `[MPL] Quality Gates: Gate 0.5 (Types) → Gate 1 (Tests) {pass_rate}% �
 
 **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
-## 3-Gate Quality Results
+## 5-Gate Quality Results
 - **Gate 0.5 (Type Check)**: {errors} errors, {warnings} warnings
 - **Gate 1 (Tests)**: {pass_rate}%
 - **Gate 1.5 (Metrics)**: Coverage {line}%/{branch}%, Duplication {dup}%, Bundle {size}KB

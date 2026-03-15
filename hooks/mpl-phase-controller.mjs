@@ -6,10 +6,10 @@
  * Based on: design doc section 9.2 hook 3 + OMC persistent-mode.mjs pattern
  *
  * Phase transitions:
- * - phase2-sprint: checks PLAN.md checkboxes → all done → phase3-gate
- * - phase3-gate: checks gate results → all pass → phase5-finalize, any fail → phase4-fix
- * - phase4-fix: checks fix_loop_count → exceeded → phase5-finalize, else continue
- * - phase5-finalize: completion message + deactivate MPL
+ * - mpl-phase-running: checks decomposition.yaml TODOs → all done → mpl-phase-complete
+ * - mpl-phase-complete: checks gate results → all pass → mpl-finalize, any fail → mpl-circuit-break
+ * - mpl-circuit-break: checks fix_loop_count → exceeded → mpl-finalize, else continue
+ * - mpl-finalize: completion message + deactivate MPL
  *
  * Always returns continue: true to keep the pipeline loop running until completion.
  */

@@ -50,8 +50,7 @@ disallowedTools: Write, Edit, Bash, Task
     - Use AskUserQuestion for all user-facing questions (not plain text questions).
     - Respect interview_depth from Triage:
       - "full": All 4 rounds
-      - "light": Round 1 (What) + Round 2 (What NOT) only
-      - "skip": Extract PPs directly from the provided prompt, **then run Uncertainty Scan**
+      - "light": Round 1 (What) + Round 2 (What NOT) only; for high-density prompts (density ≥ 8), extract PPs directly then run Uncertainty Scan
     - Keep questions focused and non-redundant.
     - Maximum 2 questions per round (avoid interview fatigue).
     - **Hypothesis-as-Options**: NEVER ask open-ended questions. Present plausible answers as structured options. Each option is a testable hypothesis about the user's constraint. The user picks; you refine.
@@ -59,7 +58,7 @@ disallowedTools: Write, Edit, Bash, Task
     - Options per question: 3-5 (more causes choice fatigue, fewer is too narrow).
     - Use multiSelect: true when compound answers are plausible.
     - Always include a catch-all option (e.g., "Other (직접 입력)") for out-of-frame answers.
-    - 질문 상한은 **소프트 리밋**(soft limit)이다: skip 3개, light 4개, full 10개.
+    - 질문 상한은 **소프트 리밋**(soft limit)이다: light 4개, full 10개.
       상한 도달 시 자동 종료하지 않고, 사용자에게 계속 진행할지 묻는다 (Continue Gate).
     - 사용자가 인터뷰 중단을 선택하면, 남은 불확실성은 **PP PROVISIONAL 태깅 + Side Interview 대상 등록**으로 후속 단계에서 점진적으로 해소한다.
   </Constraints>
@@ -67,7 +66,7 @@ disallowedTools: Write, Edit, Bash, Task
   <Continue_Gate>
     ## Continue Gate (소프트 리밋 도달 시)
 
-    질문 상한(skip: 3, light: 4, full: 10)에 도달했을 때, 또는 인터뷰어 판단에 추가 불확실성이 남아있을 때 사용자에게 선택권을 부여한다.
+    질문 상한(light: 4, full: 10)에 도달했을 때, 또는 인터뷰어 판단에 추가 불확실성이 남아있을 때 사용자에게 선택권을 부여한다.
 
     ### 트리거 조건
 
@@ -123,24 +122,23 @@ disallowedTools: Write, Edit, Bash, Task
 
   | depth | PP 라운드 | Uncertainty Scan | Phase 1 출력 |
   |-------|----------|-----------------|-------------|
-  | `skip` | 프롬프트에서 직접 추출 | **✅ 추출 후 불확실성 검사 (0~3개 질문)** | pivot-points.md + user_responses_summary |
-  | `light` | Round 1-2 | PP 라운드에서 자연 해소 | pivot-points.md + user_responses_summary |
+  | `light` | Round 1-2 (density ≥ 8: 직접 추출 후 Uncertainty Scan) | density ≥ 8 시 **✅ 추출 후 불확실성 검사 (0~3개 질문)** | pivot-points.md + user_responses_summary |
   | `full` | Round 1-4 전체 | PP 라운드에서 자연 해소 | pivot-points.md + user_responses_summary |
 
   ### 적응형 깊이 상세 매트릭스
 
-  | 차원 | skip | light | full |
-  |------|------|-------|------|
-  | **PP Rounds** | 프롬프트 직접 추출 | Round 1-2 | Round 1-4 전체 |
-  | **Uncertainty Scan** | **✅ 추출 후 불확실성 검사** | PP 라운드에서 자연 해소 | PP 라운드에서 자연 해소 |
-  | **PP 후보** | 프롬프트에서 추출 | Round 1-2에서 추출 | 전체 라운드에서 추출 + 확정 |
-  | **예상 토큰** | ~0.5K (불확실성 0) ~ ~1.5K (불확실성 3건) | ~2K | ~5K |
-  | **모델** | Opus | Sonnet | Opus |
+  | 차원 | light | full |
+  |------|-------|------|
+  | **PP Rounds** | Round 1-2 (density ≥ 8: 프롬프트 직접 추출) | Round 1-4 전체 |
+  | **Uncertainty Scan** | density ≥ 8 시 **✅ 추출 후 불확실성 검사** | PP 라운드에서 자연 해소 |
+  | **PP 후보** | Round 1-2에서 추출 (density ≥ 8: 프롬프트에서 추출) | 전체 라운드에서 추출 + 확정 |
+  | **예상 토큰** | ~2K (density ≥ 8: ~0.5K~1.5K) | ~5K |
+  | **모델** | Sonnet | Opus |
 
   <Uncertainty_Scan>
-    ## Uncertainty Scan (skip 모드 전용)
+    ## Uncertainty Scan (light 모드 + density ≥ 8 시 활성화)
 
-    skip 모드에서 PP를 프롬프트/문서에서 직접 추출한 **후**, 추출된 PP와 프롬프트 전체에 대해 불확실성 검사를 수행한다. 문서가 아무리 상세해도 **암묵적 가정, 모호한 판단 기준, 충돌 가능성, 누락된 엣지 케이스**는 존재할 수 있다.
+    light 모드에서 정보 밀도(density)가 8 이상일 때, PP를 프롬프트/문서에서 직접 추출한 **후**, 추출된 PP와 프롬프트 전체에 대해 불확실성 검사를 수행한다. 문서가 아무리 상세해도 **암묵적 가정, 모호한 판단 기준, 충돌 가능성, 누락된 엣지 케이스**는 존재할 수 있다.
 
     ### 목적
 
@@ -194,7 +192,7 @@ disallowedTools: Write, Edit, Bash, Task
     ### 프로세스
 
     ```
-    1. PP 직접 추출 (기존 skip 동작)
+    1. PP 직접 추출 (light + density ≥ 8 동작)
     2. Uncertainty Scan 실행:
        # 3축 × 3 = 9차원 + 축 간 교차 검사
        for each dimension in [U-P1, U-P2, U-P3, U-D1, U-D2, U-D3, U-E1, U-E2, U-E3]:
@@ -209,7 +207,7 @@ disallowedTools: Write, Edit, Bash, Task
     3. 결과 분류:
        high_uncertainties = filter(severity == HIGH)
        if len(high_uncertainties) == 0:
-         → 질문 없이 진행 (기존 skip과 동일)
+         → 질문 없이 진행 (일반 light과 동일)
        elif len(high_uncertainties) <= 3:
          → 각 불확실 항목에 대해 타겟 소크라틱 질문 1개씩
        else:
@@ -297,7 +295,7 @@ disallowedTools: Write, Edit, Bash, Task
 
     ### 질문 없이 진행하는 경우
 
-    HIGH 불확실성이 0건이면 질문 없이 기존 skip과 동일하게 진행한다. 이때 스캔 결과는 Pre-Execution Analysis(Step 1-B)에 참고 정보로 전달한다:
+    HIGH 불확실성이 0건이면 질문 없이 일반 light과 동일하게 진행한다. 이때 스캔 결과는 Pre-Execution Analysis(Step 1-B)에 참고 정보로 전달한다:
 
     ```
     if high_uncertainties == 0:
@@ -312,7 +310,7 @@ disallowedTools: Write, Edit, Bash, Task
     Tiptap 에디터, i18n 지원. 에디터가 핵심. 품질 > 범위. vitest+tsc+build 통과 필수."
     첨부 문서: spec.md (아키텍처), spec-frontend.md (UI 레이아웃), spec-backend.md (API)
 
-    information_density: 9 → skip 모드
+    information_density: 9 → light 모드 (density ≥ 8, Uncertainty Scan 활성화)
 
     PP 추출 결과: PP-1(범위=Phase 0), PP-2(UX 최우선), PP-3(에디터 우선),
                  PP-4(품질>범위), PP-5(vitest+tsc+build)
@@ -555,13 +553,13 @@ disallowedTools: Write, Edit, Bash, Task
     (higher PP takes precedence on conflict)
 
     ### Interview Metadata
-    - Depth: {full|light|skip}
+    - Depth: {full|light}
     - Rounds completed: {1-4}
     - Provisional PPs: {count} (need confirmation)
 
     ### Phase 2 Handoff Data (for mpl-weak-interviewer)
     - pivot_points: {PP list above}
-    - interview_depth: {full|light|skip}
+    - interview_depth: {full|light}
     - user_responses_summary: {summary of Q&A from Phase 1 rounds}
     - project_type: {greenfield|brownfield}
     - information_density: {score from triage}
