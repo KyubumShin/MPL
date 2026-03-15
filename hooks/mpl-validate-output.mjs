@@ -42,6 +42,8 @@ export const VALIDATE_AGENTS = new Set([
   'mpl-decomposer',
   'mpl-git-master',
   'mpl-compound',
+  'mpl-codebase-analyzer',
+  'mpl-phase0-analyzer',
 ]);
 
 // Expected output sections per agent
@@ -114,6 +116,16 @@ export const EXPECTED_SECTIONS = {
     'Tool Availability Detail',
     'Recommendations',
     'Summary',
+  ],
+  'mpl-codebase-analyzer': [
+    'project_type',
+    'modules',
+    'external_deps',
+    'test_infrastructure',
+  ],
+  'mpl-phase0-analyzer': [
+    'type-policy',
+    'error-spec',
   ],
 };
 

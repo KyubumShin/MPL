@@ -9,9 +9,9 @@ v3.0은 v1.0의 5단계·5에이전트 구조에서 **9+단계·11에이전트**
 | 영역 | v1.0 | v3.0 |
 |------|------|------|
 | 파이프라인 단계 | 5단계 (Step 0~5) | 9+단계 (Step 0~6 + 하위 단계) |
-| 에이전트 | 5개 | 11개 |
+| 에이전트 | 5개 | 15개 |
 | 사전 분석 | 없음 | Triage + Phase 0 Enhanced + Pre-Execution Analysis |
-| 품질 시스템 | 단순 검증 | Build-Test-Fix + 3-Gate + A/S/H 분류 + Convergence Detection |
+| 품질 시스템 | 단순 검증 | Build-Test-Fix + 5-Gate + A/S/H 분류 + Convergence Detection |
 | 캐싱 | 없음 | Phase 0 산출물 캐싱 |
 | 토큰 프로파일링 | 없음 | 페이즈별 토큰/시간 프로파일링 |
 
@@ -63,7 +63,7 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 | Step | 이름 | 핵심 에이전트 | 산출물 |
 |------|------|-------------|--------|
 | -1 | LSP Warm-up | (오케스트레이터, 비차단) | lsp_servers 목록, cold start 제거 |
-| 0 | Triage | (오케스트레이터) | interview_depth (skip/light/full) |
+| 0 | Triage | (오케스트레이터) | interview_depth (light/full) |
 | 0.5 | 성숙도 모드 감지 | (오케스트레이터) | maturity_mode (explore/standard/strict) |
 | 1 | PP 인터뷰 | mpl-interviewer | `.mpl/pivot-points.md` |
 | 1-B | Pre-Execution 분석 | mpl-pre-execution-analyzer | 누락 요구사항, AI 함정, Must NOT Do, 리스크 등급, 실행 순서 권장 |
@@ -85,8 +85,7 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 
 | interview_depth | 조건 | 인터뷰 동작 |
 |-----------------|------|-----------|
-| `skip` | 밀도 8+ & 명시적 제약 & 성공 기준 있음 | 프롬프트에서 PP 직접 추출 |
-| `light` | 밀도 4~7 & 일부 제약 있음 | Round 1 (What) + Round 2 (What NOT)만 |
+| `light` | 밀도 4+ & 일부 제약 있음 | Round 1 (What) + Round 2 (What NOT)만 |
 | `full` | 밀도 4 미만 (모호/광범위) | 4라운드 전체 인터뷰 |
 
 #### Step 0.5: 성숙도 모드 감지
@@ -212,7 +211,7 @@ complexity_score = (모듈 수 × 10) + (외부 의존성 × 5) + (테스트 파
 
 #### Step 5: E2E & 최종화
 
-3-Gate를 통과한 후 최종 단계를 수행한다:
+5-Gate를 통과한 후 최종 단계를 수행한다:
 
 | 하위 단계 | 내용 |
 |----------|------|
@@ -241,13 +240,16 @@ MPL은 페이즈별 상태 영속성을 통해 자연스럽게 이어하기(resu
 
 ## 4. 에이전트 카탈로그
 
-MPL v3.1은 11개의 전문 에이전트를 사용한다 (critic 흡수 + gap/tradeoff 통합 + doctor 추가). 각 에이전트는 명확한 역할 경계와 도구 제한을 갖는다.
+MPL v3.6은 15개의 전문 에이전트를 사용한다 (critic 흡수 + gap/tradeoff 통합 + doctor 추가). 각 에이전트는 명확한 역할 경계와 도구 제한을 갖는다.
 
 ### Pre-Execution 에이전트 (분석/계획)
 
 | 에이전트 | 역할 | 모델 | 비허용 도구 |
 |---------|------|------|-----------|
 | `mpl-interviewer` | PP 인터뷰 — 구조화된 4라운드 인터뷰로 Pivot Point 발견 | opus | Write, Edit, Bash, Task |
+| `mpl-weak-interviewer` | 2-Phase 인터뷰 명확도 보강 — 메인 인터뷰어 이후 명확도 강화(clarity reinforcement) 실행 | opus | Write, Edit, Bash, Task |
+| `mpl-codebase-analyzer` | 코드베이스 구조 분석 — 디렉토리 구조·의존성·인터페이스 정적 분석 | haiku | Write, Edit, Bash, Task |
+| `mpl-phase0-analyzer` | Pre-Execution 깊이 분석 — 실행 전 Phase 0 Enhanced 심층 분석 | sonnet | Write, Edit, Task |
 | `mpl-pre-execution-analyzer` | Pre-Execution 분석 — Gap(누락 요구사항, AI 함정, Must NOT Do) + Tradeoff(리스크 등급, 가역성, 실행 순서) 통합 | sonnet | Write, Edit, Bash, Task |
 | `mpl-decomposer` | 페이즈 분해 — 요청을 순서화된 마이크로 페이즈로 분해 (Read/Glob/Grep 허용) | opus | Write, Edit, Bash, Task, WebFetch, WebSearch, NotebookEdit |
 | `mpl-verification-planner` | 검증 계획 — A/S/H 항목 분류, 페이즈별 검증 전략 | sonnet | Write, Edit, Task |
@@ -273,7 +275,7 @@ MPL v3.1은 11개의 전문 에이전트를 사용한다 (critic 흡수 + gap/tr
 
 | 에이전트 | 역할 | 모델 | 비허용 도구 |
 |---------|------|------|-----------|
-| `mpl-doctor` | 설치 진단 — 10 카테고리 검사, tool_mode 감지 (full/enhanced/standalone) | haiku | Write, Edit, Task |
+| `mpl-doctor` | 설치 진단 — 10 카테고리 검사, tool_mode 감지 (full/partial/standalone) | haiku | Write, Edit, Task |
 
 ### 모델 라우팅 정책
 
@@ -306,7 +308,7 @@ TODO 구현 ──→ 해당 모듈 테스트 ──→ 통과? ──→ 다음
 - 페이즈 종료 시: 현재 + 이전 페이즈의 모든 테스트를 누적 실행하여 회귀를 방지한다
 - 실패 시 Phase 0 산출물(error-spec, type-policy, api-contracts)을 참조한다
 
-### 5.2 3-Gate 품질 시스템
+### 5.2 5-Gate 품질 시스템
 
 모든 페이즈 실행이 완료된 후, 3단계 품질 게이트를 순차적으로 통과해야 한다:
 
