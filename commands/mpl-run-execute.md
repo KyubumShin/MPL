@@ -475,6 +475,9 @@ Phase Runner 디스패치 시 도메인에 따라 프롬프트와 모델을 동�
 ```pseudocode
 function dispatch_phase_runner(phase):
   domain = phase.phase_domain || "general"
+  subdomain = phase.phase_subdomain || null
+  task_type = phase.phase_task_type || null
+  lang = phase.phase_lang || null
 
   # 1. 모델 선택
   if domain == "algorithm" and phase.complexity in ["L", "XL"]:
@@ -482,15 +485,19 @@ function dispatch_phase_runner(phase):
   else:
     model = "sonnet"  # 기본값
 
-  # 2. 도메인 특화 프롬프트 로드
+  # 2. 4-Layer 프롬프트 조합 (F-39)
   domain_prompt = load_domain_prompt(domain)
-  # 경로: .mpl/prompts/domains/{domain}.md (있으면 사용, 없으면 범용)
+  subdomain_prompt = subdomain ? load_subdomain_prompt(domain, subdomain) : ""
+  task_prompt = task_type ? load_task_prompt(task_type) : ""
+  lang_prompt = lang ? load_lang_prompt(lang) : ""
+
+  composed_prompt = compose_layers(domain_prompt, subdomain_prompt, task_prompt, lang_prompt)
 
   # 3. Phase Runner 디스패치
   phase_runner = dispatch(
     agent = "mpl-phase-runner",
     model = model,
-    context = assemble_context(phase) + domain_prompt,
+    context = assemble_context(phase) + composed_prompt,
     phase_definition = phase
   )
 
@@ -534,15 +541,19 @@ function dispatch_phase_runner(phase):
 - 인덱스가 쿼리 패턴에 적절한가?
 ```
 
-#### 도메인 프롬프트 경로 해석
+#### 4-Layer 프롬프트 경로 해석 (F-39)
 
-도메인 프롬프트는 두 위치에서 탐색한다 (우선순위 순):
-1. `.mpl/prompts/domains/{domain}.md` — 프로젝트별 커스텀 (사용자가 추가/수정 가능)
-2. `MPL/prompts/domains/{domain}.md` — MPL 플러그인 기본 제공
+각 레이어는 두 위치에서 탐색한다 (우선순위 순):
 
-`/mpl:mpl-setup` 실행 시 기본 프롬프트를 `.mpl/prompts/domains/`에 복사한다.
-복사되지 않은 경우에도 MPL 플러그인 경로에서 폴백 로드한다.
-두 위치 모두 없으면 범용 프롬프트 사용 (기존 동작).
+| Layer | 프로젝트별 커스텀 | 플러그인 기본 |
+|-------|-----------------|-------------|
+| Domain | `.mpl/prompts/domains/{domain}.md` | `MPL/prompts/domains/{domain}.md` |
+| Subdomain | `.mpl/prompts/subdomains/{domain}/{subdomain}.md` | `MPL/prompts/subdomains/{domain}/{subdomain}.md` |
+| Task Type | `.mpl/prompts/tasks/{task_type}.md` | `MPL/prompts/tasks/{task_type}.md` |
+| Language | `.mpl/prompts/langs/{lang}.md` | `MPL/prompts/langs/{lang}.md` |
+
+각 레이어는 **선택적** — 파일이 없으면 해당 레이어를 건너뛴다.
+최소 Domain 레이어는 항상 존재 (기존 F-28 동작 보장).
 
 #### 도메인 프롬프트 없을 때
 
@@ -558,14 +569,26 @@ function dispatch_phase_runner(phase):
 ```
 다음 실행 시 유사 태스크의 domain 분포를 참조하여 사전 프롬프트 캐싱 가능.
 
-#### Phase Runner 프롬프트에 도메인 컨텍스트 주입
+#### Phase Runner 프롬프트에 4-Layer 컨텍스트 주입 (F-39)
 
-Step 4.2의 Phase Runner 디스패치 프롬프트에 도메인 섹션을 추가한다:
+Step 4.2의 Phase Runner 디스패치 프롬프트에 4-Layer 섹션을 추가한다:
 
 ```
-     ## Domain Context (F-28)
-     Domain: {phase.phase_domain or "general"}
-     {domain_prompt_content or "범용 — 도메인 특화 프롬프트 없음"}
+## Domain Context (F-28 + F-39)
+Domain: {phase.phase_domain or "general"}
+{domain_prompt_content or "범용 — 도메인 특화 프롬프트 없음"}
+
+## Subdomain Context (F-39)
+Subdomain: {phase.phase_subdomain or "N/A"}
+{subdomain_prompt_content or ""}
+
+## Task Type Context (F-39)
+Task Type: {phase.phase_task_type or "N/A"}
+{task_prompt_content or ""}
+
+## Language Context (F-39)
+Language: {phase.phase_lang or "N/A"}
+{lang_prompt_content or ""}
 ```
 
 기존 `phase_model` 로직과의 통합:
@@ -582,29 +605,84 @@ phase_model = determine_model(phase):
   return "sonnet"
 ```
 
-### 4.2.2: Test Agent (Independent Verification)
+### 4.2.2: Test Agent — Mandatory Independent Verification (F-40)
 
-After Phase Runner completes with status `"complete"`, dispatch the Test Agent for independent verification:
+After Phase Runner completes with status `"complete"`, the Test Agent is dispatched as a **mandatory gate** based on phase_domain rules.
+
+#### Domain-Based Invocation Rules
+
+| phase_domain | Test Agent | Rationale |
+|-------------|-----------|-----------|
+| `ui` | **MANDATORY** | Component, hook, store contract tests required |
+| `api` | **MANDATORY** | Integration, contract, error response tests required |
+| `algorithm` | **MANDATORY** | Edge case, boundary, complexity verification — highest ROI |
+| `db` | **MANDATORY** | Migration, CRUD, constraint tests required |
+| `ai` | **MANDATORY** | Structured output schema, retry logic, fallback path, API key non-exposure |
+| `test` | **SKIP** | Phase itself is test writing — avoid circular invocation |
+| `infra` | **CONDITIONAL** | Only if `affected_tests` in phase impact is non-empty |
+| `general` | **CONDITIONAL** | Only if source code files (.ts, .py, .rs, etc.) were created/modified |
+
+#### Dispatch Protocol
 
 ```
+// Determine if Test Agent is required
+domain = phase_definition.phase_domain
+is_mandatory = domain in ["ui", "api", "algorithm", "db", "ai"]
+is_conditional = domain in ["infra", "general"]
+is_skip = domain == "test"
+
+if is_skip:
+  Report: "[MPL] Phase {phase_id}: test domain — Test Agent skipped (circular)."
+  -> proceed to 4.2.3
+
+if is_conditional:
+  has_source_changes = any file in changes matches *.ts|*.tsx|*.py|*.rs|*.go|*.java
+  has_affected_tests = phase_definition.impact.affected_tests is non-empty
+  if not (has_source_changes or has_affected_tests):
+    Report: "[MPL] Phase {phase_id}: {domain} domain — no source changes, Test Agent skipped."
+    -> proceed to 4.2.3
+
+// Dispatch Test Agent (mandatory or conditional-triggered)
 test_result = Task(subagent_type="mpl-test-agent", model="sonnet",
      prompt="""
      ## Phase: {phase_id} - {phase_name}
+     ## Phase Domain: {domain}
      ### Verification Plan (A/S-items for this phase)
      {phase_verification_plan}
      ### Interface Contract
      {phase_definition.interface_contract}
      ### Implemented Code
      {list of files created/modified by the Phase Runner}
+     ### Domain-Specific Test Requirements
+     {domain_test_requirements[domain]}
 
      Write and run tests for this phase's implementation.
+     ALL S-items MUST have corresponding executable tests.
      """)
 ```
+
+#### Zero-Test Enforcement Gate
+
+```
+if is_mandatory AND test_result.test_results.total == 0:
+  Report: "[MPL] FAIL: Phase {phase_id} ({domain}) — 0 tests generated for mandatory domain."
+  -> Phase status = FAIL
+  -> Enter fix loop: re-dispatch Test Agent with explicit failure context
+  -> Max 2 re-attempts before circuit_break
+```
+
+#### Result Merging
 
 Merge test_result into Phase Runner's verification data:
 - Update pass_rate with Test Agent's independent results
 - Record any bugs_found for potential fix cycle
 - If Test Agent pass_rate < Phase Runner's pass_rate: flag discrepancy
+- Record test_files_created for Gate 1 cumulative test suite
+
+#### Token Impact
+
+Phase당 ~13-24K 추가 (Test Agent 호출). 9-Phase 프로젝트에서 ~129K (전체 예산의 25-30%).
+Skip/conditional 규칙으로 불필요한 호출을 방지하여 실제 추가량은 ~80-100K.
 
 ### 4.2.3: Task-based TODO Protocol (F-23)
 
@@ -933,6 +1011,49 @@ Run the full test suite:
 - pass_rate must be >= 95% to proceed to Gate 2
 - If pass_rate < 95%: enter fix loop (see 4.6)
 
+#### Gate 1.5: Coverage + Duplication + Bundle Metrics (F-50)
+
+After Gate 1 passes (tests must pass before measuring coverage):
+
+```
+// 1. Coverage Check
+coverage_result = Bash("npx vitest run --coverage --reporter=json" or "pytest --cov --cov-report=json")
+// Parse: line_coverage, branch_coverage
+
+// 2. Duplication Check (if jscpd or similar available)
+duplication_result = Bash("npx jscpd src/ --reporters json") // optional, soft gate
+
+// 3. Bundle Size Check (if UI project with build)
+bundle_result = Bash("npm run build 2>&1") // parse output size
+
+// Thresholds (MVP mode)
+coverage_thresholds = { lines: 60, branches: 50 }
+// Thresholds (Production mode — when maturity_mode == "strict")
+// coverage_thresholds = { lines: 80, branches: 70 }
+duplication_threshold = 5  // percent
+
+if line_coverage < coverage_thresholds.lines:
+  Report: "[MPL] Gate 1.5: Line coverage {line_coverage}% < {threshold}%. Dispatching Test Agent for gap coverage."
+  // Auto-fix: dispatch mpl-test-agent with coverage gaps
+  // Max 2 retry attempts
+  coverage_fix = Task(subagent_type="mpl-test-agent", model="sonnet",
+       prompt="Coverage gaps found. Write tests to improve coverage for: {uncovered_files}")
+  // Re-run coverage check after fix
+
+if duplication > duplication_threshold:
+  Report: "[MPL] Gate 1.5: Code duplication {duplication}% > {threshold}%. (Warning only)"
+  // Soft gate: warning only, does not block
+
+if bundle_size > pp_budget:
+  Report: "[MPL] Gate 1.5: Bundle {bundle_size}KB > budget {pp_budget}KB. (H-item for review)"
+  // Soft gate: architectural decision, flagged as H-item
+```
+
+Gate 1.5 pass criteria: coverage thresholds met (or 2 fix attempts exhausted → soft pass with warning).
+Token impact: Happy path ~1,900 tokens. Worst case (2 coverage fix retries) ~22,000 tokens.
+
+Report: `[MPL] Gate 1.5: Coverage {line}%/{branch}%, Duplication {dup}%, Bundle {size}KB.`
+
 #### Gate 2: Code Review
 
 ```
@@ -969,14 +1090,15 @@ Gate 3 pass criteria: no PP violations detected + all H-items resolved.
 If Gate 3 fails -> enter fix loop (see 4.6).
 
 All 3 gates pass -> proceed to Step 5 (E2E & Finalize).
-Report: `[MPL] 3-Gate Quality: Gate 1 {pass_rate}%, Gate 2 {verdict}, Gate 3 {pass/fail}.`
+Report: `[MPL] Quality Gates: Gate 0.5 (Types) → Gate 1 (Tests) {pass_rate}% → Gate 1.5 (Metrics) cov:{coverage}% → Gate 2 (Review) {verdict} → Gate 3 (PP) {pass/fail}.`
 
 **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
 ## 3-Gate Quality Results
 - **Gate 0.5 (Type Check)**: {errors} errors, {warnings} warnings
 - **Gate 1 (Tests)**: {pass_rate}%
-- **Gate 2 (Code Review)**: {verdict}
+- **Gate 1.5 (Metrics)**: Coverage {line}%/{branch}%, Duplication {dup}%, Bundle {size}KB
+- **Gate 2 (Code Review)**: {verdict} (10-category)
 - **Gate 3 (PP Compliance)**: {pass/fail}
 - **Overall**: {all_pass ? "PASSED" : "FAILED — entering fix loop"}
 - **Timestamp**: {ISO timestamp}

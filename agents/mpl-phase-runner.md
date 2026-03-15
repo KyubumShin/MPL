@@ -118,13 +118,11 @@ disallowedTools: []
     - Max 2 immediate fix attempts per TODO before moving on (mark as needs-attention)
     - Fix should reference Phase 0 artifacts (especially error-spec and type-policy) for guidance
 
-    #### 3d. Test Agent Verification (after all TODOs complete)
-    After all worker TODOs are done (before Step 4 full verification), dispatch the Test Agent for independent testing:
-    - Provide: verification_plan A/S-items for this phase, interface_contract, list of changed files
-    - Test Agent writes and runs tests independently from the worker
-    - Collect test results and merge with worker acceptance criteria results
-    - If Test Agent finds bugs: add to fix queue for micro-cycle fixes
-    - Key principle: code author (worker) != test writer (test-agent)
+    #### 3d. [REMOVED — Moved to Orchestrator (F-40)]
+    > Test Agent invocation is now handled by the orchestrator (Step 4.2.2 in mpl-run-execute.md)
+    > as a **mandatory** gate with domain-based rules. This eliminates the dual invocation problem
+    > where both Phase Runner and orchestrator had optional test calls.
+    > Phase Runner focuses on Build-Test-Fix micro-cycles; Test Agent runs after phase completion.
 
     #### Micro-cycle failure policies:
 
@@ -280,14 +278,34 @@ disallowedTools: []
   </Execution_Flow>
 
   <Domain_Awareness>
-    #### Phase Runner 도메인 인식 (F-28)
+    #### Phase Runner 도메인 인식 (F-28 + F-39)
 
     Phase 정의에 `phase_domain` 태그가 있으면:
     1. 도메인 특화 프롬프트를 컨텍스트에 포함 (오케스트레이터가 주입)
     2. 도메인별 검증 포인트를 verification에 추가
     3. Worker 디스패치 시 도메인 컨텍스트 전달
 
+    **F-39 4-Layer 확장**: `phase_domain` 외에 추가 레이어가 존재하면 함께 로드한다:
+    1. `phase_domain` — 기존 F-28 동작 (항상 적용)
+    2. `phase_subdomain` — 존재하면 서브도메인 특화 프롬프트 로드
+    3. `phase_task_type` — 존재하면 태스크 타입 특화 프롬프트 로드
+    4. `phase_lang` — 존재하면 언어 특화 프롬프트 로드
+
+    모든 레이어는 선택적 — 필드가 없으면 해당 레이어를 건너뛴다.
     도메인 없으면 기존 범용 동작 유지 (하위 호환).
+
+    **컨텍스트 주입 절차 (Step 1 Context Loading 시)**:
+    ```
+    phase_domain   = phase_definition.phase_domain   (없으면 "general")
+    phase_subdomain = phase_definition.phase_subdomain (없으면 null → skip)
+    phase_task_type = phase_definition.phase_task_type (없으면 null → skip)
+    phase_lang      = phase_definition.phase_lang      (없으면 null → skip)
+
+    domain_prompt    = load(".mpl/prompts/domains/{domain}.md")            or skip
+    subdomain_prompt = load(".mpl/prompts/subdomains/{domain}/{subdomain}.md") or skip
+    task_prompt      = load(".mpl/prompts/tasks/{task_type}.md")           or skip
+    lang_prompt      = load(".mpl/prompts/langs/{lang}.md")                or skip
+    ```
 
     **도메인별 추가 검증 항목**:
 
@@ -298,12 +316,25 @@ disallowedTools: []
     | `ui` | 접근성(a11y), 반응형 레이아웃, 상태 관리 패턴 |
     | `algorithm` | 시간/공간 복잡도, 엣지 케이스, 경계값 |
     | `test` | 커버리지 임계값, 테스트 격리, 모킹 적절성 |
+    | `ai` | API 키 비노출, 구조화 출력 스키마 검증, 재시도 로직, 폴백 경로, 프롬프트 분리 |
     | `infra` | 환경 변수 보안, 빌드 재현성, 배포 롤백 |
     | `general` | 범용 검증만 (기존 동작) |
 
-    **컨텍스트 주입 위치**: Step 1 Context Loading에서 Layer 3 (this phase) 파싱 시,
-    `phase_definition.phase_domain` 값을 읽어 도메인 프롬프트를 Layer에 추가한다.
-    도메인 프롬프트 경로: `.mpl/prompts/domains/{domain}.md` (없으면 스킵).
+    **F-39 레이어별 추가 검증 항목**:
+
+    | 레이어 | 값 예시 | 추가 검증 |
+    |--------|--------|----------|
+    | `phase_subdomain: react` | `.tsx` 컴포넌트 | hooks 규칙 준수, key prop, memo 과용 여부 |
+    | `phase_subdomain: orm-prisma` | Prisma 스키마 | relation 정의 정확성, index 누락 여부 |
+    | `phase_subdomain: langchain` | LangChain 사용 | 체인 구성 검증, 스트리밍 처리 여부 |
+    | `phase_task_type: migration` | 모든 도메인 | 롤백 경로 존재, 데이터 손실 없음, dry-run 가능 |
+    | `phase_task_type: security` | 모든 도메인 | 취약점 패턴 검사, 비밀값 하드코딩 없음 |
+    | `phase_task_type: performance` | 모든 도메인 | 벤치마크 기준 충족, 메모리 누수 없음 |
+    | `phase_lang: rust` | `.rs` 파일 | ownership/borrow 안전성, unwrap 남용 없음 |
+    | `phase_lang: typescript` | `.ts/.tsx` 파일 | any 타입 없음, strict 모드 준수 |
+    | `phase_lang: python` | `.py` 파일 | 타입 힌트 존재, mypy 통과 |
+
+    Worker 디스패치 시 로드된 모든 레이어 프롬프트를 컨텍스트에 포함한다.
   </Domain_Awareness>
 
   <Discovery_Handling>

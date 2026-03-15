@@ -113,9 +113,54 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - Verify no phase violates a CONFIRMED PP
       - Note PROVISIONAL PP interactions for human review
 
+    Step 8.5: Mandatory Test Infrastructure Phase Insertion (F-39)
+      - Check ALL of these conditions:
+        A. Any phase targets UI files (components/, .tsx, .jsx, .vue, .svelte)
+        B. codebase_analysis.test_infrastructure.framework == null
+        C. codebase_analysis.test_infrastructure.test_files == []
+        D. codebase_analysis.scripts.test == null
+      - If ALL conditions are true (greenfield with UI):
+        → Insert a "Test Infrastructure Setup" phase with phase_domain: "test"
+        → Position: after scaffold phase (package.json creation), before first UI phase
+        → Framework detection decision tree:
+          | Build Tool    | Install Packages                                                           | Config File          |
+          |--------------|---------------------------------------------------------------------------|---------------------|
+          | Vite         | vitest, @testing-library/react, @testing-library/jest-dom, jsdom          | vitest.config.ts    |
+          | Next.js      | jest, @testing-library/react, jest-environment-jsdom                       | jest.config.ts      |
+          | Webpack      | jest, @testing-library/react, ts-jest, jest-environment-jsdom             | jest.config.ts      |
+          | Tauri + Vite | above Vite + vi.mock('@tauri-apps/api') setup                             | vitest.config.ts    |
+          | Python only  | pytest, pytest-cov                                                        | pyproject.toml      |
+          | Rust only    | skip (cargo test built-in)                                                | —                   |
+        → Success criteria:
+          - command: "npm test -- --run --passWithNoTests", expected_exit: 0
+          - file_exists: vitest.config.ts (or jest.config.ts)
+          - grep: package.json contains "test" script
+      - If ANY of B, C, D is false: skip (test infrastructure already exists)
+      - Monorepo: evaluate conditions per-workspace. Only frontend workspaces need test infra.
+
     Step 9: Domain classification (F-28)
       - For each phase, assign phase_domain based on scope files and work description
       - See phase_domain Classification section for rules
+
+    Step 9.5: Build Optimization Phase Auto-Insertion (F-49)
+      - Check ALL of these conditions:
+        A. phases.filter(p => p.phase_domain == "ui").length >= 3
+        B. PP "Bundle Budget" exists AND value != "unlimited"/"제한 없음"
+      - If ALL conditions are true:
+        → Insert a "Build Optimization + Code Splitting" phase with phase_domain: "infra"
+        → Position: after the LAST ui-domain phase
+        → Scope:
+          - Configure Vite/Webpack code splitting (lazy routes, vendor separation)
+          - Add bundle size analysis tool (vite-plugin-visualizer or webpack-bundle-analyzer)
+          - Verify bundle meets budget from PP
+          - Set up chunk naming strategy for cache optimization
+        → Success criteria:
+          - command: "npm run build", expected_exit: 0
+          - description: "JS bundle under {pp_budget}KB budget"
+          - file_exists: dist/ or build/ output directory
+        → Rationale: "3+ UI phases generate enough code to warrant bundle optimization"
+      - If condition A is false (< 3 UI phases): skip (bundle unlikely to need optimization)
+      - If condition B is false (no budget or unlimited): skip (no constraint to enforce)
 
     Step 10: Risk assessment (pre-mortem)
       - For each phase: imagine it failing. What's the most likely cause?
@@ -139,7 +184,10 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     phases:
       - id: "phase-1"
         name: string           # short name
-        phase_domain: string   # F-28: domain tag (db|api|ui|algorithm|test|infra|general)
+        phase_domain: string      # F-28: db|api|ui|algorithm|test|ai|infra|general
+        phase_subdomain: string   # F-39: optional, tech-stack specific (e.g. react, prisma, langchain)
+        phase_task_type: string   # F-39: optional, greenfield|refactor|migration|bugfix|performance|security
+        phase_lang: string        # F-39: optional, rust|go|python|typescript|java
         scope: string          # 1-2 sentence scope description
         rationale: string      # why this phase is in this position
 
@@ -236,6 +284,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     | `ui` | 프론트엔드 컴포넌트, 스타일, 상태 관리 | "로그인 폼", "대시보드 레이아웃" |
     | `algorithm` | 복잡 로직, 최적화, 데이터 구조, 수학 | "검색 알고리즘", "캐시 전략" |
     | `test` | 테스트 작성, 테스트 인프라, 픽스처 | "통합 테스트 추가", "테스트 유틸리티" |
+    | `ai` | LLM/AI API 통합, 프롬프트 관리, 사이드카 | "Gemini 추출기", "AI 프롬프트 관리" |
     | `infra` | 설정, CI/CD, 빌드, 배포, 환경 | "Docker 설정", "환경 변수 관리" |
     | `general` | 위 분류에 해당하지 않거나 2개 이상 혼합 | "리팩토링", "문서 갱신" |
 
@@ -246,10 +295,12 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
        - `routes/`, `controllers/`, `api/`, `endpoints/` → `api`
        - `components/`, `pages/`, `styles/`, `.css`, `.vue`, `.svelte` → `ui`
        - `tests/`, `__tests__/`, `.test.`, `.spec.` → `test`
+       - `sidecar/`, `ai/`, `llm/`, `prompts/` → `ai`
        - `Dockerfile`, `.yml`, `.yaml`, `config/`, `.env` → `infra`
 
     2. Phase의 `name`과 `success_criteria`에서 의미 분석으로 2차 보정
        - "최적화", "O(n)", "정렬", "탐색" → `algorithm`
+       - "gemini", "openai", "langchain", "structured output", "LLM", "AI API" → `ai`
        - 혼합 시 가장 비중 높은 도메인 선택, 동률이면 `general`
 
     3. `phase_domain`은 **힌트**이지 강제가 아님
@@ -265,7 +316,67 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     | `ui` | S-M | 주관적 검증 (H-item 빈도 높음) |
     | `algorithm` | M-L | 높은 로직 복잡도, opus 모델 권장 |
     | `test` | S | 낮은 리스크 |
+    | `ai` | M-L | API 키 노출, 재시도 로직, 모델 폴백 리스크 |
     | `infra` | S-M | 환경 의존적 실패 리스크 |
+
+    #### phase_subdomain 분류 (F-39)
+
+    Phase의 scope 파일과 의존성에서 기술스택을 감지한다. 해당 서브도메인 프롬프트 파일이 존재할 때만 태깅한다.
+
+    | 도메인 | 서브도메인 | 감지 기준 |
+    |--------|-----------|----------|
+    | `ui` | `react` | `.jsx`, `.tsx`, `react` import, hooks 사용 |
+    | `ui` | `nextjs` | `next.config`, `app/` directory, `use server` |
+    | `ui` | `vue` | `.vue` 파일, `vue` import |
+    | `ui` | `svelte` | `.svelte` 파일, `svelte.config` |
+    | `api` | `graphql` | `.graphql`, `type Query`, resolver 파일 |
+    | `api` | `websocket` | `ws://`, `socket.io`, `WebSocket` |
+    | `api` | `trpc` | `trpc`, `createTRPCRouter` |
+    | `db` | `nosql` | `mongoose`, `mongodb`, `firestore`, `dynamodb` |
+    | `db` | `orm-prisma` | `prisma/schema.prisma`, `@prisma/client` |
+    | `db` | `orm-drizzle` | `drizzle-orm`, `drizzle.config` |
+    | `ai` | `langchain` | `langchain`, `@langchain` |
+    | `ai` | `vercel-ai` | `ai` package, `useChat`, `streamText` |
+    | `ai` | `raw-sdk` | `anthropic`, `openai` SDK 직접 import |
+    | `algorithm` | `optimization` | 캐싱, 메모이제이션, lazy 키워드 |
+    | `algorithm` | `data-structure` | tree, graph, heap, trie 구현 |
+    | `infra` | `docker` | `Dockerfile`, `docker-compose` |
+    | `infra` | `cicd` | `.github/workflows`, `Jenkinsfile` |
+    | `test` | `e2e` | `playwright`, `cypress`, e2e 디렉토리 |
+    | `test` | `unit` | `vitest`, `jest`, `.test.`, `.spec.` |
+
+    서브도메인이 감지되지 않으면 `phase_subdomain` 필드를 생략한다 (null이 아닌 absent).
+
+    #### phase_task_type 분류 (F-39)
+
+    Phase의 작업 성격에 따라 태스크 타입을 부여한다.
+
+    | 타입 | 감지 기준 |
+    |------|----------|
+    | `greenfield` | Phase가 새 파일만 생성 (impact.modify 없음) |
+    | `refactor` | Phase 이름/설명에 "리팩토링", "restructure", "rename", "extract" |
+    | `migration` | "마이그레이션", "migrate", "upgrade", "전환" |
+    | `bugfix` | "버그", "fix", "수정", "hotfix" |
+    | `performance` | "성능", "optimize", "속도", "latency" |
+    | `security` | "보안", "security", "auth", "vulnerability" |
+
+    감지되지 않으면 필드를 생략한다.
+
+    #### phase_lang 분류 (F-39)
+
+    Phase의 대상 파일 확장자에서 언어를 감지한다. architecture_anchor.tech_stack도 참조한다.
+
+    | 언어 | 감지 기준 |
+    |------|----------|
+    | `typescript` | `.ts`, `.tsx` 파일 |
+    | `python` | `.py` 파일 |
+    | `rust` | `.rs` 파일, `Cargo.toml` |
+    | `go` | `.go` 파일, `go.mod` |
+    | `java` | `.java` 파일, `pom.xml`, `build.gradle` |
+
+    JavaScript (`.js`, `.jsx`)는 프로젝트에 tsconfig.json이 있으면 `typescript`로 분류, 없으면 lang 태깅 생략.
+    다중 언어 Phase는 가장 비중 높은 언어를 선택.
+    감지되지 않으면 필드를 생략한다.
   </Phase_Domain_Classification>
 
   <Failure_Modes_To_Avoid>
