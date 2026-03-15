@@ -63,10 +63,34 @@ disallowedTools: Write, Edit, Task
     - [A-2] Phase {N}: `{command}` -- Expected: {pattern} -- Verifies: {what}
     - ...
 
-    ## 3. S-items (Sandbox Agent Testing)
-    BDD/Gherkin scenarios for agent simulation:
+    ## 3. S-items (Sandbox Agent Testing) — Executable Format (F-41)
+    BDD/Gherkin scenarios with mandatory test execution metadata:
+
+    ```yaml
+    - id: S-1
+      phase: "phase-{N}"
+      scenario: "Given {context} When {action} Then {expected}"
+      test_file: "src/components/__tests__/Example.test.tsx"
+      test_command: "npx vitest run src/components/__tests__/Example.test.tsx"
+      test_pattern: "describe('Example component')"
+      expected_exit: 0
+      domain: "component | api | algorithm | e2e"
+    ```
+
+    **Validity Rules**:
+    - S-item WITHOUT test_file → **INVALID** (must reclassify as H-item with why_not_automatable)
+    - S-item WITHOUT test_command → **INVALID**
+    - Subjective scenarios requiring human judgment → reclassify as H-item
+
+    **BDD → Test Mapping**:
+    | domain | Given → | When → | Then → |
+    |--------|---------|--------|--------|
+    | component | `render(<Component />)` | `await userEvent.click/type(...)` | `expect(screen.getBy...).toBe(...)` |
+    | api | `beforeEach: seed DB` | `const res = await request(app).get(...)` | `expect(res.status).toBe(200)` |
+    | algorithm | `const input = {...}` | `const result = fn(input)` | `expect(result).toEqual(...)` |
+
+    Legacy format (backward compatible):
     - [S-1] Phase {N}: Given {context} When {action} Then {expected} -- Agent: {persona}
-    - [S-2] ...
 
     ## 4. H-items (Human-Required)
     Items requiring human judgment (triggers Side Interview):

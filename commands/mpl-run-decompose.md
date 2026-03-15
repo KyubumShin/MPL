@@ -46,7 +46,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
-     Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|infra|general),
+     Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
      scope, impact (create/modify/affected_tests/affected_config),
      interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/description),
      estimated_complexity (S/M/L).
@@ -122,6 +122,112 @@ mpl-decomposer 에이전트에 다음 지시를 추가:
    - **Redecompose Count**: {redecompose_count}
    - **Timestamp**: {ISO timestamp}
    ```
+
+---
+
+## Step 3-F: Pre-Execution → Decomposition Feedback Loop (F-46)
+
+After decomposition is saved (Step 3), cross-validate against Pre-Execution Analysis findings.
+This step runs **at most once** to prevent infinite loops.
+
+```
+pre_exec = Read(".mpl/mpl/pre-execution-analysis.md")
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+
+feedback_conditions = []
+
+// FC-1: AI Pitfalls detected but no ai-domain phases
+ai_pitfalls = pre_exec.ai_pitfalls.filter(ap => ap.severity in ["HIGH", "CRITICAL"])
+ai_phases = decomposition.phases.filter(p => p.phase_domain == "ai")
+if ai_pitfalls.length >= 3 AND ai_phases.length == 0:
+  feedback_conditions.push({
+    id: "FC-1",
+    type: "A",  // domain reclassification
+    description: "{ai_pitfalls.length} AI pitfalls found but 0 ai-domain phases.",
+    action: "Reclassify relevant infra/algorithm phases to ai domain"
+  })
+
+// FC-2: AI Pitfalls not reflected in risk_notes
+for each ap in ai_pitfalls:
+  if NOT any phase.risk_notes mentions ap.title:
+    feedback_conditions.push({
+      id: "FC-2",
+      type: "C",  // risk_notes augmentation
+      description: "AP '{ap.title}' not reflected in any phase risk_notes.",
+      action: "Add AP to relevant phase's risk_notes"
+    })
+
+// FC-3: AI phase with too many TODOs
+for each phase in ai_phases:
+  if phase.estimated_todos > 7:
+    feedback_conditions.push({
+      id: "FC-3",
+      type: "B",  // phase split
+      description: "Phase {phase.id} has {phase.estimated_todos} TODOs (ai domain max: 7).",
+      action: "Split into sub-phases by AI concern (API integration, prompt management, retry/fallback)"
+    })
+
+// FC-4: Missing Requirements unmapped to any phase
+missing_reqs = pre_exec.missing_requirements
+for each mr in missing_reqs:
+  if NOT any phase.scope covers mr:
+    feedback_conditions.push({
+      id: "FC-4",
+      type: "D",  // decomposer re-invocation
+      description: "Missing requirement '{mr.title}' not covered by any phase.",
+      action: "Re-invoke Decomposer with MR constraint"
+    })
+
+// FC-5: AI phase missing ai_complexity dimension
+for each phase in ai_phases:
+  if NOT phase has ai_complexity field:
+    feedback_conditions.push({
+      id: "FC-5",
+      type: "E",  // default value addition
+      description: "Phase {phase.id} (ai domain) missing ai_complexity.",
+      action: "Add default ai_complexity: {model_tier: 'medium', state: 'stateless'}"
+    })
+```
+
+### Feedback Application
+
+```
+if feedback_conditions is empty:
+  Report: "[MPL] Step 3-F: No feedback conditions. Proceeding to verification planning."
+  -> proceed to Step 3-B
+
+type_a_or_c = feedback_conditions.filter(fc => fc.type in ["A", "C", "E"])
+type_b = feedback_conditions.filter(fc => fc.type == "B")
+type_d = feedback_conditions.filter(fc => fc.type == "D")
+
+// Type A/C/E: Lightweight fixes — patch decomposition in-place
+for each fc in type_a_or_c:
+  apply_patch(decomposition, fc)
+  // A: change phase_domain from infra/algorithm to ai
+  // C: append to risk_notes
+  // E: add default ai_complexity field
+Save patched decomposition to .mpl/mpl/decomposition.yaml
+
+// Type B: Phase split — patch in-place (no re-invocation)
+for each fc in type_b:
+  split_phase(decomposition, fc.phase_id)
+Save updated decomposition
+
+// Type D: Re-invoke Decomposer (expensive, max 1 time)
+if type_d is not empty AND state.step3f_count == 0:
+  state.step3f_count = 1
+  Report: "[MPL] Step 3-F: {type_d.length} unmapped requirements. Re-invoking Decomposer."
+  // Re-run Step 3 with additional constraint:
+  //   "The following requirements from Pre-Execution Analysis are NOT covered: {type_d}"
+  // This consumes 1 of the 2 redecompose budget
+  -> return to Step 3 with feedback constraints
+
+elif type_d is not empty AND state.step3f_count >= 1:
+  Report: "[MPL] Step 3-F: Unmapped requirements remain but re-decompose budget exhausted. Logging as caveats."
+  // Log as READY_WITH_CAVEATS
+
+Report: "[MPL] Step 3-F: Applied {feedback_conditions.length} feedback conditions ({type_a_or_c.length} patches, {type_b.length} splits, {type_d.length} re-invocations)."
+```
 
 ---
 

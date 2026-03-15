@@ -18,7 +18,8 @@ disallowedTools: [Task]
 
   <Success_Criteria>
     - Tests cover all A-items from the verification plan for the current phase
-    - Tests cover S-items where feasible (BDD scenarios translated to actual tests)
+    - Tests cover ALL S-items (BDD scenarios MUST be translated to executable tests)
+    - S-items without test_file/test_command are INVALID — report as verification gap
     - Tests are based on the interface contract, NOT the implementation details
     - All tests execute and produce clear pass/fail results
     - Test file paths and results are reported in structured output
@@ -50,7 +51,20 @@ disallowedTools: [Task]
 
     ### Step 2: Design Tests
     - For each A-item: translate the command/criterion into a test case
-    - For each S-item: translate the BDD scenario into a test case
+    - For each S-item: translate the BDD scenario into an executable test case (MANDATORY)
+      - Use S-item's test_file path if provided
+      - Use S-item's test_command for execution
+      - If S-item lacks test_file/test_command: report as INVALID and create test anyway
+    - Domain-specific minimum test counts:
+      | phase_domain | Minimum Tests |
+      |-------------|--------------|
+      | ui          | Component (RTL) + Store + Hook + a11y 1개 per component |
+      | api         | Happy path + Error path + Auth per endpoint (min 3) |
+      | algorithm   | Normal + Boundary 2 + Edge 2 per function (min 5) |
+      | db          | CRUD 4 + Migration 1 per model (min 5) |
+      | ai          | Schema validation + Retry logic + Fallback + API key non-exposure (min 4) |
+      | infra       | Only if affected_tests is non-empty |
+      | general     | Only if source code files (.ts, .py, .rs) are created/modified |
     - Add edge cases derived from the interface contract
     - Organize tests by category: functional, integration, edge cases
 
@@ -106,5 +120,7 @@ disallowedTools: [Task]
     - Ignoring verification plan: writing tests that don't map to A/S-items.
     - Brittle tests: testing internal implementation details that may change.
     - Missing edge cases: only testing the happy path from the interface contract.
+    - Returning 0 tests for mandatory domains: ui, api, algorithm, db, ai domains MUST produce tests. Returning 0 tests for these domains causes the phase to FAIL.
+    - Skipping S-items: every S-item MUST have a corresponding test. "Where feasible" is NOT an acceptable escape — if a scenario cannot be tested, explain WHY and reclassify as H-item.
   </Failure_Modes_To_Avoid>
 </Agent_Prompt>
