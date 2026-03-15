@@ -102,9 +102,21 @@ MPL/
 
 ---
 
-## 3. MCP Tool 정의
+## 3. MCP Tool 정의 (7개, 전체 v3.7 구현)
 
-### Tier 1: 즉시 구현 (v3.7)
+### 전체 도구 요약
+
+| # | Tool | 카테고리 | 원본 소스 | 핵심 역할 |
+|---|------|---------|----------|----------|
+| 1 | `mpl_score_ambiguity` | 인터뷰 | 신규 (Ouroboros 영감) | 4차원 모호성 점수 측정 + LLM 채점 |
+| 2 | `mpl_state_read` | 상태 | `mpl-state.mjs` | 파이프라인 상태 조회 |
+| 3 | `mpl_state_write` | 상태 | `mpl-state.mjs` | 파이프라인 상태 업데이트 (atomic) |
+| 4 | `mpl_triage` | 분류 | `mpl-scope-scan.mjs` | Pipeline Score + Tier 분류 |
+| 5 | `mpl_estimate_budget` | 운영 | `mpl-budget-predictor.mjs` | 컨텍스트 예산 예측 |
+| 6 | `mpl_analyze_tests` | 분석 | `mpl-test-analyzer.mjs` | 테스트 파일 API 계약 추출 |
+| 7 | `mpl_check_convergence` | 운영 | `mpl-state.mjs` | Fix Loop 수렴/정체/회귀 판정 |
+
+### Tier 1: 인터뷰 + 상태 + 분류
 
 #### 3.1 `mpl_score_ambiguity`
 
@@ -272,7 +284,7 @@ RESPOND ONLY WITH VALID JSON:
 
 기존 `mpl-scope-scan.mjs`의 `calculatePipelineScore()` + `classifyTier()` + `extractRiskSignal()` 통합.
 
-### Tier 2: 후속 구현
+### Tier 2: 파이프라인 운영 도구
 
 #### 3.5 `mpl_estimate_budget`
 
@@ -289,32 +301,130 @@ RESPOND ONLY WITH VALID JSON:
 }
 ```
 
-기존 `mpl-budget-predictor.mjs`의 `predictBudget()` 이전.
+**반환값:**
+```json
+{
+  "can_continue": true,
+  "remaining_pct": 45.2,
+  "estimated_needed_pct": 32.1,
+  "remaining_phases": 3,
+  "avg_tokens_per_phase": 15000,
+  "recommendation": "continue",
+  "breakdown": {
+    "total_tokens": 200000,
+    "used_tokens": 109600,
+    "remaining_tokens": 90400,
+    "completed_phases": 4,
+    "total_phases": 7,
+    "safety_margin": 1.15
+  }
+}
+```
+
+**내부 로직** (기존 `mpl-budget-predictor.mjs` 이전):
+```typescript
+// 1. .mpl/context-usage.json에서 현재 사용량 읽기
+const usage = readContextUsage(cwd);
+
+// 2. .mpl/mpl/profile/phases.jsonl에서 Phase 평균 토큰 계산
+const avgPerPhase = readAvgTokensPerPhase(cwd);
+
+// 3. .mpl/mpl/decomposition.yaml에서 총 Phase 수 파악
+const totalPhases = readTotalPhases(cwd);
+const completedPhases = readCompletedPhases(cwd);
+const remainingPhases = totalPhases - completedPhases;
+
+// 4. 예측: 남은 Phase × 평균 토큰 × 안전 마진(1.15)
+const estimatedNeeded = remainingPhases * avgPerPhase * SAFETY_MARGIN;
+
+// 5. 판정
+if (remainingPct < 10) → "pause_now"
+elif (estimatedNeeded > remainingTokens) → "pause_after_current"
+else → "continue"
+```
+
+**에이전트 활용 시나리오:**
+- Phase 실행 전: `mpl_estimate_budget` 호출 → `pause_after_current`이면 사용자에게 알림
+- 현재는 Hook에서만 수동 체크 → MCP로 에이전트가 **능동적으로** 예산 확인 가능
 
 #### 3.6 `mpl_analyze_tests`
 
 ```typescript
 {
   name: "mpl_analyze_tests",
-  description: "Extract API contracts from test files",
+  description: "Extract API contracts from test files (function calls, exceptions, assertions, fixtures)",
   inputSchema: {
     properties: {
       cwd: { type: "string" },
-      test_path: { type: "string", description: "테스트 파일/디렉토리 경로" }
+      test_path: {
+        type: "string",
+        description: "테스트 파일 또는 디렉토리 경로 (상대/절대)"
+      },
+      pattern: {
+        type: "string",
+        description: "파일명 접두사 필터 (기본: 'test_')"
+      }
     },
     required: ["cwd", "test_path"]
   }
 }
 ```
 
-기존 `mpl-test-analyzer.mjs` 이전.
+**반환값:**
+```json
+{
+  "files_analyzed": 3,
+  "contracts": [
+    {
+      "file": "tests/test_auth.py",
+      "calls": [
+        { "name": "login", "argCount": 2, "kwargs": ["remember_me"], "line": 15 },
+        { "name": "validate_token", "argCount": 1, "kwargs": [], "line": 28 }
+      ],
+      "exceptions": [
+        { "exceptionType": "AuthError", "matchPattern": "invalid credentials", "line": 35 }
+      ],
+      "asserts": [
+        { "assertion": "response.status_code == 200", "operator": "==", "line": 18 },
+        { "assertion": "token in response.headers", "operator": "in", "line": 30 }
+      ],
+      "fixtures": [
+        { "name": "auth_client", "params": ["db_session"], "line": 5 }
+      ]
+    }
+  ],
+  "summary": {
+    "total_calls": 12,
+    "total_exceptions": 3,
+    "total_asserts": 25,
+    "total_fixtures": 4,
+    "unique_functions": ["login", "validate_token", "create_user", "..."]
+  },
+  "contracts_md": "# API Contract Specification (Auto-Generated)\n..."
+}
+```
+
+**내부 로직** (기존 `mpl-test-analyzer.mjs` 이전):
+```typescript
+// Regex 기반 파싱 (AST 외부 의존성 없음)
+// 1. 함수 호출 추출: name, argCount, kwargs
+// 2. pytest.raises 블록: exceptionType, matchPattern
+// 3. assert 문: assertion expression, comparison operator
+// 4. pytest.fixture: name, dependencies
+// 5. Markdown 계약서 자동 생성
+```
+
+**에이전트 활용 시나리오:**
+- Phase 0 Enhanced에서 API Contract Extraction(Step 1) 수행 시 호출
+- 현재: 에이전트가 직접 테스트 파일을 읽고 패턴 파싱 → 컨텍스트 낭비
+- MCP: `mpl_analyze_tests` 한번 호출 → 구조화된 계약 + 마크다운 반환 → 에이전트는 결과만 활용
 
 #### 3.7 `mpl_check_convergence`
 
 ```typescript
 {
   name: "mpl_check_convergence",
-  description: "Check fix loop convergence: improving, stagnating, or regressing",
+  description: "Check fix loop convergence: improving, stagnating, or regressing with strategy suggestions",
   inputSchema: {
     properties: {
       cwd: { type: "string" }
@@ -324,24 +434,60 @@ RESPOND ONLY WITH VALID JSON:
 }
 ```
 
-기존 `mpl-state.mjs`의 `checkConvergence()` 이전.
+**반환값:**
+```json
+{
+  "status": "stagnating",
+  "delta": 0.02,
+  "pass_rate_history": [0.65, 0.67, 0.68, 0.68],
+  "current_pass_rate": 0.68,
+  "fix_loop_count": 4,
+  "max_fix_loops": 10,
+  "suggestion": "Fix loop is not making progress. Try a different strategy: change implementation approach, consult Phase 0 artifacts, or escalate to redecomposition.",
+  "variance": 0.0002,
+  "should_escalate": false,
+  "should_circuit_break": true
+}
+```
+
+**내부 로직** (기존 `mpl-state.mjs`의 `checkConvergence()` 확장):
+```typescript
+// 1. state.json에서 convergence.pass_rate_history 읽기
+// 2. 최근 N개(stagnation_window) 분석
+//    - 개선 중: delta >= min_improvement (0.05)
+//    - 정체: variance < 0.0025 AND delta < min_improvement
+//    - 회귀: delta < regression_threshold (-0.10)
+// 3. 추가 판정 (MCP에서 확장):
+//    - should_escalate: 정체 + fix_loop_count > max/2 → tier 에스컬레이션 제안
+//    - should_circuit_break: 회귀 OR (정체 AND fix_loop_count > max*0.7) → 중단 제안
+// 4. strategy suggestion 생성
+```
+
+**에이전트 활용 시나리오:**
+- Fix Loop 매 반복 시작 전: `mpl_check_convergence` 호출
+- `should_circuit_break == true`이면 에이전트가 즉시 전략 변경 또는 사용자 상담
+- 현재: Hook이 PostToolUse 시점에 체크 → 에이전트는 결과를 간접 수신
+- MCP: 에이전트가 능동적으로 호출 → 판단에 직접 활용
 
 ---
 
 ## 4. 마이그레이션 전략
 
-### 단계적 이전 (Big Bang 금지)
+### 일괄 구현 (v3.7)
 
 ```
-Phase 1 (v3.7): MCP 서버 신규 생성 + mpl_score_ambiguity 구현
-                기존 hooks 그대로 유지 (병행 운영)
+v3.7: MCP 서버 생성 + Tier 1 + Tier 2 전체 구현 (7개 도구)
+      기존 hooks 병행 유지
 
-Phase 2 (v3.8): mpl_state_read/write + mpl_triage 추가
-                hooks에서 state/scope-scan 로직을 MCP 호출로 대체
-                hooks는 thin wrapper로 변환 (MCP 호출 프록시)
+      Tier 1 (인터뷰 + 상태 + 분류):
+        mpl_score_ambiguity, mpl_state_read, mpl_state_write, mpl_triage
 
-Phase 3 (v3.9): mpl_estimate_budget + mpl_analyze_tests + mpl_check_convergence
-                hooks의 lib/ 함수 대부분이 MCP로 이전 완료
+      Tier 2 (운영 + 분석):
+        mpl_estimate_budget, mpl_analyze_tests, mpl_check_convergence
+
+v3.8: hooks를 thin wrapper로 변환
+      hooks/lib/의 로직을 MCP import로 대체
+      hooks는 이벤트 트리거 + MCP 호출 프록시만 담당
 ```
 
 ### Hooks와의 공존
@@ -357,7 +503,7 @@ MCP로 이전 **불가능**한 hooks (그대로 유지):
 | `mpl-session-init.mjs` | Session init hook |
 | `mpl-compaction-tracker.mjs` | Notification hook |
 
-MCP로 이전 **가능**한 hooks (Phase 2~3에서 thin wrapper로 변환):
+MCP로 이전 **가능**한 hooks (v3.8에서 thin wrapper로 변환):
 
 | Hook | 현재 역할 | MCP 이전 후 |
 |------|----------|-------------|
