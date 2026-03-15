@@ -202,6 +202,45 @@ v1.0 (기존)                          v3.0 (달성)
 
 ---
 
+## v3.7 — 2-Stage Interview Redesign (2026-03-15)
+
+### 설계 방향
+
+v3.7은 인터뷰 파이프라인을 근본적으로 재설계한다. 기존 "PP 확인용 4라운드 → PP 차원 재측정" 구조에서, "가치 중심 PP 발견 → 메트릭 기반 모호성 해소 루프"로 전환한다.
+
+> Ouroboros의 AmbiguityScorer에서 영감: 구조(라운드)가 아닌 메트릭이 질문을 결정한다.
+> 매 응답 후 모호성을 재측정하고, 가장 약한 차원을 자동 타겟한다.
+
+### 핵심 변경
+
+| 변경 | Before (v3.6) | After (v3.7) |
+|------|--------------|-------------|
+| **Stage 1 질문 프레이밍** | 기술 카테고리 분류 ("핵심 정체성은?") | 사용자 가치/시나리오 중심 ("사용자가 뭘 할 수 있게 되나?") |
+| **Stage 2 에이전트** | `mpl-weak-interviewer` (PP 5차원 재측정) | `mpl-ambiguity-resolver` (PP 직교 4차원 메트릭 루프) |
+| **Stage 2 차원** | Goal/Boundary/Priority/Criteria/Context (PP 중복) | Spec Completeness/Edge Case/Technical Decision/Acceptance Testability (PP 직교) |
+| **종료 조건** | 질문 개수 소프트 리밋 | `ambiguity <= 0.2` (80% clarity) 정량 threshold |
+| **AskUserQuestion 옵션** | 단어/짧은 설명 | Contrast-Based: gain/sacrifice + 구체적 시나리오 예시 |
+| **기술 선택 질문** | 바로 옵션 제시 | Pre-Research Protocol: 비교표 먼저 제시 후 질문 |
+
+### 신규 프로토콜
+
+- **Pre-Research Protocol**: 기술 선택 트레이드오프가 있는 질문 전에 WebFetch/Read로 비교 자료 수집 → 비교표 제시 → 질문. Stage 1, Stage 2 모두 적용.
+- **Contrast-Based Options**: 모든 AskUserQuestion 옵션에 "무엇을 얻고 무엇을 희생하는가" + 구체적 예시 필수.
+- **Spec Reading Step**: Stage 2 시작 시 제공된 스펙/문서를 PP와 대조하여 gap/conflict/hidden constraint 식별.
+
+### 영향받는 파일
+
+| 파일 | 변경 |
+|------|------|
+| `agents/mpl-interviewer.md` | 4라운드 가치 중심 재작성 + Pre-Research Protocol |
+| `agents/mpl-ambiguity-resolver.md` | 신규 (mpl-weak-interviewer 대체) |
+| `agents/mpl-weak-interviewer.md` | 삭제 |
+| `commands/mpl-run-phase0.md` | Stage 2 참조 업데이트 |
+| `docs/design.md` | 에이전트 카탈로그 업데이트 |
+| `hooks/mpl-validate-output.mjs` | 에이전트명 + 검증 키워드 업데이트 |
+
+---
+
 ## v3.2 로드맵 — "문서가 메모리다 + 적응형 라우팅" (2026-03-07)
 
 ### 설계 방향
