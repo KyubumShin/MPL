@@ -1,20 +1,20 @@
-# Task Type: Greenfield (신규 생성)
+# Task Type: Greenfield (New Creation)
 
-## 핵심 원칙
-- 구조 설계 우선: 파일/디렉토리 배치를 먼저 확정한 뒤 로직 구현
-- 확장성을 고려하되 현재 요구사항을 넘는 과잉 설계는 금지
-- 기존 프로젝트의 네이밍 컨벤션, 파일 구조, 패턴을 그대로 따름
-- 스캐폴딩(뼈대) 완료 후 순서대로 로직 채움
-- 의존성 추가 시 기존 스택과의 일관성 우선 확인
+## Core Principles
+- Structure design first: finalize file/directory layout before implementing logic
+- Consider extensibility but prohibit over-engineering beyond current requirements
+- Follow the existing project's naming conventions, file structure, and patterns exactly
+- Complete scaffolding first, then fill in logic in order
+- When adding dependencies, first verify consistency with the existing stack
 
-## 주의 사항
-- 기존 코드베이스 컨벤션 파악 없이 새 패턴 도입 금지
-- "나중에 리팩토링할 것"을 전제로 설계하지 않음
-- 인터페이스/추상화는 실제로 필요한 시점에만 도입
-- 환경 설정, 에러 처리, 로깅을 처음부터 포함 (후추가 금지)
+## Cautions
+- Do not introduce new patterns without understanding existing codebase conventions
+- Do not design with the assumption of "we'll refactor later"
+- Interfaces/abstractions are introduced only when actually needed
+- Include environment configuration, error handling, and logging from the start (no afterthoughts)
 
-## 검증 포인트
-- 기존 코드의 네이밍·구조 컨벤션과 일관성이 있는가?
-- 빌드가 통과하는가?
-- 기본 동작을 검증하는 테스트가 존재하는가?
-- 새로 추가된 파일/모듈이 기존 진입점에서 참조 가능한가?
+## Verification Points
+- Is there consistency with the existing code's naming and structural conventions?
+- Does the build pass?
+- Are there tests that verify basic behavior?
+- Can the newly added files/modules be referenced from existing entry points?

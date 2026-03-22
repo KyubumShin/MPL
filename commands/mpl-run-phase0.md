@@ -11,7 +11,7 @@ Load this when `current_phase` is in the pre-execution stages (before decomposit
 
 ## Step -1: LSP Warm-up (Non-blocking)
 
-파이프라인 시작 시 LSP 서버를 사전 워밍업한다. Step 0 Triage와 병렬로 실행되므로 지연 없음.
+At pipeline start, pre-warm the LSP server. Runs in parallel with Step 0 Triage — no delay.
 
 ```
 on mpl-init:
@@ -29,26 +29,26 @@ on mpl-init:
      .mpl/mpl/state.json → lsp_servers: ["typescript", "python", ...]
 ```
 
-| 언어 | LSP 서버 | Cold Start | Warm-up 후 |
-|------|---------|-----------|-----------|
+| Language | LSP Server | Cold Start | After Warm-up |
+|----------|-----------|-----------|--------------|
 | TypeScript/JS | typescript-language-server | 2~5s | <100ms |
 | Python | pylsp / pyright | 3~10s | <200ms |
 | Go | gopls | 2~8s | <100ms |
 | Rust | rust-analyzer | 5~30s | <500ms |
 
-LSP 서버별 활용 가능 기능:
+Available features per LSP server:
 
-| LSP 도구 | Phase 0 활용 | Execution 활용 |
-|----------|-------------|---------------|
-| `lsp_hover` | API 시그니처·타입 추론 추출 | Worker 결과 타입 검증 |
-| `lsp_diagnostics` | 기존 코드 건강도 파악 | Worker 결과물 정적 검증 |
-| `lsp_find_references` | 중심성 분석 (import보다 정확) | blast radius 계산 |
-| `lsp_goto_definition` | 의존성 체인 추적 | cross-file 참조 해결 |
-| `lsp_document_symbols` | 공개 API 목록 추출 | 인터페이스 변경 감지 |
-| `lsp_rename` | - | 안전한 리팩토링 |
+| LSP Tool | Phase 0 Usage | Execution Usage |
+|----------|-------------|----------------|
+| `lsp_hover` | Extract API signatures and type inference | Validate Worker result types |
+| `lsp_diagnostics` | Assess existing code health | Static validation of Worker outputs |
+| `lsp_find_references` | Centrality analysis (more accurate than imports) | Calculate blast radius |
+| `lsp_goto_definition` | Trace dependency chains | Resolve cross-file references |
+| `lsp_document_symbols` | Extract public API list | Detect interface changes |
+| `lsp_rename` | - | Safe refactoring |
 | `lsp_code_actions` | - | auto-import, quick-fix |
 
-워밍업 실패 시 (LSP 서버 미설치): 경고만 출력하고 진행. LSP 없이도 ast_grep_search + Grep 폴백으로 동작한다.
+On warm-up failure (LSP server not installed): print warning and continue. Operates with ast_grep_search + Grep fallback even without LSP.
 
 ```
 if lsp_hover fails for a language:
@@ -81,6 +81,20 @@ else:
 writeState(cwd, { tool_mode: tool_mode })
 Announce: "[MPL] Tool mode: {tool_mode}. LSP: {active_tools.lsp}, ast_grep: {active_tools.ast_grep}."
 ```
+
+#### QMD Mode Detection (New)
+
+Immediately after tool_mode detection, check QMD availability:
+
+```pseudocode
+qmd_available = check_tool_exists("qmd_search") OR check_tool_exists("qmd_deep_search")
+qmd_mode = qmd_available ? "qmd_first" : "grep_only"
+
+writeState(cwd, { qmd_mode: qmd_mode })  // persist to .mpl/state.json
+profile.qmd_mode = qmd_mode               // also record in profile for metrics
+```
+
+qmd_mode is used in subsequent Scout calls and cache key generation.
 
 All subsequent Phase 0 steps check `tool_mode` before using LSP/ast_grep tools.
 If tool_mode is "standalone" or "partial", use the fallbacks defined in `docs/standalone.md`.
@@ -154,23 +168,23 @@ if exists(".mpl/memory/learnings.md"):
   Announce: "[MPL] Loaded learnings from past runs."
 ```
 
-#### 0.1.5c: 4-Tier Adaptive Memory 로드 (F-25)
+#### 0.1.5c: 4-Tier Adaptive Memory Load (F-25)
 
-Phase 0 시작 시 이전 실행의 메모리를 선택적으로 로드한다.
-기존 learnings.md(F-11) 단일 로드를 4-Tier 구조로 확장한다.
+At Phase 0 start, selectively load memory from previous runs.
+Extends the existing single learnings.md (F-11) load to a 4-Tier structure.
 
-##### 로딩 우선순위 및 예산
+##### Loading Priority and Budget
 
-| Tier | 파일 | 로드 조건 | 최대 토큰 | 용도 |
-|------|------|----------|----------|------|
-| 1 | `semantic.md` | 항상 (파일 존재 시) | 500 | 프로젝트 지식, 일반화 규칙 |
-| 2 | `procedural.jsonl` | 태스크 설명 키워드 매칭 | 500 | 관련 도구 패턴, 실패 회피 |
-| 3 | `episodic.md` | 항상 (파일 존재 시) | 800 | 이전 실행 요약, 맥락 파악 |
-| 4 | `learnings.md` (하위 호환) | semantic.md 없을 때만 | 500 | F-11 레거시 호환 |
+| Tier | File | Load Condition | Max Tokens | Purpose |
+|------|------|----------------|-----------|---------|
+| 1 | `semantic.md` | Always (if file exists) | 500 | Project knowledge, generalized rules |
+| 2 | `procedural.jsonl` | Keyword matching against task description | 500 | Relevant tool patterns, failure avoidance |
+| 3 | `episodic.md` | Always (if file exists) | 800 | Previous run summaries, context understanding |
+| 4 | `learnings.md` (backward compat) | Only when semantic.md is absent | 500 | F-11 legacy compatibility |
 
-총 예산: 최대 2000 토큰
+Total budget: max 2000 tokens
 
-##### 선택적 로딩 알고리즘
+##### Selective Loading Algorithm
 
 ```pseudocode
 function load_phase0_memory(task_description):
@@ -178,31 +192,31 @@ function load_phase0_memory(task_description):
   remaining_budget = 2000
   semantic_loaded = false
 
-  # Tier 1: Semantic (프로젝트 지식 — 항상 유용)
+  # Tier 1: Semantic (project knowledge — always useful)
   if exists(".mpl/memory/semantic.md"):
     semantic = read_truncated(".mpl/memory/semantic.md", 500)
-    memory_context += "## 프로젝트 지식 (semantic)\n" + semantic
+    memory_context += "## Project Knowledge (semantic)\n" + semantic
     remaining_budget -= token_count(semantic)
     semantic_loaded = true
 
-  # Tier 2: Procedural (관련 패턴만)
+  # Tier 2: Procedural (relevant patterns only)
   if exists(".mpl/memory/procedural.jsonl"):
-    keywords = extract_keywords(task_description)  # 간단 토큰화
+    keywords = extract_keywords(task_description)  # simple tokenization
     relevant = query_by_tags(procedural, keywords, limit=10)
     if relevant:
       procedural_text = format_procedural(relevant)
-      memory_context += "## 관련 도구 패턴 (procedural)\n" + procedural_text
+      memory_context += "## Relevant Tool Patterns (procedural)\n" + procedural_text
       remaining_budget -= token_count(procedural_text)
 
-  # Tier 3: Episodic (최근 실행 맥락)
+  # Tier 3: Episodic (recent run context)
   if exists(".mpl/memory/episodic.md"):
     episodic = read_recent(".mpl/memory/episodic.md", max_tokens=min(800, remaining_budget))
-    memory_context += "## 이전 실행 요약 (episodic)\n" + episodic
+    memory_context += "## Previous Run Summaries (episodic)\n" + episodic
 
-  # 하위 호환: semantic 없으면 기존 learnings.md 사용
+  # Backward compatibility: use existing learnings.md if no semantic
   elif exists(".mpl/memory/learnings.md") and not semantic_loaded:
     learnings = read_truncated(".mpl/memory/learnings.md", 500)
-    memory_context += "## 축적 학습 (learnings)\n" + learnings
+    memory_context += "## Accumulated Learnings (learnings)\n" + learnings
 
   return memory_context
 ```
@@ -210,60 +224,60 @@ function load_phase0_memory(task_description):
 ```
 loaded_memory = load_phase0_memory(user_request)
 if loaded_memory:
-  // Phase Runner context (Step 4.2) 및 Phase 0 Enhanced (Step 2.5)에 주입
+  // Inject into Phase Runner context (Step 4.2) and Phase 0 Enhanced (Step 2.5)
   Announce: "[MPL] 4-Tier memory loaded. Budget used: {2000 - remaining_budget}/2000 tokens."
 else:
   Announce: "[MPL] No memory files found. Proceeding without prior context."
 ```
 
-##### 토큰 절감 측정 기준
+##### Token Savings Measurement
 
-**Baseline (F-11 기존 방식)**: learnings.md 전체 파일 로드 — 최대 2000 토큰, 선택성 없음.
-**4-Tier (F-25 신규 방식)**: 선택적 로드 — semantic(관련 규칙만) + procedural(매칭 태그만) + episodic(최근 2 Phase만).
+**Baseline (F-11 old approach)**: Load entire learnings.md — max 2000 tokens, no selectivity.
+**4-Tier (F-25 new approach)**: Selective load — semantic (relevant rules only) + procedural (matching tags only) + episodic (recent 2 Phases only).
 
-절감 비율 측정:
-- Phase 5+ 실행 시 episodic 압축 효과: 10 Phase 실행 → 2 Phase 상세 + 8줄 압축 = ~400 토큰 (vs 전체 ~2000)
-- procedural 태그 매칭: 100 entries 중 평균 5-10건 매칭 = ~200 토큰 (vs 전체 ~1500)
-- semantic 일반화: 반복 패턴 제거로 ~200 토큰 (vs episodic 전체 반복 포함 ~800)
-- **예상 총합**: ~800 토큰 / 기존 ~2000 토큰 = **60% 절감** (보수적)
-- 프로파일링(Step 2.5.9)에서 `memory_tokens_loaded` vs `legacy_learnings_tokens` 비교로 실측
+Savings rate measurement:
+- Episodic compression effect on Phase 5+ runs: 10 Phase run → 2 Phase detailed + 8 lines compressed = ~400 tokens (vs full ~2000)
+- Procedural tag matching: average 5-10 matches out of 100 entries = ~200 tokens (vs full ~1500)
+- Semantic generalization: ~200 tokens removed from repeated patterns (vs episodic full with repetition ~800)
+- **Estimated total**: ~800 tokens / original ~2000 tokens = **60% savings** (conservative)
+- Measured via profiling (Step 2.5.9) by comparing `memory_tokens_loaded` vs `legacy_learnings_tokens`
 
-##### Phase 0 Enhanced와의 연동
+##### Integration with Phase 0 Enhanced
 
-Phase 0 Enhanced(Step 2.5) 실행 시 메모리 참조:
-- **semantic.md의 "Project Conventions"** → Type Policy(Step 3) 생성 시 기존 컨벤션 반영
-- **procedural.jsonl의 api_contract_violation 태그** → API Contract(Step 1) 검증 시 과거 실패 패턴 회피
-- **episodic.md의 최근 Phase 0 결과** → 복잡도 판정 시 이전 실행 복잡도 참조
+When Phase 0 Enhanced (Step 2.5) runs, memory is referenced as follows:
+- **semantic.md "Project Conventions"** → reflected in existing conventions when generating Type Policy (Step 3)
+- **procedural.jsonl api_contract_violation tag** → avoids past failure patterns when validating API Contracts (Step 1)
+- **episodic.md recent Phase 0 results** → references previous run complexity when making complexity judgments
 
-#### semantic.md 활용 Phase 0 단축 메커니즘
+#### semantic.md-Assisted Phase 0 Shortcut Mechanism
 
-semantic.md에 축적된 프로젝트 지식이 Phase 0 Enhanced 단계를 단축한다:
+Project knowledge accumulated in semantic.md shortens Phase 0 Enhanced steps:
 
-| semantic.md 항목 | Phase 0 단축 효과 | 예상 절감 |
-|-----------------|------------------|----------|
-| `## Project Conventions` 에 타입 규칙 존재 | Step 3 (Type Policy): 기존 컨벤션을 시드로 사용하여 분석 범위 축소 | ~30% |
-| `## Success Patterns` 에 API 패턴 존재 | Step 1 (API Contract): 기존 패턴 재활용, 신규 API만 추출 | ~20% |
-| `## Failure Patterns` 에 에러 패턴 존재 | Step 4 (Error Spec): 과거 실패 기반 에러 명세 보강 — 재분석 불필요 | ~15% |
+| semantic.md Entry | Phase 0 Shortcut Effect | Estimated Savings |
+|------------------|------------------------|------------------|
+| Type rules exist in `## Project Conventions` | Step 3 (Type Policy): use existing conventions as seed, narrow analysis scope | ~30% |
+| API patterns exist in `## Success Patterns` | Step 1 (API Contract): reuse existing patterns, extract only new APIs | ~20% |
+| Error patterns exist in `## Failure Patterns` | Step 4 (Error Spec): supplement error spec based on past failures — no re-analysis needed | ~15% |
 
-**단축 로직**:
+**Shortcut Logic**:
 ```pseudocode
 function phase0_with_semantic(semantic_content, complexity_grade):
-  # semantic 존재 시 각 Step에 시드 주입
+  # Inject seed into each Step when semantic exists
   if semantic_content.has("Project Conventions"):
     step3_type_policy.seed = semantic_content["Project Conventions"]
-    step3_type_policy.scope = "incremental"  # 전체 분석 → 변경분만
+    step3_type_policy.scope = "incremental"  # full analysis → delta only
 
   if semantic_content.has("Success Patterns"):
     step1_api_contracts.known_patterns = semantic_content["Success Patterns"]
-    step1_api_contracts.scope = "delta_only"  # 신규 API만 추출
+    step1_api_contracts.scope = "delta_only"  # extract only new APIs
 
   if semantic_content.has("Failure Patterns"):
     step4_error_spec.prior_failures = semantic_content["Failure Patterns"]
-    # 과거 실패 패턴은 자동 포함 — 재분석 불필요
+    # Past failure patterns included automatically — no re-analysis needed
 ```
 
-**측정**: Phase 0 토큰 프로파일링(Step 2.5.9)에서 `semantic_seed_applied: true/false` 기록.
-반복 프로젝트에서 semantic.md 유무에 따른 Phase 0 토큰 비교로 20-30% 단축 검증.
+**Measurement**: Record `semantic_seed_applied: true/false` in Phase 0 token profiling (Step 2.5.9).
+Verify 20-30% shortcut by comparing Phase 0 tokens with and without semantic.md on repeated projects.
 
 Classify tier from score (or override with user hint):
 
@@ -293,7 +307,7 @@ After tier is determined, subsequent steps are selected per tier:
 |------|--------|----------|----------|
 | Step 0.2 Interview Depth | light (+ Uncertainty Scan) | light | full detection |
 | Step 0.5 Maturity | skip | read config | read config |
-| Step 1 PP + 요구사항 인터뷰 (v2) | light (Round 1+2 + Uncertainty Scan) | light (Round 1+2 + 경량 요구사항) | full (4 rounds + 소크라틱 + JUSF) |
+| Step 1 PP + Requirements Interview (v2) | light (Round 1+2 + Uncertainty Scan) | light (Round 1+2 + lightweight requirements) | full (4 rounds + Socratic + JUSF) |
 | Step 1-B Pre-Execution | skip | skip | full |
 | Step 2 Codebase Analysis | skip (use scan) | structure + tests only | full (6 modules) |
 | Step 2.5 Phase 0 Enhanced | Step 4 only (Error Spec) | Step 4 only (Error Spec) | complexity-adaptive |
@@ -353,8 +367,8 @@ Write(".mpl/mpl/RUNBOOK.md"):
 
 ### 0.2: Interview Depth
 
-**인터뷰는 항상 실행된다.** 전체 스펙 구현을 위해 사전 불확실성 해소가 필수적이다.
-인터뷰를 생략하면 실행 중 CRITICAL discovery가 빈발하여 Side Interview로 파이프라인이 느려진다.
+**The interview always runs.** Pre-resolving uncertainty is essential for implementing the full spec.
+Skipping the interview causes CRITICAL discoveries to occur frequently during execution, slowing the pipeline through Side Interviews.
 
 ```
 interview_depth = classify_prompt(user_request):
@@ -368,10 +382,8 @@ interview_depth = classify_prompt(user_request):
     -> "full" (all 4 rounds)
 ```
 
-> **NOTE**: `"skip"` 옵션은 제거되었다. 아무리 상세한 프롬프트라도 암묵적 가정, PP 간 충돌,
-> 스펙 모호성이 존재할 수 있다. 최소 light 인터뷰(Round 1+2)를 통해 이를 사전 검출한다.
-> 고밀도 프롬프트(density ≥ 8)의 경우, light 인터뷰 후 Uncertainty Scan을 추가 실행하여
-> HIGH 불확실성 항목에 대해 타겟 질문(최대 3개)을 수행한다.
+> **NOTE**: The `"skip"` option has been removed. Even the most detailed prompt can contain implicit assumptions, conflicts between PPs, and spec ambiguities. These are pre-detected through a minimum light interview (Round 1+2).
+> For high-density prompts (density ≥ 8), an Uncertainty Scan is run after the light interview to ask targeted questions (max 3) about HIGH uncertainty items.
 
 | interview_depth | Condition | Interview Behavior |
 |-----------------|-----------|-------------------|
@@ -397,101 +409,101 @@ Announce: `[MPL] Maturity mode: {mode}. Phase sizing: {S/M/L}`
 
 ---
 
-## Step 1: PP + 요구사항 통합 인터뷰 (mpl-interviewer v2) [F-26]
+## Step 1: PP + Requirements Integrated Interview (mpl-interviewer v2) [F-26]
 
-기존 PP Interview를 mpl-interviewer v2로 확장한다. interview_depth에 따라 PP 발견과 요구사항 구조화가 단일 인터뷰 세션에서 동시에 수행된다.
+Extends the existing PP Interview to mpl-interviewer v2. Depending on interview_depth, PP discovery and requirements structuring are performed simultaneously in a single interview session.
 
-> **핵심 통찰**: PP 발견 과정 자체가 요구사항 정의의 핵심 요소이다. 분리하면 이중 인터뷰 피로가 발생한다.
+> **Core insight**: The PP discovery process itself is a key component of requirements definition. Separating them creates double-interview fatigue.
 
-interview_depth에 따라 인터뷰 범위가 자동 조절된다:
+Interview scope is automatically adjusted based on interview_depth:
 
 ### depth == "light"
 
 ```
 Phase 1 (mpl-interviewer):
-  Round 1 (What) + Round 2 (What NOT) + [고밀도 전용: Uncertainty Scan]
+  Round 1 (What) + Round 2 (What NOT) + [high-density only: Uncertainty Scan]
   → Output: pivot-points.md + user_responses_summary
 
 Stage 2 (mpl-ambiguity-resolver):
-  Spec Reading → Ambiguity Scoring Loop → 요구사항 구조화
+  Spec Reading → Ambiguity Scoring Loop → Requirements Structuring
   → Output: ambiguity score + requirements-light.md
 ```
 
-**Phase 1 상세**:
+**Phase 1 Details**:
 
-1. **Round 1**: "정확히 무엇을 원하는가?" (PP 후보 추출)
-2. **Round 2**: "절대 깨뜨리면 안 되는 것은?" (PP 제약 + 범위 경계)
-3. **[고밀도 전용] Uncertainty Scan** (information_density ≥ 8일 때만):
-   - Round 1-2에서 추출한 draft PPs + 전체 프롬프트에 대해 Uncertainty Scan 실행
-   - 3축 × 3 = 9차원 + 축 간 교차 분석:
-     [기획] U-P1: 타겟 사용자 불명확, U-P2: 핵심 가치/우선순위 불명확, U-P3: 성공 측정 기준 부재
-     [디자인] U-D1: 비주얼 디자인 시스템 부재, U-D2: 사용자 플로우 미정의, U-D3: 정보 계층 불명확
-     [개발] U-E1: 모호한 판단 기준, U-E2: 암묵적 가정, U-E3: 기술적 결정 미확정
-     [교차] 기획↔디자인, 디자인↔개발, 기획↔개발 일치성 + PP 축 편향 체크
-   - Classify: HIGH (circuit break 예상) / MED (PROVISIONAL로 진행 가능) / LOW (자연 해소)
-   - if HIGH == 0: MED/LOW는 Step 1-B에 uncertainty_notes로 전달
-   - elif HIGH >= 1: HIGH 항목에 대해 Hypothesis-as-Options 질문 (최대 3개)
-4. PP 확정: pivot-points.md 저장 + user_responses_summary 생성
+1. **Round 1**: "What exactly do you want?" (extract PP candidates)
+2. **Round 2**: "What must never be broken?" (PP constraints + scope boundaries)
+3. **[High-density only] Uncertainty Scan** (only when information_density ≥ 8):
+   - Run Uncertainty Scan on draft PPs extracted from Round 1-2 + full prompt
+   - 3 axes × 3 = 9 dimensions + cross-axis analysis:
+     [Planning] U-P1: unclear target users, U-P2: unclear core value/priorities, U-P3: no success metrics
+     [Design] U-D1: no visual design system, U-D2: undefined user flows, U-D3: unclear information hierarchy
+     [Development] U-E1: ambiguous judgment criteria, U-E2: implicit assumptions, U-E3: undecided technical choices
+     [Cross] planning↔design, design↔development, planning↔development alignment + PP axis bias check
+   - Classify: HIGH (circuit break expected) / MED (can proceed as PROVISIONAL) / LOW (naturally resolved)
+   - if HIGH == 0: pass MED/LOW as uncertainty_notes to Step 1-B
+   - elif HIGH >= 1: Hypothesis-as-Options questions for HIGH items (max 3)
+4. PP confirmation: save pivot-points.md + generate user_responses_summary
 
-**Stage 2 상세** (mpl-ambiguity-resolver):
+**Stage 2 Details** (mpl-ambiguity-resolver):
 
-1. **Spec Reading**: 제공된 스펙/문서를 PP와 대조하여 gap/conflict/hidden constraint 식별
-2. **Ambiguity Scoring**: PP 직교 4차원(Spec Completeness 35%/Edge Case 25%/Technical Decision 25%/Acceptance Testability 15%)으로 점수화
-3. **Socratic Loop**: ambiguity <= 0.2 될 때까지 가장 약한 차원을 타겟 소크라틱 질문 반복
-   - Pre-Research Protocol: 기술 선택 시 비교표 먼저 제시
-   - 매 응답 후 ambiguity 재측정
-4. **경량 요구사항 구조화**:
-   - User Stories + 자연어 AC + MoSCoW + 증거 태깅
-   - 저장: `.mpl/pm/requirements-light.md`
+1. **Spec Reading**: identify gap/conflict/hidden constraint by comparing provided spec/docs against PPs
+2. **Ambiguity Scoring**: score via 4 PP-orthogonal dimensions (Spec Completeness 35%/Edge Case 25%/Technical Decision 25%/Acceptance Testability 15%)
+3. **Socratic Loop**: repeat targeted Socratic questions on weakest dimension until ambiguity <= 0.2
+   - Pre-Research Protocol: present comparison table first for technical choices
+   - Re-measure ambiguity after each response
+4. **Lightweight Requirements Structuring**:
+   - User Stories + natural language AC + MoSCoW + evidence tagging
+   - Save to: `.mpl/pm/requirements-light.md`
 
 ### depth == "full"
 
 ```
 Phase 1 (mpl-interviewer):
-  Round 1-4 전체
+  Full Round 1-4
   → Output: pivot-points.md + user_responses_summary
 
 Stage 2 (mpl-ambiguity-resolver):
-  Spec Reading → Ambiguity Scoring Loop → 솔루션 옵션 → JUSF
+  Spec Reading → Ambiguity Scoring Loop → Solution Options → JUSF
   → Output: ambiguity score + requirements-{hash}.md
 ```
 
-**Phase 1 상세**:
+**Phase 1 Details**:
 
-1. **Round 1-4**: 기존 PP 인터뷰 전체
-2. PP 확정: pivot-points.md 저장 + user_responses_summary 생성
+1. **Round 1-4**: Full existing PP interview
+2. PP confirmation: save pivot-points.md + generate user_responses_summary
 
-**Stage 2 상세** (mpl-ambiguity-resolver):
+**Stage 2 Details** (mpl-ambiguity-resolver):
 
-1. **Spec Reading**: 제공된 스펙/문서를 PP와 대조하여 gap/conflict/hidden constraint 식별
-2. **Ambiguity Scoring**: PP 직교 4차원으로 점수화
-3. **Socratic Loop**: ambiguity <= 0.2 될 때까지 가장 약한 차원을 타겟 소크라틱 질문 반복
-   - Pre-Research Protocol: 기술 선택 시 비교표 먼저 제시
-   - 매 응답 후 ambiguity 재측정
-4. **솔루션 옵션**: 3개 이상 옵션 + 트레이드오프 매트릭스 (Pre-Research 포함)
+1. **Spec Reading**: identify gap/conflict/hidden constraint by comparing provided spec/docs against PPs
+2. **Ambiguity Scoring**: score via 4 PP-orthogonal dimensions
+3. **Socratic Loop**: repeat targeted Socratic questions on weakest dimension until ambiguity <= 0.2
+   - Pre-Research Protocol: present comparison table first for technical choices
+   - Re-measure ambiguity after each response
+4. **Solution Options**: 3+ options + tradeoff matrix (with Pre-Research)
    - Minimal / Balanced / Comprehensive
-   - 사용자 선택 → selected_option 기록
-5. **JUSF 출력**: JTBD + User Stories + Gherkin AC
+   - User selects → record selected_option
+5. **JUSF Output**: JTBD + User Stories + Gherkin AC
    - Dual-Layer: YAML frontmatter + Markdown body
-   - 증거 태깅 (High/Medium/Low)
-   - 멀티 관점 리뷰 (기획/디자인/개발)
-   - Ambiguity Resolution Log 포함
-   - 저장: `.mpl/pm/requirements-{hash}.md`
+   - Evidence tagging (High/Medium/Low)
+   - Multi-perspective review (planning/design/development)
+   - Ambiguity Resolution Log included
+   - Save to: `.mpl/pm/requirements-{hash}.md`
 
-### 라우팅 로직
+### Routing Logic
 
 ```
 if .mpl/pivot-points.md exists -> Load PPs and proceed to Step 1-B
 
 else:
-  AskUserQuestion: "프로젝트의 핵심 제약사항(Pivot Points)을 정의할까요?"
+  AskUserQuestion: "Would you like to define the project's core constraints (Pivot Points)?"
   Options:
-    1. "인터뷰 시작" -> Run two-phase interview (below)
-    2. "건너뛰기"    -> Proceed without PPs (explore mode only)
-    3. "기존 PP 로드" -> Read from .mpl/pivot-points.md
+    1. "Start interview" -> Run two-phase interview (below)
+    2. "Skip"            -> Proceed without PPs (explore mode only)
+    3. "Load existing PPs" -> Read from .mpl/pivot-points.md
 
-  // NOTE: "skip" 분기 제거됨. 인터뷰는 항상 최소 "light" 수준으로 실행.
-  // 고밀도 프롬프트도 Round 1+2 인터뷰를 거친 후 Uncertainty Scan 실행.
+  // NOTE: "skip" branch removed. Interview always runs at minimum "light" level.
+  // Even high-density prompts go through Round 1+2 interview before Uncertainty Scan.
 
 if maturity_mode == "explore" -> PP is optional, skip if user declines
 
@@ -503,39 +515,39 @@ Task(subagent_type="mpl-ambiguity-resolver", ...)  // Stage 2: Ambiguity Resolut
 → save requirements-light.md or requirements-{hash}.md + ambiguity score
 ```
 
-### 모델 라우팅 (F-26)
+### Model Routing (F-26)
 
 ```
 // Phase 1 (mpl-interviewer):
 if interview_depth == "light" AND information_density >= 8:
-    model = "opus"              # Round 1-2 + Uncertainty Scan (불확실성 판별에 추론 깊이 필요)
+    model = "opus"              # Round 1-2 + Uncertainty Scan (deep reasoning needed for uncertainty judgment)
 elif interview_depth == "light":
     model = "sonnet"            # PP Round 1-2
 elif interview_depth == "full":
-    model = "opus"              # PP 전체 4 Round
+    model = "opus"              # Full PP 4 Rounds
 
 // Stage 2 (mpl-ambiguity-resolver):
 if interview_depth == "light":
-    model = "sonnet"            # Ambiguity Resolution Loop + 경량 요구사항 구조화
+    model = "sonnet"            # Ambiguity Resolution Loop + lightweight requirements structuring
 elif interview_depth == "full":
-    model = "opus"              # Ambiguity Resolution Loop + 솔루션 옵션 + JUSF
+    model = "opus"              # Ambiguity Resolution Loop + solution options + JUSF
 ```
 
 PP States: **CONFIRMED** (hard constraint, auto-reject on conflict) / **PROVISIONAL** (soft, HITL on conflict)
 
-### Step 1 산출물 -> 다운스트림 연결 [F-26]
+### Step 1 Outputs → Downstream Connections [F-26]
 
-| 산출물 | 소비자 | 사용 방식 |
-|--------|--------|----------|
-| pivot-points.md | Step 1-B, Step 3 | PP 준수 검증 기준 |
-| requirements.md (full) | Step 3 Decomposer | 실행 순서 힌트 + US->Phase 매핑 |
-| requirements-light.md (light) | Step 3 Decomposer | 경량 범위 참조 |
-| acceptance_criteria.gherkin | Step 3-B, Step 4 | Test Agent 자동 테스트 생성 |
-| out_of_scope | Step 1-B | "Must NOT Do" 보강 |
-| recommended_execution_order | Step 3 | Phase 순서 시드 |
-| moscow + sequence_score | Step 3 Decomposer | Must 우선 분해, sequence_score로 정렬 |
-| job_definition | Step 2.5 Phase 0 Enhanced | API Contract/Type Policy의 사용자 맥락 |
-| risks + dependencies | Step 1-B | 리스크 등급 입력 |
+| Output | Consumer | Usage |
+|--------|----------|-------|
+| pivot-points.md | Step 1-B, Step 3 | PP compliance validation criteria |
+| requirements.md (full) | Step 3 Decomposer | Execution order hints + US→Phase mapping |
+| requirements-light.md (light) | Step 3 Decomposer | Lightweight scope reference |
+| acceptance_criteria.gherkin | Step 3-B, Step 4 | Automatic test generation by Test Agent |
+| out_of_scope | Step 1-B | Supplementing "Must NOT Do" |
+| recommended_execution_order | Step 3 | Phase order seed |
+| moscow + sequence_score | Step 3 Decomposer | Must-first decomposition, sorted by sequence_score |
+| job_definition | Step 2.5 Phase 0 Enhanced | User context for API Contract/Type Policy |
+| risks + dependencies | Step 1-B | Risk level input |
 
 ---
 
@@ -590,10 +602,10 @@ Save confirmation timestamp to `.mpl/mpl/state.json` as `pp_confirmed_at`.
 
 ---
 
-## Step 1-E: Interview Snapshot 저장 (Compaction 방어) [F-36]
+## Step 1-E: Interview Snapshot Save (Compaction Defense) [F-36]
 
-Step 1 완료 후, 인터뷰 결과를 파일로 백업한다. 이후 Step 2/2.5에서 compaction이 발생해도
-인터뷰에서 수집한 핵심 정보가 파일로 보존된다.
+After Step 1 completes, back up interview results to file. Even if compaction occurs during Step 2/2.5,
+the key information gathered in the interview is preserved in a file.
 
 ```
 Write(".mpl/mpl/interview-snapshot.md"):
@@ -603,35 +615,34 @@ Write(".mpl/mpl/interview-snapshot.md"):
   Information Density: {information_density}
 
   ## Pivot Points Summary
-  {pivot-points.md 핵심 요약 — CONFIRMED/PROVISIONAL 목록}
+  {pivot-points.md key summary — CONFIRMED/PROVISIONAL list}
 
   ## User Request (Original)
-  {user_request 원문}
+  {user_request verbatim}
 
   ## Key Decisions from Interview
-  {인터뷰에서 확정된 핵심 결정사항 3-5개}
+  {3-5 key decisions confirmed in the interview}
 
   ## Requirements (if generated)
-  {requirements-light.md 또는 requirements-{hash}.md 경로 참조}
+  {reference to requirements-light.md or requirements-{hash}.md path}
 
   ## Deferred Uncertainties
-  {있으면 목록, 없으면 "없음"}
+  {list if any, or "none"}
 
   ## Pre-Execution Analysis Summary
-  {pre-execution-analysis.md 핵심 요약 — 리스크, 갭, 권장 실행 순서}
+  {pre-execution-analysis.md key summary — risks, gaps, recommended execution order}
 ```
 
-> **목적**: Step 2/2.5가 서브에이전트로 실행되므로 오케스트레이터 컨텍스트 부담이 줄었지만,
-> 장시간 인터뷰나 복잡한 PP 논의 후 compaction이 발생할 수 있다.
-> 이 스냅샷이 있으면 compaction 후에도 `Read(".mpl/mpl/interview-snapshot.md")`로 복원 가능.
+> **Purpose**: Since Step 2/2.5 runs as subagents, orchestrator context load is reduced, but compaction can occur after long interviews or complex PP discussions.
+> With this snapshot, recovery is possible after compaction via `Read(".mpl/mpl/interview-snapshot.md")`.
 
 ---
 
-## Step 2: Codebase Analysis (서브에이전트 위임) [F-36]
+## Step 2: Codebase Analysis (Subagent Delegation) [F-36]
 
-> **v3.3 변경**: 오케스트레이터가 직접 6개 모듈을 분석하던 방식에서
-> `mpl-codebase-analyzer` 서브에이전트에 위임하는 방식으로 변경.
-> 오케스트레이터 컨텍스트에서 ~5-10K 토큰을 절감하여 Plan 단계 compaction을 방지한다.
+> **v3.3 Change**: Changed from orchestrator directly analyzing 6 modules
+> to delegating to `mpl-codebase-analyzer` subagent.
+> Saves ~5-10K tokens from orchestrator context, preventing Plan phase compaction.
 
 ```
 Task(subagent_type="mpl-codebase-analyzer", model="sonnet",
@@ -656,42 +667,64 @@ Task(subagent_type="mpl-codebase-analyzer", model="sonnet",
      """)
 ```
 
+#### Scout Call Branch (QMD Integration)
+
+Branch the Scout call prompt based on qmd_mode:
+
+**QMD-First Mode** (`qmd_mode == "qmd_first"`):
+```
+Task(mpl-scout, haiku, prompt="""
+  Analyze the codebase in QMD-First mode.
+  1. qmd_deep_search("project entry points and main modules") → identify key files
+  2. qmd_deep_search("test infrastructure and framework") → understand test structure
+  3. qmd_vector_search("external dependencies and integrations") → understand dependencies
+  4. Cross-verify each QMD result with Grep (Search-then-Verify)
+  5. Glob("**/*.{ts,tsx,py,go,rs}") → full file structure (supplement what QMD may miss)
+  Output: JSON (search_mode: "qmd_first", each finding includes verification)
+""")
+```
+
+**Grep-Only Mode** (`qmd_mode == "grep_only"`):
+Use the existing Scout call protocol as-is.
+
+> **Fallback:** If Scout fails QMD tool calls in QMD-First mode (MCP server unresponsive, etc.), Scout automatically falls back to Grep-Only. This is defined in mpl-scout.md's Search_Strategy.
+
 ### After Receiving Output
 
-1. 서브에이전트의 요약을 확인 (전체 JSON은 파일에 저장됨)
+1. Review subagent's summary (full JSON is already saved to file)
 2. Report: `[MPL] Codebase Analysis: {files} files, {modules} modules, {deps} deps. Tool mode: {tool_mode}.`
 3. Proceed to Step 2.5
 
-> **폴백**: mpl-codebase-analyzer 에이전트가 실패하면, 오케스트레이터가 직접 분석한다 (기존 동작).
-> 이 경우 6개 모듈의 도구 호출이 오케스트레이터 컨텍스트에 누적되므로 compaction 리스크 증가.
+> **Fallback**: If mpl-codebase-analyzer agent fails, orchestrator performs analysis directly (existing behavior).
+> In that case, 6 module tool calls accumulate in orchestrator context, increasing compaction risk.
 
-### 6-Module 상세 명세 (에이전트 참조용)
+### 6-Module Detailed Spec (for agent reference)
 
-에이전트 정의(`agents/mpl-codebase-analyzer.md`)에 전체 명세가 포함되어 있다.
-요약:
+Full spec is included in agent definition (`agents/mpl-codebase-analyzer.md`).
+Summary:
 
-| Module | 도구 | 산출물 |
+| Module | Tool | Output |
 |--------|------|--------|
 | 1. Structure | Glob | directories, entry_points, file_stats |
 | 2. Dependencies | ast_grep / Grep | modules, external_deps, module_clusters |
 | 3. Interfaces | lsp_document_symbols / Grep | types, functions, endpoints |
-| 4. Centrality | (Module 2에서 파생) | high_impact, isolated |
+| 4. Centrality | (derived from Module 2) | high_impact, isolated |
 | 5. Tests | Glob + Read | framework, run_command, test_files |
 | 6. Config | Read | env_vars, config_files, scripts |
 
 ---
 
-## Step 2.5: Phase 0 Enhanced (서브에이전트 위임) [F-36]
+## Step 2.5: Phase 0 Enhanced (Subagent Delegation) [F-36]
 
-> **v3.3 변경**: 오케스트레이터가 직접 복잡도 측정 + 4단계 분석을 수행하던 방식에서
-> `mpl-phase0-analyzer` 서브에이전트에 위임하는 방식으로 변경.
-> 오케스트레이터 컨텍스트에서 ~8-25K 토큰을 절감하여 Plan 단계 compaction을 방지한다.
+> **v3.3 Change**: Changed from orchestrator directly measuring complexity + 4-step analysis
+> to delegating to `mpl-phase0-analyzer` subagent.
+> Saves ~8-25K tokens from orchestrator context, preventing Plan phase compaction.
 
-Phase 0 Enhanced는 Step 2의 Codebase Analysis 결과를 기반으로 프로젝트 복잡도를 측정하고, 복잡도에 따라 사전 명세를 생성한다. 이 명세는 후속 Phase(Decomposition, Execution)의 정확도를 높이고 디버깅 Phase를 불필요하게 만든다.
+Phase 0 Enhanced measures project complexity based on Step 2's Codebase Analysis results, and generates pre-specifications based on complexity. These specs improve the accuracy of subsequent phases (Decomposition, Execution) and make debugging phases unnecessary.
 
-> **원칙**: "예방이 치료보다 낫다" — Phase 0에 투자하는 토큰이 Phase 5의 디버깅 비용을 완전히 제거한다.
+> **Principle**: "Prevention is better than cure" — tokens invested in Phase 0 completely eliminate debugging costs in Phase 5.
 
-### 서브에이전트 위임
+### Subagent Delegation
 
 ```
 loaded_memory = load_phase0_memory(user_request)  // F-25 4-Tier Memory
@@ -728,25 +761,25 @@ Task(subagent_type="mpl-phase0-analyzer", model="sonnet",
 
 ### After Receiving Output
 
-1. 서브에이전트의 요약을 확인 (artifact 파일은 이미 저장됨)
+1. Review subagent's summary (artifact files are already saved)
 2. Report: `[MPL] Phase 0 Enhanced complete. Grade: {grade}. Artifacts: {count}/4. Cache: {HIT|MISS|PARTIAL}.`
 3. Proceed to Step 3 (Phase Decomposition)
 
-> **폴백**: mpl-phase0-analyzer 에이전트가 실패하면, 오케스트레이터가 직접 분석한다 (아래 상세 명세 참조).
-> 이 경우 도구 호출이 오케스트레이터 컨텍스트에 누적되므로 compaction 리스크 증가.
+> **Fallback**: If mpl-phase0-analyzer agent fails, orchestrator performs analysis directly (see detailed spec below).
+> In that case, tool calls accumulate in orchestrator context, increasing compaction risk.
 
 ---
 
-### Phase 0 Enhanced 상세 명세 (에이전트 참조용 / 폴백용)
+### Phase 0 Enhanced Detailed Spec (for agent reference / fallback)
 
-아래 명세는 `agents/mpl-phase0-analyzer.md`에 내장되어 있으며,
-에이전트 실패 시 오케스트레이터가 직접 수행하는 폴백 프로토콜이기도 하다.
+The spec below is embedded in `agents/mpl-phase0-analyzer.md`,
+and is also the fallback protocol for the orchestrator to perform directly if the agent fails.
 
-### 2.5.0: Cache Check (Phase 0 캐싱, 확장: F-05 부분 무효화)
+### 2.5.0: Cache Check (Phase 0 Caching, Extended: F-05 Partial Invalidation)
 
-Phase 0 실행 전에 캐시를 확인한다. 캐시 히트 시 Phase 0 전체를 스킵하여 8~25K 토큰을 절감한다.
+Check the cache before running Phase 0. On cache hit, skip all of Phase 0 and save 8~25K tokens.
 
-#### 기존 동작 (전체 무효화)
+#### Existing Behavior (Full Invalidation)
 
 ```
 cache_dir = ".mpl/cache/phase0/"
@@ -759,14 +792,14 @@ if cache_dir exists AND cache_key matches:
     → Report: "[MPL] Phase 0 cache HIT. Skipping analysis. Saved ~{budget}K tokens."
     → Skip to Step 3 (Phase Decomposition)
   else:
-    → Cache stale — 부분 무효화 시도 (아래 확장 참조)
+    → Cache stale — attempt partial invalidation (see extension below)
 else:
   → No cache, proceed with Phase 0
 ```
 
-#### 확장: git diff 기반 부분 무효화 (F-05)
+#### Extension: git diff-Based Partial Invalidation (F-05)
 
-캐시 키가 불일치하더라도, 변경 범위가 제한적이면 **변경 모듈만 재분석**한다.
+Even if the cache key doesn't match, if the change scope is limited, **re-analyze only the changed modules**.
 
 ```pseudocode
 function check_cache_with_partial(cwd):
@@ -776,13 +809,13 @@ function check_cache_with_partial(cwd):
     return { action: "skip", artifacts: cache_result.manifest.artifacts }
 
   if not cache_result.manifest:
-    return { action: "full_rerun" }  # 캐시 없음 — 전체 실행
+    return { action: "full_rerun" }  # No cache — run everything
 
-  # 캐시 존재하지만 키 불일치 — 부분 무효화 시도
+  # Cache exists but key doesn't match — attempt partial invalidation
   diff_result = analyze_diff(cwd, cache_result.manifest)
 
   if diff_result.scope == "none":
-    return { action: "skip" }  # diff가 캐시 범위 밖 (문서 변경 등)
+    return { action: "skip" }  # diff is outside cache scope (e.g. doc changes)
 
   if diff_result.scope == "partial":
     return {
@@ -791,16 +824,16 @@ function check_cache_with_partial(cwd):
       rerun_steps: diff_result.affected_steps
     }
 
-  return { action: "full_rerun" }  # 전면 변경
+  return { action: "full_rerun" }  # Full change
 ```
 
-#### diff 범위 분석
+#### Diff Scope Analysis
 
 ```pseudocode
 function analyze_diff(cwd, manifest):
   changed_files = git_diff_names(cwd, since=manifest.commit_hash or manifest.timestamp)
 
-  # 변경 파일을 Phase 0 단계별로 분류
+  # Classify changed files by Phase 0 step
   affected = {
     api_contracts: false,   # Step 1
     examples: false,        # Step 2
@@ -809,13 +842,13 @@ function analyze_diff(cwd, manifest):
   }
 
   for file in changed_files:
-    if is_public_api(file):       # 함수 시그니처 변경
+    if is_public_api(file):       # function signature changes
       affected.api_contracts = true
-    if is_test_file(file):        # 테스트 패턴 변경
+    if is_test_file(file):        # test pattern changes
       affected.examples = true
-    if is_type_definition(file):  # 타입 정의 변경
+    if is_type_definition(file):  # type definition changes
       affected.type_policy = true
-    if is_error_handler(file):    # 에러 처리 변경
+    if is_error_handler(file):    # error handling changes
       affected.error_spec = true
 
   affected_count = count_true(affected)
@@ -829,32 +862,32 @@ function analyze_diff(cwd, manifest):
       unaffected_artifacts: [artifact for step, flag in affected if not flag]
     }
   else:
-    return { scope: "full" }  # 3+ 단계 영향 → 전체 재실행이 효율적
+    return { scope: "full" }  # 3+ steps affected → full re-run is more efficient
 ```
 
-#### 부분 재실행 프로토콜
+#### Partial Re-run Protocol
 
-partial_rerun 시:
-1. 캐시된 unaffected_artifacts를 `.mpl/mpl/phase0/`에 복사
-2. affected_steps만 Phase 0 Enhanced에서 재실행
-3. 재실행 결과를 기존 캐시에 병합
-4. 새 cache_key로 manifest 갱신
+On partial_rerun:
+1. Copy cached unaffected_artifacts to `.mpl/mpl/phase0/`
+2. Re-run only affected_steps in Phase 0 Enhanced
+3. Merge re-run results into existing cache
+4. Update manifest with new cache_key
 
-예시:
+Example:
 ```
-캐시 존재 + test 파일만 변경 →
+Cache exists + only test files changed →
   affected: { examples: true } →
-  partial_rerun: Step 2만 재실행 →
-  Step 1(api_contracts), Step 3(type_policy), Step 4(error_spec)는 캐시 재사용 →
-  토큰 절감: ~60-70% (4단계 중 1단계만 실행)
+  partial_rerun: only Step 2 re-runs →
+  Step 1(api_contracts), Step 3(type_policy), Step 4(error_spec) reuse cache →
+  Token savings: ~60-70% (only 1 of 4 steps runs)
 ```
 
-#### 파일 분류 규칙
+#### File Classification Rules
 
 ```
 is_public_api(file):
-  - src/**/*.{ts,js,py,go,rs} (test 제외)
-  - 함수/클래스 export 포함 파일
+  - src/**/*.{ts,js,py,go,rs} (excluding tests)
+  - files containing function/class exports
 
 is_test_file(file):
   - **/*.test.{ts,js}
@@ -871,7 +904,7 @@ is_type_definition(file):
 is_error_handler(file):
   - **/error*.{ts,js,py}
   - **/exception*.{py}
-  - 파일 내 "throw", "raise", "Error" 패턴 포함
+  - files containing "throw", "raise", "Error" patterns
 ```
 
 #### Cache Key Generation
@@ -882,29 +915,30 @@ generate_cache_key(codebase_analysis):
     test_files_hash:  hash(content of all test files),
     structure_hash:   hash(codebase_analysis.directories),
     deps_hash:        hash(codebase_analysis.external_deps),
-    source_files_hash: hash(content of source files touching public API)
+    source_files_hash: hash(content of source files touching public API),
+    qmd_mode: qmd_mode,  // "qmd_first" | "grep_only"
   }
   return sha256(JSON.stringify(inputs))
 ```
 
 #### Cache Invalidation
 
-| 변경 사항 | 캐시 동작 |
-|----------|----------|
-| 테스트 파일 내용 변경 | 부분 무효화 시도 (examples 단계) |
-| 소스 파일 공개 API 변경 | 부분 무효화 시도 (api_contracts 단계) |
-| 타입 정의 파일 변경 | 부분 무효화 시도 (type_policy 단계) |
-| 에러 처리 파일 변경 | 부분 무효화 시도 (error_spec 단계) |
-| 3+ 단계 동시 영향 | 전체 캐시 무효화 (부분 재실행 비효율) |
-| 의존성 버전 변경 | 전체 캐시 무효화 |
-| 디렉토리 구조 변경 | 전체 캐시 무효화 |
-| `--no-cache` 플래그 | 강제 캐시 무시 |
-| git diff 실패 | 전체 캐시 무효화 (안전 폴백) |
+| Change | Cache Behavior |
+|--------|---------------|
+| Test file content changes | Attempt partial invalidation (examples step) |
+| Source file public API changes | Attempt partial invalidation (api_contracts step) |
+| Type definition file changes | Attempt partial invalidation (type_policy step) |
+| Error handler file changes | Attempt partial invalidation (error_spec step) |
+| 3+ steps affected simultaneously | Full cache invalidation (partial re-run inefficient) |
+| Dependency version changes | Full cache invalidation |
+| Directory structure changes | Full cache invalidation |
+| `--no-cache` flag | Force cache bypass |
+| git diff failure | Full cache invalidation (safe fallback) |
 
 ### 2.5.1: Complexity Detection
 
-Step 2에서 생성한 `codebase-analysis.json`을 분석하여 복잡도 점수를 산출한다.
-모든 입력은 이미 codebase-analysis.json에 있으므로 추가 도구 호출 불필요:
+Analyze the `codebase-analysis.json` generated in Step 2 to compute complexity score.
+All inputs are already in codebase-analysis.json so no additional tool calls needed:
 
 ```
 complexity_score = (modules × 10) + (external_deps × 5) + (test_files × 3)
@@ -916,7 +950,7 @@ complexity_score = (modules × 10) + (external_deps × 5) + (test_files × 3)
 | 30~79 | Medium | Step 2 + Step 4 (Example + Error) | ~12K |
 | 80+ | Complex | Step 1 + Step 2 + Step 3 + Step 4 (Full Suite) | ~20K |
 
-Orchestrator가 직접 점수를 계산하고 등급을 판정한다:
+Orchestrator computes score and determines grade directly:
 
 ```
 modules = count of directories containing source files (from codebase_analysis.directories)
@@ -924,7 +958,7 @@ external_deps = codebase_analysis.external_deps.length
 test_files = codebase_analysis.test_infrastructure.test_files.length
 ```
 
-> v3.0에서 v3.1 변경: `async_functions × 8` 제거 (별도 ast_grep_search 호출 필요), Enterprise 등급을 Complex로 통합 (3등급 체계로 단순화). test_files 가중치 2→3으로 상향.
+> v3.0 to v3.1 changes: removed `async_functions × 8` (requires separate ast_grep_search call), merged Enterprise grade into Complex (simplified to 3-grade system). test_files weight increased from 2 to 3.
 
 Save to `.mpl/mpl/phase0/complexity-report.json`:
 ```json
@@ -943,186 +977,186 @@ Announce: `[MPL] Complexity: {score} ({grade}). Phase 0 steps: {step_list}`
 
 ### 2.5.2: Step 1 — API Contract Extraction (Complex+)
 
-**적용 조건**: Complex (80+) 이상에서만 실행
+**Applies when**: Complex (80+) only
 
-테스트 파일과 소스 코드를 분석하여 함수 시그니처, 파라미터 순서, 예외 타입을 추출한다.
+Analyze test files and source code to extract function signatures, parameter order, and exception types.
 
-**실행 방법**: Orchestrator가 직접 도구를 사용하여 분석:
+**Execution method**: Orchestrator directly uses tools to analyze:
 
 ```
-1. 함수/메서드 정의 추출
+1. Extract function/method definitions
    ast_grep_search(pattern="def $NAME($$$ARGS)", language="python")
    ast_grep_search(pattern="function $NAME($$$ARGS)", language="typescript")
    lsp_document_symbols(file) for each key source file
 
-2. 테스트에서 호출 패턴 추출
+2. Extract call patterns from tests
    ast_grep_search(pattern="$OBJ.$METHOD($$$ARGS)", language="python", path="tests/")
-   — 파라미터 순서와 타입 추론
+   — infer parameter order and types
 
-3. 예외 타입 매핑
+3. Map exception types
    ast_grep_search(pattern="raise $EXCEPTION($$$ARGS)", language="python")
    ast_grep_search(pattern="pytest.raises($EXCEPTION)", language="python", path="tests/")
    ast_grep_search(pattern="throw new $EXCEPTION($$$ARGS)", language="typescript")
 
-4. 시그니처 확인
+4. Signature verification
    lsp_hover(file, line, character) for ambiguous signatures
 ```
 
-**산출물**: `.mpl/mpl/phase0/api-contracts.md`
+**Output**: `.mpl/mpl/phase0/api-contracts.md`
 
 ```markdown
-# API 계약 명세
+# API Contract Specification
 
-## [모듈명]
+## [Module Name]
 
-### [함수명]
-- 시그니처: `function_name(param1: Type1, param2: Type2) -> ReturnType`
-- 파라미터 순서: [중요도 표시]
-- 예외: [조건] → [예외 타입]("메시지 패턴")
-- 반환값: [설명]
-- 부수효과: [있으면 기술]
+### [Function Name]
+- Signature: `function_name(param1: Type1, param2: Type2) -> ReturnType`
+- Parameter order: [importance indicator]
+- Exceptions: [condition] → [exception type]("message pattern")
+- Return value: [description]
+- Side effects: [describe if any]
 ```
 
-**실험 근거**: Exp 1에서 파라미터 순서 발견이 테스트 통과의 핵심 요인이었다.
+**Experimental basis**: In Exp 1, discovering parameter order was the key factor in passing tests.
 
 ### 2.5.3: Step 2 — Example Pattern Analysis (Medium+)
 
-**적용 조건**: Medium (30+) 이상에서 실행
+**Applies when**: Medium (30+) and above
 
-테스트 파일에서 구체적 사용 패턴, 기본값, 엣지 케이스를 추출한다.
+Extract concrete usage patterns, default values, and edge cases from test files.
 
-**실행 방법**: Orchestrator가 테스트 파일 분석:
+**Execution method**: Orchestrator analyzes test files:
 
 ```
-1. 테스트 파일 읽기 (Step 2에서 식별된 test_files)
+1. Read test files (test_files identified in Step 2)
    Read(test_file) for each test file (cap: 300 lines per file)
 
-2. 패턴 분류 (7 categories):
-   - 생성 패턴: 객체 인스턴스화 방법 (constructor args, factory methods)
-   - 검증 패턴: assert/expect 호출 패턴
-   - 정렬 패턴: 순서 관련 검증 (sorted, order_by)
-   - 결과 패턴: 반환값 구조 (dict keys, list structure)
-   - 에러 패턴: 예외 발생 조건
-   - 부수효과 패턴: 상태 변경 검증
-   - 통합 패턴: 모듈 간 상호작용
+2. Classify patterns (7 categories):
+   - Creation patterns: object instantiation methods (constructor args, factory methods)
+   - Validation patterns: assert/expect call patterns
+   - Sorting patterns: order-related verifications (sorted, order_by)
+   - Result patterns: return value structures (dict keys, list structure)
+   - Error patterns: exception trigger conditions
+   - Side effect patterns: state change verifications
+   - Integration patterns: cross-module interactions
 
-3. 기본값 추출
+3. Extract default values
    ast_grep_search(pattern="$PARAM=$DEFAULT", language="python")
    Grep(pattern="default|DEFAULT", path="src/")
 
-4. 엣지 케이스 식별
+4. Identify edge cases
    Grep(pattern="edge|corner|boundary|empty|null|None|zero|negative", path="tests/")
 ```
 
-**산출물**: `.mpl/mpl/phase0/examples.md`
+**Output**: `.mpl/mpl/phase0/examples.md`
 
 ```markdown
-# 예제 패턴 분석
+# Example Pattern Analysis
 
-## 패턴 1: [패턴 이름]
-### 기본 사용
-[코드 예제 from tests]
+## Pattern 1: [Pattern Name]
+### Basic Usage
+[code example from tests]
 
-### 엣지 케이스
-[코드 예제 from tests]
+### Edge Cases
+[code example from tests]
 
-### 기본값
-| 필드 | 기본값 | 비고 |
-|------|--------|------|
+### Default Values
+| Field | Default | Notes |
+|-------|---------|-------|
 ```
 
-**실험 근거**: Exp 3에서 구체적 예제가 추상적 명세보다 구현 정확도를 크게 높였다. 정렬 요구사항과 컨텍스트 업데이트 비대칭성이 예제를 통해서만 발견되었다.
+**Experimental basis**: In Exp 3, concrete examples significantly improved implementation accuracy over abstract specifications. Sorting requirements and context update asymmetry were only discovered through examples.
 
 ### 2.5.4: Step 3 — Type Policy Definition (Complex+)
 
-**적용 조건**: Complex (80+) 이상에서 실행
+**Applies when**: Complex (80+) only
 
-모든 함수/메서드의 타입 힌트를 정의하고, 컬렉션 타입 구분 규칙을 명시한다.
+Define type hints for all functions/methods and explicitly specify collection type distinction rules.
 
-**실행 방법**: Orchestrator가 소스 + 테스트에서 타입 정보 추출:
+**Execution method**: Orchestrator extracts type information from source + tests:
 
 ```
-1. 기존 타입 힌트 수집
+1. Collect existing type hints
    ast_grep_search(pattern="def $NAME($$$ARGS) -> $RET:", language="python")
    lsp_hover(file, line, character) for inferred types
 
-2. 테스트에서 기대 타입 추론
-   isinstance/type() 호출 패턴 분석
-   assert 문에서 컬렉션 타입 추론 (set vs list vs dict)
+2. Infer expected types from tests
+   Analyze isinstance/type() call patterns
+   Infer collection types from assert statements (set vs list vs dict)
    Grep(pattern="isinstance|type\\(", path="tests/")
 
-3. 타입 정책 수립
-   - 컬렉션 타입 구분: List (순서 보장) vs Set (중복 제거) vs Dict (키-값)
-   - Optional 규칙: None 가능 파라미터에 Optional[T] 사용
-   - 반환 타입 표준화: 일관된 반환 타입 패턴
-   - 금지 패턴: Any 남용, untyped collections, implicit None
+3. Define type policy
+   - Collection type distinction: List (order guaranteed) vs Set (dedup) vs Dict (key-value)
+   - Optional rules: use Optional[T] for nullable parameters
+   - Return type standardization: consistent return type patterns
+   - Prohibited patterns: Any abuse, untyped collections, implicit None
 ```
 
-**산출물**: `.mpl/mpl/phase0/type-policy.md`
+**Output**: `.mpl/mpl/phase0/type-policy.md`
 
 ```markdown
-# 타입 정책
+# Type Policy
 
-## 규칙
-1. 모든 함수 파라미터에 타입 힌트 필수
-2. 모든 함수에 반환 타입 필수
-3. 구체적 타입 사용 (List[str], Set[int], Dict[str, Any])
-4. Optional[T]로 nullable 표현
-5. 금지: bare list, dict, set without type parameters
+## Rules
+1. Type hints required for all function parameters
+2. Return type required for all functions
+3. Use specific types (List[str], Set[int], Dict[str, Any])
+4. Express nullable with Optional[T]
+5. Prohibited: bare list, dict, set without type parameters
 
-## 타입 참조표
-| 필드/파라미터 | 타입 | 근거 |
-|-------------|------|------|
+## Type Reference Table
+| Field/Parameter | Type | Rationale |
+|----------------|------|-----------|
 ```
 
-**실험 근거**: Exp 4에서 `Set[str]`과 `List[str]`의 혼동이 테스트 실패의 주요 원인이었다.
+**Experimental basis**: In Exp 4, confusion between `Set[str]` and `List[str]` was the primary cause of test failures.
 
 ### 2.5.5: Step 4 — Error Specification (All Grades)
 
-**적용 조건**: 모든 복잡도 (필수 — 항상 실행)
+**Applies when**: All complexity grades (required — always runs)
 
-표준 예외 매핑, 에러 메시지 패턴, 발생 조건을 명세한다.
+Specify standard exception mappings, error message patterns, and trigger conditions.
 
-**실행 방법**: Orchestrator가 테스트 + 소스에서 에러 패턴 추출:
+**Execution method**: Orchestrator extracts error patterns from tests + source:
 
 ```
-1. 예외 발생 패턴 추출
+1. Extract exception trigger patterns
    ast_grep_search(pattern="raise $EXC($$$ARGS)", language="python")
    ast_grep_search(pattern="throw new $EXC($$$ARGS)", language="typescript")
 
-2. 테스트의 에러 검증 추출
+2. Extract error validations from tests
    ast_grep_search(pattern="pytest.raises($EXC)", language="python", path="tests/")
    Grep(pattern="with pytest.raises|assertRaises|expect.*toThrow", path="tests/")
 
-3. 에러 메시지 패턴 추출
+3. Extract error message patterns
    Grep(pattern="match=|message=|msg=", path="tests/")
-   — 정규식 패턴이면 그대로 보존
+   — preserve regex patterns as-is
 
-4. 검증 순서 분석
-   소스 코드에서 if/raise 순서 확인 — 어떤 조건이 먼저 검사되는지
+4. Analyze validation order
+   Check if/raise order in source code — which condition is checked first
 ```
 
-**산출물**: `.mpl/mpl/phase0/error-spec.md`
+**Output**: `.mpl/mpl/phase0/error-spec.md`
 
 ```markdown
-# 에러 처리 명세
+# Error Handling Specification
 
-## [모듈] 에러
-- 타입: [ExceptionType]
-- 조건: [발생 조건]
-- 메시지: "[패턴 with {플레이스홀더}]"
-- 검증 순서: [우선순위]
+## [Module] Errors
+- Type: [ExceptionType]
+- Condition: [trigger condition]
+- Message: "[pattern with {placeholders}]"
+- Validation order: [priority]
 
-## 금지사항
-- 커스텀 예외 클래스 생성 금지 (표준 예외만 사용)
-- 에러 메시지는 테스트의 match 패턴과 정확히 일치해야 함
+## Prohibited
+- Do not create custom exception classes (use standard exceptions only)
+- Error messages must exactly match the match pattern in tests
 ```
 
-**실험 근거**: Exp 7에서 에러 명세가 "빠진 퍼즐 조각"임이 밝혀졌다. 에러 명세 추가만으로 점수가 83%에서 100%로 도약했다.
+**Experimental basis**: In Exp 7, error specification was found to be the "missing puzzle piece." Score jumped from 83% to 100% just by adding the error spec.
 
 ### 2.5.6: Phase 0 Output Summary
 
-모든 적용된 Step의 결과를 `.mpl/mpl/phase0/summary.md`에 요약:
+Summarize all applied step results in `.mpl/mpl/phase0/summary.md`:
 
 ```markdown
 # Phase 0 Enhanced Summary
@@ -1146,30 +1180,30 @@ Announce: `[MPL] Complexity: {score} ({grade}). Phase 0 steps: {step_list}`
 | Error Spec | `.mpl/mpl/phase0/error-spec.md` | generated |
 
 ## Key Findings
-[자동 생성된 주요 발견사항]
+[auto-generated key findings]
 ```
 
 Announce: `[MPL] Phase 0 Enhanced complete. Grade: {grade}. Artifacts: {count}/4 generated. Token budget: {budget}.`
 
 ### 2.5.7: Artifact Validation
 
-Phase 0 산출물의 품질을 자동 검증한다:
+Automatically validate the quality of Phase 0 artifacts:
 
 ```
 for each generated artifact:
   validate_artifact(artifact):
-    1. Structure check: 필수 섹션이 존재하는지 확인
-       - api-contracts.md: "## [모듈명]" + "### [함수명]" 섹션 존재
-       - examples.md: "## 패턴" 섹션 + 코드 블록 존재
-       - type-policy.md: "## 규칙" + "## 타입 참조표" 섹션 존재
-       - error-spec.md: "## [모듈] 에러" 섹션 존재
-    2. Coverage check: 테스트에서 호출되는 함수가 계약에 포함되었는지
-       - ast_grep_search로 테스트의 함수 호출 목록 추출
-       - api-contracts.md의 함수 목록과 비교
-       - 누락률 > 20% → 경고
-    3. Consistency check: 아티팩트 간 상호 참조 일관성
-       - api-contracts의 타입 ↔ type-policy의 타입 일치
-       - api-contracts의 예외 ↔ error-spec의 예외 일치
+    1. Structure check: verify required sections exist
+       - api-contracts.md: "## [Module Name]" + "### [Function Name]" sections exist
+       - examples.md: "## Pattern" section + code blocks exist
+       - type-policy.md: "## Rules" + "## Type Reference Table" sections exist
+       - error-spec.md: "## [Module] Errors" section exists
+    2. Coverage check: verify functions called in tests are included in contract
+       - Extract function call list from tests via ast_grep_search
+       - Compare against function list in api-contracts.md
+       - Missing rate > 20% → warning
+    3. Consistency check: cross-artifact reference consistency
+       - types in api-contracts ↔ types in type-policy match
+       - exceptions in api-contracts ↔ exceptions in error-spec match
 
   if validation fails:
     → Report: "[MPL] Phase 0 artifact validation WARNING: {details}"
@@ -1181,12 +1215,12 @@ Report: "[MPL] Phase 0 validation: {passed}/{total} artifacts validated."
 
 ### 2.5.8: Cache Save
 
-Phase 0 실행이 완료되면 결과를 캐시에 저장한다:
+After Phase 0 execution completes, save results to cache:
 
 ```
 cache_dir = ".mpl/cache/phase0/"
 cache_key = generate_cache_key(codebase_analysis)
-commit_hash = git_rev_parse("HEAD")  # 부분 무효화(F-05)에서 diff 기준점으로 사용
+commit_hash = git_rev_parse("HEAD")  # used as diff baseline in partial invalidation (F-05)
 
 save_to_cache:
   1. Create cache_dir if not exists
@@ -1203,12 +1237,12 @@ save_to_cache:
   4. Report: "[MPL] Phase 0 artifacts cached. Key: {short_key}."
 ```
 
-#### 2.5.8 확장: 부분 재실행 시 캐시 저장 (F-05)
+#### 2.5.8 Extension: Cache Save on Partial Re-run (F-05)
 
-부분 재실행(partial_rerun) 완료 후:
-1. 재사용된 캐시 아티팩트 + 새로 생성된 아티팩트를 병합
-2. 새 cache_key 생성 (현재 시점의 전체 해시)
-3. manifest.json 갱신: partial_rerun_info 필드 추가
+After partial re-run completes:
+1. Merge reused cache artifacts + newly generated artifacts
+2. Generate new cache_key (full hash at current point)
+3. Update manifest.json: add partial_rerun_info field
    ```json
    {
      "cache_key": "new_full_hash",
@@ -1227,7 +1261,7 @@ save_to_cache:
 
 ### 2.5.9: Token Profiling (Phase 0)
 
-Phase 0 실행의 토큰 사용량을 기록한다:
+Record token usage for Phase 0 execution:
 
 ```
 phase0_profile = {

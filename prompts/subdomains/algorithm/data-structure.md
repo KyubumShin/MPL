@@ -1,19 +1,19 @@
-# Subdomain: Algorithm/Data-Structure (자료구조 선택과 활용)
+# Subdomain: Algorithm/Data-Structure (Data Structure Selection and Usage)
 
-## 핵심 원칙
-- 자료구조 선택은 주요 연산(삽입, 삭제, 탐색, 정렬)의 시간 복잡도와 사용 빈도 기준으로 결정
-- Heap/Priority Queue로 최솟값/최댓값 반복 추출 — 정렬 배열 대비 삽입 O(log n) 보장
-- Trie는 접두사 탐색, 자동완성, 사전 구조에 적합 — 문자열 집합의 공통 접두사 공간 절약
-- 불변(Immutable) 구조는 공유 상태 버그를 원천 차단 — 함수형 업데이트 패턴 사용
+## Core Principles
+- Choose data structures based on the time complexity and usage frequency of key operations (insert, delete, search, sort)
+- Use Heap/Priority Queue for repeated min/max extraction — guarantees O(log n) insertion compared to sorted arrays
+- Trie is well-suited for prefix search, autocomplete, and dictionary structures — saves space by sharing common prefixes across string sets
+- Immutable structures prevent shared-state bugs at the source — use functional update patterns
 
-## 주의 사항
-- Hash table의 충돌 전략(chaining vs open addressing) 이해 — 최악 케이스 O(n) 탐색 방지
-- Tree/Graph 탐색 시 방문 여부 추적 누락으로 무한 루프 발생 주의 (순환 그래프)
-- 직렬화(JSON, MessagePack, Protobuf) 선택이 크기와 파싱 성능에 직접 영향
-- 재귀적 트리 탐색의 최대 깊이 제한 — 깊은 트리에서 스택 오버플로 위험
+## Cautions
+- Understand hash table collision strategies (chaining vs. open addressing) — prevent worst-case O(n) lookup
+- Watch for infinite loops caused by missing visited tracking in tree/graph traversal (cyclic graphs)
+- The choice of serialization format (JSON, MessagePack, Protobuf) directly impacts size and parsing performance
+- Limit maximum depth for recursive tree traversal — risk of stack overflow with deeply nested trees
 
-## 검증 포인트
-- 선택한 자료구조의 시간/공간 복잡도가 데이터 규모에서 허용 가능한가?
-- 그래프 순환 탐지 로직이 DFS 방문 추적으로 구현되어 있는가?
-- 직렬화 포맷이 수신 측과 스키마 버전 호환성을 유지하는가?
-- 불변 업데이트 시 원본 구조가 변경되지 않음을 단위 테스트로 검증하는가?
+## Verification Points
+- Are the time/space complexities of the chosen data structure acceptable at the target data scale?
+- Is cycle detection logic implemented with DFS visited tracking for graph traversal?
+- Does the serialization format maintain schema version compatibility with the receiver?
+- Is it verified with unit tests that immutable updates do not mutate the original structure?

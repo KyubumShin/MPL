@@ -1,4 +1,9 @@
 /**
+ * @limitation Currently supports Python/pytest patterns only.
+ * JS/TS (Jest/Vitest), Go, Rust test patterns are not yet detected.
+ */
+
+/**
  * MPL Test Analyzer — API Contract Auto-Extraction
  *
  * Extracts API contracts from test files by analyzing:

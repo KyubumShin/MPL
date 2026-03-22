@@ -1,62 +1,62 @@
-# Domain: AI (LLM/AI 통합)
+# Domain: AI (LLM/AI Integration)
 
-## 핵심 원칙
+## Core Principles
 
-1. **프롬프트 엔지니어링**: 시스템/유저 프롬프트 분리, 상수화, 버전 관리
-   - 인라인 프롬프트 금지 — 별도 파일 또는 상수 모듈로 관리
-   - 프롬프트 변경은 코드 변경과 동일한 리뷰 프로세스
-2. **API 키 관리**: 하드코딩 절대 금지, 로그 노출 금지
-   - 환경 변수 또는 시크릿 매니저 사용
-   - 키가 로그, 에러 메시지, 클라이언트 번들에 노출되지 않는지 검증
-3. **구조화 출력**: 스키마 검증 필수
-   - LLM 응답은 반드시 스키마 검증 후 사용 (`.parsed` + `.text` 이중 경로)
-   - 파싱 실패 시 graceful fallback 경로 필수
-4. **재시도/Rate Limit**: 지수 백오프 + 인증 에러 즉시 실패
-   - 3회 지수 백오프 (1s, 2s, 4s) 기본
-   - 401/403은 재시도하지 않음 (인증 문제는 재시도로 해결 불가)
-   - 429는 Retry-After 헤더 존중
-5. **모델 폴백**: 3회 실패 시 대안 모델 또는 graceful degradation
-   - 주 모델 실패 시 보조 모델로 자동 전환
-   - 모든 모델 실패 시 사용자에게 명확한 에러 표시
-6. **비용 모니터링**: 호출별 토큰 기록
-   - 입력/출력 토큰 수 로깅
-   - 모델별 단가 상수 정의
-7. **Stateful vs Stateless**: PP에서 확정된 패턴 준수
-   - IPC에 AI 상태 누출 금지
-   - 세션 관리가 필요하면 명시적 컨텍스트 객체 사용
-8. **입력 전처리**: 토큰 낭비 방지
-   - HTML 태그 제거, 불필요한 공백 정리
-   - 개인정보(PII) 마스킹
-   - 토큰 수 사전 계산으로 컨텍스트 윈도우 초과 방지
+1. **Prompt Engineering**: Separate system/user prompts, make them constants, version-control them
+   - No inline prompts — manage in separate files or constants modules
+   - Prompt changes go through the same review process as code changes
+2. **API Key Management**: Absolutely no hardcoding, no exposure in logs
+   - Use environment variables or a secrets manager
+   - Verify that keys are not exposed in logs, error messages, or client bundles
+3. **Structured Output**: Schema validation is required
+   - LLM responses must be used only after schema validation (dual path: `.parsed` + `.text`)
+   - A graceful fallback path is required on parse failure
+4. **Retry / Rate Limit**: Exponential backoff + immediate failure on auth errors
+   - Default: 3 retries with exponential backoff (1s, 2s, 4s)
+   - Do not retry 401/403 (auth issues cannot be resolved by retrying)
+   - Respect the Retry-After header for 429
+5. **Model Fallback**: After 3 failures, switch to an alternative model or graceful degradation
+   - Automatically switch to a secondary model on primary model failure
+   - Show a clear error to the user when all models fail
+6. **Cost Monitoring**: Record tokens per call
+   - Log input/output token counts
+   - Define per-model unit cost constants
+7. **Stateful vs Stateless**: Follow the pattern confirmed in PP
+   - Do not leak AI state into IPC
+   - If session management is needed, use an explicit context object
+8. **Input Preprocessing**: Prevent token waste
+   - Remove HTML tags, clean up unnecessary whitespace
+   - Mask personally identifiable information (PII)
+   - Pre-calculate token count to prevent context window overflow
 
-## Anti-Patterns (반드시 회피)
+## Anti-Patterns (Must Avoid)
 
-| # | Anti-Pattern | 올바른 패턴 |
-|---|-------------|-----------|
-| 1 | API 키 하드코딩 | 환경 변수 / 시크릿 매니저 |
-| 2 | 재시도 없는 단일 호출 | 3회 지수 백오프 |
-| 3 | `.text`만 파싱 (정규식) | 구조화 출력 스키마 + `.parsed` |
-| 4 | 인라인 프롬프트 문자열 | 별도 프롬프트 모듈/파일 |
-| 5 | 무한 재시도 루프 | 최대 재시도 + 폴백 + 에러 전파 |
-| 6 | LLM 응답 무검증 저장 | 스키마 검증 후 저장 |
-| 7 | 동기 블로킹 LLM 호출 | 비동기 + 타임아웃 설정 |
+| # | Anti-Pattern | Correct Pattern |
+|---|-------------|----------------|
+| 1 | Hardcoded API key | Environment variable / secrets manager |
+| 2 | Single call with no retry | 3x exponential backoff |
+| 3 | Parsing `.text` only (regex) | Structured output schema + `.parsed` |
+| 4 | Inline prompt string | Separate prompt module/file |
+| 5 | Infinite retry loop | Max retries + fallback + error propagation |
+| 6 | Storing LLM response without validation | Store after schema validation |
+| 7 | Synchronous blocking LLM call | Async + timeout configured |
 
-## AI 복잡도 2차원 평가
+## AI Complexity Two-Dimensional Assessment
 
-AI Phase는 일반 복잡도 외에 다음 2차원으로 추가 평가한다:
+AI Phases are assessed with the following two dimensions in addition to general complexity:
 
 | Model Tier × State | stateless | session | persistent |
 |--------------------|-----------|---------|------------|
-| simple (단일 호출) | **S** | M | M |
-| composite (체이닝) | M | **L** | L |
-| orchestrated (LangGraph 등) | L | L | **L+opus** |
+| simple (single call) | **S** | M | M |
+| composite (chaining) | M | **L** | L |
+| orchestrated (LangGraph, etc.) | L | L | **L+opus** |
 
-## 검증 포인트
+## Verification Points
 
-- API 키가 코드, 로그, 번들에 노출되지 않는가?
-- LLM 응답이 구조화 출력 스키마로 검증되는가?
-- 재시도 로직이 지수 백오프를 따르는가?
-- 인증 에러(401/403)에서 즉시 실패하는가?
-- 폴백 경로가 존재하고 테스트되었는가?
-- 프롬프트가 별도 모듈로 분리되어 있는가?
-- 토큰 사용량이 로깅되는가?
+- Is the API key not exposed in code, logs, or bundles?
+- Is the LLM response validated against a structured output schema?
+- Does the retry logic follow exponential backoff?
+- Does it fail immediately on auth errors (401/403)?
+- Does a fallback path exist and is it tested?
+- Is the prompt separated into a dedicated module?
+- Is token usage being logged?

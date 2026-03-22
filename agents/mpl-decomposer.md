@@ -41,7 +41,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     6. **Success criteria**: Must be machine-verifiable.
        - Good: "npm run build exits 0", "GET /users returns 200"
        - Bad: "code is clean", "works well"
-       Five verifiable types: command, test, file_exists, grep, description
+       Six verifiable types: command, test, file_exists, grep, description, qmd_verified
+         - `qmd_verified`: QMD semantic search + grep cross-verification. Requires `query` and `grep_pattern` fields. Falls back to grep-only if QMD unavailable.
 
     7. **Respect Pivot Points**: No phase may violate a CONFIRMED PP. If a phase would conflict with a PP, note the conflict and adjust.
 
@@ -96,6 +97,26 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - High-impact file changes → move earlier
       - Certain, safe work → can move later
 
+    Step 4.5: Feature priority classification (T-12, v3.8)
+      Within each dependency-equivalent tier (phases with no ordering constraints between them),
+      apply secondary sort by feature_priority:
+
+      | Priority | Criteria | Examples |
+      |----------|----------|---------|
+      | CORE | Directly implements a CONFIRMED PP or Must acceptance criterion | Auth flow, data model, core API |
+      | EXTENSION | Implements PROVISIONAL PP or Should/Could items, extends CORE | OAuth provider, advanced filters, UI polish |
+      | SUPPORT | Infrastructure, config, tooling that enables CORE/EXTENSION | Admin dashboard, monitoring, documentation |
+
+      Classification rules:
+      - If a phase implements ANY CONFIRMED PP → CORE
+      - If a phase implements only PROVISIONAL PPs or Should/Could → EXTENSION
+      - If a phase has no direct PP connection → SUPPORT
+      - When uncertain, prefer CORE (err toward earlier execution)
+
+      Within the same dependency tier, order: CORE → EXTENSION → SUPPORT.
+      This ensures core functionality is verified first. If later phases circuit-break,
+      the most valuable work (CORE) is already complete and committed.
+
     Step 5: Size phases per maturity mode (see Maturity_Mode_Effects table)
       - Apply per-mode sizing rules strictly
       - All modes: 8+ TODOs → split; 1 TODO → merge
@@ -145,7 +166,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     Step 9.5: Build Optimization Phase Auto-Insertion (F-49)
       - Check ALL of these conditions:
         A. phases.filter(p => p.phase_domain == "ui").length >= 3
-        B. PP "Bundle Budget" exists AND value != "unlimited"/"제한 없음"
+        B. PP "Bundle Budget" exists AND value != "unlimited"
       - If ALL conditions are true:
         → Insert a "Build Optimization + Code Splitting" phase with phase_domain: "infra"
         → Position: after the LAST ui-domain phase
@@ -169,6 +190,15 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - Classify risks by severity (HIGH/MED/LOW) and likelihood
       - HIGH severity risks MUST include concrete mitigation
       - Determine go/no-go assessment
+
+    Step 10.5: Feasibility cross-check (T-11 Layer 2, v4.0)
+      - Compare Phase 0 api-contracts against PP requirements:
+        Does any phase require an API/module that api-contracts.md doesn't list?
+      - Check if any phase's interface_contract.requires references non-existent artifacts
+      - If Phase 0 error-spec reveals impossible error handling requirements
+      - If feasibility issue found that Stage 2 didn't catch:
+        → Set go_no_go = "RE_INTERVIEW" with specific questions in re_interview_questions
+        → Each question includes: which dimension failed, what evidence was found, affected PP
   </Reasoning_Steps>
 
   <Output_Schema>
@@ -188,6 +218,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         phase_subdomain: string   # F-39: optional, tech-stack specific (e.g. react, prisma, langchain)
         phase_task_type: string   # F-39: optional, greenfield|refactor|migration|bugfix|performance|security
         phase_lang: string        # F-39: optional, rust|go|python|typescript|java
+        feature_priority: string  # T-12: core|extension|support — secondary sort within dependency tier
         scope: string          # 1-2 sentence scope description
         rationale: string      # why this phase is in this position
 
@@ -217,7 +248,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
               spec: string     # brief signature/schema
 
         success_criteria:
-          - type: "command" | "test" | "file_exists" | "grep" | "description"
+          - type: "command" | "test" | "file_exists" | "grep" | "description" | "qmd_verified"
             # type-specific fields follow the type
 
         inherited_criteria:
@@ -265,32 +296,37 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
           risk: string                     # what could break
           mitigation: string
 
-      go_no_go: "READY" | "READY_WITH_CAVEATS" | "NOT_READY"
+      go_no_go: "READY" | "READY_WITH_CAVEATS" | "NOT_READY" | "RE_INTERVIEW"
       blocking_issues: number
       advisory_issues: number
+      re_interview_questions:    # only when go_no_go == "RE_INTERVIEW" (T-11, v4.0)
+        - dimension: "api_availability" | "constraint_compatibility" | "tech_viability" | "scope"
+          question: string       # specific question for user
+          pp_affected: string    # PP-N
+          evidence: string       # what Phase 0 analysis revealed
     ```
   </Output_Schema>
 
   <Phase_Domain_Classification>
-    ### phase_domain 분류 (F-28)
+    ### phase_domain Classification (F-28)
 
-    각 Phase의 핵심 작업 성격에 따라 도메인 태그를 부여한다.
-    Phase Runner가 이 태그를 사용하여 도메인 특화 프롬프트와 모델을 선택한다.
+    Assign a domain tag based on the core nature of each phase's work.
+    Phase Runner uses this tag to select domain-specific prompts and models.
 
-    | 도메인 | 분류 기준 | 예시 Phase |
-    |--------|----------|-----------|
-    | `db` | DB 스키마, 마이그레이션, ORM 모델, 쿼리 | "User 모델 생성", "인덱스 추가" |
-    | `api` | API 엔드포인트, 라우팅, 미들웨어, 직렬화 | "회원가입 API", "인증 미들웨어" |
-    | `ui` | 프론트엔드 컴포넌트, 스타일, 상태 관리 | "로그인 폼", "대시보드 레이아웃" |
-    | `algorithm` | 복잡 로직, 최적화, 데이터 구조, 수학 | "검색 알고리즘", "캐시 전략" |
-    | `test` | 테스트 작성, 테스트 인프라, 픽스처 | "통합 테스트 추가", "테스트 유틸리티" |
-    | `ai` | LLM/AI API 통합, 프롬프트 관리, 사이드카 | "Gemini 추출기", "AI 프롬프트 관리" |
-    | `infra` | 설정, CI/CD, 빌드, 배포, 환경 | "Docker 설정", "환경 변수 관리" |
-    | `general` | 위 분류에 해당하지 않거나 2개 이상 혼합 | "리팩토링", "문서 갱신" |
+    | Domain | Classification Criteria | Example Phase |
+    |--------|------------------------|---------------|
+    | `db` | DB schema, migrations, ORM models, queries | "Create User model", "Add index" |
+    | `api` | API endpoints, routing, middleware, serialization | "Sign-up API", "Auth middleware" |
+    | `ui` | Frontend components, styles, state management | "Login form", "Dashboard layout" |
+    | `algorithm` | Complex logic, optimization, data structures, math | "Search algorithm", "Cache strategy" |
+    | `test` | Test writing, test infrastructure, fixtures | "Add integration tests", "Test utilities" |
+    | `ai` | LLM/AI API integration, prompt management, sidecars | "Gemini extractor", "AI prompt management" |
+    | `infra` | Configuration, CI/CD, build, deployment, environment | "Docker setup", "Environment variable management" |
+    | `general` | Does not fit above categories or mixes 2+ | "Refactoring", "Documentation update" |
 
-    #### 분류 규칙
+    #### Classification Rules
 
-    1. Phase의 `scope` 파일 확장자와 디렉토리로 1차 분류
+    1. Primary classification from phase scope file extensions and directories
        - `migrations/`, `models/`, `schema.` → `db`
        - `routes/`, `controllers/`, `api/`, `endpoints/` → `api`
        - `components/`, `pages/`, `styles/`, `.css`, `.vue`, `.svelte` → `ui`
@@ -298,38 +334,38 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
        - `sidecar/`, `ai/`, `llm/`, `prompts/` → `ai`
        - `Dockerfile`, `.yml`, `.yaml`, `config/`, `.env` → `infra`
 
-    2. Phase의 `name`과 `success_criteria`에서 의미 분석으로 2차 보정
-       - "최적화", "O(n)", "정렬", "탐색" → `algorithm`
+    2. Secondary correction via semantic analysis of phase `name` and `success_criteria`
+       - "optimization", "O(n)", "sort", "search" → `algorithm`
        - "gemini", "openai", "langchain", "structured output", "LLM", "AI API" → `ai`
-       - 혼합 시 가장 비중 높은 도메인 선택, 동률이면 `general`
+       - When mixed, select the highest-weighted domain; if tied use `general`
 
-    3. `phase_domain`은 **힌트**이지 강제가 아님
-       - Phase Runner는 도메인 프롬프트를 참조하되 무시할 수 있음
-       - 도메인 프롬프트 파일이 없으면 범용 동작
+    3. `phase_domain` is a **hint**, not a hard constraint
+       - Phase Runner references domain prompts but can ignore them
+       - Falls back to generic behavior if domain prompt file is absent
 
-    #### 도메인과 리스크 상관관계
+    #### Domain and Risk Correlation
 
-    | 도메인 | 일반적 복잡도 | 리스크 경향 |
-    |--------|-------------|-----------|
-    | `db` | M | 비가역적 변경 리스크 (마이그레이션) |
-    | `api` | S-M | 하위 호환성 리스크 |
-    | `ui` | S-M | 주관적 검증 (H-item 빈도 높음) |
-    | `algorithm` | M-L | 높은 로직 복잡도, opus 모델 권장 |
-    | `test` | S | 낮은 리스크 |
-    | `ai` | M-L | API 키 노출, 재시도 로직, 모델 폴백 리스크 |
-    | `infra` | S-M | 환경 의존적 실패 리스크 |
+    | Domain | General Complexity | Risk Tendency |
+    |--------|-------------------|---------------|
+    | `db` | M | Irreversible change risk (migrations) |
+    | `api` | S-M | Backward compatibility risk |
+    | `ui` | S-M | Subjective verification (high H-item frequency) |
+    | `algorithm` | M-L | High logic complexity, opus model recommended |
+    | `test` | S | Low risk |
+    | `ai` | M-L | API key exposure, retry logic, model fallback risk |
+    | `infra` | S-M | Environment-dependent failure risk |
 
-    #### phase_subdomain 분류 (F-39)
+    #### phase_subdomain Classification (F-39)
 
-    Phase의 scope 파일과 의존성에서 기술스택을 감지한다. 해당 서브도메인 프롬프트 파일이 존재할 때만 태깅한다.
+    Detect the technology stack from phase scope files and dependencies. Only tag when the corresponding subdomain prompt file exists.
 
-    | 도메인 | 서브도메인 | 감지 기준 |
-    |--------|-----------|----------|
-    | `ui` | `react` | `.jsx`, `.tsx`, `react` import, hooks 사용 |
+    | Domain | Subdomain | Detection Criteria |
+    |--------|-----------|-------------------|
+    | `ui` | `react` | `.jsx`, `.tsx`, `react` import, hooks usage |
     | `ui` | `nextjs` | `next.config`, `app/` directory, `use server` |
-    | `ui` | `vue` | `.vue` 파일, `vue` import |
-    | `ui` | `svelte` | `.svelte` 파일, `svelte.config` |
-    | `api` | `graphql` | `.graphql`, `type Query`, resolver 파일 |
+    | `ui` | `vue` | `.vue` files, `vue` import |
+    | `ui` | `svelte` | `.svelte` files, `svelte.config` |
+    | `api` | `graphql` | `.graphql`, `type Query`, resolver files |
     | `api` | `websocket` | `ws://`, `socket.io`, `WebSocket` |
     | `api` | `trpc` | `trpc`, `createTRPCRouter` |
     | `db` | `nosql` | `mongoose`, `mongodb`, `firestore`, `dynamodb` |
@@ -337,46 +373,46 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     | `db` | `orm-drizzle` | `drizzle-orm`, `drizzle.config` |
     | `ai` | `langchain` | `langchain`, `@langchain` |
     | `ai` | `vercel-ai` | `ai` package, `useChat`, `streamText` |
-    | `ai` | `raw-sdk` | `anthropic`, `openai` SDK 직접 import |
-    | `algorithm` | `optimization` | 캐싱, 메모이제이션, lazy 키워드 |
-    | `algorithm` | `data-structure` | tree, graph, heap, trie 구현 |
+    | `ai` | `raw-sdk` | direct `anthropic`, `openai` SDK import |
+    | `algorithm` | `optimization` | caching, memoization, lazy keywords |
+    | `algorithm` | `data-structure` | tree, graph, heap, trie implementation |
     | `infra` | `docker` | `Dockerfile`, `docker-compose` |
     | `infra` | `cicd` | `.github/workflows`, `Jenkinsfile` |
-    | `test` | `e2e` | `playwright`, `cypress`, e2e 디렉토리 |
+    | `test` | `e2e` | `playwright`, `cypress`, e2e directory |
     | `test` | `unit` | `vitest`, `jest`, `.test.`, `.spec.` |
 
-    서브도메인이 감지되지 않으면 `phase_subdomain` 필드를 생략한다 (null이 아닌 absent).
+    Omit the `phase_subdomain` field if no subdomain is detected (absent, not null).
 
-    #### phase_task_type 분류 (F-39)
+    #### phase_task_type Classification (F-39)
 
-    Phase의 작업 성격에 따라 태스크 타입을 부여한다.
+    Assign task type based on the nature of the phase's work.
 
-    | 타입 | 감지 기준 |
-    |------|----------|
-    | `greenfield` | Phase가 새 파일만 생성 (impact.modify 없음) |
-    | `refactor` | Phase 이름/설명에 "리팩토링", "restructure", "rename", "extract" |
-    | `migration` | "마이그레이션", "migrate", "upgrade", "전환" |
-    | `bugfix` | "버그", "fix", "수정", "hotfix" |
-    | `performance` | "성능", "optimize", "속도", "latency" |
-    | `security` | "보안", "security", "auth", "vulnerability" |
+    | Type | Detection Criteria |
+    |------|-------------------|
+    | `greenfield` | Phase only creates new files (no impact.modify) |
+    | `refactor` | Phase name/description contains "refactoring", "restructure", "rename", "extract" |
+    | `migration` | Contains "migration", "migrate", "upgrade", "transition" |
+    | `bugfix` | Contains "bug", "fix", "correction", "hotfix" |
+    | `performance` | Contains "performance", "optimize", "speed", "latency" |
+    | `security` | Contains "security", "auth", "vulnerability" |
 
-    감지되지 않으면 필드를 생략한다.
+    Omit the field if not detected.
 
-    #### phase_lang 분류 (F-39)
+    #### phase_lang Classification (F-39)
 
-    Phase의 대상 파일 확장자에서 언어를 감지한다. architecture_anchor.tech_stack도 참조한다.
+    Detect language from target file extensions of the phase. Also reference architecture_anchor.tech_stack.
 
-    | 언어 | 감지 기준 |
-    |------|----------|
-    | `typescript` | `.ts`, `.tsx` 파일 |
-    | `python` | `.py` 파일 |
-    | `rust` | `.rs` 파일, `Cargo.toml` |
-    | `go` | `.go` 파일, `go.mod` |
-    | `java` | `.java` 파일, `pom.xml`, `build.gradle` |
+    | Language | Detection Criteria |
+    |----------|-------------------|
+    | `typescript` | `.ts`, `.tsx` files |
+    | `python` | `.py` files |
+    | `rust` | `.rs` files, `Cargo.toml` |
+    | `go` | `.go` files, `go.mod` |
+    | `java` | `.java` files, `pom.xml`, `build.gradle` |
 
-    JavaScript (`.js`, `.jsx`)는 프로젝트에 tsconfig.json이 있으면 `typescript`로 분류, 없으면 lang 태깅 생략.
-    다중 언어 Phase는 가장 비중 높은 언어를 선택.
-    감지되지 않으면 필드를 생략한다.
+    JavaScript (`.js`, `.jsx`) is classified as `typescript` if project has tsconfig.json, otherwise omit lang tag.
+    For multi-language phases, select the language with the highest weight.
+    Omit the field if not detected.
   </Phase_Domain_Classification>
 
   <Failure_Modes_To_Avoid>
@@ -390,6 +426,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     - Generic risks: listing risks that apply to any project instead of THIS specific plan.
     - Risk inflation: marking everything HIGH without evidence. Be calibrated.
     - No mitigation: identifying HIGH risks without concrete mitigation recommendations.
+    - Wrong priority ordering: CORE phase appears after EXTENSION/SUPPORT phase at the same dependency level. Within dependency-equivalent tiers, always order CORE → EXTENSION → SUPPORT.
+    - Missing feasibility check: outputting READY when Phase 0 artifacts reveal impossible requirements. Always cross-reference api-contracts.md against phase requirements in Step 10.5.
 
     The output must be ONLY the YAML. No prose outside the YAML block.
   </Failure_Modes_To_Avoid>

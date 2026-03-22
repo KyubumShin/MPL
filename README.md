@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v3.7
+# MPL (Micro-Phase Loop) v4.1
 
 **Prevention over cure. Specification over debugging.**
 
@@ -271,7 +271,7 @@ Fifteen agents, each with a single purpose. Loaded on-demand, never preloaded:
 | Agent | Role | Core Principle |
 |-------|------|---------------|
 | **Interviewer** | Socratic questioning for Pivot Points | "What are you NOT willing to compromise on?" |
-| **Weak Interviewer** | 2-Phase clarity reinforcement | "Are these PPs clear enough to build from?" |
+| **Ambiguity Resolver** | PP-Aligned Spec Resolution — 5D metric-based Socratic loop with PP Conformance | "Can we derive a spec that conforms to these PPs?" |
 | **Codebase Analyzer** | Project structure analysis (haiku) | "What exists before we plan?" |
 | **Phase 0 Analyzer** | Pre-execution deep analysis | "Type policy, error spec, build constraints" |
 | **Pre-Execution Analyzer** | Gap + Tradeoff unified analysis | "What's missing? What's risky?" |
@@ -363,7 +363,7 @@ MPL/
 │       ├── mpl-cache.mjs         # Phase 0 caching
 │       ├── mpl-profile.mjs       # Token profiling
 │       └── mpl-routing-patterns.mjs # Routing pattern learning (F-22)
-├── skills/                 # 7 skills
+├── skills/                 # 11 skills
 │   ├── mpl/                # Main pipeline (single entry point)
 │   ├── mpl-pivot/          # PP interview
 │   ├── mpl-status/         # Dashboard
@@ -395,6 +395,16 @@ MPL/
 - **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)
 - **3-Tier PD** — Phase Decisions classified Active/Summary/Archived per phase for constant token budget
 - **Convergence Detection** — Stagnation (variance < 5%), regression (delta < -10%), strategy suggestions
+- **Dangerous Command Detection (T-01, v3.8)** — Bash safety guard for rm -rf, DROP TABLE, git push --force, etc.
+- **Core-First Phase Ordering (T-12, v3.8)** — CORE → EXTENSION → SUPPORT sort within dependency tiers
+- **Compaction Recovery (F-31, v3.8)** — Read-side checkpoint loading after context compression
+- **Post-Execution Review (T-10, v3.9)** — H-item severity routing: HIGH blocks, MED/LOW defer to Step 5.5
+- **Phase-Scoped File Lock (T-01 P2, v3.9)** — Warn on writes outside current phase's declared scope
+- **Budget Pause & Resume (F-33, v3.9)** — Auto-pause on context exhaustion, handoff signal for watcher
+- **Feasibility 2-Layer Defense (T-11, v4.0)** — INFEASIBLE detection in Stage 2 + RE_INTERVIEW in Decomposer
+- **Browser QA Gate (T-03, v4.0)** — Claude in Chrome MCP UI verification (Gate 1.7, non-blocking)
+- **PR Creation (T-04, v4.0)** — Auto PR with Gate evidence via `gh pr create`
+- **MCP Server Tier 1 (M-01, v4.1)** — Deterministic ambiguity scoring + active state read/write via MCP tools
 
 </details>
 
@@ -485,18 +495,19 @@ node --test hooks/__tests__/*.test.mjs
 
 ## References
 
-MPL은 다양한 외부 프로젝트와 아티클에서 영감을 받았습니다.
+MPL draws inspiration from various external projects and articles.
 
-| 영역 | 출처 | MPL 적용 |
-|------|------|---------|
-| **Pipeline Router** | [Ouroboros (Q00)](https://github.com/Q00/ouroboros) — PAL Router 3-tier 비용 모델 | Adaptive Pipeline Router (F-20, F-21, F-22) |
-| **Test Design** | SG-Loop (UAM에 통합) — 실험 기반 검증 설계, Phase 0 명세 철학 *(Hoyeon의 테스트 설계 사상에서 영향)* | Phase 0 Enhanced (7개 실험 → 4-step 명세) |
-| **Session Memory** | [QMD (Tobi Lütke)](https://github.com/tobi/qmd) — 로컬 하이브리드 검색 (BM25+벡터+리랭킹) | Scout QMD 통합 (F-25) |
-| **Grep Is Dead** | [ArtemXTech](https://x.com/ArtemXTech/status/2028330693659332615) — /recall 패턴, 세션 간 컨텍스트 지속 | Scout 2-layer 검색 전략 |
-| **Long-Horizon Tasks** | [Codex docs pattern](https://www.linkedin.com/posts/gb-jeong_run-long-horizon-tasks-with-codex-activity-7435825294554484736-hBEX) — 4-Document 매핑 | RUNBOOK.md (F-10) |
+| Area | Source | MPL Application |
+|------|--------|----------------|
+| **Pipeline Router** | [Ouroboros (Q00)](https://github.com/Q00/ouroboros) — PAL Router 3-tier cost model | Adaptive Pipeline Router (F-20, F-21, F-22) |
+| **Test Design** | SG-Loop (integrated in UAM) — experiment-based verification design, Phase 0 specification philosophy *(influenced by Hoyeon's test design philosophy)* | Phase 0 Enhanced (7 experiments → 4-step specification) |
+| **Session Memory** | [QMD (Tobi Lütke)](https://github.com/tobi/qmd) — local hybrid search (BM25+vector+reranking) | Scout QMD integration (F-25) |
+| **Grep Is Dead** | [ArtemXTech](https://x.com/ArtemXTech/status/2028330693659332615) — /recall pattern, cross-session context persistence | Scout 2-layer search strategy |
+| **Long-Horizon Tasks** | [Codex docs pattern](https://www.linkedin.com/posts/gb-jeong_run-long-horizon-tasks-with-codex-activity-7435825294554484736-hBEX) — 4-Document mapping | RUNBOOK.md (F-10) |
 | **Agent Design** | [Seeing like an Agent (Thariq, Anthropic)](https://x.com/trq212/status/2027463795355095314) — self-directed search, progressive disclosure | F-23, F-24, F-16 |
+| **Software Factory** | [gstack (Garry Tan)](https://github.com/garrytan/gstack) — 25-skill sprint lifecycle, design-first approach, cross-model review | Temp roadmap: Safety Guard, Cross-Model Review, Ship Pipeline |
 
-상세 분석: [`docs/REFERENCES.md`](./docs/REFERENCES.md)
+Detailed analysis: [`docs/REFERENCES.md`](./docs/REFERENCES.md)
 
 ---
 

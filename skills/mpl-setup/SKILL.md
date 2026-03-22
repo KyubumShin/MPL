@@ -126,9 +126,9 @@ qmd_available = Bash("which qmd 2>/dev/null && qmd --version")
 
 ```
 if NOT qmd_available:
-  AskUserQuestion: "QMD 검색 엔진을 설치할까요? Scout 에이전트의 탐색 품질과 속도가 크게 향상됩니다."
-    - "설치 (권장)" → proceed to install
-    - "건너뛰기" → skip, set qmd_available = false
+  AskUserQuestion: "Would you like to install the QMD search engine? It significantly improves the Scout agent's exploration quality and speed."
+    - "Install (recommended)" → proceed to install
+    - "Skip" → skip, set qmd_available = false
 
   if user chose install:
     1. Check Node.js >= 22:
@@ -337,10 +337,10 @@ Quick Start:
 
 ### Step 7: QMD Search Engine Setup
 
-AskUserQuestion: "QMD 시맨틱 검색 엔진을 사용할까요? Scout 에이전트의 코드베이스 탐색이 50-60% 빨라집니다."
-  - "설치하고 사용 (권장)" → Install QMD + register collections + enable (run Step 3g)
-  - "이미 설치됨 — 활성화만" → Skip install, register collections + enable
-  - "사용 안 함" → Set qmd.enabled = false, Scout uses Grep fallback
+AskUserQuestion: "Would you like to use the QMD semantic search engine? It speeds up the Scout agent's codebase exploration by 50-60%."
+  - "Install and use (recommended)" → Install QMD + register collections + enable (run Step 3g)
+  - "Already installed — activate only" → Skip install, register collections + enable
+  - "Do not use" → Set qmd.enabled = false, Scout uses Grep fallback
 
 ### Step 7b: Context Rotation Backend (Auto-Resume)
 
@@ -380,9 +380,9 @@ if backend detected:
 #### Configuration
 
 ```
-AskUserQuestion: "컨텍스트 자동 로테이션을 활성화할까요? 파이프라인이 컨텍스트 한계에 도달하면 자동으로 /clear + resume 합니다."
-  - "활성화 (권장)" → save backend config
-  - "사용 안 함" → set enabled = false
+AskUserQuestion: "Would you like to enable automatic context rotation? When the pipeline reaches the context limit, it will automatically /clear + resume."
+  - "Enable (recommended)" → save backend config
+  - "Do not use" → set enabled = false
 
 if enabled:
   Write to .mpl/config.json:
@@ -408,17 +408,17 @@ if backend == "kitty":
   // Check kitty remote control
   kitty_conf = Bash("cat ~/.config/kitty/kitty.conf 2>/dev/null | grep allow_remote_control")
   if "yes" not in kitty_conf:
-    Report: "Kitty remote control이 비활성화되어 있습니다."
-    Report: "  ~/.config/kitty/kitty.conf 에 다음을 추가하세요:"
+    Report: "Kitty remote control is disabled."
+    Report: "  Add the following to ~/.config/kitty/kitty.conf:"
     Report: "  allow_remote_control yes"
-    Report: "  그 후 Kitty를 재시작하세요."
+    Report: "  Then restart Kitty."
 ```
 
 ### Step 8: HUD Statusline Setup
 
-AskUserQuestion: "MPL HUD(상태표시줄)를 활성화할까요? 파이프라인 진행률, 토큰 사용량, Gate 상태를 실시간으로 볼 수 있습니다."
-  - "활성화 (권장)" → Configure statusLine in Claude settings
-  - "사용 안 함" → Skip HUD setup
+AskUserQuestion: "Would you like to enable the MPL HUD (statusline)? You can see pipeline progress, token usage, and Gate status in real time."
+  - "Enable (recommended)" → Configure statusLine in Claude settings
+  - "Do not use" → Skip HUD setup
 
 If enabled:
 
@@ -451,11 +451,11 @@ If user has OMC HUD active, warn and ask for confirmation.
 
 ### Step 9: Optional Advanced Configuration
 
-AskUserQuestion: "고급 설정을 커스터마이즈할까요?"
-  - "기본값 사용 (권장)" → Skip to Step 10
-  - "커스터마이즈" → Ask the following:
+AskUserQuestion: "Would you like to customize advanced settings?"
+  - "Use defaults (recommended)" → Skip to Step 10
+  - "Customize" → Ask the following:
 
-If "커스터마이즈" selected:
+If "Customize" selected:
 1. **Maturity mode** (default standard): explore / standard / strict
 2. **Max fix loops** (default 10): How many fix attempts before circuit breaker?
 3. **Token budget** (default 500K): Maximum token spend per pipeline run?

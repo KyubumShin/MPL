@@ -39,7 +39,7 @@ disallowedTools: Write, Edit, Task
     - List all .md files in `MPL/agents/`
     - For each: verify YAML frontmatter has `name`, `description`, `model`
     - Verify `model` is one of: haiku, sonnet, opus
-    - Expected count: 15 active agents
+    - Expected: count files in MPL/agents/*.md (currently 15)
     - FAIL if any agent has invalid frontmatter
     - WARN if count != 15
 

@@ -131,7 +131,7 @@ export function saveCache(cwd, { cacheKey, complexityGrade, artifacts }) {
       writeFileSync(join(cacheDir, name), content, 'utf-8');
     }
 
-    // Write manifest (commit_hash 포함 — F-05 부분 무효화 diff 기준점)
+    // Write manifest (includes commit_hash — F-05 partial invalidation diff reference point)
     const manifest = {
       cache_key: cacheKey,
       commit_hash: getHeadCommitHash(cwd),
@@ -184,10 +184,10 @@ export function invalidateCache(cwd) {
 }
 
 // ---------------------------------------------------------------------------
-// F-05: Partial Cache Invalidation (git diff 기반 부분 무효화)
+// F-05: Partial Cache Invalidation (git diff-based partial invalidation)
 // ---------------------------------------------------------------------------
 
-/** Phase 0 단계별 아티팩트 매핑 */
+/** Phase 0 per-step artifact mapping */
 const STEP_ARTIFACT_MAP = {
   api_contracts: 'api-contracts.md',
   examples: 'examples.md',
@@ -196,10 +196,10 @@ const STEP_ARTIFACT_MAP = {
 };
 
 /**
- * 현재 HEAD의 commit hash를 반환한다.
- * git 저장소가 아니거나 실패 시 null 반환.
+ * Returns the commit hash of the current HEAD.
+ * Returns null if not a git repository or on failure.
  *
- * @param {string} cwd - 워킹 디렉토리
+ * @param {string} cwd - Working directory
  * @returns {string|null}
  */
 function getHeadCommitHash(cwd) {
@@ -211,9 +211,9 @@ function getHeadCommitHash(cwd) {
 }
 
 /**
- * 파일 경로가 공개 API 소스인지 판별한다.
+ * Determines whether a file path is a public API source.
  *
- * @param {string} filePath - 프로젝트 루트 기준 상대 경로
+ * @param {string} filePath - Relative path from project root
  * @returns {boolean}
  */
 function isPublicApi(filePath) {
@@ -222,19 +222,19 @@ function isPublicApi(filePath) {
   const sourceExts = /\.(ts|js|py|go|rs|java|c|cpp)$/;
   if (!sourceExts.test(filePath)) return false;
 
-  // 소스 디렉토리 패턴 (일반적인 프로젝트 레이아웃)
+  // Source directory patterns (common project layouts)
   const sourceDirPatterns = ['src/', 'lib/', 'app/', 'pkg/', 'packages/', 'core/', 'internal/'];
   const normalized = filePath.replace(/\\/g, '/');
 
-  // 소스 디렉토리 내 파일이거나 루트 레벨 소스 파일
+  // File is inside a source directory or is a root-level source file
   return sourceDirPatterns.some(dir => normalized.includes(dir))
-    || !normalized.includes('/');  // 루트 레벨 (e.g., main.py, index.ts)
+    || !normalized.includes('/');  // Root-level (e.g., main.py, index.ts)
 }
 
 /**
- * 파일 경로가 테스트 파일인지 판별한다.
+ * Determines whether a file path is a test file.
  *
- * @param {string} filePath - 프로젝트 루트 기준 상대 경로
+ * @param {string} filePath - Relative path from project root
  * @returns {boolean}
  */
 function isTestFile(filePath) {
@@ -244,9 +244,9 @@ function isTestFile(filePath) {
 }
 
 /**
- * 파일 경로가 타입 정의 파일인지 판별한다.
+ * Determines whether a file path is a type definition file.
  *
- * @param {string} filePath - 프로젝트 루트 기준 상대 경로
+ * @param {string} filePath - Relative path from project root
  * @returns {boolean}
  */
 function isTypeDefinition(filePath) {
@@ -257,10 +257,10 @@ function isTypeDefinition(filePath) {
 }
 
 /**
- * 파일 경로가 에러 핸들러 파일인지 판별한다.
- * 파일명 패턴으로만 판별하며, 내용 검사는 호출자가 필요 시 수행한다.
+ * Determines whether a file path is an error handler file.
+ * Determined by filename pattern only; content inspection is left to the caller if needed.
  *
- * @param {string} filePath - 프로젝트 루트 기준 상대 경로
+ * @param {string} filePath - Relative path from project root
  * @returns {boolean}
  */
 function isErrorHandler(filePath) {
@@ -269,12 +269,12 @@ function isErrorHandler(filePath) {
 }
 
 /**
- * git diff 기반 부분 무효화 분석.
+ * Analyze partial invalidation based on git diff.
  *
- * 캐시 manifest의 commit_hash(또는 timestamp)를 기준으로 변경된 파일을 분석하고,
- * 영향받는 Phase 0 단계를 분류한다.
+ * Analyzes files changed since the cache manifest's commit_hash (or timestamp)
+ * and classifies the affected Phase 0 steps.
  *
- * @param {string} cwd - 워킹 디렉토리
+ * @param {string} cwd - Working directory
  * @returns {{ scope: 'none'|'partial'|'full', affectedSteps?: string[], unaffectedArtifacts?: string[] }}
  */
 export function analyzePartialInvalidation(cwd) {
@@ -292,14 +292,14 @@ export function analyzePartialInvalidation(cwd) {
     return { scope: 'full' };
   }
 
-  // diff 기준점 결정: commit_hash 우선, 없으면 timestamp 폴백
+  // Determine diff reference: prefer commit_hash, fall back to timestamp
   const diffRef = manifest.commit_hash || null;
   if (!diffRef) {
-    // commit_hash 없는 레거시 캐시 — 안전하게 전체 재실행
+    // Legacy cache without commit_hash — safely re-run everything
     return { scope: 'full' };
   }
 
-  // git diff 실행
+  // Run git diff
   let changedFiles;
   try {
     const output = execSync(`git diff --name-only ${diffRef} HEAD`, {
@@ -309,7 +309,7 @@ export function analyzePartialInvalidation(cwd) {
     });
     changedFiles = output.trim().split('\n').filter(Boolean);
   } catch {
-    // git diff 실패 — 안전 폴백으로 전체 재실행
+    // git diff failed — safe fallback: re-run everything
     return { scope: 'full' };
   }
 
@@ -317,7 +317,7 @@ export function analyzePartialInvalidation(cwd) {
     return { scope: 'none' };
   }
 
-  // 변경 파일을 Phase 0 단계별로 분류
+  // Classify changed files by Phase 0 step
   const affected = {
     api_contracts: false,
     examples: false,
@@ -345,7 +345,7 @@ export function analyzePartialInvalidation(cwd) {
   }
 
   if (affectedSteps.length >= 3) {
-    // 3+ 단계 영향 → 전체 재실행이 효율적
+    // 3+ steps affected → full re-run is more efficient
     return { scope: 'full' };
   }
 
@@ -357,18 +357,18 @@ export function analyzePartialInvalidation(cwd) {
 }
 
 /**
- * 부분 재실행 후 캐시 저장 (기존 + 새 아티팩트 병합).
+ * Save cache after a partial re-run (merge existing + new artifacts).
  *
- * 재사용 아티팩트는 기존 캐시에서 유지하고, 새로 생성된 아티팩트만 덮어쓴다.
- * 새 commit_hash 및 cache_key로 manifest를 갱신하며 partial_rerun 메타데이터를 기록한다.
+ * Reused artifacts are kept from the existing cache; only newly generated artifacts are overwritten.
+ * Updates the manifest with a new commit_hash and cache_key, and records partial_rerun metadata.
  *
- * @param {string} cwd - 워킹 디렉토리
+ * @param {string} cwd - Working directory
  * @param {object} options
- * @param {string[]} options.reusedArtifacts - 재사용된 아티팩트 파일명 목록
- * @param {Object<string, string>} options.newArtifacts - 새로 생성된 아티팩트 (filename -> content)
- * @param {string} options.originalKey - 이전 캐시 키
- * @param {string} options.newCacheKey - 새로 계산된 캐시 키
- * @param {string} options.complexityGrade - 복잡도 등급
+ * @param {string[]} options.reusedArtifacts - List of reused artifact filenames
+ * @param {Object<string, string>} options.newArtifacts - Newly generated artifacts (filename -> content)
+ * @param {string} options.originalKey - Previous cache key
+ * @param {string} options.newCacheKey - Newly computed cache key
+ * @param {string} options.complexityGrade - Complexity grade
  * @returns {{ saved: boolean, cacheDir: string, artifactCount: number }}
  */
 export function partialCacheSave(cwd, { reusedArtifacts, newArtifacts, originalKey, newCacheKey, complexityGrade }) {
@@ -377,15 +377,15 @@ export function partialCacheSave(cwd, { reusedArtifacts, newArtifacts, originalK
   try {
     mkdirSync(cacheDir, { recursive: true });
 
-    // 새 아티팩트 기록 (영향받은 단계의 결과물)
+    // Write new artifacts (output of affected steps)
     for (const [name, content] of Object.entries(newArtifacts)) {
       writeFileSync(join(cacheDir, name), content, 'utf-8');
     }
 
-    // 재사용 아티팩트가 캐시 디렉토리에 이미 존재하는지 확인
+    // Verify reused artifacts already exist in the cache directory
     for (const name of reusedArtifacts) {
       if (!existsSync(join(cacheDir, name))) {
-        // 캐시 디렉토리에 없으면 phase0 출력에서 복사 시도
+        // Not in cache directory — attempt to copy from phase0 output
         const phase0Path = join(cwd, '.mpl/mpl/phase0', name);
         if (existsSync(phase0Path)) {
           copyFileSync(phase0Path, join(cacheDir, name));
@@ -401,7 +401,7 @@ export function partialCacheSave(cwd, { reusedArtifacts, newArtifacts, originalK
       .filter(([, artifact]) => reusedArtifacts.includes(artifact))
       .map(([step]) => step);
 
-    // manifest 갱신 (partial_rerun 메타데이터 포함)
+    // Update manifest (includes partial_rerun metadata)
     const manifest = {
       cache_key: newCacheKey,
       commit_hash: getHeadCommitHash(cwd),

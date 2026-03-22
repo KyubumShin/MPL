@@ -85,14 +85,15 @@ describe('VALIDATE_AGENTS', () => {
     assert.ok(VALIDATE_AGENTS instanceof Set);
   });
 
-  it('should contain all 11 expected agents', () => {
+  it('should contain all expected agents', () => {
     const expected = [
       'mpl-pre-execution-analyzer', 'mpl-verification-planner',
       'mpl-worker', 'mpl-phase-runner', 'mpl-interviewer',
+      'mpl-ambiguity-resolver', 'mpl-codebase-analyzer', 'mpl-phase0-analyzer',
       'mpl-test-agent', 'mpl-code-reviewer', 'mpl-decomposer', 'mpl-git-master', 'mpl-compound',
       'mpl-doctor',
     ];
-    assert.strictEqual(VALIDATE_AGENTS.size, 11);
+    assert.strictEqual(VALIDATE_AGENTS.size, expected.length);
     for (const agent of expected) {
       assert.ok(VALIDATE_AGENTS.has(agent), `missing: ${agent}`);
     }

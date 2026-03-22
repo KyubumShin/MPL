@@ -1,20 +1,20 @@
-# Task Type: Refactor (리팩토링)
+# Task Type: Refactor
 
-## 핵심 원칙
-- 기존 동작 보존이 최우선: 변경 전 테스트 커버리지를 먼저 확인
-- 점진적 변경: 한 번에 하나의 변환만 수행 (이름 변경, 추출, 이동 등)
-- 각 단계에서 테스트가 통과하는 상태를 유지하며 커밋
-- IDE 리팩토링 도구(rename, extract, inline)를 수동 편집보다 우선 사용
-- 범위를 명확히 한정: 요청되지 않은 인접 코드는 건드리지 않음
+## Core Principles
+- Preserving existing behavior is the top priority: check test coverage before making changes
+- Incremental changes: perform only one transformation at a time (rename, extract, move, etc.)
+- Commit at each step while keeping tests passing
+- Prefer IDE refactoring tools (rename, extract, inline) over manual editing
+- Clearly bound the scope: do not touch adjacent code that was not requested
 
-## 주의 사항
-- 기능 변경과 리팩토링을 같은 커밋에 섞지 않음
-- 테스트 없는 코드는 리팩토링 전 테스트 추가 필수
-- 퍼블릭 API(함수 시그니처, 인터페이스) 변경은 Breaking change 검토
-- 성능 개선을 목적으로 리팩토링하지 않음 (별도 태스크)
+## Cautions
+- Do not mix functional changes and refactoring in the same commit
+- Code without tests must have tests added before refactoring
+- Changes to public APIs (function signatures, interfaces) require a breaking change review
+- Do not refactor for performance improvement (create a separate task)
 
-## 검증 포인트
-- 기존 테스트가 100% 통과하는가?
-- 외부 동작(입출력, 부작용)이 변경되지 않았는가?
-- 각 중간 커밋에서도 빌드와 테스트가 통과하는가?
-- 코드 복잡도 또는 가독성이 실제로 개선되었는가?
+## Verification Points
+- Do 100% of existing tests pass?
+- Is external behavior (inputs/outputs, side effects) unchanged?
+- Do builds and tests pass at each intermediate commit?
+- Is code complexity or readability genuinely improved?

@@ -227,7 +227,12 @@ async function main() {
         // Preserve existing fix_loop_count to prevent infinite loop bypass
         // (only initialize to 0 on first entry, not on re-entry from Phase 3)
         const currentFixCount = state.fix_loop_count || 0;
-        writeState(cwd, { current_phase: 'phase4-fix', fix_loop_count: currentFixCount });
+        // Reset gate results when re-entering gate phase to prevent stale data
+        writeState(cwd, {
+          current_phase: 'phase4-fix',
+          fix_loop_count: currentFixCount,
+          gate_results: { gate0_5_passed: null, gate1_passed: null, gate1_5_passed: null, gate2_passed: null, gate3_passed: null }
+        });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] Quality Gate failed. Gate results: G1=${gateResults.details.gate1}, G2=${gateResults.details.gate2}, G3=${gateResults.details.gate3}. Transitioning to Phase 4: Fix Loop.`

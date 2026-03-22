@@ -4,15 +4,15 @@ description: MPL Pivot Point discovery through structured interview - define imm
 
 # MPL Pivot Points Interview
 
-Pivot Points(PP)는 프로젝트 전체에서 **절대 변하지 않는 제약**이다.
-이 스킬은 구조화된 인터뷰를 통해 PP를 발견하고 정의한다.
+Pivot Points (PP) are **constraints that never change** throughout the entire project.
+This skill discovers and defines PPs through a structured interview.
 
 ## When to Use
 
-- MPL 파이프라인 시작 전 (Phase 1 이전)
-- PP가 명확하지 않을 때
-- 새 프로젝트나 대규모 방향 전환 시
-- `/mpl:mpl` 실행 시 PP가 없으면 자동으로 이 스킬을 먼저 실행
+- Before starting the MPL pipeline (before Phase 1)
+- When PPs are not clearly defined
+- When starting a new project or making a large directional change
+- When running `/mpl:mpl` and no PP exists, this skill runs automatically first
 
 ## Triage Integration
 
@@ -21,118 +21,116 @@ When invoked from the MPL pipeline, the Triage step determines interview depth:
 | Triage Result | Interview Behavior |
 |---------------|-------------------|
 | `interview_depth: "full"` | All 4 rounds (default behavior) |
-| `interview_depth: "light"` | Round 1 (What) + Round 2 (What NOT) only. Skip Either/Or and How to Judge. |
-| `interview_depth: "skip"` | No interview. Extract PPs directly from the user's prompt. Generate PP candidates from explicit constraints in the prompt, then proceed to PP Confirmation (Step 1-D). |
+| `interview_depth: "light"` | Round 1 (What) + Round 2 (What NOT) only. Skip Either/Or and How to Judge. This is the minimum depth — `light` cannot be reduced further (F-35). |
 
 When `interview_depth` is provided in the invocation context, respect it:
-- `"light"`: After Round 2, generate PP candidates and skip to Output.
-- `"skip"`: Parse the user prompt for constraint-like statements, generate PP candidates directly, skip to Output.
+- `"light"`: After Round 2, generate PP candidates and skip to Output. This is the minimum interview depth; `skip` is not supported.
 
 ## Interview Protocol
 
-### Round 1: 본질 탐색 (What)
+### Round 1: Core Exploration (What)
 
-프로젝트의 핵심 정체성을 파악한다.
+Identify the core identity of the project.
 
 ```
-AskUserQuestion: "이 프로젝트의 핵심 정체성은 무엇인가요?"
+AskUserQuestion: "What is the core identity of this project?"
 Options:
-  1. {프로젝트 설명에서 추론한 정체성 A}
-  2. {프로젝트 설명에서 추론한 정체성 B}
-  3. (사용자 직접 입력)
+  1. {Identity A inferred from project description}
+  2. {Identity B inferred from project description}
+  3. (User input)
 ```
 
-**추론 방법**: 코드베이스 탐색 (explore 에이전트) + README/CLAUDE.md 분석으로 후보를 미리 파악한다.
+**Inference method**: Pre-identify candidates through codebase exploration (explore agent) + README/CLAUDE.md analysis.
 
-이어서:
+Followed by:
 ```
-AskUserQuestion: "이 프로젝트에서 가장 중요한 가치는?"
+AskUserQuestion: "What is the most important value in this project?"
 Options:
-  1. "사용자 경험 (UX)"
-  2. "성능/속도"
-  3. "안정성/신뢰성"
-  4. (사용자 직접 입력)
+  1. "User Experience (UX)"
+  2. "Performance/Speed"
+  3. "Stability/Reliability"
+  4. (User input)
 ```
 
-### Round 2: 경계 탐색 (What NOT)
+### Round 2: Boundary Exploration (What NOT)
 
-변하면 안 되는 것을 찾는다.
+Find what must not change.
 
 ```
-AskUserQuestion: "이 기능을 추가하면서 절대 잃으면 안 되는 것은?"
+AskUserQuestion: "What must absolutely not be lost while adding this feature?"
 Options:
-  1. {Round 1 답변에서 추론한 제약 A}
-  2. {Round 1 답변에서 추론한 제약 B}
-  3. {코드베이스에서 발견한 핵심 패턴}
-  4. (사용자 직접 입력)
+  1. {Constraint A inferred from Round 1 answers}
+  2. {Constraint B inferred from Round 1 answers}
+  3. {Core pattern discovered in codebase}
+  4. (User input)
 ```
 
 ```
-AskUserQuestion: "어떤 변경이 이 프로젝트를 망칠 수 있나요?"
+AskUserQuestion: "What changes could break this project?"
 Options:
-  1. {추론한 위험 시나리오 A}
-  2. {추론한 위험 시나리오 B}
-  3. (사용자 직접 입력)
+  1. {Inferred risk scenario A}
+  2. {Inferred risk scenario B}
+  3. (User input)
 ```
 
-### Round 3: 트레이드오프 탐색 (Either/Or)
+### Round 3: Tradeoff Exploration (Either/Or)
 
-PP 간 우선순위를 확인한다.
+Confirm priorities between PPs.
 
 ```
-AskUserQuestion: "{PP-A}와 {PP-B}가 충돌하면 어느 쪽을 우선하나요?"
+AskUserQuestion: "If {PP-A} and {PP-B} conflict, which takes priority?"
 Options:
-  1. "{PP-A} 우선"
-  2. "{PP-B} 우선"
-  3. "상황에 따라 다름" → 판정 기준 추가 질문
+  1. "{PP-A} first"
+  2. "{PP-B} first"
+  3. "Depends on the situation" → follow-up question to define judgment criteria
 ```
 
-이 라운드는 PP가 2개 이상일 때만 실행한다.
-모든 PP 쌍에 대해 우선순위를 확인한다 (N*(N-1)/2 쌍).
+This round only runs when there are 2 or more PPs.
+Confirm priority for all PP pairs (N*(N-1)/2 pairs).
 
-### Round 4: 구체화 (How to Judge)
+### Round 4: Concretization (How to Judge)
 
-각 PP의 위반 판정 기준을 구체화한다.
+Concretize the violation judgment criteria for each PP.
 
 ```
-AskUserQuestion: "'{PP-1 원칙}'을 어떻게 판단할 수 있을까요?"
+AskUserQuestion: "How can we judge '{PP-1 principle}'?"
 Options:
-  1. {추론한 판정 기준 A} (예: "클릭 수 증가하면 위반")
-  2. {추론한 판정 기준 B} (예: "로딩 시간 2초 초과하면 위반")
-  3. (사용자 직접 입력)
+  1. {Inferred judgment criterion A} (e.g., "Violation if click count increases")
+  2. {Inferred judgment criterion B} (e.g., "Violation if loading time exceeds 2 seconds")
+  3. (User input)
 ```
 
-**판정 기준이 모호한 경우**: 사용자가 명확하게 답하지 못하면 아래 전략을 사용한다.
+**When judgment criteria are ambiguous**: Use the following strategy if the user cannot answer clearly.
 
-### Unclear PP 처리 전략
+### Unclear PP Handling Strategy
 
-PP가 명확하지 않은 경우 3단계로 접근한다:
+When a PP is not clear, approach in 3 stages:
 
-#### 전략 1: 예시 기반 구체화
+#### Strategy 1: Example-Based Concretization
 ```
-AskUserQuestion: "다음 중 {PP 원칙}을 위반하는 것은?"
+AskUserQuestion: "Which of the following violates the {PP principle}?"
 Options:
-  1. "설정 메뉴를 3depth로 분리" → 위반?
-  2. "키보드 단축키 추가" → 위반?
-  3. "사이드바 상시 표시" → 위반?
+  1. "Splitting the settings menu into 3 levels" → Violation?
+  2. "Adding keyboard shortcuts" → Violation?
+  3. "Always showing the sidebar" → Violation?
 ```
-사용자의 위반/비위반 판단에서 패턴을 추출하여 판정 기준을 역으로 도출한다.
+Extract the judgment criteria in reverse by analyzing the user's violation/non-violation judgments.
 
-#### 전략 2: 임시 PP로 진행
+#### Strategy 2: Proceed with Provisional PP
 ```
-PP-2: 에디터 본질 유지 (PROVISIONAL)
-- 원칙: 텍스트 편집이 핵심이며 부가 기능에 밀리지 않아야 한다
-- 판정 기준: [미정 — Phase 2에서 Discovery 발생 시 재논의]
-- 상태: PROVISIONAL (확정 전까지 soft 제약)
+PP-2: Preserve Editor Essence (PROVISIONAL)
+- Principle: Text editing is the core and must not be overshadowed by supplementary features
+- Judgment criteria: [TBD — revisit when Discovery occurs in Phase 2]
+- Status: PROVISIONAL (soft constraint until confirmed)
 ```
 
-PROVISIONAL PP는:
-- Discovery 충돌 시 **자동 반려하지 않고 HITL로 넘긴다**
-- Phase 2 진행 중 구체적 사례가 나오면 판정 기준을 확정한다
-- Phase 3 진입 전까지 CONFIRMED로 전환해야 한다
+PROVISIONAL PPs:
+- **Do not auto-reject on Discovery conflict — escalate to HITL**
+- When concrete cases emerge during Phase 2 execution, finalize judgment criteria
+- Must be converted to CONFIRMED before entering Phase 3
 
-#### 전략 3: PP 없이 시작
-PP를 정의할 수 없는 탐색 초기 단계에서는:
+#### Strategy 3: Start Without PP
+In early exploration stages where a PP cannot be defined:
 ```json
 {
   "maturity_mode": "explore",
@@ -140,63 +138,63 @@ PP를 정의할 수 없는 탐색 초기 단계에서는:
   "pp_status": "deferred"
 }
 ```
-explore 모드에서 PP 없이 시작하고, Phase 2 진행 중 발견되는 패턴에서 PP 후보를 추출한다.
+Start in explore mode without PP, and extract PP candidates from patterns discovered during Phase 2.
 
 ## Output
 
-인터뷰 완료 후 `.mpl/pivot-points.md`를 생성한다:
+After the interview, create `.mpl/pivot-points.md`:
 
 ```markdown
 # Pivot Points
 
-## PP-1: {제목}
-- 원칙: {변하지 않아야 하는 것}
-- 판정 기준: {구체적 위반 조건}
-- 우선순위: 1 (최고)
-- 상태: CONFIRMED
-- 위반 예시: {예시}
-- 허용 예시: {예시}
+## PP-1: {title}
+- Principle: {what must not change}
+- Judgment criteria: {specific violation conditions}
+- Priority: 1 (highest)
+- Status: CONFIRMED
+- Violation example: {example}
+- Allowed example: {example}
 
-## PP-2: {제목}
-- 원칙: ...
-- 판정 기준: ...
-- 우선순위: 2
-- 상태: PROVISIONAL (판정 기준 미확정)
-- 위반 예시: {예시}
-- 허용 예시: {예시}
+## PP-2: {title}
+- Principle: ...
+- Judgment criteria: ...
+- Priority: 2
+- Status: PROVISIONAL (judgment criteria not finalized)
+- Violation example: {example}
+- Allowed example: {example}
 
 ## Priority Order
 PP-1 > PP-2 > PP-3
-(충돌 시 상위 PP 우선)
+(Higher PP takes priority on conflict)
 ```
 
-그리고 PLAN.md의 `## Pivot Points` 섹션에 동일 내용을 삽입한다.
+And insert the same content into the `## Pivot Points` section of PLAN.md.
 
 ## Integration with MPL Pipeline
 
 ```
-/mpl:mpl-pivot (이 스킬)
+/mpl:mpl-pivot (this skill)
      │
      ▼
-.mpl/pivot-points.md 생성
+.mpl/pivot-points.md created
      │
      ▼
 /mpl:mpl (Phase 1)
      │
-     ├── PM이 pivot-points.md 참조하여 PLAN.md 작성
-     ├── PLAN.md에 ## Pivot Points 섹션 포함
+     ├── PM references pivot-points.md to write PLAN.md
+     ├── PLAN.md includes ## Pivot Points section
      │
      ▼
-Phase 2: Worker discoveries → PP 충돌 검사
+Phase 2: Worker discoveries → PP conflict check
      │
-     ├── CONFIRMED PP 충돌 → 자동 반려
-     ├── PROVISIONAL PP 충돌 → HITL로 판단 요청
-     └── PP 없음 (explore) → 모든 discovery 허용
+     ├── CONFIRMED PP conflict → auto-reject
+     ├── PROVISIONAL PP conflict → request HITL judgment
+     └── No PP (explore) → all discoveries allowed
 ```
 
 ## Standalone Usage
 
-MPL 파이프라인 없이도 사용 가능:
-- 프로젝트 초기 방향성 정의
-- 기존 프로젝트의 암묵적 제약 명문화
-- 팀 온보딩 시 핵심 원칙 공유 문서 생성
+Can be used without the MPL pipeline:
+- Define initial project direction
+- Formalize implicit constraints in existing projects
+- Generate core principles document for team onboarding

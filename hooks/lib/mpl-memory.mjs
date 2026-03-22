@@ -2,11 +2,11 @@
 /**
  * MPL 4-Tier Adaptive Memory (F-25)
  *
- * 4계층 메모리 관리 유틸리티:
- *   episodic.md       — Phase 완료 요약 (시간 기반 압축)
- *   semantic.md        — 3회+ 반복 패턴 일반화 (프로젝트 지식)
- *   procedural.jsonl   — 도구 사용 패턴 (분류 태그 포함)
- *   working.md         — 현재 Phase TODO (임시, 실행 중만)
+ * 4-tier memory management utility:
+ *   episodic.md       — Phase completion summaries (time-based compression)
+ *   semantic.md        — Generalization of patterns repeated 3+ times (project knowledge)
+ *   procedural.jsonl   — Tool usage patterns (with classification tags)
+ *   working.md         — Current Phase TODO (ephemeral, active execution only)
  *
  * Memory directory: .mpl/memory/
  */
@@ -69,7 +69,7 @@ async function fileExists(filePath) {
 // ──────────────────────────────────────
 
 /**
- * .mpl/memory/ 디렉토리가 없으면 생성
+ * Create .mpl/memory/ directory if it does not exist
  * @param {string} cwd - Working directory
  */
 export async function ensureMemoryDir(cwd) {
@@ -82,7 +82,7 @@ export async function ensureMemoryDir(cwd) {
 // ──────────────────────────────────────
 
 /**
- * episodic.md 읽기 — 파싱된 섹션 배열 반환
+ * Read episodic.md — returns array of parsed sections
  * @param {string} cwd
  * @returns {Promise<Array<{phase: string, name: string, timestamp: string, body: string}>>}
  */
@@ -122,10 +122,10 @@ export async function readEpisodicMemory(cwd) {
 }
 
 /**
- * Phase 완료 요약을 episodic.md에 추가
+ * Append a Phase completion summary to episodic.md
  * @param {string} cwd
  * @param {string} phaseId - e.g. "1", "2", "0"
- * @param {string} summary - 2-3줄 요약
+ * @param {string} summary - 2-3 line summary
  */
 export async function appendEpisodic(cwd, phaseId, summary) {
   await ensureMemoryDir(cwd);
@@ -137,9 +137,9 @@ export async function appendEpisodic(cwd, phaseId, summary) {
 }
 
 /**
- * 시간 기반 압축: 최근 N Phase는 상세 유지, 이전은 1줄 압축
+ * Time-based compression: keep last N Phases in detail, compress earlier ones to 1 line
  * @param {string} cwd
- * @param {number} keepDetailedCount - 상세 유지할 최근 Phase 수 (기본 2)
+ * @param {number} keepDetailedCount - Number of recent Phases to keep in detail (default 2)
  */
 export async function compressEpisodic(cwd, keepDetailedCount = 2) {
   const sections = await readEpisodicMemory(cwd);
@@ -151,16 +151,16 @@ export async function compressEpisodic(cwd, keepDetailedCount = 2) {
   for (let i = 0; i < sections.length; i++) {
     const s = sections[i];
     if (i < cutoff) {
-      // 1줄 압축
+      // Compress to 1 line
       const oneLine = s.body.split('\n').filter(l => l.trim()).slice(0, 1).join(' ').slice(0, 120);
       compressed.push(`- Phase ${s.phase}: ${s.name} — ${oneLine}`);
     } else {
-      // 상세 유지
+      // Keep in detail
       compressed.push(`### Phase ${s.phase}: ${s.name} (${s.timestamp})\n${s.body}`);
     }
   }
 
-  // 100줄 상한 유지
+  // Enforce 100-line upper limit
   let output = compressed.join('\n\n') + '\n';
   const lines = output.split('\n');
   if (lines.length > 100) {
@@ -176,7 +176,7 @@ export async function compressEpisodic(cwd, keepDetailedCount = 2) {
 // ──────────────────────────────────────
 
 /**
- * semantic.md 읽기 (일반화된 프로젝트 지식)
+ * Read semantic.md (generalized project knowledge)
  * @param {string} cwd
  * @returns {Promise<string>}
  */
@@ -185,10 +185,10 @@ export async function readSemanticMemory(cwd) {
 }
 
 /**
- * 반복 패턴을 semantic.md로 승격
+ * Promote a repeated pattern to semantic.md
  * @param {string} cwd
- * @param {string} pattern - 패턴 설명
- * @param {string} category - 카테고리: "Failure Patterns" | "Success Patterns" | "Project Conventions"
+ * @param {string} pattern - Pattern description
+ * @param {string} category - Category: "Failure Patterns" | "Success Patterns" | "Project Conventions"
  */
 export async function promoteToSemantic(cwd, pattern, category) {
   await ensureMemoryDir(cwd);
@@ -198,33 +198,33 @@ export async function promoteToSemantic(cwd, pattern, category) {
   const entry = `- ${pattern}`;
 
   if (existing.includes(header)) {
-    // 기존 카테고리에 추가
+    // Append to existing category
     const updated = existing.replace(header, `${header}\n${entry}`);
     await atomicWrite(filePath, updated);
   } else {
-    // 새 카테고리 생성
+    // Create new category
     const addition = `\n${header}\n${entry}\n`;
     await atomicWrite(filePath, existing + addition);
   }
 }
 
 /**
- * episodic에서 3회+ 반복 패턴 감지
+ * Detect patterns repeated 3+ times from episodic memory
  * @param {string} cwd
- * @param {number} threshold - 반복 횟수 임계값 (기본 3)
+ * @param {number} threshold - Repetition count threshold (default 3)
  * @returns {Promise<Array<{keyword: string, count: number, category: string}>>}
  */
 export async function detectRepeatedPatterns(cwd, threshold = 3) {
   const sections = await readEpisodicMemory(cwd);
   if (sections.length < threshold) return [];
 
-  // 키워드/태그 빈도 계산
+  // Calculate keyword/tag frequency
   const freq = {};
   const categoryMap = {};
 
   for (const s of sections) {
     const text = `${s.name} ${s.body}`.toLowerCase();
-    // 의미 있는 키워드 추출 (4글자 이상)
+    // Extract meaningful keywords (4+ characters)
     const words = text.match(/[a-z가-힣]{4,}/g) || [];
     const seen = new Set();
 
@@ -233,10 +233,10 @@ export async function detectRepeatedPatterns(cwd, threshold = 3) {
       seen.add(w);
       freq[w] = (freq[w] || 0) + 1;
 
-      // 카테고리 추론
-      if (text.includes('fail') || text.includes('error') || text.includes('실패')) {
+      // Infer category
+      if (text.includes('fail') || text.includes('error') || text.includes('failure')) {
         categoryMap[w] = 'Failure Patterns';
-      } else if (text.includes('success') || text.includes('pass') || text.includes('성공')) {
+      } else if (text.includes('success') || text.includes('pass') || text.includes('succeeded')) {
         categoryMap[w] = 'Success Patterns';
       } else {
         categoryMap[w] = 'Project Conventions';
@@ -244,7 +244,7 @@ export async function detectRepeatedPatterns(cwd, threshold = 3) {
     }
   }
 
-  // threshold 이상 반복된 패턴 반환
+  // Return patterns repeated at or above threshold
   return Object.entries(freq)
     .filter(([, count]) => count >= threshold)
     .map(([keyword, count]) => ({
@@ -260,7 +260,7 @@ export async function detectRepeatedPatterns(cwd, threshold = 3) {
 // ──────────────────────────────────────
 
 /**
- * procedural.jsonl 읽기 — 파싱된 엔트리 배열 반환
+ * Read procedural.jsonl — returns array of parsed entries
  * @param {string} cwd
  * @returns {Promise<Array<object>>}
  */
@@ -283,7 +283,7 @@ export async function readProcedural(cwd) {
 }
 
 /**
- * 도구 사용 패턴 엔트리 추가
+ * Append a tool usage pattern entry
  * @param {string} cwd
  * @param {object} entry - {timestamp, phase, tool, action, result, tags[], context}
  */
@@ -305,7 +305,7 @@ export async function appendProcedural(cwd, entry) {
   const line = JSON.stringify(record) + '\n';
   const updated = existing + line;
 
-  // 100 entries 상한: FIFO 초과 삭제
+  // 100-entry upper limit: evict excess via FIFO
   const lines = updated.trim().split('\n').filter(l => l.trim());
   const trimmed = lines.length > 100 ? lines.slice(lines.length - 100) : lines;
 
@@ -313,10 +313,10 @@ export async function appendProcedural(cwd, entry) {
 }
 
 /**
- * 태그 기반 조회 — 관련도 높은 엔트리 반환
+ * Tag-based lookup — returns most relevant entries
  * @param {string} cwd
- * @param {string[]} tags - 검색할 태그
- * @param {number} limit  - 최대 반환 수 (기본 10)
+ * @param {string[]} tags - Tags to search for
+ * @param {number} limit  - Maximum entries to return (default 10)
  * @returns {Promise<Array<object>>}
  */
 export async function queryProcedural(cwd, tags, limit = 10) {
@@ -325,7 +325,7 @@ export async function queryProcedural(cwd, tags, limit = 10) {
 
   const tagSet = new Set(tags.map(t => t.toLowerCase()));
 
-  // 태그 매칭 점수 계산 후 정렬
+  // Calculate tag match score, then sort
   const scored = entries.map(entry => {
     const entryTags = (entry.tags || []).map(t => t.toLowerCase());
     const matchCount = entryTags.filter(t => tagSet.has(t)).length;
@@ -344,7 +344,7 @@ export async function queryProcedural(cwd, tags, limit = 10) {
 // ──────────────────────────────────────
 
 /**
- * working.md 읽기 (현재 Phase 상태)
+ * Read working.md (current Phase state)
  * @param {string} cwd
  * @returns {Promise<string>}
  */
@@ -353,7 +353,7 @@ export async function readWorkingMemory(cwd) {
 }
 
 /**
- * working.md 갱신 — 현재 Phase TODO 상태 덮어쓰기
+ * Update working.md — overwrite current Phase TODO state
  * @param {string} cwd
  * @param {string} content
  */
@@ -364,7 +364,7 @@ export async function updateWorkingMemory(cwd, content) {
 }
 
 /**
- * working.md 비우기 — Phase 완료 시 정리
+ * Clear working.md — cleanup on Phase completion
  * @param {string} cwd
  */
 export async function clearWorkingMemory(cwd) {
@@ -374,35 +374,35 @@ export async function clearWorkingMemory(cwd) {
 }
 
 // ──────────────────────────────────────
-// Selective Loading (Phase 0 용)
+// Selective Loading (for Phase 0)
 // ──────────────────────────────────────
 
 /**
- * 태스크 관련 메모리를 선택적으로 로드 (토큰 예산 내)
+ * Selectively load task-relevant memory (within token budget)
  *
- * 우선순위:
- *   1. semantic.md (일반화 지식, 작은 크기)
- *   2. procedural entries (태그 매칭)
- *   3. episodic 최근 2개 (상세)
- *   4. working.md 제외 (현재 실행 전용)
+ * Priority:
+ *   1. semantic.md (generalized knowledge, small size)
+ *   2. procedural entries (tag matching)
+ *   3. episodic last 2 (detailed)
+ *   4. working.md excluded (current execution only)
  *
  * @param {string} cwd
- * @param {string} taskDescription - 태스크 설명 (태그 추출용)
- * @param {number} maxTokens - 토큰 예산 (기본 2000, ~4chars/token)
+ * @param {string} taskDescription - Task description (used for tag extraction)
+ * @param {number} maxTokens - Token budget (default 2000, ~4chars/token)
  * @returns {Promise<{semantic: string, procedural: object[], episodic: string, totalChars: number}>}
  */
 export async function loadRelevantMemory(cwd, taskDescription, maxTokens = 2000) {
-  const charBudget = maxTokens * 4; // 대략적 토큰→문자 변환
+  const charBudget = maxTokens * 4; // Approximate token-to-character conversion
   let remaining = charBudget;
 
-  // 1. Semantic (항상 로드)
+  // 1. Semantic (always load)
   let semantic = await readSemanticMemory(cwd);
   if (semantic.length > remaining * 0.4) {
     semantic = semantic.slice(0, Math.floor(remaining * 0.4));
   }
   remaining -= semantic.length;
 
-  // 2. Procedural (태그 매칭)
+  // 2. Procedural (tag matching)
   const taskTags = extractTags(taskDescription);
   const proceduralEntries = await queryProcedural(cwd, taskTags, 5);
   let proceduralText = proceduralEntries.map(e => JSON.stringify(e)).join('\n');
@@ -411,7 +411,7 @@ export async function loadRelevantMemory(cwd, taskDescription, maxTokens = 2000)
   }
   remaining -= proceduralText.length;
 
-  // 3. Episodic (최근 2개 상세)
+  // 3. Episodic (last 2 in detail)
   const sections = await readEpisodicMemory(cwd);
   const recentSections = sections.slice(-2);
   let episodic = recentSections
@@ -432,14 +432,14 @@ export async function loadRelevantMemory(cwd, taskDescription, maxTokens = 2000)
 }
 
 /**
- * 태스크 설명에서 태그 추출 (간단한 키워드 방식)
+ * Extract tags from task description (simple keyword approach)
  * @param {string} text
  * @returns {string[]}
  */
 function extractTags(text) {
   if (!text) return [];
   const lower = text.toLowerCase();
-  // 알려진 태그 패턴 매칭
+  // Match against known tag patterns
   const knownTags = [
     'type_mismatch', 'dependency_conflict', 'test_flake',
     'api_contract_violation', 'build_failure', 'lint_error',
@@ -450,7 +450,7 @@ function extractTags(text) {
     lower.includes(tag) || lower.includes(tag.replace(/_/g, ' '))
   );
 
-  // 4글자 이상 단어도 추가
+  // Also include words with 4+ characters
   const words = lower.match(/[a-z]{4,}/g) || [];
   const extra = words.filter(w => !['this', 'that', 'with', 'from', 'have', 'been'].includes(w));
 
@@ -462,7 +462,7 @@ function extractTags(text) {
 // ──────────────────────────────────────
 
 /**
- * 메모리 통계 반환
+ * Return memory statistics
  * @param {string} cwd
  * @returns {Promise<{episodic_entries: number, semantic_rules: number, procedural_entries: number, working_active: boolean}>}
  */
@@ -472,7 +472,7 @@ export async function getMemoryStats(cwd) {
   const procedural = await readProcedural(cwd);
   const working = await readWorkingMemory(cwd);
 
-  // semantic rules: bullet 항목 수 계산
+  // semantic rules: count bullet item entries
   const semanticRules = (semantic.match(/^- .+/gm) || []).length;
 
   return {

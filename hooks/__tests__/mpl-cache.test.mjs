@@ -326,7 +326,7 @@ describe('F-05: Partial Cache Invalidation', () => {
       const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
       mkdirSync(cacheDir, { recursive: true });
 
-      // 기존 캐시 아티팩트 (재사용 대상)
+      // Existing cached artifacts (candidates for reuse)
       writeFileSync(join(cacheDir, 'api-contracts.md'), '# Cached API Contracts');
       writeFileSync(join(cacheDir, 'type-policy.md'), '# Cached Type Policy');
 
@@ -372,7 +372,7 @@ describe('F-05: Partial Cache Invalidation', () => {
       mkdirSync(cacheDir, { recursive: true });
       mkdirSync(phase0Dir, { recursive: true });
 
-      // 재사용 대상이 캐시에 없고 phase0 출력 디렉토리에만 존재
+      // Reuse candidate not in cache, only exists in phase0 output directory
       writeFileSync(join(phase0Dir, 'api-contracts.md'), '# API Contracts from phase0');
 
       partialCacheSave(tempDir, {
@@ -383,7 +383,7 @@ describe('F-05: Partial Cache Invalidation', () => {
         originalKey: 'key-prev',
       });
 
-      // phase0 출력에서 캐시로 복사되었는지 확인
+      // Verify copied from phase0 output into cache
       assert.ok(existsSync(join(cacheDir, 'api-contracts.md')));
       assert.equal(
         readFileSync(join(cacheDir, 'api-contracts.md'), 'utf-8'),

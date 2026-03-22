@@ -30,11 +30,13 @@ For `paused_budget` state:
 Read these files to rebuild context:
 
 ```
-1. .mpl/state.json              → pipeline state, progress snapshot
-2. .mpl/PLAN.md                 → TODO list and acceptance criteria
-3. .mpl/research/report.md      → research report (if exists)
-4. .mpl/research/stage*-cache.md → intermediate research stage caches (if exists)
-5. docs/learnings/{feat}/       → any learnings from previous run
+1. .mpl/state.json                    → pipeline state, progress snapshot
+2. .mpl/mpl/decomposition.yaml       → phase definitions and success criteria
+3. .mpl/mpl/phase0/summary.md        → Phase 0 analysis summary (if exists)
+4. .mpl/mpl/phase-decisions.md       → accumulated phase decisions
+5. .mpl/research/report.md           → research report (if exists)
+6. .mpl/research/stage*-cache.md     → intermediate research stage caches (if exists)
+7. docs/learnings/{feat}/            → any learnings from previous run
 ```
 
 ### Step 3: Display Resume Summary
@@ -80,18 +82,18 @@ writeState(cwd, { research: { status: '{next incomplete stage}' } })
 #### Resume Phase 1-B (Plan Generation)
 
 - If `report.md` exists → use as research input for planning agents
-- If PLAN.md exists → Skip agent exploration, go directly to HITL
-- If no PLAN.md → Full Phase 1-B restart with research context
+- If decomposition.yaml exists → Skip agent exploration, go directly to HITL
+- If no decomposition.yaml → Full Phase 1-B restart with research context
 
 #### Resume Phase 1 (Quick Plan — legacy)
 
-- If PLAN.md exists → Skip agent exploration, go directly to HITL
-- If no PLAN.md → Full Phase 1 restart (explore + analyze + plan)
+- If decomposition.yaml exists → Skip agent exploration, go directly to HITL
+- If no decomposition.yaml → Full Phase 1 restart (explore + analyze + plan)
 
 #### Resume Phase 2 (MVP Sprint)
 
-- Re-parse PLAN.md for incomplete TODOs (`### [ ]`)
-- Skip completed TODOs (`### [x]`)
+- Re-parse decomposition.yaml for incomplete phases
+- Skip completed phases (check state.json phases_completed)
 - Dispatch workers only for remaining TODOs
 - Continue dependency-aware parallel execution
 
@@ -99,8 +101,10 @@ writeState(cwd, { research: { status: '{next incomplete stage}' } })
 
 - Check which gates were already evaluated
 - Re-run only failed or unevaluated gates
-- If gate1_passed=true, skip to Gate 2
-- If gate1 & gate2 passed, skip to Gate 3
+- If gate0_5_passed=true, skip to Gate 1
+- If gate1_passed=true, skip to Gate 1.5
+- If gate1_5_passed=true, skip to Gate 2
+- If gate2_passed=true, skip to Gate 3
 
 #### Resume Phase 4 (Fix Loop)
 
@@ -130,7 +134,7 @@ Then execute the phase protocol from `/mpl:mpl-run` or the embedded protocol in 
 
 | Scenario | Action |
 |----------|--------|
-| PLAN.md was manually edited | Accept edits, use current PLAN.md as is |
+| decomposition.yaml was manually edited | Accept edits, use current decomposition.yaml as is |
 | Source files changed since cancel | Workers will work with current codebase state |
 | State file corrupted | Report error, suggest /mpl:mpl-cancel --force |
 | Multiple cancellations | Use most recent cancellation snapshot |
@@ -139,6 +143,6 @@ Then execute the phase protocol from `/mpl:mpl-run` or the embedded protocol in 
 ## Safety Rules
 
 - NEVER skip the resume summary (user must see what's being resumed)
-- NEVER reset progress (completed TODOs stay completed)
+- NEVER reset progress (completed phases stay completed)
 - Carry forward ALL convergence data (pass_rate_history is critical)
-- Re-read PLAN.md fresh (may have been manually updated)
+- Re-read decomposition.yaml fresh (may have been manually updated)

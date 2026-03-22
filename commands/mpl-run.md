@@ -163,7 +163,7 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 |------|-------|----------|---------|
 | `mpl-run-phase0.md` | -1 ~ 2.5 | LSP Warm-up, Triage (with Quick Scope Scan + tier routing), PP Interview, Pre-Execution Analysis, Codebase Analysis, Phase 0 Enhanced | ~14K |
 | `mpl-run-decompose.md` | 3 ~ 3-B | Phase Decomposition, Verification Planning (Critic absorbed into Decomposer) | ~3K |
-| `mpl-run-execute.md` | 4 | Phase Execution Loop, Context Assembly, 3-Gate Quality, Fix Loop, RUNBOOK updates | ~11K |
+| `mpl-run-execute.md` | 4 | Phase Execution Loop, Context Assembly, 5-Gate Quality, Fix Loop, RUNBOOK updates | ~55K |
 | `mpl-run-finalize.md` | 5 ~ 6 | E2E, Finalize, Resume Protocol, Discovery Processing, Related Skills | ~7K |
 
 **IMPORTANT**: Do NOT proceed with any step without loading the corresponding protocol file first. Each file contains the exact agent calls, context assembly rules, and output handling logic for that stage.

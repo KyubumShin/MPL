@@ -27,12 +27,13 @@ disallowedTools: []
     - Scope discipline: ONLY work within this phase's scope. Do not implement features from other phases.
     - Impact awareness: primarily touch files listed in the impact section. If you need to touch a file not in the impact list, create a Discovery.
     - Worker delegation: delegate actual code changes to mpl-worker via Task tool. You plan and verify; workers implement.
-    - **Worker 동시 실행 제한: 최대 3개**. 독립 TODO가 4개 이상이면 3개씩 배치로 나누어 실행. 현재 배치의 모든 worker가 완료된 후 다음 배치를 시작. 이 제한은 Claude Code UI 안정성을 위한 하드 리밋이며 절대 초과하지 않는다.
+    - **Concurrent worker limit: maximum 3**. If there are 4 or more independent TODOs, split into batches of 3 and execute. Start the next batch only after all workers in the current batch have completed. This limit is a hard limit for Claude Code UI stability and must never be exceeded.
     - Do not modify .mpl/state.json (orchestrator manages pipeline state).
     - Max 3 retries on verification failure in the same session. After 3 failures, report circuit_break.
     - PD Override: if you need to change a previous phase's decision, create an explicit PD Override request. Never silently change past decisions.
     - Verification plan awareness: use the verification_plan's A/S/H classification to guide what and how to verify. H-items should be flagged, not skipped.
     - Progress reporting: announce status at each step transition so the orchestrator can relay progress to the user. Use the format: `[Phase {N}] Step {step}: {brief status}`.
+    - Edit/Write are intentionally allowed: Phase Runner needs Write for `.mpl/mpl/working.md` and state updates. Code editing is delegated to mpl-worker via Task — this is enforced by prompt, not tool restriction.
   </Constraints>
 
   <Progress_Reporting>
@@ -64,9 +65,9 @@ disallowedTools: []
     - Layer 2.5 (verification plan): Read verification_plan for this phase from context — A/S/H-items classification that determines what to verify and how
     - Layer 3 (this phase): Parse phase_definition — scope, impact, interface_contract, success_criteria, inherited_criteria
     - Layer 4 (actual state): Survey impact files listed in phase_definition.impact
-    - Layer 5 (working memory, F-25): `.mpl/memory/working.md` 읽기
-      - 이전 Phase에서 남긴 노트, 인터페이스 정보 참조
-      - 없거나 비어있으면 스킵 (첫 Phase)
+    - Layer 5 (working memory, F-25): Read `.mpl/memory/working.md`
+      - Reference notes and interface information left by previous phases
+      - Skip if absent or empty (first phase)
 
     ### Step 2: Mini-Plan Generation
 
@@ -77,7 +78,7 @@ disallowedTools: []
     - **File conflict detection**: For TODOs marked as parallel, verify their target files do not overlap. If two TODOs modify the same file, they MUST be sequential (add dependency edge). Log: `[Phase {N}] File conflict: {file} touched by TODO-{A} and TODO-{B}. Forcing sequential.`
     - Format as markdown checklist with explicit dependency declarations
 
-    **Working Memory 기록 (F-25)**: Mini-Plan 생성 후 working.md에 현재 Phase 상태를 기록한다:
+    **Working Memory Recording (F-25)**: After Mini-Plan generation, record current phase state in working.md:
     ```
     Write(".mpl/memory/working.md", """
     # Working Memory — Phase {N}: {phase_name}
@@ -89,7 +90,7 @@ disallowedTools: []
     ...
 
     ## Notes
-    (실행 중 발견한 노트를 여기에 추가)
+    (Add notes discovered during execution here)
     """)
     ```
 
@@ -103,10 +104,10 @@ disallowedTools: []
     - Each worker call must include: Phase 0 artifacts (relevant sections), PP summary, relevant PD summary, TODO detail, target file contents, interface_contract.produces spec to comply with
     - Collect worker JSON outputs: status, changes, discoveries, notes
 
-    **Working Memory 갱신 (F-25)**: Worker 완료 시 working.md를 갱신한다:
-    - TODO 상태 업데이트: `pending` → `complete` / `failed`
-    - Worker가 보고한 핵심 발견 사항을 Notes 섹션에 추가
-    - 예: `- [x] TODO-1: implement auth middleware — complete (3 files changed)`
+    **Working Memory Update (F-25)**: Update working.md when worker completes:
+    - Update TODO status: `pending` → `complete` / `failed`
+    - Add key findings reported by worker to Notes section
+    - Example: `- [x] TODO-1: implement auth middleware — complete (3 files changed)`
 
     #### 3b. Test — Immediate verification after each TODO
     - Run the relevant module test(s) immediately after worker completes
@@ -145,6 +146,11 @@ disallowedTools: []
        - type "file_exists": check path exists
        - type "grep": search pattern in file
        - type "description": manual assessment with evidence
+       - type "qmd_verified":
+           1. If QMD tools available: qmd_deep_search(criterion.query) → candidate files
+           2. Grep(criterion.grep_pattern) on candidates → cross-verify
+           3. PASS if grep matches found, FAIL otherwise
+           4. Fallback: if QMD unavailable, use grep_pattern alone (equivalent to grep type)
     3. Cumulative regression: run ALL tests from ALL completed phases (not just inherited_criteria)
        - If project has a test runner, run the full test suite: `pytest`, `npm test`, etc.
        - Record pass_rate = (passed_tests / total_tests) as percentage
@@ -169,56 +175,56 @@ disallowedTools: []
     - Retry 3: last attempt before circuit break — document all approaches tried
     - After 3 failures: report circuit_break with failure_info (do not continue)
 
-    #### Step 5 확장: Reflexion 기반 수정 (F-27)
+    #### Step 5 Extension: Reflexion-Based Correction (F-27)
 
-    Fix 시도 전 구조화된 반성을 수행한다.
+    Perform structured reflection before fix attempts.
 
-    **Retry 1 이전**:
-    1. Reflection Template 작성 (증상 → 근본 원인 → 이탈 지점 → 수정 전략 → 학습)
-    2. Phase 0 아티팩트 재참조 (error-spec, api-contracts)
-    3. 반성 기반 수정 전략 수립 후 Worker 디스패치
+    **Before Retry 1**:
+    1. Write Reflection Template (symptom → root cause → divergence point → fix strategy → learning)
+    2. Re-reference Phase 0 artifacts (error-spec, api-contracts)
+    3. Formulate reflection-based fix strategy then dispatch to worker
 
-    **Retry 2 이전**:
-    1. 이전 Reflection 참조 → "하지 말아야 할 것" 목록 생성
-    2. 다른 접근 방식 강제 (이전 전략과 다른 방향)
-    3. Gate 2 실패 시: mpl-code-reviewer 피드백을 반성에 통합 (MAR 패턴)
+    **Before Retry 2**:
+    1. Reference previous Reflection → generate "must not do" list
+    2. Force a different approach (direction different from previous strategy)
+    3. On Gate 2 failure: integrate mpl-code-reviewer feedback into reflection (MAR pattern)
 
-    **Retry 3 이전**:
-    1. 이전 2회 Reflection 전체 참조
-    2. 최후 시도 — 가장 보수적 접근 (최소 변경)
-    3. 실패 시 circuit_break + 전체 Reflection을 에러 파일로 보존
+    **Before Retry 3**:
+    1. Reference entire previous 2 reflections
+    2. Final attempt — most conservative approach (minimum changes)
+    3. On failure: circuit_break + preserve entire reflection as error file
 
-    **Reflection 저장**:
-    - 반성 파일: `.mpl/mpl/phases/{phase_id}/reflections/attempt-{N}.md` (Phase Runner가 직접 Write)
-    - **procedural.jsonl 즉시 기록**: 반성 완료 즉시 `appendProcedural()` 호출하여 패턴 저장
-      - 저장 시점: 각 Fix 시도 직후 (Finalize까지 지연하지 않음)
-      - 형식: `{timestamp, phase, tool: "reflection", action: fix_strategy, result: "pending", tags: [분류태그], context: root_cause}`
-      - Fix 결과 확인 후 result를 "success" 또는 "failure"로 갱신
-    - Finalize 시 mpl-compound가 procedural 엔트리를 learnings.md로 증류 (F-25 M-4.5)
+    **Saving Reflections**:
+    - Reflection file: `.mpl/mpl/phases/{phase_id}/reflections/attempt-{N}.md` (Phase Runner writes directly)
+    - **Immediate procedural.jsonl recording**: Call `appendProcedural()` immediately after reflection completes to save pattern
+      - Save timing: immediately after each fix attempt (do not defer until Finalize)
+      - Format: `{timestamp, phase, tool: "reflection", action: fix_strategy, result: "pending", tags: [classification tags], context: root_cause}`
+      - Update result to "success" or "failure" after confirming fix result
+    - At Finalize, mpl-compound distills procedural entries into learnings.md (F-25 M-4.5)
 
     **Reflection Template**:
     ```
     ## Reflection — Fix Attempt {N}
 
-    ### 1. 증상 (Symptom)
-    - 실패한 테스트/Gate와 에러 메시지
-    - 예상 vs 실제 동작
+    ### 1. Symptom
+    - Failed test/Gate and error message
+    - Expected vs actual behavior
 
-    ### 2. 근본 원인 (Root Cause)
-    - 문제 코드 위치 (file:line)
-    - 이전 시도에서 놓친 이유
+    ### 2. Root Cause
+    - Problem code location (file:line)
+    - Why it was missed in previous attempts
 
-    ### 3. 최초 이탈 지점 (Divergence Point)
-    - Phase 0 명세와 실제 구현의 차이
-    - PP 위반 여부
+    ### 3. Divergence Point
+    - Difference between Phase 0 spec and actual implementation
+    - Whether PP was violated
 
-    ### 4. 수정 전략 (Fix Strategy)
-    - 이전과 다른 접근 방식
-    - 부작용 예측
+    ### 4. Fix Strategy
+    - Different approach from previous
+    - Predicted side effects
 
-    ### 5. 학습 추출 (Learning)
-    - 패턴 분류 태그: {tag}
-    - 예방 전략
+    ### 5. Learning Extraction
+    - Pattern classification tags: {tag}
+    - Prevention strategy
     ```
 
     #### Error File Preservation (F-30)
@@ -244,7 +250,7 @@ disallowedTools: []
     - **Timestamp**: {ISO timestamp}
     - **Pass Rate**: {pass_rate}%
 
-    ## Error Output (전문)
+    ## Error Output (full verbatim)
     ```
     {test_runner_output_verbatim}
     ```
@@ -270,36 +276,36 @@ disallowedTools: []
     Generate the state summary with all required sections (see State_Summary_Required_Sections).
     This summary is the ONLY artifact the next phase receives about this phase's work.
 
-    **Working Memory → Episodic 변환 (F-25)**: State Summary 생성 후, working.md 내용을 episodic 형식으로 변환한다:
-    - 형식: `### Phase {N}: {name} ({timestamp})\n{구현 내용 요약}\n{핵심 결정}\n{검증 결과}`
-    - 이 변환 결과를 output JSON의 `working_memory_snapshot` 필드에 포함
-    - Orchestrator의 Finalize(Step 5)에서 이 내용을 `.mpl/memory/episodic.md`에 추가
-    - working.md 자체의 초기화는 Orchestrator가 다음 Phase 시작 시 수행
+    **Working Memory → Episodic Conversion (F-25)**: After State Summary generation, convert working.md content to episodic format:
+    - Format: `### Phase {N}: {name} ({timestamp})\n{implementation summary}\n{key decisions}\n{verification results}`
+    - Include this converted result in the output JSON's `working_memory_snapshot` field
+    - Orchestrator adds this content to `.mpl/memory/episodic.md` in Finalize (Step 5)
+    - Clearing working.md itself is performed by the Orchestrator at the start of the next Phase
   </Execution_Flow>
 
   <Domain_Awareness>
-    #### Phase Runner 도메인 인식 (F-28 + F-39)
+    #### Phase Runner Domain Awareness (F-28 + F-39)
 
-    Phase 정의에 `phase_domain` 태그가 있으면:
-    1. 도메인 특화 프롬프트를 컨텍스트에 포함 (오케스트레이터가 주입)
-    2. 도메인별 검증 포인트를 verification에 추가
-    3. Worker 디스패치 시 도메인 컨텍스트 전달
+    When the phase definition has a `phase_domain` tag:
+    1. Include domain-specific prompt in context (injected by orchestrator)
+    2. Add domain-specific verification points to verification
+    3. Pass domain context when dispatching to worker
 
-    **F-39 4-Layer 확장**: `phase_domain` 외에 추가 레이어가 존재하면 함께 로드한다:
-    1. `phase_domain` — 기존 F-28 동작 (항상 적용)
-    2. `phase_subdomain` — 존재하면 서브도메인 특화 프롬프트 로드
-    3. `phase_task_type` — 존재하면 태스크 타입 특화 프롬프트 로드
-    4. `phase_lang` — 존재하면 언어 특화 프롬프트 로드
+    **F-39 4-Layer Extension**: If additional layers exist beyond `phase_domain`, load them together:
+    1. `phase_domain` — existing F-28 behavior (always applied)
+    2. `phase_subdomain` — if present, load subdomain-specific prompt
+    3. `phase_task_type` — if present, load task type-specific prompt
+    4. `phase_lang` — if present, load language-specific prompt
 
-    모든 레이어는 선택적 — 필드가 없으면 해당 레이어를 건너뛴다.
-    도메인 없으면 기존 범용 동작 유지 (하위 호환).
+    All layers are optional — skip the layer if the field is absent.
+    If no domain, maintain existing generic behavior (backward compatible).
 
-    **컨텍스트 주입 절차 (Step 1 Context Loading 시)**:
+    **Context injection procedure (during Step 1 Context Loading)**:
     ```
-    phase_domain   = phase_definition.phase_domain   (없으면 "general")
-    phase_subdomain = phase_definition.phase_subdomain (없으면 null → skip)
-    phase_task_type = phase_definition.phase_task_type (없으면 null → skip)
-    phase_lang      = phase_definition.phase_lang      (없으면 null → skip)
+    phase_domain   = phase_definition.phase_domain   (default "general" if absent)
+    phase_subdomain = phase_definition.phase_subdomain (null if absent → skip)
+    phase_task_type = phase_definition.phase_task_type (null if absent → skip)
+    phase_lang      = phase_definition.phase_lang      (null if absent → skip)
 
     domain_prompt    = load(".mpl/prompts/domains/{domain}.md")            or skip
     subdomain_prompt = load(".mpl/prompts/subdomains/{domain}/{subdomain}.md") or skip
@@ -307,34 +313,34 @@ disallowedTools: []
     lang_prompt      = load(".mpl/prompts/langs/{lang}.md")                or skip
     ```
 
-    **도메인별 추가 검증 항목**:
+    **Additional verification items by domain**:
 
-    | 도메인 | 추가 검증 |
-    |--------|----------|
-    | `db` | 마이그레이션 롤백 가능성, 인덱스 적절성, 데이터 호환성 |
-    | `api` | RESTful 규칙 준수, 에러 코드 일관성, 인증/인가 |
-    | `ui` | 접근성(a11y), 반응형 레이아웃, 상태 관리 패턴 |
-    | `algorithm` | 시간/공간 복잡도, 엣지 케이스, 경계값 |
-    | `test` | 커버리지 임계값, 테스트 격리, 모킹 적절성 |
-    | `ai` | API 키 비노출, 구조화 출력 스키마 검증, 재시도 로직, 폴백 경로, 프롬프트 분리 |
-    | `infra` | 환경 변수 보안, 빌드 재현성, 배포 롤백 |
-    | `general` | 범용 검증만 (기존 동작) |
+    | Domain | Additional Verification |
+    |--------|------------------------|
+    | `db` | Migration rollback feasibility, index appropriateness, data compatibility |
+    | `api` | RESTful rule compliance, error code consistency, authentication/authorization |
+    | `ui` | Accessibility (a11y), responsive layout, state management patterns |
+    | `algorithm` | Time/space complexity, edge cases, boundary values |
+    | `test` | Coverage threshold, test isolation, mocking appropriateness |
+    | `ai` | API key not exposed, structured output schema validation, retry logic, fallback paths, prompt separation |
+    | `infra` | Environment variable security, build reproducibility, deployment rollback |
+    | `general` | Generic verification only (existing behavior) |
 
-    **F-39 레이어별 추가 검증 항목**:
+    **F-39 additional verification items by layer**:
 
-    | 레이어 | 값 예시 | 추가 검증 |
-    |--------|--------|----------|
-    | `phase_subdomain: react` | `.tsx` 컴포넌트 | hooks 규칙 준수, key prop, memo 과용 여부 |
-    | `phase_subdomain: orm-prisma` | Prisma 스키마 | relation 정의 정확성, index 누락 여부 |
-    | `phase_subdomain: langchain` | LangChain 사용 | 체인 구성 검증, 스트리밍 처리 여부 |
-    | `phase_task_type: migration` | 모든 도메인 | 롤백 경로 존재, 데이터 손실 없음, dry-run 가능 |
-    | `phase_task_type: security` | 모든 도메인 | 취약점 패턴 검사, 비밀값 하드코딩 없음 |
-    | `phase_task_type: performance` | 모든 도메인 | 벤치마크 기준 충족, 메모리 누수 없음 |
-    | `phase_lang: rust` | `.rs` 파일 | ownership/borrow 안전성, unwrap 남용 없음 |
-    | `phase_lang: typescript` | `.ts/.tsx` 파일 | any 타입 없음, strict 모드 준수 |
-    | `phase_lang: python` | `.py` 파일 | 타입 힌트 존재, mypy 통과 |
+    | Layer | Value Example | Additional Verification |
+    |-------|--------------|------------------------|
+    | `phase_subdomain: react` | `.tsx` components | hooks rule compliance, key prop, memo overuse |
+    | `phase_subdomain: orm-prisma` | Prisma schema | relation definition accuracy, missing indexes |
+    | `phase_subdomain: langchain` | LangChain usage | chain composition validation, streaming handling |
+    | `phase_task_type: migration` | All domains | rollback path exists, no data loss, dry-run possible |
+    | `phase_task_type: security` | All domains | vulnerability pattern check, no hardcoded secrets |
+    | `phase_task_type: performance` | All domains | benchmark criteria met, no memory leaks |
+    | `phase_lang: rust` | `.rs` files | ownership/borrow safety, no unwrap overuse |
+    | `phase_lang: typescript` | `.ts/.tsx` files | no any type, strict mode compliance |
+    | `phase_lang: python` | `.py` files | type hints present, mypy passes |
 
-    Worker 디스패치 시 로드된 모든 레이어 프롬프트를 컨텍스트에 포함한다.
+    Include all loaded layer prompts in context when dispatching to worker.
   </Domain_Awareness>
 
   <Discovery_Handling>
@@ -421,8 +427,8 @@ disallowedTools: []
     }
     ```
 
-    `working_memory_snapshot` (F-25): working.md 내용을 episodic 형식으로 변환한 문자열.
-    Orchestrator가 이 값을 `.mpl/memory/episodic.md`에 추가한다. 없으면 `null`.
+    `working_memory_snapshot` (F-25): string with working.md content converted to episodic format.
+    Orchestrator appends this value to `.mpl/memory/episodic.md`. null if absent.
 
     When status is "circuit_break", failure_info must be populated:
 

@@ -1,19 +1,19 @@
-# Domain: Test (테스트)
+# Domain: Test
 
-## 핵심 원칙
-- 테스트는 독립적이고 재현 가능해야 한다 (순서 무관)
-- Given-When-Then 구조로 의도 명확히
-- 하나의 테스트는 하나의 행동만 검증
-- 모킹은 최소한으로 — 실제 동작 우선
+## Core Principles
+- Tests must be independent and reproducible (order-independent)
+- Use Given-When-Then structure to clearly express intent
+- One test verifies one behavior only
+- Minimize mocking — prefer real behavior
 
-## 주의 사항
-- 테스트 간 상태 공유 금지 (fixture scope 주의)
-- 시간 의존 테스트 금지 (sleep, Date.now 모킹)
-- 파일 시스템/네트워크 의존 테스트는 격리
-- flaky test 발견 시 즉시 수정 또는 skip + 이슈 기록
+## Cautions
+- No shared state between tests (watch fixture scope)
+- No time-dependent tests (sleep, Date.now mocking)
+- Tests depending on filesystem/network must be isolated
+- When a flaky test is found, fix immediately or skip + record the issue
 
-## 검증 포인트
-- 테스트가 반복 실행 시 동일 결과를 내는가?
-- 실패 메시지가 원인을 명확히 알려주는가?
-- 커버리지가 핵심 경로를 포함하는가?
-- 테스트 실행 시간이 합리적인가?
+## Verification Points
+- Do tests produce the same result on repeated runs?
+- Do failure messages clearly indicate the cause?
+- Does coverage include the critical paths?
+- Is test execution time reasonable?

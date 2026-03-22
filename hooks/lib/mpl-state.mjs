@@ -68,7 +68,7 @@ const DEFAULT_STATE = {
     error: null,            // failure error message
     degraded_stages: []     // stages with partial failures, e.g. ['stage2']
   },
-  memory: {                  // F-25: 4-Tier Adaptive Memory 통계
+  memory: {                  // F-25: 4-Tier Adaptive Memory statistics
     episodic_entries: 0,
     semantic_rules: 0,
     procedural_entries: 0,

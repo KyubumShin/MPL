@@ -27,7 +27,7 @@ disallowedTools: Write, Edit, Task
   <Constraints>
     - No code writing: Write and Edit tools are BLOCKED.
     - No delegation: Task tool is BLOCKED.
-    - Use Bash only for git commands (git add, git commit, git log, git diff, git status).
+    - Use Bash only for git commands (git add, git commit, git log, git diff, git status, git push, gh pr create).
     - Use Read/Glob/Grep only to understand what files changed and why.
     - Never use --no-verify or --force flags.
     - Never amend published commits.
@@ -62,5 +62,41 @@ disallowedTools: Write, Edit, Task
 
     ## Verification
     - `git log --oneline -N` output showing clean history
+
+    ## PR Created (only when pr_creation: true)
+    - URL: {pr_url}
+    - Title: {pr_title}
+    - Base: {base_branch}
   </Output_Format>
+
+  <PR_Creation>
+    ## PR Creation Mode (T-04, v4.0)
+
+    When `pr_creation: true` is included in the prompt, perform these additional steps AFTER committing:
+
+    1. **Detect base branch**: `git remote show origin | grep "HEAD branch"` → main/master/develop
+    2. **Create feature branch** (if on base branch): `git checkout -b mpl/{short-task-summary}`
+    3. **Push**: `git push -u origin HEAD`
+    4. **Create PR**: `gh pr create --title "{title}" --body "{body}"`
+       - Title: concise summary derived from task/PP description
+       - Body format (markdown):
+         ```
+         ## Summary
+         {1-3 sentence description from PPs}
+
+         ## Quality Gate Results
+         {gate results from RUNBOOK or prompt context}
+
+         ## Files Changed
+         {git diff --stat output}
+
+         <details><summary>Deferred Review Items</summary>
+         {deferred items if any, or "None"}
+         </details>
+         ```
+    5. **Report**: include PR URL in output
+
+    If `gh` CLI is not available, report: "PR creation skipped: GitHub CLI (gh) not installed."
+    If not on a git repo with remote, report: "PR creation skipped: no git remote configured."
+  </PR_Creation>
 </Agent_Prompt>

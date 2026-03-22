@@ -1,91 +1,91 @@
-# Adaptive Pipeline Router — 구현 계획
+# Adaptive Pipeline Router — Implementation Plan
 
-> F-20, F-21, F-22 구현 계획. Ouroboros PAL Router 분석 기반.
-> 작성일: 2026-03-07
-
----
-
-## 목표
-
-**사용자가 "mpl"만 입력하면 시스템이 최적 파이프라인을 자동 선택하고, 실행 중 필요하면 확장한다.**
-
-현재 3개 스킬(mpl, mpl-small, mpl-bugfix) → 단일 "mpl" 진입점으로 통합.
+> Implementation plan for F-20, F-21, F-22. Based on Ouroboros PAL Router analysis.
+> Written: 2026-03-07
 
 ---
 
-## 구현 단계
+## Goal
 
-### Phase 1: Quick Scope Scan + Pipeline Score (F-20 핵심)
+**When the user types just "mpl", the system automatically selects the optimal pipeline and expands if needed during execution.**
 
-**목표**: Triage(Step 0)에서 `pipeline_tier`를 자동 산정
+Current 3 skills (mpl, mpl-small, mpl-bugfix) → unified into a single "mpl" entry point.
 
-#### 1-1. `hooks/lib/mpl-scope-scan.mjs` 신규 생성
+---
 
-Quick Scope Scan 유틸리티. 오케스트레이터가 Triage 시점에 호출하는 것이 아니라, **keyword-detector 또는 Triage 프로토콜에서 참조하는 공식 정의**.
+## Implementation Phases
+
+### Phase 1: Quick Scope Scan + Pipeline Score (F-20 core)
+
+**Goal**: Automatically determine `pipeline_tier` in Triage (Step 0)
+
+#### 1-1. Create `hooks/lib/mpl-scope-scan.mjs`
+
+Quick Scope Scan utility. Rather than the orchestrator calling it at Triage time, this is the **official definition referenced by keyword-detector or Triage protocol**.
 
 ```javascript
-// 입력: 사용자 프롬프트 + cwd
-// 출력: { pipeline_score, pipeline_tier, scan_evidence }
+// Input: user prompt + cwd
+// Output: { pipeline_score, pipeline_tier, scan_evidence }
 
-// pipeline_score 공식:
+// pipeline_score formula:
 // (file_scope × 0.35) + (test_complexity × 0.25)
 //   + (dependency_depth × 0.25) + (risk_signal × 0.15)
 
-// Quick Scope Scan은 오케스트레이터가 Glob/Grep으로 수행 (빌트인 도구)
-// 이 모듈은 score 산정 로직만 담당
+// Quick Scope Scan is performed by the orchestrator with Glob/Grep (built-in tools)
+// This module handles score calculation logic only
 ```
 
-구현 범위:
-- `calculatePipelineScore(scanResult)` — score 계산 순수 함수
-- `classifyTier(score, hint)` — tier 분류 (hint가 있으면 오버라이드)
-- `formatScanEvidence(scanResult, score, tier)` — 증거 문자열 생성
+Implementation scope:
+- `calculatePipelineScore(scanResult)` — pure function for score calculation
+- `classifyTier(score, hint)` — tier classification (overrides if hint is provided)
+- `formatScanEvidence(scanResult, score, tier)` — generate evidence string
 
-#### 1-2. `commands/mpl-run.md` Triage 섹션 수정
+#### 1-2. Modify `commands/mpl-run.md` Triage Section
 
-Step 0 Triage에 Quick Scope Scan + pipeline_tier 결정 절차 추가:
+Add Quick Scope Scan + pipeline_tier determination procedure to Step 0 Triage:
 
 ```markdown
-### Step 0: Triage (확장)
+### Step 0: Triage (expanded)
 
-1. 정보 밀도 분석 → interview_depth (기존)
-2. **Quick Scope Scan** (신규, ~1-2K 토큰):
-   a. Glob("**/*.{ts,tsx,js,jsx,py,go,rs}") → 프로젝트 파일 수 확인
-   b. 사용자 프롬프트에서 언급된 파일/모듈 → Grep으로 존재 확인 → affected_files 추정
-   c. 테스트 파일 존재 여부 → Glob("**/*.test.*", "**/*_test.*", "**/test_*")
-   d. 언급된 모듈의 import 깊이 → Grep("import|require", affected_files) 1-hop
-3. **pipeline_score 산출** → pipeline_tier
-4. routing-patterns.jsonl 매칭 (F-22, Phase 3에서 구현)
-5. state.json에 pipeline_tier 기록
+1. Information density analysis → interview_depth (existing)
+2. **Quick Scope Scan** (new, ~1-2K tokens):
+   a. Glob("**/*.{ts,tsx,js,jsx,py,go,rs}") → confirm project file count
+   b. Files/modules mentioned in user prompt → confirm existence with Grep → estimate affected_files
+   c. Test file presence → Glob("**/*.test.*", "**/*_test.*", "**/test_*")
+   d. Import depth of mentioned modules → Grep("import|require", affected_files) 1-hop
+3. **Calculate pipeline_score** → pipeline_tier
+4. routing-patterns.jsonl matching (F-22, implemented in Phase 3)
+5. Record pipeline_tier in state.json
 ```
 
-#### 1-3. `commands/mpl-run-triage.md` 신규 생성
+#### 1-3. Create `commands/mpl-run-triage.md`
 
-Triage 전용 상세 프로토콜. tier별 분기 로직을 명확히 정의:
+Detailed protocol dedicated to Triage. Clearly defines branching logic by tier:
 
 ```markdown
-## Tier별 파이프라인 분기
+## Tier-based Pipeline Branching
 
-pipeline_tier 결정 후, 이후 단계를 tier에 맞게 선택:
+After pipeline_tier is determined, select subsequent steps to match the tier:
 
 ### Frugal (score < 0.3)
-- Skip: PP 인터뷰, Pre-Execution Analysis, Decomposition, Gate 2/3
-- Do: Error Spec(Phase 0 Step 4) → 단일 Fix Cycle → Gate 1 → Commit
-- 오케스트레이터 프로토콜: mpl-run-frugal.md 로드
+- Skip: PP interview, Pre-Execution Analysis, Decomposition, Gate 2/3
+- Do: Error Spec (Phase 0 Step 4) → single Fix Cycle → Gate 1 → Commit
+- Orchestrator protocol: load mpl-run-frugal.md
 
 ### Standard (0.3 ≤ score < 0.65)
-- Skip: Full PP(→light), Phase 0 Step 1-3, 다중 페이즈 분해, Gate 2/3
-- Do: PP(light) → Error Spec → 단일 Phase 실행 → Gate 1 → Commit
-- 오케스트레이터 프로토콜: mpl-run-standard.md 로드
+- Skip: Full PP (→light), Phase 0 Steps 1-3, multi-phase decomposition, Gate 2/3
+- Do: PP (light) → Error Spec → single Phase execution → Gate 1 → Commit
+- Orchestrator protocol: load mpl-run-standard.md
 
 ### Frontier (score ≥ 0.65)
-- Skip: 없음
-- Do: 전체 9+ step 파이프라인
-- 오케스트레이터 프로토콜: mpl-run.md (기존)
+- Skip: none
+- Do: full 9+ step pipeline
+- Orchestrator protocol: mpl-run.md (existing)
 ```
 
-#### 1-4. `hooks/mpl-keyword-detector.mjs` 수정
+#### 1-4. Modify `hooks/mpl-keyword-detector.mjs`
 
-3-way 분기 → 단일 진입점으로 통합:
+Unify 3-way branching into a single entry point:
 
 ```javascript
 // Before:
@@ -96,14 +96,14 @@ const skillName = isSmallRun ? 'mpl-small' : 'mpl';
 const tierHint = extractTierHint(cleanPrompt);
 // "bugfix|fix|bug" → "frugal"
 // "small|quick|light" → "standard"
-// 없으면 → null (auto)
+// none → null (auto)
 initState(cwd, featureName, 'auto', tierHint);
-const skillName = 'mpl'; // 항상 단일 스킬
+const skillName = 'mpl'; // always single skill
 ```
 
-#### 1-5. `hooks/lib/mpl-state.mjs` 수정
+#### 1-5. Modify `hooks/lib/mpl-state.mjs`
 
-state.json에 `pipeline_tier`와 `tier_hint` 필드 추가:
+Add `pipeline_tier` and `tier_hint` fields to state.json:
 
 ```json
 {
@@ -114,218 +114,218 @@ state.json에 `pipeline_tier`와 `tier_hint` 필드 추가:
 }
 ```
 
-`pipeline_tier`는 Triage 완료 후 오케스트레이터가 설정. `tier_hint`는 keyword-detector가 설정.
+`pipeline_tier` is set by the orchestrator after Triage completes. `tier_hint` is set by keyword-detector.
 
-#### 산출물
+#### Deliverables
 
-| 파일 | 변경 유형 | 설명 |
+| File | Change Type | Description |
 |------|----------|------|
-| `hooks/lib/mpl-scope-scan.mjs` | 신규 | pipeline_score 계산 로직 |
-| `commands/mpl-run-triage.md` | 신규 | Triage 확장 프로토콜 (tier별 분기) |
-| `commands/mpl-run-frugal.md` | 신규 | Frugal tier 오케스트레이션 프로토콜 |
-| `commands/mpl-run-standard.md` | 신규 | Standard tier 오케스트레이션 프로토콜 |
-| `commands/mpl-run.md` | 수정 | Step 0 Triage에 Quick Scope Scan 추가, tier별 프로토콜 로드 분기 |
-| `hooks/mpl-keyword-detector.mjs` | 수정 | 단일 진입점 통합 |
-| `hooks/lib/mpl-state.mjs` | 수정 | pipeline_tier, tier_hint 필드 추가 |
-| `skills/mpl/SKILL.md` | 수정 | tier 인식 로직 추가 |
+| `hooks/lib/mpl-scope-scan.mjs` | New | pipeline_score calculation logic |
+| `commands/mpl-run-triage.md` | New | Triage extended protocol (branching by tier) |
+| `commands/mpl-run-frugal.md` | New | Frugal tier orchestration protocol |
+| `commands/mpl-run-standard.md` | New | Standard tier orchestration protocol |
+| `commands/mpl-run.md` | Modified | Add Quick Scope Scan to Step 0 Triage, tier-based protocol load branching |
+| `hooks/mpl-keyword-detector.mjs` | Modified | Unified single entry point |
+| `hooks/lib/mpl-state.mjs` | Modified | Add pipeline_tier, tier_hint fields |
+| `skills/mpl/SKILL.md` | Modified | Add tier recognition logic |
 
 ---
 
 ### Phase 2: Dynamic Escalation (F-21)
 
-**목표**: circuit break 시 자동으로 상위 tier로 전환
+**Goal**: Automatically switch to a higher tier upon circuit break
 
-#### 2-1. Escalation 프로토콜 정의
+#### 2-1. Define Escalation Protocol
 
-`commands/mpl-run-triage.md`에 에스컬레이션 섹션 추가:
+Add escalation section to `commands/mpl-run-triage.md`:
 
 ```markdown
 ## Escalation Protocol
 
-### Frugal → Standard 에스컬레이션
-트리거: Frugal Fix Cycle에서 circuit break (3회 재시도 실패)
-절차:
-1. 완료된 TODO 목록 보존 (state.json에 기록)
-2. state.json pipeline_tier를 "standard"로 변경
-3. escalation_history에 기록
-4. PP 추출 (light) — 프롬프트에서 직접 추출
-5. Error Spec 재활용 (이미 생성됨)
-6. 실패한 작업을 단일 Phase의 TODO로 재구성
-7. Standard 프로토콜로 재실행
+### Frugal → Standard Escalation
+Trigger: circuit break in Frugal Fix Cycle (3 retry failures)
+Procedure:
+1. Preserve completed TODO list (record in state.json)
+2. Change state.json pipeline_tier to "standard"
+3. Record in escalation_history
+4. Extract PP (light) — extract directly from prompt
+5. Reuse Error Spec (already generated)
+6. Reorganize failed task as single Phase TODO
+7. Re-run with Standard protocol
 
-### Standard → Frontier 에스컬레이션
-트리거: Standard Phase에서 circuit break
-절차:
-1. 완료된 TODO/Phase 보존
-2. state.json pipeline_tier를 "frontier"로 변경
-3. escalation_history에 기록
-4. Full PP 인터뷰 실행 (기존 light PP를 기반으로 확장)
-5. Phase 0 Enhanced 실행 (Error Spec 외 Step 1-3 추가)
-6. 실패한 작업을 mpl-decomposer로 다중 페이즈 분해
-7. Frontier 프로토콜로 재실행
+### Standard → Frontier Escalation
+Trigger: circuit break in Standard Phase
+Procedure:
+1. Preserve completed TODOs/Phases
+2. Change state.json pipeline_tier to "frontier"
+3. Record in escalation_history
+4. Run Full PP interview (expand based on existing light PP)
+5. Run Phase 0 Enhanced (add Steps 1-3 beyond Error Spec)
+6. Decompose failed task into multiple phases with mpl-decomposer
+7. Re-run with Frontier protocol
 
-### Frontier에서도 실패 시
-기존 circuit break + mpl-failed 프로토콜 적용 (변경 없음)
+### If Frontier also fails
+Apply existing circuit break + mpl-failed protocol (no change)
 ```
 
-#### 2-2. `hooks/mpl-phase-controller.mjs` 수정
+#### 2-2. Modify `hooks/mpl-phase-controller.mjs`
 
-circuit break 이벤트에서 에스컬레이션 가능 여부 확인 로직 추가:
+Add logic to check escalation availability on circuit break event:
 
 ```javascript
-// circuit break 감지 시:
-// 1. 현재 pipeline_tier 확인
-// 2. frugal 또는 standard이면 → 에스컬레이션 메시지 반환
-// 3. frontier이면 → 기존 mpl-failed 처리
+// On circuit break detection:
+// 1. Check current pipeline_tier
+// 2. If frugal or standard → return escalation message
+// 3. If frontier → existing mpl-failed handling
 ```
 
-#### 2-3. `hooks/lib/mpl-state.mjs` 수정
+#### 2-3. Modify `hooks/lib/mpl-state.mjs`
 
-에스컬레이션 관련 함수 추가:
+Add escalation-related functions:
 
-- `escalateTier(cwd)` — 현재 tier → 다음 tier 전환 + history 기록
-- `getEscalationTarget(cwd)` — 다음 tier 반환 (frontier이면 null)
-- `recordEscalation(cwd, from, to, reason, preservedWork)` — history append
+- `escalateTier(cwd)` — transition current tier → next tier + record history
+- `getEscalationTarget(cwd)` — return next tier (null if frontier)
+- `recordEscalation(cwd, from, to, reason, preservedWork)` — append to history
 
-#### 산출물
+#### Deliverables
 
-| 파일 | 변경 유형 | 설명 |
+| File | Change Type | Description |
 |------|----------|------|
-| `commands/mpl-run-triage.md` | 수정 | Escalation Protocol 섹션 추가 |
-| `hooks/mpl-phase-controller.mjs` | 수정 | circuit break → 에스컬레이션 분기 |
-| `hooks/lib/mpl-state.mjs` | 수정 | escalateTier, getEscalationTarget 함수 |
+| `commands/mpl-run-triage.md` | Modified | Add Escalation Protocol section |
+| `hooks/mpl-phase-controller.mjs` | Modified | circuit break → escalation branching |
+| `hooks/lib/mpl-state.mjs` | Modified | escalateTier, getEscalationTarget functions |
 
 ---
 
 ### Phase 3: Routing Pattern Learning (F-22)
 
-**목표**: 실행 결과를 축적하여 다음 실행의 초기 tier를 최적화
+**Goal**: Accumulate execution results to optimize the initial tier for the next run
 
-#### 3-1. `hooks/lib/mpl-routing-patterns.mjs` 신규 생성
+#### 3-1. Create `hooks/lib/mpl-routing-patterns.mjs`
 
 ```javascript
-// append: 실행 완료 시 패턴 기록
+// append: record pattern on execution completion
 function appendPattern(cwd, { description, tier, escalated, result, tokens, files })
 
-// match: Triage 시 유사 패턴 검색
+// match: search for similar patterns at Triage time
 function findSimilarPattern(cwd, description, threshold = 0.8)
 
-// jaccard: 토큰화 후 유사도 계산
+// jaccard: calculate similarity after tokenization
 function jaccardSimilarity(desc1, desc2)
 ```
 
-#### 3-2. `commands/mpl-run-triage.md` 수정
+#### 3-2. Modify `commands/mpl-run-triage.md`
 
-Triage Step 0에 패턴 매칭 단계 추가:
-
-```markdown
-4. **Routing Pattern 매칭** (F-22):
-   a. `.mpl/memory/routing-patterns.jsonl` 로드
-   b. 사용자 프롬프트와 Jaccard 유사도 비교
-   c. 유사도 ≥ 0.8인 패턴이 있으면 → 해당 패턴의 tier를 추천
-   d. 추천 tier가 pipeline_score와 2단계 이상 차이나면 → score 우선
-   e. 추천 적용 시 scan_evidence에 "pattern_match" 기록
-```
-
-#### 3-3. `commands/mpl-run-finalize.md` 수정
-
-Step 5 Finalize에 패턴 기록 단계 추가:
+Add pattern matching step to Triage Step 0:
 
 ```markdown
-### Step 5.4.5: Routing Pattern 기록 (F-22)
-실행 결과를 `.mpl/memory/routing-patterns.jsonl`에 append:
-- 태스크 설명 (사용자 프롬프트 요약)
-- 최종 pipeline_tier (에스컬레이션된 경우 최종 tier)
-- 에스컬레이션 여부 및 원본 tier
-- 성공/실패
-- 총 토큰 사용량
-- 영향 파일 수
+4. **Routing Pattern Matching** (F-22):
+   a. Load `.mpl/memory/routing-patterns.jsonl`
+   b. Compare Jaccard similarity with user prompt
+   c. If pattern with similarity ≥ 0.8 exists → recommend that pattern's tier
+   d. If recommended tier differs from pipeline_score by 2+ levels → score takes priority
+   e. Record "pattern_match" in scan_evidence when recommendation is applied
 ```
 
-#### 산출물
+#### 3-3. Modify `commands/mpl-run-finalize.md`
 
-| 파일 | 변경 유형 | 설명 |
+Add pattern recording step to Step 5 Finalize:
+
+```markdown
+### Step 5.4.5: Routing Pattern Recording (F-22)
+Append execution results to `.mpl/memory/routing-patterns.jsonl`:
+- Task description (user prompt summary)
+- Final pipeline_tier (final tier if escalated)
+- Whether escalated and original tier
+- Success/failure
+- Total token usage
+- Number of affected files
+```
+
+#### Deliverables
+
+| File | Change Type | Description |
 |------|----------|------|
-| `hooks/lib/mpl-routing-patterns.mjs` | 신규 | 패턴 기록/매칭/유사도 로직 |
-| `commands/mpl-run-triage.md` | 수정 | 패턴 매칭 단계 추가 |
-| `commands/mpl-run-finalize.md` | 수정 | 패턴 기록 단계 추가 |
+| `hooks/lib/mpl-routing-patterns.mjs` | New | Pattern recording/matching/similarity logic |
+| `commands/mpl-run-triage.md` | Modified | Add pattern matching step |
+| `commands/mpl-run-finalize.md` | Modified | Add pattern recording step |
 
 ---
 
-## 구현 순서 및 의존성
+## Implementation Order and Dependencies
 
 ```
 Phase 1 (F-20): Quick Scope Scan + Pipeline Score
-  ├─ 1-5. mpl-state.mjs (tier 필드 추가)           ← 기반
-  ├─ 1-1. mpl-scope-scan.mjs (score 계산)           ← 독립
-  ├─ 1-4. keyword-detector.mjs (단일 진입점)         ← 1-5 의존
-  ├─ 1-3. mpl-run-triage.md (tier별 분기)            ← 1-1 의존
-  │   ├─ mpl-run-frugal.md (신규 프로토콜)
-  │   └─ mpl-run-standard.md (신규 프로토콜)
-  └─ 1-2. mpl-run.md (Step 0 수정)                   ← 1-3 의존
+  ├─ 1-5. mpl-state.mjs (add tier fields)           ← foundation
+  ├─ 1-1. mpl-scope-scan.mjs (score calculation)    ← independent
+  ├─ 1-4. keyword-detector.mjs (single entry point) ← depends on 1-5
+  ├─ 1-3. mpl-run-triage.md (tier branching)        ← depends on 1-1
+  │   ├─ mpl-run-frugal.md (new protocol)
+  │   └─ mpl-run-standard.md (new protocol)
+  └─ 1-2. mpl-run.md (modify Step 0)                ← depends on 1-3
 
 Phase 2 (F-21): Dynamic Escalation
-  ├─ 2-3. mpl-state.mjs (escalation 함수)            ← Phase 1 완료 후
-  ├─ 2-2. mpl-phase-controller.mjs (분기 추가)       ← 2-3 의존
-  └─ 2-1. mpl-run-triage.md (escalation 섹션)        ← 2-3 의존
+  ├─ 2-3. mpl-state.mjs (escalation functions)      ← after Phase 1 complete
+  ├─ 2-2. mpl-phase-controller.mjs (add branching)  ← depends on 2-3
+  └─ 2-1. mpl-run-triage.md (escalation section)    ← depends on 2-3
 
 Phase 3 (F-22): Routing Pattern Learning
-  ├─ 3-1. mpl-routing-patterns.mjs (패턴 로직)       ← Phase 1 완료 후
-  ├─ 3-2. mpl-run-triage.md (매칭 단계)              ← 3-1 의존
-  └─ 3-3. mpl-run-finalize.md (기록 단계)            ← 3-1 의존
+  ├─ 3-1. mpl-routing-patterns.mjs (pattern logic)  ← after Phase 1 complete
+  ├─ 3-2. mpl-run-triage.md (matching step)         ← depends on 3-1
+  └─ 3-3. mpl-run-finalize.md (recording step)      ← depends on 3-1
 ```
 
-Phase 2와 Phase 3는 Phase 1 완료 후 병렬 진행 가능.
+Phase 2 and Phase 3 can proceed in parallel after Phase 1 is complete.
 
 ---
 
-## 검증 계획
+## Validation Plan
 
-### Phase 1 검증
+### Phase 1 Validation
 
-| 검증 항목 | 방법 | 통과 기준 |
+| Validation Item | Method | Pass Criteria |
 |----------|------|----------|
-| score 계산 정확성 | mpl-scope-scan.mjs 단위 테스트 | 3가지 시나리오(frugal/standard/frontier)에서 올바른 tier 분류 |
-| keyword-detector 통합 | "mpl bugfix X", "mpl small X", "mpl X" 입력 테스트 | 모두 단일 스킬로 진입, tier_hint 올바르게 설정 |
-| Triage 확장 | 실제 프로젝트에서 mpl 실행 | pipeline_tier가 state.json에 기록됨 |
-| Frugal 프로토콜 | 단순 버그 수정 태스크 | mpl-bugfix와 동등한 결과, 토큰 ~5-15K |
-| Standard 프로토콜 | 소규모 기능 추가 태스크 | mpl-small과 동등한 결과, 토큰 ~20-40K |
+| Score calculation accuracy | mpl-scope-scan.mjs unit tests | Correct tier classification in 3 scenarios (frugal/standard/frontier) |
+| keyword-detector integration | Test inputs "mpl bugfix X", "mpl small X", "mpl X" | All enter single skill, tier_hint set correctly |
+| Triage expansion | Run mpl on real project | pipeline_tier recorded in state.json |
+| Frugal protocol | Simple bug fix task | Equivalent result to mpl-bugfix, ~5-15K tokens |
+| Standard protocol | Small feature addition task | Equivalent result to mpl-small, ~20-40K tokens |
 
-### Phase 2 검증
+### Phase 2 Validation
 
-| 검증 항목 | 방법 | 통과 기준 |
+| Validation Item | Method | Pass Criteria |
 |----------|------|----------|
-| Frugal→Standard 에스컬레이션 | 의도적으로 복잡한 태스크를 bugfix 힌트로 시작 | circuit break 후 자동 Standard 전환, 완료된 TODO 보존 |
-| Standard→Frontier 에스컬레이션 | 중간 복잡도 태스크에서 실패 유도 | 자동 Frontier 전환, light PP가 full PP로 확장 |
-| 에스컬레이션 history | state.json 검사 | escalation_history에 전환 기록 존재 |
+| Frugal→Standard escalation | Intentionally start complex task with bugfix hint | Automatic Standard switch after circuit break, completed TODOs preserved |
+| Standard→Frontier escalation | Induce failure in medium-complexity task | Automatic Frontier switch, light PP expanded to full PP |
+| Escalation history | Inspect state.json | Transition record exists in escalation_history |
 
-### Phase 3 검증
+### Phase 3 Validation
 
-| 검증 항목 | 방법 | 통과 기준 |
+| Validation Item | Method | Pass Criteria |
 |----------|------|----------|
-| 패턴 기록 | 실행 완료 후 routing-patterns.jsonl 확인 | 올바른 형식으로 append됨 |
-| 유사도 매칭 | 비슷한 태스크 설명으로 재실행 | 이전 패턴의 tier가 추천됨 |
-| Jaccard 정확도 | 단위 테스트 | 동일 문장 = 1.0, 완전 다른 문장 = 0.0 |
+| Pattern recording | Check routing-patterns.jsonl after execution completes | Appended in correct format |
+| Similarity matching | Re-run with similar task description | Previous pattern's tier is recommended |
+| Jaccard accuracy | Unit tests | Same sentence = 1.0, completely different sentence = 0.0 |
 
 ---
 
-## 하위 호환성
+## Backward Compatibility
 
-| 기존 기능 | 영향 | 대응 |
+| Existing Feature | Impact | Response |
 |----------|------|------|
-| `/mpl:mpl-bugfix` 스킬 | **Deprecated** | tier_hint="frugal"로 리다이렉트. SKILL.md에 deprecation 안내 추가 |
-| `/mpl:mpl-small` 스킬 | **Deprecated** | tier_hint="standard"로 리다이렉트. SKILL.md에 deprecation 안내 추가 |
-| `/mpl:mpl` 스킬 | 유지 | tier 인식 로직 추가 |
-| `mpl-keyword-detector.mjs` | 수정 | 기존 "mpl small", "mpl bugfix" 키워드는 여전히 인식하되 hint로만 사용 |
-| `state.json` 형식 | 필드 추가 | pipeline_tier, tier_hint, escalation_history 추가. 기존 필드 보존 |
-| `mpl-run.md` | 수정 | Step 0에 Quick Scope Scan 추가, tier별 프로토콜 로드 분기 |
+| `/mpl:mpl-bugfix` skill | **Deprecated** | Redirect to tier_hint="frugal". Add deprecation notice to SKILL.md |
+| `/mpl:mpl-small` skill | **Deprecated** | Redirect to tier_hint="standard". Add deprecation notice to SKILL.md |
+| `/mpl:mpl` skill | Maintained | Add tier recognition logic |
+| `mpl-keyword-detector.mjs` | Modified | Existing "mpl small", "mpl bugfix" keywords still recognized but used as hint only |
+| `state.json` format | Fields added | Add pipeline_tier, tier_hint, escalation_history. Preserve existing fields |
+| `mpl-run.md` | Modified | Add Quick Scope Scan to Step 0, tier-based protocol load branching |
 
 ---
 
-## 레퍼런스
+## References
 
 - [Ouroboros PAL Router](https://github.com/Q00/ouroboros) — `src/ouroboros/routing/` (router.py, complexity.py, tiers.py, escalation.py, downgrade.py)
 - Ouroboros Complexity Score: `(token × 0.30) + (tool × 0.30) + (ac_depth × 0.40)`
-- Ouroboros Escalation: 2회 연속 실패 → 다음 tier, 성공 시 카운터 리셋
-- Ouroboros Downgrade: 5회 연속 성공 → 이전 tier, Jaccard 유사도 0.8로 패턴 상속
-- MPL design.md §3.2 (Triage), §3.3 Step 0.5 (성숙도 모드)
+- Ouroboros Escalation: 2 consecutive failures → next tier, counter resets on success
+- Ouroboros Downgrade: 5 consecutive successes → previous tier, pattern inheritance with Jaccard similarity 0.8
+- MPL design.md §3.2 (Triage), §3.3 Step 0.5 (maturity mode)

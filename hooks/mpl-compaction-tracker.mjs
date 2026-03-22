@@ -78,7 +78,7 @@ async function main() {
     `- **Timestamp**: ${record.timestamp}`,
     `- **Current Phase**: ${record.current_phase}`,
     `- **Compaction Count**: ${newCount}`,
-    `- **Context Usage**: triggered at ~83.5%`,
+    `- **Context Usage**: triggered at compaction threshold`,
     ``,
     `## Recovery Instructions`,
     `Resume from current phase. Read state-summary.md from previous phases if context was lost.`,

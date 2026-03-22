@@ -1,20 +1,20 @@
-# Task Type: Bugfix (버그 수정)
+# Task Type: Bugfix
 
-## 핵심 원칙
-- 증상이 아닌 근본 원인(root cause)을 파악한 뒤 수정
-- 재현 테스트를 먼저 작성하고(red), 수정 후 통과(green)시킴
-- 최소 변경 원칙: 버그와 무관한 코드는 절대 수정하지 않음
-- 동일 패턴의 다른 발생 지점을 코드베이스에서 검토
-- 수정 이유를 커밋 메시지 또는 코드 주석에 명시
+## Core Principles
+- Identify the root cause, not just the symptom, before fixing
+- Write a reproduction test first (red), then make it pass after the fix (green)
+- Minimal change principle: never modify code unrelated to the bug
+- Review the codebase for other occurrences of the same pattern
+- Document the reason for the fix in the commit message or code comments
 
-## 주의 사항
-- "이 코드도 이상해 보임"을 이유로 범위를 확장하지 않음
-- 임시 방편(workaround)과 근본 수정을 구분하여 기록
-- 서드파티 라이브러리 버그는 업스트림 보고 및 로컬 우회 전략 분리
-- 수정 과정에서 발견된 별개 이슈는 새 태스크로 분리
+## Cautions
+- Do not expand scope on the grounds of "this code also looks suspicious"
+- Distinguish and record workarounds separately from root-cause fixes
+- For third-party library bugs, separate upstream reporting from local workaround strategy
+- Separate issues discovered during the fix into new tasks
 
-## 검증 포인트
-- 버그 재현 테스트가 수정 후 통과하는가?
-- 기존 회귀 테스트가 모두 통과하는가?
-- 근본 원인이 해결되었는가 (증상 억제만 아닌가)?
-- 동일 패턴의 다른 코드에도 동일 수정이 적용되었는가?
+## Verification Points
+- Does the bug reproduction test pass after the fix?
+- Do all existing regression tests pass?
+- Is the root cause resolved (not just the symptom suppressed)?
+- Has the same fix been applied to other code with the same pattern?

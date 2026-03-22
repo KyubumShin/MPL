@@ -93,9 +93,17 @@ disallowedTools: Write, Edit, Task
     - [S-1] Phase {N}: Given {context} When {action} Then {expected} -- Agent: {persona}
 
     ## 4. H-items (Human-Required)
-    Items requiring human judgment (triggers Side Interview):
-    - [H-1] Phase {N}: {item} -- Why not automatable: {reason}
-    - [H-2] ...
+    Items requiring human judgment. Severity determines blocking behavior (T-10, v3.9):
+    - [H-1] Phase {N}: {item} -- Severity: HIGH -- Why: {reason}
+    - [H-2] Phase {N}: {item} -- Severity: MED -- Why: {reason}
+    - [H-3] Phase {N}: {item} -- Severity: LOW -- Why: {reason}
+
+    Severity criteria:
+    | Severity | Blocks execution? | Criteria | Examples |
+    |----------|:-----------------:|----------|---------|
+    | HIGH | Yes (Side Interview) | PP compliance judgment, security decisions, data loss risk | "Does this auth flow meet compliance?" |
+    | MED | No (deferred to Step 5.5) | UX preference, visual review, business logic appropriateness | "Is this error message user-friendly?" |
+    | LOW | No (deferred to Step 5.5) | Documentation quality, naming conventions, minor style | "Should this variable be renamed?" |
 
     ## 5. Verification Gaps
     Environment constraints and alternatives:

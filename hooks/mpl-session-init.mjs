@@ -16,6 +16,8 @@ async function main() {
   let cwd = process.cwd();
 
   // Try to read stdin for cwd
+  // NOTE: Uses raw stdin instead of lib/stdin.mjs because SessionStart hook
+  // has different input format requirements. See mpl-hud.mjs for same pattern.
   try {
     const chunks = [];
     for await (const chunk of process.stdin) {

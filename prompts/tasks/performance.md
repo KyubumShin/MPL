@@ -1,20 +1,20 @@
-# Task Type: Performance (성능 개선)
+# Task Type: Performance (Improvement)
 
-## 핵심 원칙
-- 프로파일링 먼저: 추측으로 최적화 지점을 결정하지 않음
-- before/after 벤치마크 측정 필수 (수치로 개선 증명)
-- 핫 패스(실제 병목)만 최적화, 전체 코드 최적화 금지
-- 가독성과 성능 간 트레이드오프를 명시적으로 문서화
-- 최적화로 인한 복잡도 증가는 주석으로 이유 설명
+## Core Principles
+- Profile first: do not decide on optimization targets by guessing
+- Before/after benchmark measurements are required (prove improvement with numbers)
+- Optimize only the hot path (actual bottleneck), not the entire codebase
+- Explicitly document the trade-off between readability and performance
+- Explain with comments why optimization increases complexity
 
-## 주의 사항
-- 측정 없는 "더 빠를 것 같은" 코드 변경 금지
-- 캐싱 도입 시 무효화 전략과 메모리 한도를 함께 정의
-- 동시성 최적화는 레이스 컨디션 위험을 동반하므로 신중히 접근
-- 성능 개선이 기능 회귀를 유발하지 않도록 기존 테스트 유지
+## Cautions
+- No code changes based on "this might be faster" without measurement
+- When introducing caching, define the invalidation strategy and memory limit together
+- Concurrency optimization carries race condition risk — approach with caution
+- Maintain existing tests to ensure performance improvements do not cause functional regressions
 
-## 검증 포인트
-- 측정 가능한 개선(수치)이 확인되는가?
-- 기존 테스트가 모두 통과하는가?
-- 가독성이 허용 범위 내에서 유지되는가?
-- 개선된 수치가 목표 요구사항을 충족하는가?
+## Verification Points
+- Is a measurable improvement (in numbers) confirmed?
+- Do all existing tests pass?
+- Is readability maintained within acceptable bounds?
+- Does the improved metric meet the target requirements?

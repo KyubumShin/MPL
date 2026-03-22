@@ -9,7 +9,7 @@
  *   - .mpl/state.json (completed phase tracking)
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const DEFAULT_TOKENS_PER_PHASE = 15000; // conservative estimate
@@ -159,4 +159,32 @@ export function predictBudget(cwd) {
     avg_tokens_per_phase: avgPerPhase,
     recommendation,
   };
+}
+
+/**
+ * Write a session-handoff signal file for the external watcher (F-33, v3.9).
+ * The watcher (mpl-session-watcher.sh) detects this file and auto-resumes
+ * in a new Claude session via `/mpl:mpl-resume`.
+ *
+ * @param {string} cwd - Project root directory
+ * @param {object} data - Handoff data
+ * @param {string} data.phaseId - Phase to resume from
+ * @param {string[]} data.completedPhases - IDs of completed phases
+ * @param {string[]} data.remainingPhases - IDs of remaining phases
+ * @param {object} data.budget - Budget prediction at time of pause
+ */
+export function writeSessionHandoff(cwd, { phaseId, completedPhases, remainingPhases, budget }) {
+  const signalDir = join(cwd, '.mpl', 'signals');
+  mkdirSync(signalDir, { recursive: true });
+
+  const signal = {
+    resume_from_phase: phaseId,
+    completed_phases: completedPhases,
+    remaining_phases: remainingPhases,
+    budget_at_pause: budget,
+    timestamp: new Date().toISOString(),
+  };
+
+  const signalPath = join(signalDir, 'session-handoff.json');
+  writeFileSync(signalPath, JSON.stringify(signal, null, 2));
 }

@@ -2,17 +2,17 @@
 
 ## Motivation
 
-현재 MPL의 리서치 단계는 기술적 분석에 집중되어 있지만, 실제 프로덕트 개발에서는 **요구사항 명확화**, **우선순위 설정**, **트레이드오프 분석**이 중요하다. PM(Product Manager) 스킬을 리서치 단계에 추가하면 더 명확한 스펙과 실행 가능한 계획을 얻을 수 있다.
+The current MPL research phase focuses on technical analysis, but in real product development, **requirements clarification**, **prioritization**, and **tradeoff analysis** are important. Adding a PM (Product Manager) skill to the research phase yields clearer specs and actionable plans.
 
 ---
 
 ## What PM Skill Does
 
-PM 스킬은 사용자의 모호한 요청을 다음과 같이 변환한다:
+The PM skill transforms a user's vague request as follows:
 
 ### Input (Vague Request)
 ```
-사용자 인증 기능 추가해줘
+Add user authentication
 ```
 
 ### Output (Structured Spec)
@@ -59,9 +59,9 @@ Nice-to-Have (Future):
 
 #### 4. Out of Scope (Explicit Boundaries)
 ```
-- ❌ Admin user management (별도 태스크)
-- ❌ Role-based permissions (별도 태스크)
-- ❌ Multi-tenancy (필요 없음)
+- ❌ Admin user management (separate task)
+- ❌ Role-based permissions (separate task)
+- ❌ Multi-tenancy (not needed)
 ```
 
 #### 5. Dependencies & Risks
@@ -98,7 +98,7 @@ Decompose & Execute
 ```
 
 **When to trigger:**
-- Vague keywords detected: "추가", "만들어줘", "구현", etc.
+- Vague keywords detected: "add", "create", "implement", etc.
 - No technical details in request
 - User explicitly requests: `mpl pm <task>`
 
@@ -165,7 +165,7 @@ Decompose & Execute
 ### Step -2: PM Interview
 
 **Trigger Conditions:**
-- Request contains vague keywords: "추가", "만들어", "구현", "개선", etc.
+- Request contains vague keywords: "add", "create", "implement", "improve", etc.
 - Request is < 50 characters (too short to be specific)
 - No file names or technical terms mentioned
 - User explicitly uses: `mpl pm <task>`
@@ -241,7 +241,7 @@ pm_interview:
 
 ### User Request:
 ```
-mpl 사용자 인증 추가
+mpl add user authentication
 ```
 
 ### Step -2: PM Interview (NEW)

@@ -51,7 +51,7 @@ disallowedTools: Write, Edit, Task
     1) Read the Pivot Points and interface contracts for context.
     2) Read all changed files (diff or full file for new files).
     3) Run available static analysis tools (linter, type checker) via Bash.
-    4) Evaluate each file against the 8 review categories.
+    4) Evaluate each file against the applicable review categories (8 base + 2 UI-specific when applicable).
     5) Cross-reference with PP constraints for architecture category.
     6) Produce verdict with prioritized findings.
   </Investigation_Protocol>

@@ -12,7 +12,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -177,6 +177,67 @@ ACTION REQUIRED: Re-run the agent with clarified instructions targeting the miss
 Do NOT proceed to the next phase until all sections are present.`;
 }
 
+/**
+ * Log a phase profile record to .mpl/mpl/profile/phases.jsonl.
+ * @param {string} cwd
+ * @param {object} state - current MPL state object
+ * @param {string} agentType
+ * @param {number} estimatedTokens
+ */
+function logPhaseProfile(cwd, state, agentType, estimatedTokens) {
+  try {
+    const profileDir = join(cwd, '.mpl/mpl/profile');
+    if (!existsSync(profileDir)) mkdirSync(profileDir, { recursive: true });
+    const phaseRecord = {
+      step: state.current_phase || 'unknown',
+      name: agentType || '',
+      pass_rate: null,
+      micro_fixes: 0,
+      estimated_tokens: { context: 0, output: estimatedTokens, total: estimatedTokens },
+      compaction_count: state.compaction_count || 0,
+      timestamp: new Date().toISOString(),
+    };
+    appendFileSync(join(profileDir, 'phases.jsonl'), JSON.stringify(phaseRecord) + '\n');
+  } catch {
+    // Profile logging is best-effort
+  }
+}
+
+/**
+ * Track token usage for a completed agent task.
+ * Updates total_tokens in state and appends to weekly usage log.
+ * @param {string} cwd
+ * @param {string} agentType
+ * @param {string} responseText
+ */
+function trackTokenUsage(cwd, agentType, responseText) {
+  try {
+    const estimatedTokens = Math.ceil(responseText.length / 4);
+    if (estimatedTokens > 0) {
+      const currentState = readState(cwd);
+      if (currentState) {
+        const currentTokens = currentState.cost?.total_tokens || 0;
+        writeState(cwd, { cost: { total_tokens: currentTokens + estimatedTokens } });
+
+        // Weekly usage tracking for HUD
+        try {
+          const usageDir = join(cwd, '.mpl/usage');
+          if (!existsSync(usageDir)) mkdirSync(usageDir, { recursive: true });
+          appendFileSync(join(usageDir, 'weekly.jsonl'), JSON.stringify({
+            timestamp: new Date().toISOString(),
+            tokens: estimatedTokens,
+          }) + '\n');
+        } catch { /* best-effort */ }
+
+        // Experiment: append compaction_count to phases.jsonl for correlation analysis
+        logPhaseProfile(cwd, currentState, agentType, estimatedTokens);
+      }
+    }
+  } catch {
+    // Token tracking is best-effort; do not block on failure
+  }
+}
+
 async function main() {
   const input = await readStdin();
 
@@ -214,50 +275,7 @@ async function main() {
     : JSON.stringify(toolResponse);
 
   // H2: Estimate token usage from response length and update state
-  try {
-    const estimatedTokens = Math.ceil(responseText.length / 4);
-    if (estimatedTokens > 0) {
-      const currentState = readState(cwd);
-      if (currentState) {
-        const currentTokens = currentState.cost?.total_tokens || 0;
-        writeState(cwd, { cost: { total_tokens: currentTokens + estimatedTokens } });
-
-        // Weekly usage tracking for HUD
-        try {
-          const { appendFileSync: af, mkdirSync: md, existsSync: de } = await import('fs');
-          const { join: jp } = await import('path');
-          const usageDir = jp(cwd, '.mpl/usage');
-          if (!de(usageDir)) md(usageDir, { recursive: true });
-          af(jp(usageDir, 'weekly.jsonl'), JSON.stringify({
-            timestamp: new Date().toISOString(),
-            tokens: estimatedTokens,
-          }) + '\n');
-        } catch { /* best-effort */ }
-
-        // Experiment: append compaction_count to phases.jsonl for correlation analysis
-        try {
-          const { appendFileSync, mkdirSync, existsSync: dirExists } = await import('fs');
-          const { join: pathJoin } = await import('path');
-          const profileDir = pathJoin(cwd, '.mpl/mpl/profile');
-          if (!dirExists(profileDir)) mkdirSync(profileDir, { recursive: true });
-          const phaseRecord = {
-            step: currentState.current_phase || 'unknown',
-            name: agentType || '',
-            pass_rate: null,
-            micro_fixes: 0,
-            estimated_tokens: { context: 0, output: estimatedTokens, total: estimatedTokens },
-            compaction_count: currentState.compaction_count || 0,
-            timestamp: new Date().toISOString(),
-          };
-          appendFileSync(pathJoin(profileDir, 'phases.jsonl'), JSON.stringify(phaseRecord) + '\n');
-        } catch {
-          // Profile logging is best-effort
-        }
-      }
-    }
-  } catch {
-    // Token tracking is best-effort; do not block on failure
-  }
+  trackTokenUsage(cwd, agentType, responseText);
 
   // Validation only applies to agents in VALIDATE_AGENTS
   if (!VALIDATE_AGENTS.has(agentType)) {

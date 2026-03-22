@@ -13,10 +13,10 @@ Load this when `current_phase` is `mpl-finalize` or when resuming a session.
 
 ### 5.0: E2E Test (Final)
 
-After 3-Gate Quality passes, run final E2E validation:
+After 5-Gate Quality passes, run final E2E validation:
 - Execute Verification Planner's S-items designated as E2E scenarios
 - If Docker available: run in container. Otherwise: local E2E.
-- Execute remaining H-items via final Side Interview (if any unconsumed H-items remain)
+- MED/LOW H-items are NOT re-asked here — they are aggregated in Step 5.5 (T-10, v3.9)
 - Report: `[MPL] E2E Test: {passed}/{total} scenarios passed.`
 
 ### 5.0.5: AD Final Verification
@@ -32,6 +32,54 @@ Run ALL success_criteria from ALL completed phases. If project has build/test co
 ```
 Bash("npm run build")
 Bash("npm test")
+```
+
+### 5.5: Post-Execution Review Report (T-10, v3.9)
+
+Aggregate all deferred items accumulated during execution into a structured review report.
+This step is **informational only** — it does NOT block pipeline completion.
+
+```
+sources = []
+
+# 1. MED/LOW H-items deferred from Gate 3
+if exists(".mpl/mpl/deferred-review.md"):
+  sources += parse(".mpl/mpl/deferred-review.md")
+
+# 2. Per-phase deferred items (non-critical discoveries, AD markers)
+for each completed phase:
+  path = ".mpl/mpl/phases/{phase.id}/deferred-items.md"
+  if exists(path):
+    sources += parse(path)
+
+# 3. Gate 2 auto-resolved NEEDS_FIXES (if any were auto-fixed)
+# (tracked in RUNBOOK quality results section)
+
+if sources is empty:
+  announce: "[MPL] Post-Execution Review: No deferred items. Clean execution."
+else:
+  # Categorize into 3 sections:
+  worth_reviewing = [s for s in sources if s.severity == "MED"]
+  improvement_directions = [s for s in sources if s.severity == "LOW"]
+  auto_resolved = [s for s in sources if s.type == "auto-resolved"]
+
+  announce: """
+  [MPL] === Post-Execution Review ===
+
+  ## Worth Reviewing ({count} items)
+  Items where human judgment may add value:
+  {for each: - [{severity}] {item} (Phase {phase}) — {reason}}
+
+  ## Improvement Directions ({count} items)
+  Patterns to consider for next iteration:
+  {for each: - {item} — {suggestion}}
+
+  ## Auto-Resolved Summary ({count} items)
+  Decisions made autonomously during execution (for transparency):
+  {for each: - {item} — resolved as: {resolution}}
+
+  Review at your discretion. None of these blocked execution.
+  """
 ```
 
 ### 5.2: Extract Learnings
@@ -91,30 +139,30 @@ Ensure .mpl/memory/ directory exists.
 Report: "[MPL] Learnings distilled: {new_entries} new patterns added to memory."
 ```
 
-### 5.2.6: 4-Tier Memory 갱신 (F-25)
+### 5.2.6: 4-Tier Memory Update (F-25)
 
-mpl-compound의 4-Tier Memory 프로토콜을 실행한다:
+Execute mpl-compound's 4-Tier Memory protocol:
 
-1. **episodic.md 갱신**: 각 완료 Phase의 요약을 episodic.md에 추가
-   - 형식: `### Phase {N}: {name} ({timestamp})\n{2-3줄 요약: 구현 내용, 핵심 결정, 결과}`
-   - Phase 0 요약도 포함 (complexity grade, 적용 step 등)
+1. **Update episodic.md**: Append summary of each completed Phase to episodic.md
+   - Format: `### Phase {N}: {name} ({timestamp})\n{2-3 line summary: what was implemented, key decisions, results}`
+   - Also include Phase 0 summary (complexity grade, applied steps, etc.)
 
-2. **episodic 압축**: 시간 기반 압축 실행
-   - 최근 2 Phase: 상세 유지 (2-3줄)
-   - 이전 Phase: 1줄 압축 (`- Phase N: {name} — {결과}`)
-   - 100줄 상한 유지
+2. **Episodic compression**: Run time-based compression
+   - Recent 2 Phases: keep detailed (2-3 lines)
+   - Earlier Phases: compress to 1 line (`- Phase N: {name} — {result}`)
+   - Maintain 100-line cap
 
-3. **semantic.md 승격**: episodic에서 3회+ 반복 패턴 감지 → 일반화
-   - 반복 실패 패턴 → "## Failure Patterns" 섹션에 규칙화
-   - 반복 성공 패턴 → "## Success Patterns" 섹션에 규칙화
-   - 반복 컨벤션 → "## Project Conventions" 섹션에 규칙화
-   - episodic의 해당 항목은 1줄로 축약 + semantic 참조 링크
+3. **Promote to semantic.md**: Detect patterns repeated 3+ times in episodic → generalize
+   - Repeated failure patterns → formalize as rules in "## Failure Patterns" section
+   - Repeated success patterns → formalize in "## Success Patterns" section
+   - Repeated conventions → formalize in "## Project Conventions" section
+   - Corresponding entries in episodic are compressed to 1 line + semantic reference link
 
-4. **procedural.jsonl 정리**: mpl-compound가 추출한 도구 패턴 저장
-   - 분류 태그: type_mismatch, dependency_conflict, test_flake, api_contract_violation 등
-   - 100 entries 초과 시 가장 오래된 항목부터 삭제 (FIFO)
+4. **Clean up procedural.jsonl**: Save tool patterns extracted by mpl-compound
+   - Classification tags: type_mismatch, dependency_conflict, test_flake, api_contract_violation, etc.
+   - If exceeding 100 entries, delete oldest entries first (FIFO)
 
-5. **state.json memory 필드 갱신**: 메모리 통계 업데이트
+5. **Update state.json memory field**: Update memory statistics
 
 ```
 Task(subagent_type="mpl-compound", model="sonnet",
@@ -126,29 +174,29 @@ Task(subagent_type="mpl-compound", model="sonnet",
 Report: "[MPL] 4-Tier Memory updated: episodic={N} entries, semantic={N} rules, procedural={N} entries."
 ```
 
-### 5.2.7: working.md 정리
+### 5.2.7: Clear working.md
 
-파이프라인 완료 시 working.md를 비운다 (다음 실행을 위해).
+Clear working.md on pipeline completion (for next run).
 
 ```
 clearWorkingMemory(cwd)
 Report: "[MPL] Working memory cleared."
 ```
 
-### Step 5.2.8: Good/Bad Examples 아카이브 분류 (F-26)
+### Step 5.2.8: Good/Bad Examples Archive Classification (F-26)
 
-파이프라인 완료 시 mpl-interviewer v2가 생성한 요구사항 문서의 효과를 평가하고 아카이브한다.
+On pipeline completion, evaluate the effectiveness of requirements documents generated by mpl-interviewer v2 and archive them.
 
-#### 분류 기준
+#### Classification Criteria
 
-| 지표 | Good Example | Bad Example |
-|------|-------------|------------|
-| Phase 0 반복 횟수 | 0-1 | 3+ |
-| 재분해 횟수 | 0 | 1+ |
-| Gate 통과율 | 95%+ (1회) | 2회 이상 시도 |
-| 사용자 수정 요청 | 0 | 2+ |
+| Metric | Good Example | Bad Example |
+|--------|-------------|------------|
+| Phase 0 retry count | 0-1 | 3+ |
+| Redecomposition count | 0 | 1+ |
+| Gate pass rate | 95%+ (1st attempt) | 2+ attempts |
+| User correction requests | 0 | 2+ |
 
-#### 프로토콜
+#### Protocol
 
 ```pseudocode
 if exists(".mpl/pm/requirements-*.md"):
@@ -165,16 +213,16 @@ if exists(".mpl/pm/requirements-*.md"):
     copy requirements to ".mpl/pm/good-examples/{date}-{topic}.md"
   elif score <= 1:
     copy requirements to ".mpl/pm/bad-examples/{date}-{topic}.md"
-  # score 2: 중간 — 아카이브하지 않음
+  # score 2: middle — do not archive
 ```
 
-오케스트레이터가 Step 5 Finalize에서 직접 수행한다 (별도 에이전트 불필요).
+Orchestrator performs this directly in Step 5 Finalize (no separate agent needed).
 
-**F-25 Memory 연동:**
-아카이브 분류 후 procedural.jsonl에 품질 신호를 기록한다:
+**F-25 Memory Integration:**
+After archive classification, record quality signals in procedural.jsonl:
 - Good → `appendProcedural(cwd, { tool: "mpl-interviewer", result: "success", tags: ["prd_quality_good", depth], context: filename })`
 - Bad → `appendProcedural(cwd, { tool: "mpl-interviewer", result: "failure", tags: ["prd_quality_bad", depth, reason], context: filename })`
-이를 통해 향후 실행에서 interviewer가 이전 PRD 품질 패턴을 참조할 수 있다.
+This allows the interviewer in future runs to reference past PRD quality patterns.
 
 ### 5.3: Atomic Commits
 
@@ -182,6 +230,50 @@ Reuse `mpl-git-master`:
 ```
 Task(subagent_type="mpl-git-master", model="sonnet",
      prompt="Create atomic commits for all changes. Detect project commit style. 3+ files -> 2+ commits.")
+```
+
+### 5.4b: PR Creation (T-04, v4.0)
+
+Optional — activated when `.mpl/config.json` → `auto_pr.enabled: true` OR
+user's original prompt contains "PR", "pull request", or "ship".
+
+```
+if config.auto_pr?.enabled or task_prompt_mentions_pr:
+  // Gather PR context
+  gate_results = Read(".mpl/mpl/RUNBOOK.md") → extract "5-Gate Quality Results" section
+  deferred = Read(".mpl/mpl/deferred-review.md") or "None"
+  pp_summary = Read(".mpl/pivot-points.md") → first 3 PPs
+
+  Task(subagent_type="mpl-git-master", model="sonnet",
+    prompt="Create a pull request for the completed MPL pipeline.
+    pr_creation: true
+    Base branch: auto-detect
+    Title: derive from task description
+    PR Body context:
+    ## PP Summary
+    {pp_summary}
+    ## Quality Gate Results
+    {gate_results}
+    ## Deferred Review Items
+    {deferred}")
+
+  if pr_url:
+    announce: "[MPL] PR created: {pr_url}"
+    append to RUNBOOK: "## PR Created\n- URL: {pr_url}\n- Timestamp: {ISO}"
+  else:
+    announce: "[MPL] PR creation skipped or failed. See git-master output for details."
+else:
+  announce: "[MPL] Step 5.4b: PR creation skipped (not enabled in config or prompt)"
+```
+
+Config example (`.mpl/config.json`):
+```json
+{
+  "auto_pr": {
+    "enabled": false,
+    "base_branch": "auto"
+  }
+}
 ```
 
 ### 5.4: Metrics
@@ -238,9 +330,9 @@ Generate full run profile at `.mpl/mpl/profile/run-summary.json`:
 ```
 
 Profile data enables:
-1. **복잡도별 최적 토큰 예산 학습**: 과거 프로파일에서 등급별 평균 토큰 산출
-2. **Phase 0 Step 조합 최적화**: 어떤 Step 조합이 가장 효율적인지 통계
-3. **비정상 실행 탐지**: 토큰 과다 사용(평균의 2x 이상), 과도한 마이크로 수정(5회+) 경고
+1. **Learn optimal token budget by complexity**: derive average tokens per grade from past profiles
+2. **Optimize Phase 0 step combinations**: statistics on which step combinations are most efficient
+3. **Detect abnormal runs**: warn on excessive token usage (2x+ the average), excessive micro-fixes (5+)
 
 ### 5.5: Completion Report
 
@@ -310,10 +402,19 @@ On session start:
       // RUNBOOK provides: current status, milestones, decisions, issues
       // Use as primary context for understanding pipeline state
 
+    # F-31 (v3.8): Checkpoint-aware resume
+    if exists(".mpl/mpl/checkpoints/"):
+      checkpoints = list(".mpl/mpl/checkpoints/compaction-*.md")
+      if checkpoints not empty:
+        latest = max(checkpoints by N)
+        announce: "[MPL] Found compaction checkpoint: {latest}. Using for enhanced recovery."
+        # Checkpoint supplements standard resume data (RUNBOOK + state-summary)
+        # Loaded into context.checkpoint_recovery during Step 4.1 Context Assembly
+
     if all completed -> Step 5 (Finalize) if not done
     else:
       Report: "[MPL] Resuming: {completed}/{total} done. Next: {nextPhase.name}"
-      Load: RUNBOOK.md + phase-decisions.md + last state-summary.md
+      Load: RUNBOOK.md + phase-decisions.md + last state-summary.md + checkpoint (if exists)
       Continue from Step 4.1 for nextPhase
 ```
 
@@ -330,16 +431,38 @@ if state.session_status == "paused_budget":
         "pause_reason": None,
         "pause_timestamp": None,
         "budget_at_pause": None
-        # resume_from_phase는 유지 — Step 6의 기존 로직이 사용
+        # resume_from_phase is preserved — used by Step 6's existing logic
     })
 
-    # Handoff 신호 정리
+    # Clear handoff signal
     rm -f ".mpl/signals/session-handoff.json"
 
-    # 기존 Resume 로직으로 진행 (resume_from_phase 기반)
+    # Proceed to existing Resume logic (based on resume_from_phase)
 ```
 
-이 처리는 기존 Resume 로직 **이전**에 실행되며, `session_status`를 정리한 후 기존 Phase 복원 로직이 `resume_from_phase`를 사용하여 정상 이어하기를 수행한다.
+This processing runs **before** the existing Resume logic, cleans up `session_status`, then the existing Phase restoration logic uses `resume_from_phase` to perform normal continuation.
+
+#### Watcher-Based Auto-Resume (F-33, v3.9)
+
+For hands-free operation, run the session watcher in a separate terminal:
+
+```bash
+# Watch for pause signals and auto-resume
+./MPL/tools/mpl-session-watcher.sh /path/to/project
+
+# Notify-only mode (no auto-start)
+./MPL/tools/mpl-session-watcher.sh /path/to/project --notify-only
+
+# Custom check interval (default: 5s)
+./MPL/tools/mpl-session-watcher.sh /path/to/project --interval 10
+```
+
+The watcher monitors `.mpl/signals/session-handoff.json`. When detected:
+1. Reads signal data (resume_from_phase, budget info)
+2. Removes signal file (prevents duplicate resume)
+3. Starts a new Claude session with `/mpl:mpl-resume`
+
+Signal freshness: mpl-session-init.mjs validates the signal is <120s old (HANDOFF_MAX_AGE_MS).
 
 | Data | Source |
 |------|--------|
@@ -370,9 +493,9 @@ for each discovery in result.discoveries:
       -> Handle by maturity_mode:
          explore:  Auto-approve + record
          standard: HITL:
-           AskUserQuestion: "Discovery D-{N}이 PP-{M}과 충돌합니다."
-           Options: "반려" | "수용" | "보류"
-           Timeout: 30s -> Auto-select "보류"
+           AskUserQuestion: "Discovery D-{N} conflicts with PP-{M}."
+           Options: "Reject" | "Accept" | "Defer"
+           Timeout: 30s -> Auto-select "Defer"
          strict: HITL (same options, no auto-timeout)
 
   # 2. PD Override Check

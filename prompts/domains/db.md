@@ -1,19 +1,19 @@
-# Domain: DB (데이터베이스)
+# Domain: DB (Database)
 
-## 핵심 원칙
-- 마이그레이션은 항상 롤백 가능해야 한다 (up + down)
-- 인덱스 추가는 데이터 크기와 쿼리 패턴을 고려한다
-- 스키마 변경은 기존 데이터 호환성을 유지한다
-- ORM과 raw SQL을 혼용하지 않는다
+## Core Principles
+- Migrations must always be reversible (up + down)
+- Index additions must consider data size and query patterns
+- Schema changes must maintain backward compatibility with existing data
+- Do not mix ORM and raw SQL
 
-## 주의 사항
-- DROP TABLE/COLUMN은 되돌릴 수 없다 — 별도 Phase로 분리하거나 soft delete 사용
-- NULL → NOT NULL 변경 시 기존 데이터 마이그레이션 필수
-- 외래 키 제약 추가 시 기존 데이터 정합성 확인
-- 트랜잭션 범위를 최소화하고 deadlock 가능성 검토
+## Cautions
+- DROP TABLE/COLUMN is irreversible — isolate into a separate Phase or use soft delete
+- Changing NULL → NOT NULL requires migrating existing data first
+- Verify existing data integrity before adding foreign key constraints
+- Minimize transaction scope and review for deadlock potential
 
-## 검증 포인트
-- 마이그레이션 up/down 모두 성공하는가?
-- 기존 seed/fixture 데이터와 호환되는가?
-- 인덱스가 주요 쿼리 패턴에 적절한가?
-- 롤백 시 데이터 손실이 없는가?
+## Verification Points
+- Do both migration up and down succeed?
+- Is it compatible with existing seed/fixture data?
+- Are indexes appropriate for the primary query patterns?
+- Is there no data loss on rollback?

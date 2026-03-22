@@ -1,19 +1,19 @@
-# Subdomain: Algorithm/Optimization (연산 최적화 전략)
+# Subdomain: Algorithm/Optimization (Computational Optimization Strategy)
 
-## 핵심 원칙
-- 캐싱 전략은 데이터 변경 빈도와 일관성 요구사항에 따라 선택: LRU(용량 제한), TTL(시간 만료), Write-through(쓰기 동기화)
-- Memoization은 순수 함수(동일 입력 → 동일 출력)에만 적용 — 사이드 이펙트 있는 함수 적용 금지
-- Lazy evaluation으로 실제 필요 시점까지 비용이 큰 연산 지연
-- Batch processing으로 개별 처리 대비 I/O 왕복 횟수와 오버헤드 감소
+## Core Principles
+- Choose caching strategy based on data change frequency and consistency requirements: LRU (capacity limit), TTL (time expiry), Write-through (write synchronization)
+- Apply memoization only to pure functions (same input → same output) — do not apply to functions with side effects
+- Use lazy evaluation to defer costly operations until the result is actually needed
+- Use batch processing to reduce I/O round trips and overhead compared to per-item processing
 
-## 주의 사항
-- 최적화 전 반드시 프로파일링으로 실제 병목 지점 확인 — 추측 기반 최적화 금지
-- 캐시 무효화 전략 부재 시 stale 데이터 서빙 — TTL 또는 명시적 eviction 정책 필수
-- Space-time tradeoff: 캐시로 연산을 줄이되 메모리 사용량이 허용 범위 내인지 확인
-- 조기 최적화(premature optimization)로 코드 복잡도가 증가하면 유지보수 비용 상승
+## Cautions
+- Always profile to identify actual bottlenecks before optimizing — prohibit assumption-based optimization
+- Without a cache invalidation strategy, stale data will be served — TTL or explicit eviction policy is required
+- Space-time tradeoff: reduce computation with caching, but verify memory usage stays within acceptable bounds
+- Premature optimization increases code complexity and raises maintenance cost
 
-## 검증 포인트
-- 최적화 전후 벤치마크 수치가 측정되고 개선이 확인되었는가?
-- 캐시 히트율이 목표치(일반적으로 80% 이상) 달성 가능한 키 설계인가?
-- 메모이제이션 캐시가 메모리 누수 없이 적절한 크기로 제한되는가?
-- 배치 크기가 처리 레이턴시와 처리량(throughput) 균형점으로 설정되었는가?
+## Verification Points
+- Have benchmark measurements before and after optimization been taken and improvements confirmed?
+- Is the key design capable of achieving the target cache hit rate (generally 80% or above)?
+- Is the memoization cache bounded to an appropriate size without memory leaks?
+- Is the batch size set at the balance point between processing latency and throughput?

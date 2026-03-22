@@ -1,19 +1,19 @@
-# Domain: General (범용)
+# Domain: General
 
-## 핵심 원칙
-- 기존 프로젝트 컨벤션을 최우선으로 따른다
-- 단일 책임 원칙 — 하나의 함수/모듈은 하나의 역할
-- 명확한 네이밍 — 의도를 드러내는 변수/함수명 사용
-- 변경 범위를 최소화하고 영향 범위를 명확히 파악한다
+## Core Principles
+- Follow existing project conventions as the top priority
+- Single responsibility principle — one function/module has one role
+- Clear naming — use variable/function names that reveal intent
+- Minimize the scope of changes and clearly understand the impact area
 
-## 주의 사항
-- 과잉 추상화 금지 — 당장 필요하지 않은 레이어를 추가하지 않는다
-- 사이드 이펙트가 있는 함수는 명시적으로 표시한다
-- 매직 넘버/문자열은 상수로 추출한다
-- 기존 테스트가 깨지는 변경은 의도적이어야 한다
+## Cautions
+- No over-abstraction — do not add layers that are not immediately needed
+- Functions with side effects must be explicitly marked
+- Magic numbers/strings should be extracted as constants
+- Changes that break existing tests must be intentional
 
-## 검증 포인트
-- 기존 테스트가 모두 통과하는가?
-- 변경이 프로젝트 컨벤션과 일치하는가?
-- 불필요한 의존성이 추가되지 않았는가?
-- 코드가 자체 문서화(self-documenting)되는가?
+## Verification Points
+- Do all existing tests pass?
+- Does the change align with project conventions?
+- Have no unnecessary dependencies been added?
+- Is the code self-documenting?

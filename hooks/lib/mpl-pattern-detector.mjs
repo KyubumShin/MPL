@@ -1,4 +1,9 @@
 /**
+ * @limitation Currently supports Python/pytest patterns only.
+ * JS/TS (Jest/Vitest), Go, Rust test patterns are not yet detected.
+ */
+
+/**
  * MPL Pattern Detector — 7-Category Auto-Classification
  *
  * Detects usage patterns in test files and classifies them into 7 categories:

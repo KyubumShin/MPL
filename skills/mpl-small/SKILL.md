@@ -24,8 +24,8 @@ description: "[DEPRECATED] 3-Phase lightweight pipeline — use /mpl:mpl instead
 ### Phase A: Analyze (Phase 0 Simple)
 
 1. Complexity is fixed to `Simple` grade (Step 4: Error Spec only)
-2. Skip Triage (interview_depth = `skip`)
-3. Extract Pivot Points directly from user prompt (no interview)
+2. Lightweight Triage (interview_depth = `light`, minimum per F-35)
+3. Extract Pivot Points via abbreviated Round 1 + Round 2 interview
 4. Run codebase analysis (structure + test infrastructure only)
 5. Generate error specification: `.mpl/mpl/phase0/error-spec.md`
 

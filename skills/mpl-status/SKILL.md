@@ -13,12 +13,13 @@ Display the current MPL pipeline status with structured metrics.
 Read `.mpl/state.json` to get current pipeline state.
 If no state file exists, report "MPL is not active."
 
-### Step 2: Read PLAN.md
+### Step 2: Read decomposition.yaml
 
-Read `.mpl/PLAN.md` (or `PLAN.md`) to count TODO checkboxes:
-- `### [x]` = completed
-- `### [ ]` = pending
-- `### [FAILED]` = failed
+Read `.mpl/mpl/decomposition.yaml` to count phase progress:
+- Each phase entry with status tracking
+- Count completed vs total phases from decomposition
+
+Also check `.mpl/state.json` for `phases_completed` count.
 
 ### Step 3: Generate Dashboard
 
@@ -36,11 +37,12 @@ Output a structured dashboard:
 ║  Current Phase: {phase} {phase_icon}             ║
 ║                                                  ║
 ║  Phase Progress:                                 ║
-║  [1-A] Deep Research  {✅|⬜|🔄|⏭️}            ║
-║  [1-B] Plan Gen       {✅|⬜|🔄}                ║
-║  [2]   MVP Sprint     {✅|⬜|🔄}                ║
-║  [3]   Quality Gate   {✅|⬜|🔄}                ║
-║  [4]   Fix Loop       {✅|⬜|🔄|⏭️}            ║
+║  [0]   Triage         {✅|⬜|🔄|⏭️}            ║
+║  [1]   PP Interview   {✅|⬜|🔄|⏭️}            ║
+║  [2]   Codebase Scan  {✅|⬜|🔄}                ║
+║  [2.5] Phase 0 Enh.   {✅|⬜|🔄|⏭️}            ║
+║  [3]   Decompose      {✅|⬜|🔄}                ║
+║  [4]   Execute Loop   {✅|⬜|🔄}                ║
 ║  [5]   Finalize       {✅|⬜|🔄}                ║
 ╠══════════════════════════════════════════════════╣
 ║  TODO Progress: {completed}/{total} ({pct}%)     ║
@@ -48,9 +50,11 @@ Output a structured dashboard:
 ║  Completed: {N}  Pending: {N}  Failed: {N}       ║
 ╠══════════════════════════════════════════════════╣
 ║  Quality Gates:                                  ║
-║  Gate 1 (Tests):  {PASS|FAIL|PENDING}            ║
-║  Gate 2 (Review): {PASS|FAIL|PENDING}            ║
-║  Gate 3 (Agent):  {PASS|FAIL|PENDING|N/A}        ║
+║  Gate 0.5 (Types):    {PASS|FAIL|PENDING|N/A}    ║
+║  Gate 1   (Tests):    {PASS|FAIL|PENDING}         ║
+║  Gate 1.5 (Coverage): {PASS|FAIL|PENDING|N/A}    ║
+║  Gate 2   (Review):   {PASS|FAIL|PENDING}         ║
+║  Gate 3   (PP+H):     {PASS|FAIL|PENDING|N/A}    ║
 ╠══════════════════════════════════════════════════╣
 ║  Research:                                       ║
 ║  Mode: {full|light|standalone|skipped}           ║
@@ -99,7 +103,7 @@ Based on the current phase, add contextual information:
 - **phase1a-research**: Show research mode (full/light/standalone), current stage, stages completed, degraded stages if any
 - **phase1b-plan**: Show research report path, key recommendation, agents launched for planning
 - **phase1-plan** (legacy): List agents launched, waiting for outputs
-- **phase2-sprint**: Show per-TODO status, worker assignments, blocked TODOs
+- **phase2-sprint**: Show per-phase status from decomposition.yaml, worker assignments, blocked phases
 - **phase3-gate**: Show each gate's detailed results
 - **phase4-fix**: Show failure pattern, strategy being used, convergence trend
 - **phase5-finalize**: Show learnings extracted, commits made
@@ -115,9 +119,9 @@ Based on state, suggest next action:
 | phase1a + stage2 complete | "Run Stage 3 Synthesis to generate report" |
 | phase1a + completed | "Research done. Proceed to Phase 1-B" |
 | phase1b + no agents launched | "Run Phase 1-B planning agents with research input" |
-| phase1b + agents complete | "Generate PLAN.md and get HITL approval" |
+| phase1b + agents complete | "Generate decomposition.yaml and get HITL approval" |
 | phase1 + no agents launched | "Run Phase 1 exploration agents (legacy)" |
-| phase1 + agents complete | "Generate PLAN.md and get HITL approval" |
+| phase1 + agents complete | "Generate decomposition.yaml and get HITL approval" |
 | phase2 + blocked TODOs | "Complete dependency TODOs first: {list}" |
 | phase3 + gate failed | "Enter Phase 4 fix loop or re-plan" |
 | phase4 + stagnating | "Consider model escalation or re-plan" |
@@ -129,4 +133,4 @@ Based on state, suggest next action:
 
 - No `.mpl/` directory → "MPL has not been initialized. Say 'mpl' or run /mpl:mpl to start."
 - Corrupted state.json → "State file is corrupted. Run /mpl:mpl-cancel --force to reset."
-- Missing PLAN.md in phase2+ → "PLAN.md not found. Return to Phase 1."
+- Missing decomposition.yaml in phase execution → "decomposition.yaml not found. Return to Step 3 (Decompose)."

@@ -1,398 +1,546 @@
-# MPL 로드맵: v1.0→v3.0 진화와 잔여 계획
+# MPL Roadmap: v1.0→v3.0 Evolution and Remaining Plans
 
-## 비전: "Phase 0 Enhanced + Phase 5 Minimized"
+## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 
-MPL의 핵심 철학은 **사전 명세(Phase 0)를 강화하여 사후 수정(Phase 5)을 불필요하게 만드는 것**이다. 7개의 실험(Exp 1~8, Exp 2 제외)을 통해 Phase 0에 투자하는 토큰이 Phase 5의 디버깅/수정 비용을 완전히 제거할 수 있음을 실증적으로 검증했다.
+MPL's core philosophy is **strengthening pre-specification (Phase 0) to make post-correction (Phase 5) unnecessary**. Through 7 experiments (Exp 1~8, excluding Exp 2), it was empirically verified that tokens invested in Phase 0 can completely eliminate the debugging/correction cost of Phase 5.
 
-v3.0에서 이 비전은 **구현 완료**되었으며, 추가로 로드맵에 없던 기능들(Pre-Execution Analysis, 5-Gate 품질, Convergence Detection 등)도 도입되었다.
-
----
-
-## 3단계 구현 로드맵 — 달성 현황
-
-| 단계 | 이름 | 핵심 목표 | 상태 | 상세 문서 |
-|------|------|----------|------|----------|
-| Phase 1 | Foundation | Phase 0 Enhanced: 복잡도 적응형 4단계 분석 | **v3.0 완전 구현** | [phase1-foundation.md](./phase1-foundation.md) |
-| Phase 2 | Incremental | Build-Test-Fix 마이크로 사이클, Phase 5 진입 조건 엄격화 | **v3.0 완전 구현** | [phase2-incremental.md](./phase2-incremental.md) |
-| Phase 3 | Automation | 토큰 프로파일링, Phase 0 캐싱, API 자동 추출, 패턴 자동 분석 | **완전 구현** (4/4) | [phase3-automation.md](./phase3-automation.md) |
+In v3.0, this vision has been **fully implemented**, and additionally, features not in the roadmap (Pre-Execution Analysis, 5-Gate quality, Convergence Detection, etc.) were also introduced.
 
 ---
 
-## 핵심 수치 목표 — 달성 여부
+## 3-Stage Implementation Roadmap — Achievement Status
 
-| 지표 | v1.0 기준 | v2.0 목표 | v3.0 달성 | 상태 |
-|------|----------|----------|----------|------|
-| 총 토큰 사용량 | ~81K | 50~55K | 적응형 (복잡도별 가변) | ✓ 복잡도 기반 최적화 |
-| Phase 4 통과율 | 66~83% | 95%+ | 5-Gate 시스템으로 대체 | ✓ 95% 이상 요구 |
-| Phase 5 의존도 | 높음 (필수) | 최소 (조건부) | Fix Loop + Convergence Detection으로 대체 | ✓ 사실상 제거 |
-| Phase 0 토큰 | ~5K | 8~25K (복잡도별) | 8~25K (4등급 적응형) | ✓ 목표 달성 |
-| 디버깅 사이클 수 | 3~5회 | 0~1회 | Build-Test-Fix (TODO당 최대 2회) | ✓ 즉시 수정으로 전환 |
+| Stage | Name | Core Goal | Status | Detailed Docs |
+|-------|------|-----------|--------|--------------|
+| Phase 1 | Foundation | Phase 0 Enhanced: complexity-adaptive 4-step analysis | **v3.0 fully implemented** | [phase1-foundation.md](./phase1-foundation.md) |
+| Phase 2 | Incremental | Build-Test-Fix micro cycle, stricter Phase 5 entry conditions | **v3.0 fully implemented** | [phase2-incremental.md](./phase2-incremental.md) |
+| Phase 3 | Automation | Token profiling, Phase 0 caching, automatic API extraction, automatic pattern analysis | **fully implemented** (4/4) | [phase3-automation.md](./phase3-automation.md) |
 
 ---
 
-## 구현 상태 매트릭스
+## Key Numeric Goals — Achievement Status
 
-### Phase 1: Foundation — 완전 구현
-
-| 기능 | 설계 | 구현 | 비고 |
-|------|------|------|------|
-| 복잡도 감지기 (4등급) | ✓ | ✓ | Simple/Medium/Complex/Enterprise |
-| Phase 0 4단계 프로세스 | ✓ | ✓ | Step 1~4, 복잡도별 선택적 적용 |
-| API Contract Extraction | ✓ | ✓ | ast_grep_search + lsp 기반 |
-| Example Pattern Analysis | ✓ | ✓ | 7개 패턴 카테고리 |
-| Type Policy Definition | ✓ | ✓ | 타입 힌트 규칙 |
-| Error Specification | ✓ | ✓ | 모든 복잡도에서 필수 |
-| 산출물 검증 체크리스트 | - | ✓ | v3.0 추가 |
-| Phase 0 요약 생성 | - | ✓ | v3.0 추가 |
-
-### Phase 2: Incremental — 완전 구현
-
-| 기능 | 설계 | 구현 | 비고 |
-|------|------|------|------|
-| Build-Test-Fix 마이크로 사이클 | ✓ | ✓ | TODO당 최대 2회 재시도 |
-| 누적 테스트 (회귀 방지) | ✓ | ✓ | 페이즈 종료 시 전체 실행 |
-| Phase 5 진입 조건 엄격화 | ✓ | ✓ | 5-Gate 시스템으로 발전 |
-| 복잡도 자동 감지기 | ✓ | ✓ | Step 2.5에 통합 |
-| Test Agent (독립 검증) | - | ✓ | v3.0 추가: 코드 작성자와 분리 |
-| Convergence Detection | - | ✓ | v3.0 추가: improving/stagnating/regressing |
-
-### Phase 3: Automation — 완전 구현
-
-| 기능 | 설계 | 구현 | 비고 |
-|------|------|------|------|
-| 토큰 프로파일링 | ✓ | ✓ | phases.jsonl + run-summary.json |
-| Phase 0 캐싱 | ✓ | ✓ | .mpl/cache/phase0/ |
-| API 자동 추출 (AST 파서) | ✓ | ✓ | hooks/lib/mpl-test-analyzer.mjs 구현 |
-| 패턴 자동 분석 (패턴 감지기) | ✓ | ✓ | hooks/lib/mpl-pattern-detector.mjs 구현 |
+| Metric | v1.0 baseline | v2.0 target | v3.0 achieved | Status |
+|--------|--------------|------------|--------------|--------|
+| Total token usage | ~81K | 50~55K | Adaptive (variable by complexity) | ✓ Complexity-based optimization |
+| Phase 4 pass rate | 66~83% | 95%+ | Replaced by 5-Gate system | ✓ 95%+ required |
+| Phase 5 dependency | High (required) | Minimal (conditional) | Replaced by Fix Loop + Convergence Detection | ✓ Effectively eliminated |
+| Phase 0 tokens | ~5K | 8~25K (by complexity) | 8~25K (4-grade adaptive) | ✓ Goal achieved |
+| Debugging cycle count | 3~5 | 0~1 | Build-Test-Fix (max 2 per TODO) | ✓ Switched to immediate correction |
 
 ---
 
-## v3.0에서 로드맵 외 추가된 기능
+## Implementation Status Matrix
 
-로드맵에 계획되지 않았으나 v3.0에서 새로 도입된 기능들:
+### Phase 1: Foundation — Fully Implemented
 
-| 기능 | 설명 | 관련 에이전트 |
-|------|------|-------------|
-| **Triage** | information_density 기반 인터뷰 깊이 자동 결정 (light/full, skip 제거) | (오케스트레이터) |
-| **Pre-Execution Analysis** | Gap/Tradeoff 통합 + Verification 2단계 사전 분석 | mpl-pre-execution-analyzer, mpl-verification-planner |
-| **5-Gate 품질 시스템** | Gate 0.5(타입 체크) + Gate 1(자동 테스트) + Gate 2(코드 리뷰) + Gate 3(PP 준수) + Gate 3.5(H-items) | mpl-code-reviewer |
-| **A/S/H 검증 분류** | Agent/Sandbox/Human 검증 항목 분류 | mpl-verification-planner |
-| **Test Agent** | 코드 작성자와 독립된 테스트 에이전트 | mpl-test-agent |
-| **Convergence Detection** | Fix Loop에서 improving/stagnating/regressing 감지 | (오케스트레이터) |
-| **Side Interview** | CRITICAL discovery + PP 충돌 시에만 사용자 확인 (비차단 항목은 deferred-items.md로 로그) | (오케스트레이터) |
-| **Resume 프로토콜** | 페이즈별 상태 영속성 기반 이어하기 | (오케스트레이터) |
-| **컨텍스트 정리** | 페이즈 완료 후 오케스트레이터 메모리 정리 | (오케스트레이터) |
+| Feature | Design | Implementation | Notes |
+|---------|--------|---------------|-------|
+| Complexity detector (4 grades) | ✓ | ✓ | Simple/Medium/Complex/Enterprise |
+| Phase 0 4-step process | ✓ | ✓ | Step 1~4, selectively applied by complexity |
+| API Contract Extraction | ✓ | ✓ | ast_grep_search + lsp based |
+| Example Pattern Analysis | ✓ | ✓ | 7 pattern categories |
+| Type Policy Definition | ✓ | ✓ | Type hint rules |
+| Error Specification | ✓ | ✓ | Required at all complexity levels |
+| Artifact verification checklist | - | ✓ | Added in v3.0 |
+| Phase 0 summary generation | - | ✓ | Added in v3.0 |
+
+### Phase 2: Incremental — Fully Implemented
+
+| Feature | Design | Implementation | Notes |
+|---------|--------|---------------|-------|
+| Build-Test-Fix micro cycle | ✓ | ✓ | Max 2 retries per TODO |
+| Cumulative testing (regression prevention) | ✓ | ✓ | Full execution at phase end |
+| Stricter Phase 5 entry conditions | ✓ | ✓ | Evolved into 5-Gate system |
+| Automatic complexity detector | ✓ | ✓ | Integrated at Step 2.5 |
+| Test Agent (independent verification) | - | ✓ | Added in v3.0: separated from code author |
+| Convergence Detection | - | ✓ | Added in v3.0: improving/stagnating/regressing |
+
+### Phase 3: Automation — Fully Implemented
+
+| Feature | Design | Implementation | Notes |
+|---------|--------|---------------|-------|
+| Token profiling | ✓ | ✓ | phases.jsonl + run-summary.json |
+| Phase 0 caching | ✓ | ✓ | .mpl/cache/phase0/ |
+| Automatic API extraction (AST parser) | ✓ | ✓ | hooks/lib/mpl-test-analyzer.mjs implemented |
+| Automatic pattern analysis (pattern detector) | ✓ | ✓ | hooks/lib/mpl-pattern-detector.mjs implemented |
 
 ---
 
-## 실험 성과 매트릭스
+## Features Added Beyond Roadmap in v3.0
 
-7개 실험 모두 77/77 = 100% 달성 (최종 테스트 스위트 기준). 이 실험 결과는 v3.0의 Phase 0 Enhanced 설계의 근거가 되었다.
+Features newly introduced in v3.0 that were not planned in the roadmap:
 
-| 실험 | Phase 0 기법 | 누적 점수 진행 | v3.0 반영 |
-|------|-------------|---------------|----------|
-| Exp 1 | API 계약 추출 | 34/89 (38%) → 77/77 (100%) | Step 1: API Contract Extraction |
-| Exp 3 | 예제 패턴 분석 | 52/89 (58%) → 77/77 (100%) | Step 2: Example Pattern Analysis |
-| Exp 4 | 타입 정책 정의 | 58/89 (65%) → 77/77 (100%) | Step 3: Type Policy Definition |
-| Exp 5 | 테스트 스텁 생성 | 69/89 (77%) → 77/77 (100%) | Build-Test-Fix 마이크로 사이클 |
-| Exp 6 | 점진적 테스팅 | 74/89 (83%) → 77/77 (100%) | Incremental Verification |
-| Exp 7 | 에러 명세 | 77/77 (100%) | Step 4: Error Specification |
-| Exp 8 | 하이브리드 검증 | 77/77 (100%) | 5-Gate 품질 시스템 |
+| Feature | Description | Related Agent |
+|---------|-------------|--------------|
+| **Triage** | Automatic interview depth decision based on information_density (light/full, skip removed) | (orchestrator) |
+| **Pre-Execution Analysis** | Gap/Tradeoff integration + Verification 2-stage pre-analysis | mpl-pre-execution-analyzer, mpl-verification-planner |
+| **5-Gate quality system** | Gate 0.5 (type check) + Gate 1 (auto tests) + Gate 2 (code review) + Gate 3 (PP compliance) + Gate 3.5 (H-items) | mpl-code-reviewer |
+| **A/S/H verification classification** | Agent/Sandbox/Human verification item classification | mpl-verification-planner |
+| **Test Agent** | Test agent independent from code author | mpl-test-agent |
+| **Convergence Detection** | Detecting improving/stagnating/regressing in Fix Loop | (orchestrator) |
+| **Side Interview** | User confirmation only for CRITICAL discovery + PP conflicts (non-blocking items logged to deferred-items.md) | (orchestrator) |
+| **Resume protocol** | Continue based on per-phase state persistence | (orchestrator) |
+| **Context cleanup** | Orchestrator memory cleanup after phase completion | (orchestrator) |
 
-> **핵심 발견**: 누적 점수 진행(38% → 58% → 65% → 77% → 83% → 100%)은 Phase 0 기법이 추가될수록 점수가 단조 증가함을 보여준다. 이 발견이 복잡도 적응형 Phase 0 설계의 근거가 되었다.
+---
 
-## Phase 0 Enhanced: 4단계 프로세스
+## Experiment Achievement Matrix
 
-실험 결과를 종합하면, 완전한 Phase 0는 4단계로 구성된다. v3.0에서 **구현 완료**되었다:
+All 7 experiments achieved 77/77 = 100% (based on final test suite). These experiment results became the basis for the Phase 0 Enhanced design in v3.0.
+
+| Experiment | Phase 0 technique | Cumulative score progress | v3.0 reflection |
+|------------|------------------|--------------------------|----------------|
+| Exp 1 | API contract extraction | 34/89 (38%) → 77/77 (100%) | Step 1: API Contract Extraction |
+| Exp 3 | Example pattern analysis | 52/89 (58%) → 77/77 (100%) | Step 2: Example Pattern Analysis |
+| Exp 4 | Type policy definition | 58/89 (65%) → 77/77 (100%) | Step 3: Type Policy Definition |
+| Exp 5 | Test stub generation | 69/89 (77%) → 77/77 (100%) | Build-Test-Fix micro cycle |
+| Exp 6 | Incremental testing | 74/89 (83%) → 77/77 (100%) | Incremental Verification |
+| Exp 7 | Error specification | 77/77 (100%) | Step 4: Error Specification |
+| Exp 8 | Hybrid verification | 77/77 (100%) | 5-Gate quality system |
+
+> **Key finding**: The cumulative score progression (38% → 58% → 65% → 77% → 83% → 100%) shows that scores monotonically increase as Phase 0 techniques are added. This finding became the basis for the complexity-adaptive Phase 0 design.
+
+## Phase 0 Enhanced: 4-Step Process
+
+Synthesizing experiment results, a complete Phase 0 consists of 4 steps. **Fully implemented** in v3.0:
 
 ```
-Step 1: API Contract Extraction (Exp 1) ─── 함수 시그니처, 파라미터 순서
-Step 2: Example Pattern Analysis (Exp 3) ── 사용 패턴, 기본값, 엣지 케이스
-Step 3: Type Policy Definition (Exp 4) ──── 타입 힌트, 컬렉션 타입 규칙
-Step 4: Error Specification (Exp 7) ──────── 표준 예외, 메시지 패턴
+Step 1: API Contract Extraction (Exp 1) ─── function signatures, parameter order
+Step 2: Example Pattern Analysis (Exp 3) ── usage patterns, defaults, edge cases
+Step 3: Type Policy Definition (Exp 4) ──── type hints, collection type rules
+Step 4: Error Specification (Exp 7) ──────── standard exceptions, message patterns
 ```
 
-각 단계가 독립적으로도 점수를 개선하지만, 조합했을 때 시너지 효과가 극대화된다. 복잡도에 따라 적용 Step이 자동 선택된다.
+Each step improves scores independently, but synergy is maximized when combined. Applied steps are automatically selected based on complexity.
 
-## 토큰 예산 재배분
+## Token Budget Reallocation
 
-v1.0에서 v3.0으로의 토큰 예산 변화. v3.0은 Phase 5를 Fix Loop + 5-Gate로 대체하여 구조가 변경되었다:
+Token budget changes from v1.0 to v3.0. v3.0 changed structure by replacing Phase 5 with Fix Loop + 5-Gate:
 
 ```
-v1.0 (기존)                          v3.0 (달성)
+v1.0 (original)                     v3.0 (achieved)
 ┌──────────────────────────┐        ┌──────────────────────────┐
-│ Phase 0:  ~5K  ( 6%)     │        │ Phase 0: 8~25K (적응형)   │
-│ Phase 1: ~15K (19%)      │        │ Phase 실행: 페이즈당 적응형  │
+│ Phase 0:  ~5K  ( 6%)     │        │ Phase 0: 8~25K (adaptive) │
+│ Phase 1: ~15K (19%)      │        │ Phase execution: adaptive  │
 │ Phase 2: ~15K (19%)      │        │ 5-Gate: ~2K              │
-│ Phase 3: ~15K (19%)      │        │ Fix Loop: 0~10K (조건부)  │
+│ Phase 3: ~15K (19%)      │        │ Fix Loop: 0~10K (conditional) │
 │ Phase 4: ~15K (19%)      │        │ Finalize: ~2K            │
 │ Phase 5: ~16K (20%)      │        │                          │
-│ ─────────────────────    │        │ Phase 0 캐시 히트 시: ~0K  │
-│ 합계:    ~81K            │        │ 합계: 복잡도 기반 가변     │
+│ ─────────────────────    │        │ Phase 0 cache hit: ~0K   │
+│ Total:   ~81K            │        │ Total: variable by complexity │
 └──────────────────────────┘        └──────────────────────────┘
 ```
 
-## 잔여 계획 및 알려진 이슈
+## Remaining Plans and Known Issues
 
-> 최종 감사일: 2026-03-05. 전체 목록은 [design.md §9](../design.md#9-알려진-이슈-및-잔여-작업)를 참조한다.
+> Final audit date: 2026-03-05. For full list, refer to [design.md §9](../design.md#9-known-issues-and-remaining-work).
 
-### ~~CRITICAL (2건) — 정합성 영향~~ **해결됨** (2026-03-05)
+### ~~CRITICAL (2 items) — Consistency impact~~ **Resolved** (2026-03-05)
 
-| ID | 항목 | 상태 |
-|----|------|------|
-| I-01 | ~~유령 에이전트 `mpl-research-synthesizer`~~ | **해결됨** — VALIDATE_AGENTS 및 EXPECTED_SECTIONS에서 제거 |
-| I-02 | ~~mpl-run.md Related Skills 중복~~ | **해결됨** — 중복 행 제거, 단일 등록으로 정리 |
+| ID | Item | Status |
+|----|------|--------|
+| I-01 | ~~Ghost agent `mpl-research-synthesizer`~~ | **Resolved** — Removed from VALIDATE_AGENTS and EXPECTED_SECTIONS |
+| I-02 | ~~mpl-run.md Related Skills duplication~~ | **Resolved** — Duplicate rows removed, consolidated to single registration |
 
-### ~~HIGH (5건) — 기능 누락~~ **해결됨** (2026-03-05)
+### ~~HIGH (5 items) — Missing features~~ **Resolved** (2026-03-05)
 
-| ID | 항목 | 상태 |
-|----|------|------|
-| I-03 | ~~스킬 `/mpl:mpl-bugfix` 미구현~~ | **해결됨** — `skills/mpl-bugfix/SKILL.md` 생성 |
-| I-04 | ~~스킬 `/mpl:mpl-small` 미구현~~ | **해결됨** — `skills/mpl-small/SKILL.md` 생성 |
-| I-05 | ~~스킬 `/mpl:mpl-compound` 래퍼 없음~~ | **해결됨** — `skills/mpl-compound/SKILL.md` 생성 |
-| I-06 | ~~스킬 `/mpl:mpl-gap-analysis` 래퍼 없음~~ | **해결됨** — `skills/mpl-gap-analysis/SKILL.md` 생성 |
-| I-07 | ~~`mpl-validate-output` 에이전트 목록 불완전~~ | **해결됨** — `mpl-decomposer`, `mpl-git-master`, `mpl-compound` 추가 |
+| ID | Item | Status |
+|----|------|--------|
+| I-03 | ~~Skill `/mpl:mpl-bugfix` not implemented~~ | **Resolved** — `skills/mpl-bugfix/SKILL.md` created |
+| I-04 | ~~Skill `/mpl:mpl-small` not implemented~~ | **Resolved** — `skills/mpl-small/SKILL.md` created |
+| I-05 | ~~Skill `/mpl:mpl-compound` wrapper missing~~ | **Resolved** — `skills/mpl-compound/SKILL.md` created |
+| I-06 | ~~Skill `/mpl:mpl-gap-analysis` wrapper missing~~ | **Resolved** — `skills/mpl-gap-analysis/SKILL.md` created |
+| I-07 | ~~`mpl-validate-output` agent list incomplete~~ | **Resolved** — `mpl-decomposer`, `mpl-git-master`, `mpl-compound` added |
 
-### ~~MEDIUM (2건) — 미구현 로드맵~~ **해결됨** (2026-03-05)
+### ~~MEDIUM (2 items) — Unimplemented roadmap~~ **Resolved** (2026-03-05)
 
-| ID | 항목 | 상태 |
-|----|------|------|
-| I-08 | ~~API 자동 추출 (AST 파서)~~ | **해결됨** — `hooks/lib/mpl-test-analyzer.mjs` 구현 |
-| I-09 | ~~패턴 자동 분석 (패턴 감지기)~~ | **해결됨** — `hooks/lib/mpl-pattern-detector.mjs` 구현 |
+| ID | Item | Status |
+|----|------|--------|
+| I-08 | ~~Automatic API extraction (AST parser)~~ | **Resolved** — `hooks/lib/mpl-test-analyzer.mjs` implemented |
+| I-09 | ~~Automatic pattern analysis (pattern detector)~~ | **Resolved** — `hooks/lib/mpl-pattern-detector.mjs` implemented |
 
-### ~~LOW (4건) — 개선 사항~~ **해결됨** (2026-03-05)
+### ~~LOW (4 items) — Improvements~~ **Resolved** (2026-03-05)
 
-| ID | 항목 | 상태 |
-|----|------|------|
-| I-10 | ~~Convergence 상태 명명 불일치~~ | **해결됨** — `stagnating`/`regressing`으로 통일 |
-| I-11 | ~~Phase 0 캐시 검증 유틸리티 코드 없음~~ | **해결됨** — `hooks/lib/mpl-cache.mjs` 구현 |
-| I-12 | ~~토큰 프로파일링 집계·시각화 도구 없음~~ | **해결됨** — `hooks/lib/mpl-profile.mjs` 구현 |
-| I-13 | ~~Triage 로직이 훅으로 강제되지 않음~~ | **해결됨** — phase-controller에 triage 가드 추가 |
+| ID | Item | Status |
+|----|------|--------|
+| I-10 | ~~Convergence state naming inconsistency~~ | **Resolved** — Unified to `stagnating`/`regressing` |
+| I-11 | ~~Phase 0 cache validation utility code missing~~ | **Resolved** — `hooks/lib/mpl-cache.mjs` implemented |
+| I-12 | ~~Token profiling aggregation/visualization tool missing~~ | **Resolved** — `hooks/lib/mpl-profile.mjs` implemented |
+| I-13 | ~~Triage logic not enforced by hook~~ | **Resolved** — Triage guard added to phase-controller |
 
 ---
 
-## v3.1 감사 및 개선 (2026-03-07)
+## v3.1 Audit and Improvements (2026-03-07)
 
-### 완료된 항목
+### Completed Items
 
-| # | 항목 | 유형 | 변경 내용 |
-|---|------|------|----------|
-| 1 | Critic → Decomposer 흡수 | 제거 | `mpl-critic` 삭제, risk_assessment를 decomposer 출력에 내장 |
-| 2 | Phase 0 복잡도 공식 단순화 | 개선 | async_functions 제거, 4등급→3등급, 추가 도구 호출 불필요 |
-| 3 | Gap + Tradeoff 통합 | 병합 | `mpl-pre-execution-analyzer`(sonnet) 생성, 2회→1회 호출 |
-| 4 | Fast-Fail Path | 추가 | bugfix/small/full 3-way 파이프라인 모드 분류 |
-| 5 | Phase Runner 진행 보고 | 추가 | 10개 마일스톤별 실시간 상태 보고 프로토콜 |
-| 6 | Circuit break 부분 롤백 | 추가 | PASS TODO 보존, FAIL TODO 파일 롤백, recovery context 생성 |
-| 7 | Worker 파일 충돌 감지 | 추가 | 병렬 TODO 간 파일 겹침 시 자동 순차 강제 |
-| 9 | Decomposer 읽기 도구 허용 | 개선 | Read/Glob/Grep 허용으로 분해 정확도 향상 |
-| 10 | State Summary 섹션명 통일 | 개선 | 한/영 혼용→일관된 영문 섹션명 |
-| 11 | Worker PLAN.md 참조 수정 | 버그 | "PLAN.md"→"mini-plan" |
-| 12 | Gate 3 재정의 | 개선 | Agent-as-User(S-items 중복)→PP Compliance + H-items resolution |
+| # | Item | Type | Change content |
+|---|------|------|---------------|
+| 1 | Critic → Decomposer absorption | Removal | `mpl-critic` deleted, risk_assessment embedded in decomposer output |
+| 2 | Phase 0 complexity formula simplification | Improvement | async_functions removed, 4 grades→3 grades, no additional tool calls needed |
+| 3 | Gap + Tradeoff integration | Merge | `mpl-pre-execution-analyzer`(sonnet) created, 2 calls→1 call |
+| 4 | Fast-Fail Path | Addition | bugfix/small/full 3-way pipeline mode classification |
+| 5 | Phase Runner progress reporting | Addition | Real-time status reporting protocol for 10 milestones |
+| 6 | Circuit break partial rollback | Addition | PASS TODO preservation, FAIL TODO file rollback, recovery context creation |
+| 7 | Worker file conflict detection | Addition | Automatic sequential enforcement when files overlap among parallel TODOs |
+| 9 | Decomposer read tool permission | Improvement | Read/Glob/Grep allowed for improved decomposition accuracy |
+| 10 | State Summary section name unification | Improvement | Mixed Korean/English→consistent English section names |
+| 11 | Worker PLAN.md reference fix | Bug | "PLAN.md"→"mini-plan" |
+| 12 | Gate 3 redefinition | Improvement | Agent-as-User (S-items duplicate)→PP Compliance + H-items resolution |
 
-에이전트 수: 12→10 (critic 흡수 + gap/tradeoff 통합, deprecated 파일 삭제) → v3.2에서 12 (mpl-scout, mpl-compound 정식 추가)
+Agent count: 12→10 (critic absorbed + gap/tradeoff integrated, deprecated files deleted) → 12 in v3.2 (mpl-scout, mpl-compound officially added)
 
-### 미래 로드맵 (기존 — v3.1 이전)
+### Future Roadmap (original — pre v3.1)
 
-| ID | 항목 | 우선순위 | 상태 | 설명 |
-|----|------|---------|------|------|
-| F-03 | 언어별 LSP 통합 강화 | MED | **완료** | Step -1 LSP Warm-up 추가 (mpl-run-phase0.md). 언어 자동 감지 → cold start 제거 → ast_grep 폴백 |
-| F-04 | Standalone 독립 동작 | **HIGH** | 미구현 | OMC 의존성 제거. `/mpl:mpl-setup`으로 LSP·MCP 자동 설정, `mpl-doctor` 에이전트로 진단. OMC 도구(lsp_*, ast_grep) 없으면 Grep/Glob 폴백 |
-| F-05 | Phase 0 캐시 부분 무효화 | LOW | 미구현 | 전체 무효화 대신 변경된 모듈만 재분석 |
-| F-06 | 멀티 프로젝트 지원 | LOW | 미구현 | monorepo 환경에서 프로젝트별 독립 파이프라인 |
+| ID | Item | Priority | Status | Description |
+|----|------|----------|--------|-------------|
+| F-03 | Enhanced per-language LSP integration | MED | **Complete** | Added Step -1 LSP Warm-up (mpl-run-phase0.md). Auto-detect language → eliminate cold start → ast_grep fallback |
+| F-04 | Standalone independent operation | **HIGH** | Not implemented | Remove OMC dependency. Auto-configure LSP·MCP via `/mpl:mpl-setup`, diagnose with `mpl-doctor` agent. Grep/Glob fallback if OMC tools (lsp_*, ast_grep) unavailable |
+| F-05 | Phase 0 cache partial invalidation | LOW | Not implemented | Re-analyze only changed modules instead of full invalidation |
+| F-06 | Multi-project support | LOW | Not implemented | Independent pipeline per project in monorepo environment |
+
+---
+
+## v4.1 — MCP Server Tier 1: Deterministic Scoring + Active State (2026-03-22)
+
+### Summary
+
+v4.1 introduces the MPL MCP Server, eliminating LLM scoring variance and enabling agents to actively query pipeline state.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| M-01 | **MCP Server Tier 1** | New server | 3 MCP tools: `mpl_score_ambiguity` (5D scoring via haiku API temp 0.1 + code computation), `mpl_state_read` (active state query for agents), `mpl_state_write` (atomic state update). TypeScript + @modelcontextprotocol/sdk, stdio transport. All tools have graceful fallback when server unavailable. |
+
+### Architecture
+
+```
+MPL/mcp-server/
+├── src/index.ts              # Server entry + tool registration
+├── src/tools/scoring.ts      # mpl_score_ambiguity
+├── src/tools/state.ts        # mpl_state_read + mpl_state_write
+├── src/lib/state-manager.ts  # Ported from hooks/lib/mpl-state.mjs
+└── src/lib/llm-scorer.ts     # Anthropic API scoring (haiku, temp 0.1)
+```
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `mcp-server/` | Complete MCP server (TypeScript, compiled to dist/) |
+| `.mcp.json` | MCP server registration for Claude Code |
+
+### Key Design Decisions
+
+- **haiku for scoring**: ~$0.001/call, sufficient accuracy at temp 0.1, 10x cheaper than sonnet
+- **Code-computed weighted sum**: LLM scores dimensions, but weighted average is deterministic code
+- **Graceful fallback**: All tools degrade to existing behavior when MCP unavailable
+- **State port**: `state-manager.ts` is a TypeScript port of `hooks/lib/mpl-state.mjs` with identical schema
+
+---
+
+## v4.0 — Feasibility Defense, Browser QA, PR Creation (2026-03-22)
+
+### Summary
+
+v4.0 adds verification depth: catching infeasible specs earlier, validating UI in real browsers, and automating PR creation.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| T-11 | **Feasibility 2-Layer Defense** | Agent extension | **Layer 1**: Stage 2 PP Conformance Check extended with `INFEASIBLE` classification. Checks API availability, constraint compatibility, tech viability, scope via Grep/Glob on codebase — catches ~80% of feasibility issues during interview at zero additional cost. **Layer 2**: Decomposer `go_no_go` extended with `RE_INTERVIEW` signal + `re_interview_questions` field. Safety net for Phase 0-dependent issues. |
+| T-03 | **Browser QA (Gate 1.7)** | New agent + Gate | New `mpl-qa-agent` validates UI via Claude in Chrome MCP tools (tabs, read_page, find, console, screenshot). Gate 1.7 inserted between Gate 1.5 and Gate 2. **Non-blocking** — issues defer to Step 5.5. Graceful skip when Chrome MCP unavailable. |
+| T-04 | **PR Creation (Step 5.4b)** | Agent extension + Step | `mpl-git-master` extended with PR creation mode (`pr_creation: true`). Creates feature branch, pushes, opens PR via `gh pr create` with Gate evidence + deferred items in body. Optional, activated by config or prompt keywords. |
+
+### New Agent
+
+| Agent | Role | Model |
+|-------|------|-------|
+| `mpl-qa-agent` | Browser QA — validates UI via Chrome MCP, reports console errors, accessibility, element presence | sonnet |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `agents/mpl-ambiguity-resolver.md` | INFEASIBLE classification + feasibility scan + question template |
+| `agents/mpl-decomposer.md` | RE_INTERVIEW go_no_go + re_interview_questions + Step 10.5 |
+| `commands/mpl-run-decompose.md` | RE_INTERVIEW handling |
+| `agents/mpl-qa-agent.md` | NEW — Browser QA agent |
+| `commands/mpl-run-execute.md` | Gate 1.7 Browser QA |
+| `agents/mpl-git-master.md` | PR creation mode |
+| `commands/mpl-run-finalize.md` | Step 5.4b PR Creation |
+
+---
+
+## v3.9 — Autonomous Execution, Phase Lock, Budget Pause (2026-03-22)
+
+### Summary
+
+v3.9 focuses on autonomous execution — reducing mid-pipeline human interruptions and improving session resilience.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| T-10 | **Post-Execution Review (Step 5.5)** | Protocol extension | H-items now have severity (HIGH/MED/LOW). Gate 3 only blocks on HIGH H-items; MED/LOW are deferred to Step 5.5 post-execution review report. Step 5.0 Final Side Interview removed (absorbed into 5.5). Users review deferred items once at the end, not mid-pipeline. |
+| T-01 P2 | **Phase-Scoped File Lock** | Hook + new parser | New `mpl-decomposition-parser.mjs` extracts per-phase file scopes from decomposition.yaml. `mpl-write-guard` checks if Edit/Write targets are within the current phase's declared scope. Soft warning (non-blocking) on out-of-scope writes. |
+| F-33 | **Session Budget Prediction** | Predictor + protocol | `writeSessionHandoff()` added to budget predictor. Step 4.8 Graceful Pause Protocol: calls predictBudget() after each phase, writes handoff signal on "pause_now". Watcher docs added. Completes the predict→pause→signal→resume loop. |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `agents/mpl-verification-planner.md` | H-item severity field (HIGH/MED/LOW) + criteria table |
+| `commands/mpl-run-execute.md` | Gate 3 severity filter + Step 4.8 Graceful Pause |
+| `commands/mpl-run-finalize.md` | Step 5.5 Post-Execution Review + watcher docs |
+| `hooks/lib/mpl-decomposition-parser.mjs` | NEW — YAML parser for phase scope extraction |
+| `hooks/mpl-write-guard.mjs` | Phase-scoped file lock check |
+| `hooks/lib/mpl-budget-predictor.mjs` | writeSessionHandoff() function |
+
+---
+
+## v3.8 — Safety, Core-First Ordering, Compaction Recovery (2026-03-22)
+
+### Summary
+
+v3.8 adds three low-risk, high-value improvements focused on safety, decomposition quality, and session resilience.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| T-01 | **Dangerous Command Detection** | Hook extension | `mpl-write-guard` now intercepts Bash tool calls containing dangerous patterns (rm -rf, git push --force, DROP TABLE, kubectl delete, etc.). Safe cleanup patterns (rm -rf node_modules) are allowlisted. Soft warning (same as Edit/Write guard). |
+| T-12 | **Core-First Phase Ordering** | Decomposer prompt | New Step 4.5 in decomposer: classify phases as CORE/EXTENSION/SUPPORT based on PP connection. Within dependency-equivalent tiers, sort CORE → EXTENSION → SUPPORT. Ensures core functionality is verified first; sub-feature failures don't affect core. |
+| F-31 | **Compaction Recovery Read-Side** | Protocol extension | Compaction checkpoints (created by PreCompact hook since v3.2) are now loaded during context assembly (Case 2: after compaction) and injected into Phase Runner context. Resume protocol also checks for checkpoints. Completes the write→read loop. |
+
+### Stage 2 Redesign (PP-Aligned Spec Resolution)
+
+Also included in this release: Stage 2 (Ambiguity Resolver) redesigned to treat PPs as immutable inputs.
+
+| Change | Before | After |
+|--------|--------|-------|
+| PP mutability | Stage 2 could update PP.judgment_criteria | **PPs are never modified by Stage 2** |
+| Pre-resolution | Jump straight to Socratic questions | **PP Conformance Check**: auto-resolve items derivable from PP + context |
+| Scoring dimensions | 4D (Spec/Edge/Tech/Testability) | **5D** (+PP Conformance: detects choices conflicting with PPs) |
+| PP conflicts | Not tracked | **PP_CONFLICT** items raise ambiguity score; user chooses PP-first or exception |
+| Output | Updated PPs + requirements | **PP-aligned spec** (PPs unchanged) + requirements |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `hooks/mpl-write-guard.mjs` | Added Bash dangerous command detection (9 patterns + 8 safe allowlist) |
+| `hooks/hooks.json` | PreToolUse matcher: `Edit\|Write` → `Edit\|Write\|Bash` |
+| `agents/mpl-decomposer.md` | Step 4.5 (feature priority), `feature_priority` output field, failure mode |
+| `agents/mpl-ambiguity-resolver.md` | Full rewrite: PP immutability, PP Conformance Check, 5D scoring |
+| `commands/mpl-run-execute.md` | Checkpoint loading in Case 2 + Phase Runner recovery context section |
+| `commands/mpl-run-finalize.md` | Checkpoint-aware resume in Step 6 |
+| `docs/design.md` | Version bump, Stage 2 description + agent catalog updated |
 
 ---
 
 ## v3.7 — 2-Stage Interview Redesign (2026-03-15)
 
-### 설계 방향
+### Design Direction
 
-v3.7은 인터뷰 파이프라인을 근본적으로 재설계한다. 기존 "PP 확인용 4라운드 → PP 차원 재측정" 구조에서, "가치 중심 PP 발견 → 메트릭 기반 모호성 해소 루프"로 전환한다.
+v3.7 fundamentally redesigns the interview pipeline. It transitions from the existing "4 rounds for PP confirmation → PP dimension re-measurement" structure to "value-centered PP discovery → metrics-based ambiguity resolution loop".
 
-> Ouroboros의 AmbiguityScorer에서 영감: 구조(라운드)가 아닌 메트릭이 질문을 결정한다.
-> 매 응답 후 모호성을 재측정하고, 가장 약한 차원을 자동 타겟한다.
+> Inspired by Ouroboros's AmbiguityScorer: metrics, not structure (rounds), determine questions.
+> Ambiguity is re-measured after each response, and the weakest dimension is automatically targeted.
 
-### 핵심 변경
+### Key Changes
 
-| 변경 | Before (v3.6) | After (v3.7) |
-|------|--------------|-------------|
-| **Stage 1 질문 프레이밍** | 기술 카테고리 분류 ("핵심 정체성은?") | 사용자 가치/시나리오 중심 ("사용자가 뭘 할 수 있게 되나?") |
-| **Stage 2 에이전트** | `mpl-weak-interviewer` (PP 5차원 재측정) | `mpl-ambiguity-resolver` (PP 직교 4차원 메트릭 루프) |
-| **Stage 2 차원** | Goal/Boundary/Priority/Criteria/Context (PP 중복) | Spec Completeness/Edge Case/Technical Decision/Acceptance Testability (PP 직교) |
-| **종료 조건** | 질문 개수 소프트 리밋 | `ambiguity <= 0.2` (80% clarity) 정량 threshold |
-| **AskUserQuestion 옵션** | 단어/짧은 설명 | Contrast-Based: gain/sacrifice + 구체적 시나리오 예시 |
-| **기술 선택 질문** | 바로 옵션 제시 | Pre-Research Protocol: 비교표 먼저 제시 후 질문 |
+| Change | Before (v3.6) | After (v3.7) |
+|--------|--------------|-------------|
+| **Stage 1 question framing** | Technical category classification ("What is the core identity?") | User value/scenario centered ("What can the user do?") |
+| **Stage 2 agent** | `mpl-weak-interviewer` (PP 5-dimension re-measurement) | `mpl-ambiguity-resolver` (PP orthogonal 4-dimension metrics loop) |
+| **Stage 2 dimensions** | Goal/Boundary/Priority/Criteria/Context (PP redundant) | Spec Completeness/Edge Case/Technical Decision/Acceptance Testability (PP orthogonal) |
+| **Termination condition** | Question count soft limit | `ambiguity <= 0.2` (80% clarity) quantitative threshold |
+| **AskUserQuestion options** | Word/short description | Contrast-Based: gain/sacrifice + concrete scenario examples |
+| **Technical choice questions** | Present options immediately | Pre-Research Protocol: present comparison table first, then ask |
 
-### 신규 프로토콜
+### New Protocols
 
-- **Pre-Research Protocol**: 기술 선택 트레이드오프가 있는 질문 전에 WebFetch/Read로 비교 자료 수집 → 비교표 제시 → 질문. Stage 1, Stage 2 모두 적용.
-- **Contrast-Based Options**: 모든 AskUserQuestion 옵션에 "무엇을 얻고 무엇을 희생하는가" + 구체적 예시 필수.
-- **Spec Reading Step**: Stage 2 시작 시 제공된 스펙/문서를 PP와 대조하여 gap/conflict/hidden constraint 식별.
+- **Pre-Research Protocol**: Before questions with technology selection trade-offs, collect comparison materials via WebFetch/Read → present comparison table → ask. Applied in both Stage 1 and Stage 2.
+- **Contrast-Based Options**: All AskUserQuestion options must include "what do you gain and what do you sacrifice" + concrete examples.
+- **Spec Reading Step**: At start of Stage 2, compare provided spec/documents with PP to identify gap/conflict/hidden constraints.
 
-### 영향받는 파일
+### Affected Files
 
-| 파일 | 변경 |
-|------|------|
-| `agents/mpl-interviewer.md` | 4라운드 가치 중심 재작성 + Pre-Research Protocol |
-| `agents/mpl-ambiguity-resolver.md` | 신규 (mpl-weak-interviewer 대체) |
-| `agents/mpl-weak-interviewer.md` | 삭제 |
-| `commands/mpl-run-phase0.md` | Stage 2 참조 업데이트 |
-| `docs/design.md` | 에이전트 카탈로그 업데이트 |
-| `hooks/mpl-validate-output.mjs` | 에이전트명 + 검증 키워드 업데이트 |
+| File | Change |
+|------|--------|
+| `agents/mpl-interviewer.md` | Rewrite 4 rounds as value-centered + Pre-Research Protocol |
+| `agents/mpl-ambiguity-resolver.md` | New (replaces mpl-weak-interviewer) |
+| `agents/mpl-weak-interviewer.md` | Deleted |
+| `commands/mpl-run-phase0.md` | Update Stage 2 reference |
+| `docs/design.md` | Update agent catalog |
+| `hooks/mpl-validate-output.mjs` | Update agent name + verification keywords |
 
 ---
 
-## v3.2 로드맵 — "문서가 메모리다 + 적응형 라우팅" (2026-03-07)
+## v3.2 Roadmap — "Documents as Memory + Adaptive Routing" (2026-03-07)
 
-### 설계 방향
+### Design Direction
 
-v3.2는 두 축으로 진화한다:
+v3.2 evolves along two axes:
 
-**축 1: 문서가 메모리다** — 세션 간·실행 간 연속성 보장
+**Axis 1: Documents as Memory** — Continuity between sessions and executions
 
-> 장기 실행 에이전트의 성공은 모델 지능이 아니라 **운영 구조**에서 비롯된다.
+> The success of long-running agents comes not from model intelligence but from **operational structure**.
 > — [Run long-horizon tasks with Codex](https://www.linkedin.com/posts/gb-jeong_run-long-horizon-tasks-with-codex-activity-7435825294554484736-hBEX)
 
-**축 2: 적응형 파이프라인 라우팅** — 사용자가 복잡도를 판단하지 않는다
+**Axis 2: Adaptive Pipeline Routing** — Users don't judge complexity
 
-> MPL이 복잡해질수록 경량 작업의 진입 장벽이 높아지는 역설을 해결한다.
-> Ouroboros의 PAL Router(Progressive Adaptive LLM Router)에서 영감을 받아,
-> **단일 진입점 + 자동 tier 분류 + 동적 에스컬레이션**으로 3개 스킬(mpl/mpl-small/mpl-bugfix)을 통합한다.
-> — [Ouroboros](https://github.com/Q00/ouroboros) 분석 (2026-03-07)
+> Resolves the paradox where lightweight task entry barriers increase as MPL grows more complex.
+> Inspired by Ouroboros's PAL Router (Progressive Adaptive LLM Router),
+> integrates 3 skills (mpl/mpl-small/mpl-bugfix) into **single entry point + automatic tier classification + dynamic escalation**.
+> — [Ouroboros](https://github.com/Q00/ouroboros) analysis (2026-03-07)
 
-#### 4-Document 매핑 (축 1)
+#### 4-Document Mapping (Axis 1)
 
-| 레퍼런스 문서 | 역할 | MPL 대응 | 상태 |
-|-------------|------|---------|------|
-| `docs/prompt.md` | 목표/비목표, 완료 기준 동결 | `pivot-points.md` | ✅ 있음 |
-| `docs/plans.md` | 마일스톤별 수용기준 + 검증 명령 | `decomposition.yaml` | ✅ 있음 |
-| `docs/implement.md` | plans를 SSOT로, 범위 확대 금지 | `mpl-run.md` (오케스트레이터 프로토콜) | ✅ 있음 |
-| `docs/documentation.md` | 감시 기록, 세션 간 연속성 | **없음** → `RUNBOOK.md`로 신설 | ❌ 미구현 |
+| Reference document | Role | MPL equivalent | Status |
+|-------------------|------|---------------|--------|
+| `docs/prompt.md` | Goal/non-goal, freeze completion criteria | `pivot-points.md` | ✅ Present |
+| `docs/plans.md` | Acceptance criteria + verification commands per milestone | `decomposition.yaml` | ✅ Present |
+| `docs/implement.md` | plans as SSOT, scope expansion prohibited | `mpl-run.md` (orchestrator protocol) | ✅ Present |
+| `docs/documentation.md` | Audit log, continuity between sessions | **Missing** → newly created as `RUNBOOK.md` | ❌ Not implemented |
 
-MPL은 1~3번 문서가 이미 강력하지만, 4번 — "감시 기록(audit log) 겸 공유 메모리"가 부족하다. 현재 State Summary가 페이즈별로 파편화되어 있고, 사람이나 다음 세션 에이전트가 "지금 어디까지 왔고, 왜 이런 결정을 했는지"를 한눈에 파악할 통합 문서가 없다.
+MPL already has strong documents 1~3, but is lacking 4 — "audit log combined with shared memory". Current State Summary is fragmented per phase, and there is no integrated document for humans or next-session agents to grasp at a glance "how far we've come and why these decisions were made".
 
-#### Adaptive Pipeline Router (축 2) — 문제와 해결
+#### Adaptive Pipeline Router (Axis 2) — Problem and Solution
 
-**현재 문제**: 3개 스킬 분기가 사용자 키워드에 의존한다.
-
-```
-"mpl bugfix" → mpl-bugfix (최소 파이프라인)
-"mpl small"  → mpl-small  (3-Phase 경량)
-"mpl"        → mpl full   (9+ step 전체)
-```
-
-| 문제 | 상세 |
-|------|------|
-| 사용자 판단 의존 | "이건 small인가 full인가?"를 미리 결정해야 함 |
-| Triage와 중복 | full의 Triage(Step 0)가 이미 정보 밀도를 분석하는데, small은 우회함 |
-| 에스컬레이션 없음 | small로 시작 → 복잡 → circuit break → 사용자가 full을 재실행해야 함 |
-| 다운그레이드 없음 | full로 시작 → 사실 간단 → 9+ 단계 전체 오버헤드 |
-| 토큰 갭 | bugfix(~5-10K) ↔ small(~15-25K) ↔ full(~50-100K+) 사이에 최적 경로 없음 |
-
-**해결**: Ouroboros PAL Router 방식을 MPL에 적응.
+**Current problem**: 3 skill branches depend on user keywords.
 
 ```
-Before: 사용자가 3개 중 선택
-  "mpl bugfix: 로그인 에러 수정"    → mpl-bugfix
-  "mpl small: 검증 추가"           → mpl-small
-  "mpl: 인증 시스템 리팩토링"       → mpl full
+"mpl bugfix" → mpl-bugfix (minimal pipeline)
+"mpl small"  → mpl-small  (3-Phase lightweight)
+"mpl"        → mpl full   (9+ step full)
+```
 
-After: 시스템이 자동 판정 + 동적 전환
-  "mpl 로그인 에러 수정"            → Triage → Frugal (≈bugfix)
-  "mpl 검증 추가"                  → Triage → Standard (≈small 확장)
-  "mpl 인증 시스템 리팩토링"        → Triage → Frontier (≈full)
-  (실행 중 circuit break 시 자동 에스컬레이션)
+| Problem | Detail |
+|---------|--------|
+| User judgment dependency | Must decide in advance "is this small or full?" |
+| Duplication with Triage | full's Triage (Step 0) already analyzes information density, but small bypasses it |
+| No escalation | Start small → complex → circuit break → user must re-run full |
+| No downgrade | Start full → actually simple → full 9+ step overhead |
+| Token gap | No optimal path between bugfix (~5-10K) ↔ small (~15-25K) ↔ full (~50-100K+) |
+
+**Solution**: Adapt Ouroboros PAL Router approach to MPL.
+
+```
+Before: User selects from 3
+  "mpl bugfix: fix login error"         → mpl-bugfix
+  "mpl small: add validation"           → mpl-small
+  "mpl: refactor auth system"           → mpl full
+
+After: System auto-determines + dynamic switching
+  "mpl fix login error"                 → Triage → Frugal (≈bugfix)
+  "mpl add validation"                  → Triage → Standard (≈small extended)
+  "mpl refactor auth system"            → Triage → Frontier (≈full)
+  (automatic escalation on circuit break during execution)
 ```
 
 ---
 
-### 전체 항목
+### All Items
 
-#### HIGH — 핵심 아키텍처
+#### HIGH — Core Architecture
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-20 | **Adaptive Pipeline Router — 단일 진입점** | ✅ **S1 완료** | Triage(Step 0)를 확장하여 `pipeline_tier`(frugal/standard/frontier)를 자동 산정. Quick Scope Scan(Glob/Grep, ~1-2K 토큰)으로 영향 파일 수, 테스트 존재 여부, import 깊이를 측정. `pipeline_score` 공식으로 tier 결정. keyword-detector를 단일 진입점으로 통합 (mpl-bugfix/mpl-small 별도 분기 제거). 사용자 힌트(bugfix/small)는 tier 오버라이드로만 기능. **Ouroboros PAL Router 참조** |
-| F-21 | **Dynamic Escalation/Downgrade** | ✅ **S1 완료** | 실행 중 tier 자동 전환. Frugal에서 circuit break → Standard로 에스컬레이션 → 여전히 실패 → Frontier로 에스컬레이션. 에스컬레이션 시 완료된 작업 보존, 실패 페이즈만 확장 파이프라인으로 재실행. 다운그레이드는 Phase 0에서 이전 routing pattern 참조로 구현 (F-22 연동) |
-| F-10 | **RUNBOOK.md — 통합 실행 로그** | ✅ **S1 완료** | `docs/documentation.md` 개념을 MPL에 도입. `.mpl/mpl/RUNBOOK.md`에 Current Status, Milestone Progress, Key Decisions, Known Issues, How to Resume 섹션을 파이프라인 실행 중 자동 갱신. 사람이든 에이전트든 이 파일 하나로 현재 상태 파악 → 즉시 재개 가능 |
-| F-11 | **Run-to-Run 학습 축적** | ✅ **S2 완료** | RUNBOOK의 decisions/issues가 실행 완료 시 `mpl-compound`를 통해 `.mpl/memory/learnings.md`로 증류. 다음 실행 Phase 0에서 자동 로드. 실패 패턴(타입 혼동, 에러 불일치), 성공 패턴, 프로젝트 컨벤션(discovered)을 축적. **흐름**: 실행 중 RUNBOOK 기록 → compound 증류 → 다음 Phase 0 참조 |
-| F-12 | **세션 내 컨텍스트 영속** | ✅ **S2 완료** | 오케스트레이터가 페이즈 전환마다 `<remember priority>` 태그로 핵심 상태(현재 페이즈, PP 요약, 직전 실패 원인)를 마킹. RUNBOOK.md(파일 기반)와 `<remember>`(태그 기반)의 이중 안전망으로 장시간 실행 시 컨텍스트 압축에 대응 |
-| F-04 | Standalone 독립 동작 | ✅ **S4 완료** | (기존) OMC 의존성 제거. Grep/Glob 폴백 |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-20 | **Adaptive Pipeline Router — Single Entry Point** | ✅ **S1 complete** | Extend Triage (Step 0) to auto-calculate `pipeline_tier` (frugal/standard/frontier). Measure affected file count, test presence, import depth via Quick Scope Scan (Glob/Grep, ~1-2K tokens). Determine tier via `pipeline_score` formula. Integrate keyword-detector as single entry point (remove separate mpl-bugfix/mpl-small branches). User hints (bugfix/small) function only as tier overrides. **Ouroboros PAL Router reference** |
+| F-21 | **Dynamic Escalation/Downgrade** | ✅ **S1 complete** | Automatic tier switching during execution. Frugal circuit break → escalate to Standard → still failing → escalate to Frontier. On escalation, preserve completed work, re-run only failed phase with expanded pipeline. Downgrade implemented via previous routing pattern reference in Phase 0 (F-22 linkage) |
+| F-10 | **RUNBOOK.md — Integrated Execution Log** | ✅ **S1 complete** | Introduce `docs/documentation.md` concept to MPL. Auto-update Current Status, Milestone Progress, Key Decisions, Known Issues, How to Resume sections in `.mpl/mpl/RUNBOOK.md` during pipeline execution. Anyone — human or agent — can grasp current status and resume immediately from this single file |
+| F-11 | **Run-to-Run Learning Accumulation** | ✅ **S2 complete** | RUNBOOK decisions/issues distilled via `mpl-compound` to `.mpl/memory/learnings.md` on execution completion. Auto-loaded in next execution Phase 0. Accumulates failure patterns (type confusion, error mismatch), success patterns, project conventions (discovered). **Flow**: Record in RUNBOOK during execution → compound distillation → next Phase 0 reference |
+| F-12 | **In-session Context Persistence** | ✅ **S2 complete** | Orchestrator marks key state (current phase, PP summary, last failure cause) with `<remember priority>` tags at each phase transition. Dual safety net of RUNBOOK.md (file-based) and `<remember>` (tag-based) to handle context compression during long executions |
+| F-04 | Standalone independent operation | ✅ **S4 complete** | (existing) OMC dependency removed. Grep/Glob fallback |
 
-#### MEDIUM — 실행 효율 및 UX
+#### MEDIUM — Execution Efficiency and UX
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-22 | **Routing Pattern Learning** | ✅ **S2 완료** | `.mpl/memory/routing-patterns.jsonl`에 실행 결과(task 설명, tier, 성공 여부, 토큰 사용량)를 append. 다음 실행 Triage에서 Jaccard 유사도(≥0.8)로 이전 패턴과 비교하여 초기 tier 추천. F-11 learnings.md와 별도 파일 — learnings는 기술적 교훈, routing-patterns는 비용 최적화 데이터. **Ouroboros DowngradeManager 참조** |
-| F-13 | **Background Execution** | ✅ **S3 완료** | Phase Runner 내에서 파일 충돌 없는 독립 TODO의 worker를 `run_in_background: true`로 병렬 실행. v3.1의 파일 충돌 감지와 결합하여 충돌 시 자동 순차 강제 |
-| F-14 | **AskUserQuestion HITL** | ✅ **기존 구현** | `mpl-interviewer`의 PP 인터뷰 + Side Interview에서 `AskUserQuestion` 도구 사용. 클릭 가능한 선택지 제공으로 HITL 응답 속도 개선 |
-| F-15 | **Worktree 격리 실행** | ✅ **S5 완료** | Pre-Execution Analysis에서 risk=HIGH인 페이즈를 `isolation: "worktree"`로 실행. 성공 시 머지, 실패 시 자동 정리. circuit break 시 부분 롤백 불필요. Frontier tier에서만 활성화 |
-| F-16 | **mpl-scout 에이전트** | ✅ **S4 완료** | haiku 기반 경량 코드베이스 탐색 에이전트. Phase 0 구조 분석, Fix Loop 원인 탐색, Phase Runner 컨텍스트 보조에 활용. Read/Glob/Grep/LSP만 허용. sonnet/opus 토큰 절감. Claude Code의 Guide subagent 패턴 — 도구 추가 없이 기능 확장. **"Seeing like an Agent" Progressive Disclosure 참조** |
-| F-17 | **lsp_diagnostics_directory 통합** | ✅ **S4 완료** | Gate 1 자동 테스트 전에 프로젝트 전체 타입 체크. tool_mode=full일 때 활성, standalone이면 `tsc --noEmit` / `python -m py_compile` 폴백 |
-| F-23 | **Phase Runner Task-based TODO 관리** | ✅ **S3 완료** | Phase Runner가 mini-plan.md 체크박스 대신 Task tool로 TODO를 관리. Worker 간 의존성 추적, 병렬 실행 상태 자동 동기화. 현재 mini-plan.md 패턴은 Claude Code 초기 TodoWrite와 동일한 한계 — 모델이 목록에 얽매이고 에이전트 간 통신이 불가. F-13(Background Execution)과 시너지: 독립 TODO를 병렬 Task로 dispatch. **"Seeing like an Agent" TodoWrite→Task 교훈 참조** |
-| F-24 | **Phase Runner Self-Directed Context** | ✅ **S3 완료** | Phase Runner에게 scope-bounded search를 허용하여 필요한 컨텍스트를 직접 탐색. 현재: 오케스트레이터가 context assembly 후 주입 ("given context"). 개선: impact files 목록만 제공하고 실제 내용은 Phase Runner가 직접 Read/Grep. 격리 원칙 유지를 위해 해당 phase의 impact 범위 내에서만 검색 허용(scope-bounded). **"Seeing like an Agent" RAG→self-directed search 교훈 참조** |
-| F-25 | **4-Tier Adaptive Memory** | ✅ **S5 완료** | RUC DeepAgent Memory Folding + Letta(MemGPT) OS 패러다임 + 최신 메모리 연구("Memory in the Age of AI Agents", 2025.12) 종합. State Summary를 4계층 메모리로 확장: `.mpl/memory/episodic.md` (완료 Phase 요약, 시간 기반 압축 — 최근 2 Phase 상세, 이전은 1-2줄), `semantic.md` (3회+ 반복 패턴을 일반화한 프로젝트 지식), `procedural.jsonl` (도구 사용 패턴, 분류 태그 포함), `working.md` (현재 Phase TODO). episodic→semantic 자동 통합: 반복 패턴 감지 시 episodic에서 축약 + semantic에 일반화 저장. Phase 0 선택적 로드: 전체 파일이 아닌 관련 메모리만 유사도 기반 필터링. 토큰 70%+ 절감 + 반복 프로젝트 Phase 0 시간 20-30% 추가 단축. F-11 (learnings.md)과 시너지: procedural.jsonl → learnings.md 자동 증류. F-24 (Self-Directed Context)와 보완: procedural.jsonl 참조로 효과적 도구 우선 선택. **DeepAgent comparison + Letta + "Memory in the Age of AI Agents" 참조** |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-22 | **Routing Pattern Learning** | ✅ **S2 complete** | Append execution results (task description, tier, success, token usage) to `.mpl/memory/routing-patterns.jsonl`. Recommend initial tier in next execution Triage by comparing against previous patterns via Jaccard similarity (≥0.8). Separate file from F-11 learnings.md — learnings is technical lessons, routing-patterns is cost optimization data. **Ouroboros DowngradeManager reference** |
+| F-13 | **Background Execution** | ✅ **S3 complete** | Parallel execution of workers for independent TODOs without file conflicts using `run_in_background: true` within Phase Runner. Combined with v3.1 file conflict detection to auto-enforce sequential execution on conflicts |
+| F-14 | **AskUserQuestion HITL** | ✅ **existing implementation** | `AskUserQuestion` tool used in `mpl-interviewer` PP interview + Side Interview. Clickable options improve HITL response speed |
+| F-15 | **Worktree Isolated Execution** | ✅ **S5 complete** | Execute phases with risk=HIGH in Pre-Execution Analysis with `isolation: "worktree"`. Merge on success, auto-cleanup on failure. Partial rollback not needed on circuit break. Activated only in Frontier tier |
+| F-16 | **mpl-scout agent** | ✅ **S4 complete** | Haiku-based lightweight codebase exploration agent. Used for Phase 0 structure analysis, Fix Loop root cause exploration, Phase Runner context assistance. Only Read/Glob/Grep/LSP allowed. Saves sonnet/opus tokens. Claude Code's Guide subagent pattern — extend functionality without adding tools. **"Seeing like an Agent" Progressive Disclosure reference** |
+| F-17 | **lsp_diagnostics_directory integration** | ✅ **S4 complete** | Project-wide type check before Gate 1 auto tests. Active when tool_mode=full, fallback to `tsc --noEmit` / `python -m py_compile` in standalone |
+| F-23 | **Phase Runner Task-based TODO management** | ✅ **S3 complete** | Phase Runner manages TODOs via Task tool instead of mini-plan.md checkboxes. Cross-worker dependency tracking, automatic parallel execution state sync. Current mini-plan.md pattern has same limitation as Claude Code's early TodoWrite — model gets trapped in list and inter-agent communication is impossible. Synergy with F-13 (Background Execution): dispatch independent TODOs as parallel Tasks. **"Seeing like an Agent" TodoWrite→Task lesson reference** |
+| F-24 | **Phase Runner Self-Directed Context** | ✅ **S3 complete** | Allow Phase Runner scope-bounded search to directly explore needed context. Current: orchestrator assembles context then injects ("given context"). Improvement: provide only impact files list, Phase Runner directly Read/Grep actual content. Scope-bounded search within that phase's impact range to maintain isolation principle. **"Seeing like an Agent" RAG→self-directed search lesson reference** |
+| F-25 | **4-Tier Adaptive Memory** | ✅ **S5 complete** | Synthesis of RUC DeepAgent Memory Folding + Letta (MemGPT) OS paradigm + latest memory research ("Memory in the Age of AI Agents", 2025.12). Expand State Summary to 4-tier memory: `.mpl/memory/episodic.md` (completed Phase summary, time-based compression — recent 2 phases detailed, earlier in 1-2 lines), `semantic.md` (project knowledge generalizing 3+ repeated patterns), `procedural.jsonl` (tool usage patterns, with classification tags), `working.md` (current Phase TODOs). Auto-integration episodic→semantic: on repeated pattern detection, abbreviate in episodic + save generalization in semantic. Selective Phase 0 loading: similarity-based filtering of relevant memory only, not entire files. 70%+ token savings + additional 20-30% Phase 0 time reduction for repeated projects. Synergy with F-11 (learnings.md): auto-distill procedural.jsonl → learnings.md. Complement with F-24 (Self-Directed Context): prioritize effective tools via procedural.jsonl reference. **DeepAgent comparison + Letta + "Memory in the Age of AI Agents" reference** |
 
-#### MEDIUM — 리서치 기반 신규 (2026-03-13)
+#### MEDIUM — Research-Based New (2026-03-13)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-26 | **mpl-interviewer v2: 소크라틱 통합 인터뷰** | ✅ **S6 완료** | 기존 mpl-interviewer를 확장하여 PP 발견 + 요구사항 구조화를 **단일 인터뷰로 통합**. `interview_depth`(skip/light/full)에 따라 PM 역할 범위를 자동 조절. **skip**: PP 직접 추출 + **Uncertainty Scan**(5차원 불확실성 검사 → HIGH 항목만 타겟 질문). **light**: Round 1-2 + 경량 요구사항. **full**: 소크라틱 6유형 + 솔루션 옵션 3+ + JUSF. 질문 상한은 **소프트 리밋** — 도달 시 **Continue Gate**로 사용자가 계속/중단 선택. 중단 시 남은 불확실성은 **Deferred Uncertainties**로 PP PROVISIONAL 태깅 + Side Interview 대상 등록하여 실행 중 just-in-time 해소. AI_PM 소크라틱 접근법 차용. Dual-Layer 출력(YAML+Markdown). MoSCoW + sequence_score. good/bad examples 자기 개선. **Ouroboros "From Wonder to Ontology" 영감: 문서가 상세해도 불확실성은 존재한다** — pm-design.md, mpl-interviewer.md 참조 |
-| F-27 | **Reflexion 기반 Fix Loop 학습** | ✅ **S6 완료** | Fix Loop 진입 시 구조화된 반성(Self-Reflection) 단계 추가. Reflexion(NeurIPS 2023) + MAR(Multi-Agent Reflexion) 패턴 적용. **Reflection Template**: 실패 TODO → 증상 → 근본 원인 → 최초 이탈 지점 → 수정 전략 → 학습 추출. 반성 결과를 패턴 분류(type_mismatch, dependency_conflict, test_flake 등)하여 procedural.jsonl에 저장. 다음 실행 Phase 0에서 태스크 설명 유사도 기반으로 관련 패턴만 선택적 로드. Gate 2 실패 시 mpl-code-reviewer 피드백을 반성에 통합(MAR 패턴). HumanEval pass@1 +8.1% 개선 실적(Reflexion). F-25(procedural.jsonl)과 직접 시너지. **Reflexion + MAR 논문 참조** |
-| F-28 | **Phase별 동적 에이전트 라우팅** | ✅ **S6 완료** | Phase 특성에 따라 worker 프롬프트/모델을 동적 조정. 현재 모든 Phase에 동일한 mpl-worker 할당 → Phase 도메인별 특화 프롬프트 자동 선택. TDAG(Task Decomposition and Agent Generation) 패턴 참조. 예: DB 스키마 Phase → DB 특화 프롬프트, UI Phase → 디자인 인식 프롬프트, 복잡 알고리즘 Phase → opus 모델. Decomposer 출력에 `phase_domain` 태그 추가 → Phase Runner가 매칭 프롬프트 선택. **TDAG + Anthropic 모델 라우팅 권장사항 참조** |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-26 | **mpl-interviewer v2: Socratic integrated interview** | ✅ **S6 complete** | Extend existing mpl-interviewer to **integrate PP discovery + requirements structuring into a single interview**. Auto-adjust PM role scope by `interview_depth` (skip/light/full). **skip**: direct PP extraction + **Uncertainty Scan** (5-dimension uncertainty check → targeted questions for HIGH items only). **light**: Round 1-2 + lightweight requirements. **full**: Socratic 6 types + solution options 3+ + JUSF. Question limit is **soft limit** — at limit, user chooses continue/stop via **Continue Gate**. On stop, remaining uncertainty tagged as **Deferred Uncertainties** with PP PROVISIONAL + registered for Side Interview for just-in-time resolution during execution. AI_PM Socratic approach adapted. Dual-Layer output (YAML+Markdown). MoSCoW + sequence_score. self-improvement via good/bad examples. **Ouroboros "From Wonder to Ontology" inspiration: uncertainty exists even in detailed documents** — pm-design.md, mpl-interviewer.md reference |
+| F-27 | **Reflexion-based Fix Loop learning** | ✅ **S6 complete** | Add structured self-reflection step when entering Fix Loop. Reflexion (NeurIPS 2023) + MAR (Multi-Agent Reflexion) patterns applied. **Reflection Template**: failed TODO → symptom → root cause → first deviation point → correction strategy → learning extraction. Classify reflection results by pattern (type_mismatch, dependency_conflict, test_flake, etc.) and store in procedural.jsonl. Selectively load only relevant patterns in next execution Phase 0 based on task description similarity. Integrate mpl-code-reviewer feedback into reflection on Gate 2 failure (MAR pattern). HumanEval pass@1 +8.1% improvement record (Reflexion). Direct synergy with F-25 (procedural.jsonl). **Reflexion + MAR paper reference** |
+| F-28 | **Per-phase dynamic agent routing** | ✅ **S6 complete** | Dynamically adjust worker prompt/model based on Phase characteristics. Currently same mpl-worker assigned to all Phases → auto-select domain-specialized prompts per Phase. TDAG (Task Decomposition and Agent Generation) pattern reference. Example: DB schema Phase → DB-specialized prompt, UI Phase → design-aware prompt, complex algorithm Phase → opus model. Add `phase_domain` tag to Decomposer output → Phase Runner selects matching prompt. **TDAG + Anthropic model routing recommendations reference** |
 
 #### Full Scope Implementation (2026-03-14)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-35 | **Full Scope Implementation** | ✅ **완료** | MPL이 주어진 스펙의 전체 범위를 구현하도록 보장. **4가지 핵심 변경**: (1) Decomposer의 Max Phases 하드캡 제거 → Typical Phases 가이드라인으로 변경, "core function" 스코핑 제거. (2) 인터뷰 필수화 — `skip` interview_depth 제거, 최소 `light`(Round 1+2) 보장. 고밀도 프롬프트(density ≥8)도 light + Uncertainty Scan 실행. (3) Side Interview를 CRITICAL + PP 충돌 시에만 트리거. H-items, AD 마커 등 비차단 항목은 `deferred-items.md`로 로그. (4) Interviewer에 인터뷰 품질 = Side Interview 빈도 감소 인사이트 추가. **변경 파일**: `mpl-decomposer.md`, `mpl-run-decompose.md`, `mpl-run-execute.md`, `mpl-run-phase0.md`, `mpl-interviewer.md` |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-35 | **Full Scope Implementation** | ✅ **complete** | Ensure MPL implements the full scope of a given spec. **4 core changes**: (1) Remove Decomposer's Max Phases hard cap → change to Typical Phases guideline, remove "core function" scoping. (2) Mandatory interview — remove `skip` interview_depth, guarantee minimum `light` (Round 1+2). High-density prompts (density ≥8) also run light + Uncertainty Scan. (3) Side Interview triggered only for CRITICAL + PP conflicts. H-items, AD markers and other non-blocking items logged to `deferred-items.md`. (4) Add insight to Interviewer: interview quality = reduced Side Interview frequency. **Changed files**: `mpl-decomposer.md`, `mpl-run-decompose.md`, `mpl-run-execute.md`, `mpl-run-phase0.md`, `mpl-interviewer.md` |
 
-#### Plan-Phase Compaction 방지 (2026-03-14)
+#### Plan-Phase Compaction Prevention (2026-03-14)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-36 | **Plan-Phase Context Offloading** | ✅ **완료** | Plan 단계(Step 0~3B)에서 compaction 발생을 방지. **3가지 변경**: (1) Step 2 Codebase Analysis를 `mpl-codebase-analyzer`(sonnet) 서브에이전트로 위임 (~5-10K 절감). (2) Step 2.5 Phase 0 Enhanced를 `mpl-phase0-analyzer`(sonnet) 서브에이전트로 위임 (~8-25K 절감). (3) Step 1-E Interview Snapshot — 인터뷰 완료 후 핵심 결과를 `.mpl/mpl/interview-snapshot.md`에 백업하여 compaction 후에도 복원 가능. 오케스트레이터 Plan 단계 토큰: ~29-65K → ~11-16K. **변경 파일**: `mpl-run-phase0.md`, 신규 에이전트 `mpl-codebase-analyzer.md`, `mpl-phase0-analyzer.md` |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-36 | **Plan-Phase Context Offloading** | ✅ **complete** | Prevent compaction in Plan stage (Step 0~3B). **3 changes**: (1) Delegate Step 2 Codebase Analysis to `mpl-codebase-analyzer`(sonnet) subagent (~5-10K savings). (2) Delegate Step 2.5 Phase 0 Enhanced to `mpl-phase0-analyzer`(sonnet) subagent (~8-25K savings). (3) Step 1-E Interview Snapshot — backup key results to `.mpl/mpl/interview-snapshot.md` after interview completion for restoration after compaction. Orchestrator Plan stage tokens: ~29-65K → ~11-16K. **Changed files**: `mpl-run-phase0.md`, new agents `mpl-codebase-analyzer.md`, `mpl-phase0-analyzer.md` |
 
 #### 2-Phase Interview (2026-03-14)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-37 | **Clarity Reinforcement (2-Phase Interview)** | ✅ **완료** | PP 기반 인터뷰(Phase 1) 후 약한 차원 보강(Phase 2) 추가. OMC Deep Interview의 수학적 모호성 점수 개념을 MPL PP 체계에 적용. **핵심**: 5-Dimension Clarity Scoring (Goal/Boundary/Priority/Criteria/Context, 가중치 합산) → 0.6 미만 차원에 타겟 보강 질문 → PP 업데이트. Greenfield/Brownfield 가중치 차별화. light 미실행 라운드는 응답에서 추론. 질문 상한: light 2개, full 4개. **변경 파일**: `mpl-interviewer.md`, `mpl-run-phase0.md` |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-37 | **Clarity Reinforcement (2-Phase Interview)** | ✅ **complete** | Add weak dimension reinforcement (Phase 2) after PP-based interview (Phase 1). Apply OMC Deep Interview's mathematical ambiguity score concept to MPL PP framework. **Core**: 5-Dimension Clarity Scoring (Goal/Boundary/Priority/Criteria/Context, weighted sum) → targeted reinforcement questions for dimensions below 0.6 → PP update. Differentiated Greenfield/Brownfield weights. Infer unrun light rounds from responses. Question limit: 2 for light, 4 for full. **Changed files**: `mpl-interviewer.md`, `mpl-run-phase0.md` |
 
 #### Auto Context Rotation (2026-03-14)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-38 | **Auto Context Rotation** | ✅ **완료** | 컨텍스트 윈도우가 거의 찬 상태에서 자동 세션 로테이션. Compaction 이벤트 감지 → 핸드오프 시그널 작성 → 터미널 백엔드(kitty/tmux/osascript)를 통해 `/clear` 전송 → 파이프라인 자동 재개. `mpl-setup`에서 설정 가능. **파일**: `hooks/lib/rotation-backends.mjs`(터미널 백엔드 추상화), `hooks/lib/mpl-rotator.mjs`(백그라운드 워처), `hooks/mpl-session-init.mjs`(SessionStart 훅), `hooks/mpl-compaction-tracker.mjs`(수정: 핸드오프 시그널 작성), `hooks/hooks.json`(수정: SessionStart 등록). **설정**: `.mpl/config.json` → `context_rotation.backend` |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-38 | **Auto Context Rotation** | ✅ **complete** | Automatic session rotation when context window is nearly full. Detect compaction event → write handoff signal → send `/clear` via terminal backend (kitty/tmux/osascript) → auto-resume pipeline. Configurable via `mpl-setup`. **Files**: `hooks/lib/rotation-backends.mjs` (terminal backend abstraction), `hooks/lib/mpl-rotator.mjs` (background watcher), `hooks/mpl-session-init.mjs` (SessionStart hook), `hooks/mpl-compaction-tracker.mjs` (modified: write handoff signal), `hooks/hooks.json` (modified: SessionStart registration). **Config**: `.mpl/config.json` → `context_rotation.backend` |
 
 #### Semi-TDAG 4-Layer Template (2026-03-15)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-39 | **Semi-TDAG 4-Layer Template Composition** | ✅ **완료** | F-28 도메인 라우팅을 4계층으로 확장. Decomposer가 `phase_subdomain`(기술스택), `phase_task_type`(작업유형), `phase_lang`(언어) 3개 optional 필드를 추가 출력. Phase Runner가 `domains/` + `subdomains/{domain}/` + `tasks/` + `langs/` 4-Layer 프롬프트를 조합하여 worker 컨텍스트에 주입. 총 38개 사전 정의 템플릿: 도메인 8 + 서브도메인 19(react, nextjs, vue, svelte, graphql, websocket, trpc, nosql, orm-prisma, orm-drizzle, langchain, vercel-ai, raw-sdk, optimization, data-structure, docker, cicd, e2e, unit) + 태스크 타입 6(greenfield, refactor, migration, bugfix, performance, security) + 언어 5(rust, go, python, typescript, java). TDAG 패턴의 "에이전트 동적 생성" 대신 "프롬프트 템플릿 동적 조합"으로 안정성과 유연성 균형. 각 레이어는 선택적 — 파일 없으면 해당 레이어 건너뜀(F-28 하위 호환). |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-39 | **Semi-TDAG 4-Layer Template Composition** | ✅ **complete** | Extend F-28 domain routing to 4 layers. Decomposer outputs 3 additional optional fields: `phase_subdomain` (tech stack), `phase_task_type` (work type), `phase_lang` (language). Phase Runner combines `domains/` + `subdomains/{domain}/` + `tasks/` + `langs/` 4-Layer prompts and injects into worker context. Total 38 predefined templates: 8 domains + 19 subdomains (react, nextjs, vue, svelte, graphql, websocket, trpc, nosql, orm-prisma, orm-drizzle, langchain, vercel-ai, raw-sdk, optimization, data-structure, docker, cicd, e2e, unit) + 6 task types (greenfield, refactor, migration, bugfix, performance, security) + 5 languages (rust, go, python, typescript, java). Balance stability and flexibility with "dynamic prompt template composition" instead of TDAG pattern's "dynamic agent generation". Each layer is optional — skip that layer if file is missing (F-28 backward compatible). |
 
-#### Compaction Resilience (2026-03-12 실험 기반)
+#### Compaction Resilience (based on 2026-03-12 experiments)
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-30 | **Error Context File Preservation** | ✅ **S5 완료** | Worker 실패 시 에러 전문을 `.mpl/mpl/phases/phase-N/errors/` 파일로 보존. Compaction 후에도 정확한 에러 정보로 fix loop 수렴. Phase Runner가 에러 파일 Write, orchestrator는 경로만 수신 |
-| F-31 | **Compaction-Aware Context Recovery** | 부분 구현 | PreCompact 훅에서 `.mpl/mpl/checkpoints/compaction-{N}.md` checkpoint 생성. compaction_count 3회 시 경고, 4회+ 시 세션 리셋 권장. Write-side 구현 완료, orchestrator read-side 경로 명시 TBD |
-| F-32 | **Adaptive Context Loading** | ✅ **S5 완료** | Phase 전환 시 context 상태 판단하여 로드량 3-way 분기: 동일 세션(최소 로드) / compaction 후(선택적 로드+checkpoint) / 새 세션(전체 로드). `last_phase_compaction_count` 필드로 compaction 감지 |
-| F-33 | **Session Budget Prediction & Auto-Continue** | 부분 구현 | Phase 완료 시 HUD context_window 데이터 기반으로 남은 Phase 예산을 예측. 부족 시 graceful pause → `.mpl/signals/session-handoff.json` 생성. **구현 완료**: budget predictor 라이브러리(`hooks/lib/mpl-budget-predictor.mjs`), HUD bridge(`context-usage.json` 기록), 오케스트레이터 커맨드(Step 4.8 Graceful Pause Protocol). **미완료**: 외부 session watcher(`mpl-session-watcher.sh`), hooks.json 등록, end-to-end 통합 테스트 |
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-30 | **Error Context File Preservation** | ✅ **S5 complete** | Preserve full error text in `.mpl/mpl/phases/phase-N/errors/` file on Worker failure. Fix loop converges with accurate error info even after compaction. Phase Runner writes error file, orchestrator receives only the path |
+| F-31 | **Compaction-Aware Context Recovery** | Partially implemented | Create `.mpl/mpl/checkpoints/compaction-{N}.md` checkpoint in PreCompact hook. Warn at 3 compaction_count, recommend session reset at 4+. Write-side implementation complete, orchestrator read-side path specification TBD |
+| F-32 | **Adaptive Context Loading** | ✅ **S5 complete** | Assess context state at phase transition and 3-way branch load amount: same session (minimal load) / after compaction (selective load+checkpoint) / new session (full load). Compaction detection via `last_phase_compaction_count` field |
+| F-33 | **Session Budget Prediction & Auto-Continue** | Partially implemented | Predict remaining Phase budget based on HUD context_window data at Phase completion. Graceful pause when insufficient → create `.mpl/signals/session-handoff.json`. **Implemented**: budget predictor library (`hooks/lib/mpl-budget-predictor.mjs`), HUD bridge (`context-usage.json` recording), orchestrator command (Step 4.8 Graceful Pause Protocol). **Not implemented**: external session watcher (`mpl-session-watcher.sh`), hooks.json registration, end-to-end integration tests |
 
-#### LOW — 유지
+#### Sprint 5-6 New Features
 
-| ID | 항목 | 상태 | 설명 |
-|----|------|------|------|
-| F-05 | Phase 0 캐시 부분 무효화 | ✅ **S5 완료** | git diff 기반 변경 모듈만 재분석. `analyzePartialInvalidation()` + `partialCacheSave()` 구현 |
-| F-06 | 멀티 프로젝트 지원 | 미구현 | monorepo 환경에서 프로젝트별 독립 파이프라인 |
+| ID | Item | Related files | Sprint |
+|----|------|--------------|--------|
+| F-34 | Auto-Permission Learning | `mpl-auto-permit.mjs`, `mpl-permit-learner.mjs` | Sprint 5 |
+| F-40 | Test Agent Mandatory | Gate 1 requires mpl-test-agent | Sprint 6 |
+| F-50 | Gate 1.5 Coverage | Coverage threshold gate | Sprint 6 |
+
+#### LOW — Maintenance
+
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| F-05 | Phase 0 cache partial invalidation | ✅ **S5 complete** | Re-analyze only changed modules based on git diff. `analyzePartialInvalidation()` + `partialCacheSave()` implemented |
+| F-06 | Multi-project support | Not implemented | Independent pipeline per project in monorepo environment |
 
 ---
 
-### Adaptive Pipeline Router 상세 설계 (F-20, F-21, F-22)
+### Adaptive Pipeline Router Detailed Design (F-20, F-21, F-22)
 
-#### Pipeline Score 공식
+#### Pipeline Score Formula
 
-Triage(Step 0)에서 Quick Scope Scan 후 산출:
+Calculated after Quick Scope Scan in Triage (Step 0):
 
 ```
 pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
@@ -401,33 +549,33 @@ pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
 file_scope:       min(affected_files / 10, 1.0)
 test_complexity:  min(test_scenarios / 8, 1.0)
 dependency_depth: min(import_chain_depth / 5, 1.0)
-risk_signal:      keyword_hint 또는 prompt 분석 (0.0~1.0)
+risk_signal:      keyword_hint or prompt analysis (0.0~1.0)
 ```
 
-Quick Scope Scan은 Glob/Grep만으로 ~1-2K 토큰에 완료된다. 기존 Step 2 코드베이스 분석의 경량 버전.
+Quick Scope Scan completes in ~1-2K tokens using only Glob/Grep. A lightweight version of the existing Step 2 codebase analysis.
 
-#### 3-Tier 파이프라인 매핑
+#### 3-Tier Pipeline Mapping
 
-| Tier | Score | 실행 단계 | 스킵 | 예상 토큰 |
-|------|-------|----------|------|----------|
-| **Frugal** (< 0.3) | 단순 버그 수정, 1-2 파일 | Bug Analysis → Fix → Gate 1 → Commit | Triage, PP, Phase 0, Decomposition, Gate 2/3 | ~5-15K |
-| **Standard** (0.3~0.65) | 소규모 기능, 3-5 파일 | Triage(skip) → PP(light) → Phase 0(Error Spec) → 단일 Phase → Gate 1 → Commit | Full PP, Phase 0 Step 1-3, Decomposition(다중 페이즈), Gate 2/3 | ~20-40K |
-| **Frontier** (> 0.65) | 복잡 작업, 6+ 파일 | 전체 9+ step 파이프라인 | 없음 | ~50-100K+ |
+| Tier | Score | Execution steps | Skipped | Expected tokens |
+|------|-------|----------------|---------|----------------|
+| **Frugal** (< 0.3) | Simple bug fix, 1-2 files | Bug Analysis → Fix → Gate 1 → Commit | Triage, PP, Phase 0, Decomposition, Gate 2/3 | ~5-15K |
+| **Standard** (0.3~0.65) | Small feature, 3-5 files | Triage(skip) → PP(light) → Phase 0(Error Spec) → single Phase → Gate 1 → Commit | Full PP, Phase 0 Step 1-3, Decomposition (multi-phase), Gate 2/3 | ~20-40K |
+| **Frontier** (> 0.65) | Complex task, 6+ files | Full 9+ step pipeline | None | ~50-100K+ |
 
-사용자 힌트 오버라이드: `"mpl bugfix"` → tier를 frugal로 강제, `"mpl small"` → standard 강제. 힌트 없으면 자동 산정.
+User hint override: `"mpl bugfix"` → force tier to frugal, `"mpl small"` → force standard. Auto-calculated if no hint.
 
-#### 동적 에스컬레이션 프로토콜
+#### Dynamic Escalation Protocol
 
 ```
 [Frugal] ──circuit break──→ [Standard] ──circuit break──→ [Frontier]
                               │                              │
-                              ├─ 완료된 TODO 보존             ├─ 완료된 페이즈 보존
-                              ├─ 실패 TODO를 단일 Phase로     ├─ 실패 Phase를 재분해
-                              │  재구성                       │
-                              └─ PP 추출 (light)              └─ Full PP + Phase 0
+                              ├─ Preserve completed TODOs    ├─ Preserve completed phases
+                              ├─ Restructure failed TODOs    ├─ Re-decompose failed phases
+                              │  as single Phase             │
+                              └─ PP extraction (light)       └─ Full PP + Phase 0
 ```
 
-에스컬레이션 시 state.json에 `escalation_history` 기록:
+Record `escalation_history` in state.json on escalation:
 
 ```json
 {
@@ -438,7 +586,7 @@ Quick Scope Scan은 Glob/Grep만으로 ~1-2K 토큰에 완료된다. 기존 Step
 }
 ```
 
-#### Routing Pattern 파일 형식 (F-22)
+#### Routing Pattern File Format (F-22)
 
 ```jsonl
 {"ts":"2026-03-07T10:00:00Z","desc":"add validation to endpoint","tier":"standard","result":"success","tokens":32400,"files":4}
@@ -447,78 +595,78 @@ Quick Scope Scan은 Glob/Grep만으로 ~1-2K 토큰에 완료된다. 기존 Step
 {"ts":"2026-03-07T15:00:00Z","desc":"add input sanitization","tier":"frugal","escalated":"standard","result":"success","tokens":28000,"files":3}
 ```
 
-Jaccard 유사도로 매칭 (토큰화 후 intersection/union, 임계값 0.8):
+Matching via Jaccard similarity (tokenized intersection/union, threshold 0.8):
 
 ```
 new_task: "add email validation to signup endpoint"
-match:    "add validation to endpoint" (similarity=0.83) → tier=standard 추천
+match:    "add validation to endpoint" (similarity=0.83) → tier=standard recommended
 ```
 
 ---
 
-### 전체 흐름도
+### Full Flow Diagram
 
 ```
-진입 (keyword-detector)
-├── "mpl" 감지 → 단일 스킬 진입                             [F-20]
-└── hint 추출 (bugfix→frugal, small→standard, 없음→auto)
+Entry (keyword-detector)
+├── "mpl" detected → single skill entry                      [F-20]
+└── hint extraction (bugfix→frugal, small→standard, none→auto)
 
-Triage (Step 0) — 확장
-├── 정보 밀도 분석 → interview_depth
-├── Quick Scope Scan (Glob/Grep, ~1-2K 토큰)               [F-20]
-│   ├── 영향 파일 수
-│   ├── 테스트 존재 여부
-│   └── import 깊이 샘플링
-├── routing-patterns.jsonl 매칭 (이전 패턴 참조)             [F-22]
-├── pipeline_score 산출 → pipeline_tier                     [F-20]
-└── .mpl/memory/learnings.md 로드                           [F-11]
+Triage (Step 0) — extended
+├── Information density analysis → interview_depth
+├── Quick Scope Scan (Glob/Grep, ~1-2K tokens)               [F-20]
+│   ├── affected file count
+│   ├── test presence check
+│   └── import depth sampling
+├── routing-patterns.jsonl matching (previous pattern reference) [F-22]
+├── pipeline_score calculation → pipeline_tier               [F-20]
+└── .mpl/memory/learnings.md load                            [F-11]
 
-PP + 요구사항 통합 인터뷰 (Step 1) — mpl-interviewer v2      [F-26, F-35]
-├── 인터뷰는 항상 실행 (skip 제거, 최소 light)                  [F-35]
-├── interview_depth에 따라 자동 범위 조절
-│   ├── light (density ≥ 8): Round 1-2 (PP) + Uncertainty Scan (HIGH만 타겟 질문)
-│   ├── light (density 4-7): Round 1-2 (PP) + 경량 요구사항 구조화
-│   └── full: 소크라틱 질문 + 옵션 3+ + PP + JUSF 출력
-├── Continue Gate: 소프트 리밋 도달 시 사용자 선택 (계속/멈추기)
-├── Deferred Uncertainties: 중단 시 PP PROVISIONAL + Side Interview 등록
-├── Dual-Layer 출력: YAML frontmatter + Markdown body
-├── Gherkin AC → Test Agent 입력
-└── good/bad examples 아카이브로 자기 개선
+PP + Requirements Integrated Interview (Step 1) — mpl-interviewer v2  [F-26, F-35]
+├── Interview always runs (skip removed, minimum light)       [F-35]
+├── Auto scope adjustment by interview_depth
+│   ├── light (density ≥ 8): Round 1-2 (PP) + Uncertainty Scan (target questions for HIGH only)
+│   ├── light (density 4-7): Round 1-2 (PP) + lightweight requirements structuring
+│   └── full: Socratic questions + 3+ options + PP + JUSF output
+├── Continue Gate: user choice (continue/stop) when soft limit reached
+├── Deferred Uncertainties: PP PROVISIONAL + Side Interview registration on stop
+├── Dual-Layer output: YAML frontmatter + Markdown body
+├── Gherkin AC → Test Agent input
+└── Self-improvement via good/bad examples archive
 
-실행 전 (Phase 0) — tier별 분기
-├── Frugal:  Error Spec만 → 단일 Fix Cycle
-├── Standard: Error Spec + light PP → 단일 Phase
-├── Frontier: 전체 Phase 0 → 다중 Phase
-├── mpl-scout(haiku)로 구조 분석                            [F-16]
-├── lsp_diagnostics_directory 타입 체크                      [F-17]
-├── 4-Tier Memory 선택적 로드                                [F-25]
-│   ├── semantic.md (프로젝트 지식)
-│   ├── procedural.jsonl (관련 패턴만 유사도 필터)
-│   └── episodic.md (이전 실행 요약)
-└── phase_domain 태그 기반 프롬프트 선택                      [F-28]
+Pre-Execution (Phase 0) — branch by tier
+├── Frugal:  Error Spec only → single Fix Cycle
+├── Standard: Error Spec + light PP → single Phase
+├── Frontier: Full Phase 0 → multi-Phase
+├── Structure analysis via mpl-scout (haiku)                  [F-16]
+├── lsp_diagnostics_directory type check                      [F-17]
+├── 4-Tier Memory selective load                              [F-25]
+│   ├── semantic.md (project knowledge)
+│   ├── procedural.jsonl (relevant patterns only, similarity filter)
+│   └── episodic.md (previous execution summary)
+└── prompt selection based on phase_domain tag                [F-28]
 
-실행 중 (Phase 1~N)
-├── RUNBOOK.md 실시간 갱신                                   [F-10]
-├── <remember priority> 태그로 컴팩션 대비                    [F-12]
-├── Background Execution (독립 TODO 병렬)                    [F-13]
-├── AskUserQuestion (Side Interview HITL)                    [F-14]
-├── Worktree 격리 (HIGH 리스크 페이즈)                       [F-15]
-├── circuit break 시 자동 에스컬레이션                        [F-21]
-│   └── Frugal→Standard→Frontier (완료 작업 보존)
-├── mpl-scout (Fix Loop 원인 탐색)                           [F-16]
-└── Fix Loop 진입 시 Reflection Template 실행                [F-27]
-    ├── 실패 원인 → 근본 원인 → 수정 전략 → 학습 추출
-    └── 패턴 분류 → procedural.jsonl 저장
+During Execution (Phase 1~N)
+├── RUNBOOK.md real-time update                               [F-10]
+├── <remember priority> tags for compaction resilience        [F-12]
+├── Background Execution (parallel independent TODOs)         [F-13]
+├── AskUserQuestion (Side Interview HITL)                     [F-14]
+├── Worktree isolation (HIGH risk phases)                     [F-15]
+├── Automatic escalation on circuit break                     [F-21]
+│   └── Frugal→Standard→Frontier (completed work preserved)
+├── mpl-scout (Fix Loop root cause exploration)               [F-16]
+└── Reflection Template execution on Fix Loop entry           [F-27]
+    ├── failure cause → root cause → correction strategy → learning extraction
+    └── pattern classification → procedural.jsonl storage
 
-실행 후 (Finalize)
-├── routing-patterns.jsonl에 실행 결과 append                [F-22]
-├── RUNBOOK decisions/issues → memory/learnings.md 증류      [F-11]
-├── episodic.md 갱신 → 3회+ 반복 시 semantic.md로 승격       [F-25]
-├── procedural.jsonl → learnings.md 자동 증류                [F-25]
-└── 다음 실행 Phase 0에서 4-tier memory + patterns 자동 참조
+Post-Execution (Finalize)
+├── Append execution result to routing-patterns.jsonl         [F-22]
+├── RUNBOOK decisions/issues → memory/learnings.md distillation [F-11]
+├── episodic.md update → promote to semantic.md after 3+ repetitions [F-25]
+├── procedural.jsonl → learnings.md auto-distillation         [F-25]
+└── 4-tier memory + patterns auto-referenced in next execution Phase 0
 ```
 
-### RUNBOOK.md 형식 (F-10)
+### RUNBOOK.md Format (F-10)
 
 ```markdown
 # RUNBOOK — {task description}
@@ -551,7 +699,7 @@ Load: pivot-points.md + decomposition.yaml + this file
 Next: Phase 3 TODO #3 — email format validator
 ```
 
-### learnings.md 형식 (F-11)
+### learnings.md Format (F-11)
 
 ```markdown
 # MPL Learnings (auto-accumulated)
@@ -572,18 +720,18 @@ Last updated: 2026-03-07
 
 ---
 
-## 결론
+## Conclusion
 
-MPL은 v1.0→v3.0 진화를 통해 "예방이 치료보다 낫다"는 원칙을 실증 데이터로 뒷받침하는 파이프라인으로 성장했다. v3.2는 두 가지 원칙을 추가한다:
+Through the v1.0→v3.0 evolution, MPL has grown into a pipeline that backs the principle "prevention is better than cure" with empirical data. v3.2 adds two more principles:
 
-1. **"문서가 메모리다"** — 단일 실행 내 품질뿐 아니라 세션 간·실행 간 연속성을 보장
-2. **"사용자에게 복잡도를 판단하라고 요구하지 않는다"** — Ouroboros PAL Router에서 영감을 받은 적응형 파이프라인 라우팅으로, 단일 진입점 + 자동 tier 분류 + 동적 에스컬레이션을 통해 경량 작업의 진입 장벽을 제거
+1. **"Documents are memory"** — ensuring continuity not only within a single execution but also between sessions and executions
+2. **"Don't ask users to judge complexity"** — adaptive pipeline routing inspired by Ouroboros PAL Router, eliminating entry barriers for lightweight tasks through single entry point + automatic tier classification + dynamic escalation
 
-상세 설계는 각 문서를 참고한다:
+Refer to each document for detailed design:
 
-- [Phase 1: Foundation - Phase 0 Enhanced](./phase1-foundation.md) — **구현 완료**
-- [Phase 2: Incremental - 점진적 구현/테스트](./phase2-incremental.md) — **구현 완료**
-- [Phase 3: Automation - 자동화 및 최적화](./phase3-automation.md) — **완전 구현**
-- [Adaptive Pipeline Router 구현 계획](./adaptive-router-plan.md) — **v3.2 신규**
-- [실험 결과 요약](./experiments-summary.md)
-- [v3.0 설계 문서](../design.md)
+- [Phase 1: Foundation - Phase 0 Enhanced](./phase1-foundation.md) — **implementation complete**
+- [Phase 2: Incremental - incremental implementation/testing](./phase2-incremental.md) — **implementation complete**
+- [Phase 3: Automation - automation and optimization](./phase3-automation.md) — **fully implemented**
+- [Adaptive Pipeline Router implementation plan](./adaptive-router-plan.md) — **v3.2 new**
+- [Experiment results summary](./experiments-summary.md)
+- [v3.0 design document](../design.md)

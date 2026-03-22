@@ -1,64 +1,64 @@
-# MPL MCP Server 설계 문서
+# MPL MCP Server Design Document
 
-> v3.7 — 2-Stage Interview의 Ambiguity Scoring을 시작으로, hooks의 핵심 로직을 MCP 도구로 점진 이전
+> v3.7 — Starting with Ambiguity Scoring from the 2-Stage Interview, progressively migrating core hook logic to MCP tools
 
-## 1. 설계 동기
+## 1. Design Motivation
 
-### 현재 문제
+### Current Problem
 
-MPL의 핵심 연산 로직이 두 곳에 분산되어 있다:
+MPL's core computation logic is split across two locations:
 
-1. **Hooks** (`mpl-state.mjs`, `mpl-scope-scan.mjs` 등): 파이프라인 상태, 스코어링, 예산 예측
-2. **에이전트 프롬프트** (`mpl-ambiguity-resolver.md`): Ambiguity Scoring을 프롬프트에서 지시
+1. **Hooks** (`mpl-state.mjs`, `mpl-scope-scan.mjs`, etc.): pipeline state, scoring, budget prediction
+2. **Agent prompts** (`mpl-ambiguity-resolver.md`): Ambiguity Scoring instructed in the prompt
 
-문제점:
-- **Hooks는 수동적**: Hook 시점에만 발동. 에이전트가 "지금 상태가 뭐지?"라고 능동적으로 물을 수 없음
-- **프롬프트 내 스코어링은 비일관적**: LLM이 점수를 매기면 같은 입력에 0.6~0.8 편차 발생
-- **컨텍스트 낭비**: 스코어링 로직이 프롬프트에 포함되면 에이전트 컨텍스트를 소모
+Problems:
+- **Hooks are passive**: Only triggered at hook points. Agents cannot actively ask "what's the current state?"
+- **In-prompt scoring is inconsistent**: When LLM assigns scores, the same input produces variance of 0.6~0.8
+- **Context waste**: Including scoring logic in prompts consumes agent context
 
-### Ouroboros의 해결법
-
-```
-에이전트 (질문 생성) ←→ MCP Server (상태 관리 + 스코어링)
-```
-
-- 인터뷰 상태: MCP `ouroboros_interview` 도구가 디스크에 영속
-- Ambiguity Score: Python 코드로 LLM API 호출 (temperature 0.1) → JSON 파싱 → 가중 평균 계산
-- 에이전트는 "질문"에만 집중, 연산은 MCP가 담당
-
-### MPL 적용 원칙
+### Ouroboros's Solution
 
 ```
-에이전트 (오케스트레이션 + 질문)
-  ↕ MCP Tool 호출
-MPL MCP Server (상태 관리 + 스코어링 + 분석)
-  ↕ 파일 I/O + LLM API
-.mpl/ 디렉토리 + Anthropic API
+Agent (question generation) ←→ MCP Server (state management + scoring)
+```
+
+- Interview state: MCP `ouroboros_interview` tool persists to disk
+- Ambiguity Score: Python code calls LLM API (temperature 0.1) → parses JSON → calculates weighted average
+- Agent focuses only on "questions", MCP handles computation
+
+### MPL Application Principle
+
+```
+Agent (orchestration + questions)
+  ↕ MCP Tool calls
+MPL MCP Server (state management + scoring + analysis)
+  ↕ File I/O + LLM API
+.mpl/ directory + Anthropic API
 ```
 
 ---
 
-## 2. 아키텍처
+## 2. Architecture
 
-### 2.1 기술 스택
+### 2.1 Tech Stack
 
-| 요소 | 선택 | 이유 |
+| Component | Choice | Reason |
 |------|------|------|
-| 언어 | TypeScript | MPL hooks와 동일 생태계, MCP SDK 공식 지원 |
-| MCP SDK | `@modelcontextprotocol/sdk` | 공식, 가장 성숙 |
-| LLM SDK | `@anthropic-ai/sdk` | Ambiguity Scoring용 |
-| 런타임 | Node.js >= 20 | ES modules, top-level await |
-| 전송 | stdio | Claude Code 표준 |
+| Language | TypeScript | Same ecosystem as MPL hooks, official MCP SDK support |
+| MCP SDK | `@modelcontextprotocol/sdk` | Official, most mature |
+| LLM SDK | `@anthropic-ai/sdk` | For Ambiguity Scoring |
+| Runtime | Node.js >= 20 | ES modules, top-level await |
+| Transport | stdio | Claude Code standard |
 
-### 2.2 디렉토리 구조
+### 2.2 Directory Structure
 
 ```
 MPL/
-├── mcp/                          # MCP 서버 루트
+├── mcp/                          # MCP server root
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── src/
-│   │   ├── index.ts              # MCP 서버 엔트리포인트
+│   │   ├── index.ts              # MCP server entrypoint
 │   │   ├── tools/
 │   │   │   ├── ambiguity.ts      # mpl_score_ambiguity
 │   │   │   ├── state.ts          # mpl_state_read, mpl_state_write
@@ -67,25 +67,25 @@ MPL/
 │   │   │   ├── test-analyzer.ts  # mpl_analyze_tests
 │   │   │   └── convergence.ts    # mpl_check_convergence
 │   │   ├── lib/
-│   │   │   ├── scoring.ts        # Ambiguity 점수 계산 로직
-│   │   │   ├── llm.ts            # LLM API 호출 래퍼
-│   │   │   └── state.ts          # 상태 파일 읽기/쓰기 (hooks/lib 이전)
-│   │   └── types.ts              # 공유 타입 정의
+│   │   │   ├── scoring.ts        # Ambiguity score calculation logic
+│   │   │   ├── llm.ts            # LLM API call wrapper
+│   │   │   └── state.ts          # State file read/write (migrated from hooks/lib)
+│   │   └── types.ts              # Shared type definitions
 │   └── __tests__/
 │       ├── ambiguity.test.ts
 │       ├── state.test.ts
 │       └── triage.test.ts
-├── hooks/                        # 기존 Hooks (MCP로 이전 불가능한 것만 남김)
+├── hooks/                        # Existing Hooks (only those that cannot be migrated to MCP remain)
 │   ├── lib/
-│   │   ├── mpl-state.mjs         # → mcp/src/lib/state.ts로 이전 (hooks는 MCP 호출)
+│   │   ├── mpl-state.mjs         # → migrate to mcp/src/lib/state.ts (hooks call MCP)
 │   │   └── ...
 │   └── ...
 └── ...
 ```
 
-### 2.3 Claude Code 연동 설정
+### 2.3 Claude Code Integration Configuration
 
-`.mcp.json` (MPL 플러그인 루트):
+`.mcp.json` (MPL plugin root):
 ```json
 {
   "mcpServers": {
@@ -102,29 +102,29 @@ MPL/
 
 ---
 
-## 3. MCP Tool 정의 (9개, 전체 v3.7 구현)
+## 3. MCP Tool Definitions (9 tools, full v3.7 implementation)
 
-### 전체 도구 요약
+### Full Tool Summary
 
-| # | Tool | 카테고리 | 원본 소스 | 핵심 역할 |
+| # | Tool | Category | Source | Core Role |
 |---|------|---------|----------|----------|
-| 1 | `mpl_score_ambiguity` | 인터뷰 | 신규 (Ouroboros 영감) | 4차원 모호성 점수 측정 + LLM 채점 |
-| 2 | `mpl_state_read` | 상태 | `mpl-state.mjs` | 파이프라인 상태 조회 |
-| 3 | `mpl_state_write` | 상태 | `mpl-state.mjs` | 파이프라인 상태 업데이트 (atomic) |
-| 4 | `mpl_triage` | 분류 | `mpl-scope-scan.mjs` | Pipeline Score + Tier 분류 |
-| 5 | `mpl_estimate_budget` | 운영 | `mpl-budget-predictor.mjs` | 컨텍스트 예산 예측 |
-| 6 | `mpl_analyze_tests` | 분석 | `mpl-test-analyzer.mjs` | 테스트 파일 API 계약 추출 |
-| 7 | `mpl_check_convergence` | 운영 | `mpl-state.mjs` | Fix Loop 수렴/정체/회귀 판정 |
-| 8 | `mpl_extract_assertions` | 검증 | 신규 (Ouroboros extractor 영감) | AC를 4-Tier SpecAssertion으로 자동 분해 |
-| 9 | `mpl_verify_spec` | 검증 | 신규 (Ouroboros verifier 영감) | T1/T2 assertion을 regex로 소스 스캔 검증 ($0) |
+| 1 | `mpl_score_ambiguity` | Interview | New (Ouroboros-inspired) | Measure 4-dimensional ambiguity score + LLM scoring |
+| 2 | `mpl_state_read` | State | `mpl-state.mjs` | Query pipeline state |
+| 3 | `mpl_state_write` | State | `mpl-state.mjs` | Update pipeline state (atomic) |
+| 4 | `mpl_triage` | Classification | `mpl-scope-scan.mjs` | Pipeline Score + Tier classification |
+| 5 | `mpl_estimate_budget` | Operations | `mpl-budget-predictor.mjs` | Context budget prediction |
+| 6 | `mpl_analyze_tests` | Analysis | `mpl-test-analyzer.mjs` | Extract API contracts from test files |
+| 7 | `mpl_check_convergence` | Operations | `mpl-state.mjs` | Fix Loop convergence/stagnation/regression judgment |
+| 8 | `mpl_extract_assertions` | Verification | New (Ouroboros extractor-inspired) | Automatically decompose AC into 4-Tier SpecAssertions |
+| 9 | `mpl_verify_spec` | Verification | New (Ouroboros verifier-inspired) | Verify T1/T2 assertions against source via regex scan ($0) |
 
-> 도구 8, 9의 상세 스펙은 `docs/roadmap/test-strategy-redesign.md` 섹션 2.2 참조.
+> Detailed specs for tools 8 and 9: see `docs/roadmap/test-strategy-redesign.md` section 2.2.
 
-### Tier 1: 인터뷰 + 상태 + 분류
+### Tier 1: Interview + State + Classification
 
 #### 3.1 `mpl_score_ambiguity`
 
-**핵심 도구**: Stage 2 메트릭 루프의 엔진.
+**Core tool**: Engine of the Stage 2 metric loop.
 
 ```typescript
 {
@@ -135,19 +135,19 @@ MPL/
     properties: {
       conversation_context: {
         type: "string",
-        description: "Stage 1 PP + Stage 2 대화 전체 컨텍스트"
+        description: "Full context of Stage 1 PP + Stage 2 conversation"
       },
       pivot_points: {
         type: "string",
-        description: "확정된 PP 목록 (pivot-points.md 내용)"
+        description: "List of confirmed PPs (pivot-points.md content)"
       },
       provided_specs: {
         type: "string",
-        description: "제공된 스펙/문서 내용 (있을 경우)"
+        description: "Provided spec/documentation content (if any)"
       },
       cwd: {
         type: "string",
-        description: "프로젝트 작업 디렉토리"
+        description: "Project working directory"
       }
     },
     required: ["conversation_context", "pivot_points", "cwd"]
@@ -155,7 +155,7 @@ MPL/
 }
 ```
 
-**반환값:**
+**Return value:**
 ```json
 {
   "ambiguity_score": 0.41,
@@ -170,30 +170,30 @@ MPL/
   },
   "weakest_dimension": "technical_decision",
   "suggested_questions": [
-    "상태 관리 라이브러리 선택이 미확정입니다. Zustand vs Jotai vs Redux Toolkit 중 선호가 있나요?"
+    "State management library selection is undecided. Is there a preference between Zustand vs Jotai vs Redux Toolkit?"
   ]
 }
 ```
 
-**내부 로직** (Ouroboros `ambiguity.py` 패턴):
+**Internal logic** (Ouroboros `ambiguity.py` pattern):
 ```typescript
-// 1. LLM API 호출 (temperature 0.1, 재현성)
+// 1. LLM API call (temperature 0.1, reproducibility)
 const response = await anthropic.messages.create({
-  model: "claude-sonnet-4-20250514",  // 스코어링은 sonnet으로 충분
+  model: "claude-sonnet-4-20250514",  // sonnet is sufficient for scoring
   temperature: 0.1,
   max_tokens: 2048,
-  system: SCORING_SYSTEM_PROMPT,  // 4차원 채점 지시
+  system: SCORING_SYSTEM_PROMPT,  // 4-dimensional scoring instructions
   messages: [{ role: "user", content: scoringUserPrompt }]
 });
 
-// 2. JSON 파싱 + 재시도
+// 2. JSON parsing + retry
 const breakdown = parseScoreResponse(response.content);
 
-// 3. 가중 평균 계산 (코드로, LLM 아님)
+// 3. Weighted average calculation (in code, not LLM)
 const clarity = dimensions.reduce((sum, d) => sum + d.score * d.weight, 0);
 const ambiguity = Math.round((1 - clarity) * 10000) / 10000;
 
-// 4. 약한 차원 + 질문 제안 도출
+// 4. Derive weakest dimension + question suggestions
 const weakest = dimensions.sort((a, b) => a.score - b.score)[0];
 ```
 
@@ -235,11 +235,11 @@ RESPOND ONLY WITH VALID JSON:
   description: "Read current MPL pipeline state",
   inputSchema: {
     properties: {
-      cwd: { type: "string", description: "프로젝트 작업 디렉토리" },
+      cwd: { type: "string", description: "Project working directory" },
       fields: {
         type: "array",
         items: { type: "string" },
-        description: "특정 필드만 조회 (비어있으면 전체)"
+        description: "Query specific fields only (empty = all)"
       }
     },
     required: ["cwd"]
@@ -247,7 +247,7 @@ RESPOND ONLY WITH VALID JSON:
 }
 ```
 
-기존 `hooks/lib/mpl-state.mjs`의 `readState()` 이전.
+Migration of `readState()` from existing `hooks/lib/mpl-state.mjs`.
 
 #### 3.3 `mpl_state_write`
 
@@ -257,15 +257,15 @@ RESPOND ONLY WITH VALID JSON:
   description: "Update MPL pipeline state (merge patch)",
   inputSchema: {
     properties: {
-      cwd: { type: "string", description: "프로젝트 작업 디렉토리" },
-      patch: { type: "object", description: "병합할 상태 필드" }
+      cwd: { type: "string", description: "Project working directory" },
+      patch: { type: "object", description: "State fields to merge" }
     },
     required: ["cwd", "patch"]
   }
 }
 ```
 
-기존 `writeState()` 이전. Atomic write (temp + rename) 유지.
+Migration of existing `writeState()`. Atomic write (temp + rename) preserved.
 
 #### 3.4 `mpl_triage`
 
@@ -276,7 +276,7 @@ RESPOND ONLY WITH VALID JSON:
   inputSchema: {
     properties: {
       cwd: { type: "string" },
-      prompt: { type: "string", description: "사용자 프롬프트" },
+      prompt: { type: "string", description: "User prompt" },
       affected_files: { type: "number" },
       test_scenarios: { type: "number" },
       import_depth: { type: "number" }
@@ -286,9 +286,9 @@ RESPOND ONLY WITH VALID JSON:
 }
 ```
 
-기존 `mpl-scope-scan.mjs`의 `calculatePipelineScore()` + `classifyTier()` + `extractRiskSignal()` 통합.
+Integration of `calculatePipelineScore()` + `classifyTier()` + `extractRiskSignal()` from existing `mpl-scope-scan.mjs`.
 
-### Tier 2: 파이프라인 운영 도구
+### Tier 2: Pipeline Operations Tools
 
 #### 3.5 `mpl_estimate_budget`
 
@@ -305,7 +305,7 @@ RESPOND ONLY WITH VALID JSON:
 }
 ```
 
-**반환값:**
+**Return value:**
 ```json
 {
   "can_continue": true,
@@ -325,31 +325,31 @@ RESPOND ONLY WITH VALID JSON:
 }
 ```
 
-**내부 로직** (기존 `mpl-budget-predictor.mjs` 이전):
+**Internal logic** (migration of existing `mpl-budget-predictor.mjs`):
 ```typescript
-// 1. .mpl/context-usage.json에서 현재 사용량 읽기
+// 1. Read current usage from .mpl/context-usage.json
 const usage = readContextUsage(cwd);
 
-// 2. .mpl/mpl/profile/phases.jsonl에서 Phase 평균 토큰 계산
+// 2. Calculate average Phase tokens from .mpl/mpl/profile/phases.jsonl
 const avgPerPhase = readAvgTokensPerPhase(cwd);
 
-// 3. .mpl/mpl/decomposition.yaml에서 총 Phase 수 파악
+// 3. Get total Phase count from .mpl/mpl/decomposition.yaml
 const totalPhases = readTotalPhases(cwd);
 const completedPhases = readCompletedPhases(cwd);
 const remainingPhases = totalPhases - completedPhases;
 
-// 4. 예측: 남은 Phase × 평균 토큰 × 안전 마진(1.15)
+// 4. Prediction: remaining Phases × avg tokens × safety margin (1.15)
 const estimatedNeeded = remainingPhases * avgPerPhase * SAFETY_MARGIN;
 
-// 5. 판정
+// 5. Judgment
 if (remainingPct < 10) → "pause_now"
 elif (estimatedNeeded > remainingTokens) → "pause_after_current"
 else → "continue"
 ```
 
-**에이전트 활용 시나리오:**
-- Phase 실행 전: `mpl_estimate_budget` 호출 → `pause_after_current`이면 사용자에게 알림
-- 현재는 Hook에서만 수동 체크 → MCP로 에이전트가 **능동적으로** 예산 확인 가능
+**Agent usage scenarios:**
+- Before Phase execution: call `mpl_estimate_budget` → notify user if `pause_after_current`
+- Currently only manually checked in Hook → MCP allows agents to **proactively** check budget
 
 #### 3.6 `mpl_analyze_tests`
 
@@ -362,11 +362,11 @@ else → "continue"
       cwd: { type: "string" },
       test_path: {
         type: "string",
-        description: "테스트 파일 또는 디렉토리 경로 (상대/절대)"
+        description: "Test file or directory path (relative/absolute)"
       },
       pattern: {
         type: "string",
-        description: "파일명 접두사 필터 (기본: 'test_')"
+        description: "Filename prefix filter (default: 'test_')"
       }
     },
     required: ["cwd", "test_path"]
@@ -374,7 +374,7 @@ else → "continue"
 }
 ```
 
-**반환값:**
+**Return value:**
 ```json
 {
   "files_analyzed": 3,
@@ -408,20 +408,20 @@ else → "continue"
 }
 ```
 
-**내부 로직** (기존 `mpl-test-analyzer.mjs` 이전):
+**Internal logic** (migration of existing `mpl-test-analyzer.mjs`):
 ```typescript
-// Regex 기반 파싱 (AST 외부 의존성 없음)
-// 1. 함수 호출 추출: name, argCount, kwargs
-// 2. pytest.raises 블록: exceptionType, matchPattern
-// 3. assert 문: assertion expression, comparison operator
+// Regex-based parsing (no external AST dependencies)
+// 1. Extract function calls: name, argCount, kwargs
+// 2. pytest.raises blocks: exceptionType, matchPattern
+// 3. assert statements: assertion expression, comparison operator
 // 4. pytest.fixture: name, dependencies
-// 5. Markdown 계약서 자동 생성
+// 5. Auto-generate Markdown contract
 ```
 
-**에이전트 활용 시나리오:**
-- Phase 0 Enhanced에서 API Contract Extraction(Step 1) 수행 시 호출
-- 현재: 에이전트가 직접 테스트 파일을 읽고 패턴 파싱 → 컨텍스트 낭비
-- MCP: `mpl_analyze_tests` 한번 호출 → 구조화된 계약 + 마크다운 반환 → 에이전트는 결과만 활용
+**Agent usage scenarios:**
+- Called when performing API Contract Extraction (Step 1) in Phase 0 Enhanced
+- Currently: agent directly reads test files and parses patterns → context waste
+- MCP: single `mpl_analyze_tests` call → returns structured contracts + markdown → agent uses only the result
 
 #### 3.7 `mpl_check_convergence`
 
@@ -438,7 +438,7 @@ else → "continue"
 }
 ```
 
-**반환값:**
+**Return value:**
 ```json
 {
   "status": "stagnating",
@@ -454,142 +454,142 @@ else → "continue"
 }
 ```
 
-**내부 로직** (기존 `mpl-state.mjs`의 `checkConvergence()` 확장):
+**Internal logic** (extension of existing `checkConvergence()` from `mpl-state.mjs`):
 ```typescript
-// 1. state.json에서 convergence.pass_rate_history 읽기
-// 2. 최근 N개(stagnation_window) 분석
-//    - 개선 중: delta >= min_improvement (0.05)
-//    - 정체: variance < 0.0025 AND delta < min_improvement
-//    - 회귀: delta < regression_threshold (-0.10)
-// 3. 추가 판정 (MCP에서 확장):
-//    - should_escalate: 정체 + fix_loop_count > max/2 → tier 에스컬레이션 제안
-//    - should_circuit_break: 회귀 OR (정체 AND fix_loop_count > max*0.7) → 중단 제안
-// 4. strategy suggestion 생성
+// 1. Read convergence.pass_rate_history from state.json
+// 2. Analyze latest N entries (stagnation_window)
+//    - Improving: delta >= min_improvement (0.05)
+//    - Stagnating: variance < 0.0025 AND delta < min_improvement
+//    - Regressing: delta < regression_threshold (-0.10)
+// 3. Additional judgments (extended in MCP):
+//    - should_escalate: stagnating + fix_loop_count > max/2 → suggest tier escalation
+//    - should_circuit_break: regression OR (stagnating AND fix_loop_count > max*0.7) → suggest abort
+// 4. Generate strategy suggestion
 ```
 
-**에이전트 활용 시나리오:**
-- Fix Loop 매 반복 시작 전: `mpl_check_convergence` 호출
-- `should_circuit_break == true`이면 에이전트가 즉시 전략 변경 또는 사용자 상담
-- 현재: Hook이 PostToolUse 시점에 체크 → 에이전트는 결과를 간접 수신
-- MCP: 에이전트가 능동적으로 호출 → 판단에 직접 활용
+**Agent usage scenarios:**
+- Before each Fix Loop iteration: call `mpl_check_convergence`
+- If `should_circuit_break == true`, agent immediately changes strategy or consults user
+- Currently: Hook checks at PostToolUse point → agent receives result indirectly
+- MCP: agent proactively calls → uses directly in decision-making
 
 ---
 
-## 4. 마이그레이션 전략
+## 4. Migration Strategy
 
-### 일괄 구현 (v3.7)
+### Batch Implementation (v3.7)
 
 ```
-v3.7: MCP 서버 생성 + Tier 1 + Tier 2 전체 구현 (7개 도구)
-      기존 hooks 병행 유지
+v3.7: Create MCP server + implement all of Tier 1 + Tier 2 (7 tools)
+      Keep existing hooks running in parallel
 
-      Tier 1 (인터뷰 + 상태 + 분류):
+      Tier 1 (Interview + State + Classification):
         mpl_score_ambiguity, mpl_state_read, mpl_state_write, mpl_triage
 
-      Tier 2 (운영 + 분석):
+      Tier 2 (Operations + Analysis):
         mpl_estimate_budget, mpl_analyze_tests, mpl_check_convergence
 
-v3.8: hooks를 thin wrapper로 변환
-      hooks/lib/의 로직을 MCP import로 대체
-      hooks는 이벤트 트리거 + MCP 호출 프록시만 담당
+v3.8: Convert hooks to thin wrappers
+      Replace hooks/lib/ logic with MCP imports
+      Hooks handle event triggers + MCP call proxy only
 ```
 
-### Hooks와의 공존
+### Coexistence with Hooks
 
-MCP로 이전 **불가능**한 hooks (그대로 유지):
+Hooks that **cannot** be migrated to MCP (kept as-is):
 
-| Hook | 이유 |
+| Hook | Reason |
 |------|------|
-| `mpl-write-guard.mjs` | PreToolUse 시점에서 차단해야 함 — MCP 호출 타이밍으로는 불가 |
-| `mpl-hud.mjs` | StatusLine은 Hook 전용 기능 |
-| `mpl-keyword-detector.mjs` | UserPromptSubmit 시점에서 파이프라인 활성화 |
+| `mpl-write-guard.mjs` | Must block at PreToolUse point — impossible with MCP call timing |
+| `mpl-hud.mjs` | StatusLine is a hook-exclusive feature |
+| `mpl-keyword-detector.mjs` | Activate pipeline at UserPromptSubmit point |
 | `mpl-auto-permit.mjs` | Permission hook |
 | `mpl-session-init.mjs` | Session init hook |
 | `mpl-compaction-tracker.mjs` | Notification hook |
 
-MCP로 이전 **가능**한 hooks (v3.8에서 thin wrapper로 변환):
+Hooks that **can** be migrated to MCP (converted to thin wrappers in v3.8):
 
-| Hook | 현재 역할 | MCP 이전 후 |
+| Hook | Current Role | After MCP Migration |
 |------|----------|-------------|
-| `mpl-phase-controller.mjs` | 상태 읽기/쓰기 + 에스컬레이션 | `mpl_state_read/write` 호출 |
-| `mpl-validate-output.mjs` | 에이전트 출력 검증 | 검증 로직은 MCP, Hook은 트리거만 |
+| `mpl-phase-controller.mjs` | State read/write + escalation | Call `mpl_state_read/write` |
+| `mpl-validate-output.mjs` | Agent output validation | Validation logic in MCP, Hook is trigger only |
 
-### 코드 재사용
+### Code Reuse
 
-기존 `hooks/lib/` → `mcp/src/lib/`로 TypeScript 변환:
+Existing `hooks/lib/` → TypeScript conversion to `mcp/src/lib/`:
 
-| 원본 | 변환 대상 | 변환 내용 |
+| Source | Target | Conversion |
 |------|----------|----------|
-| `mpl-state.mjs` | `mcp/src/lib/state.ts` | 타입 추가 + export |
-| `mpl-scope-scan.mjs` | `mcp/src/tools/triage.ts` | 타입 추가 |
-| `mpl-budget-predictor.mjs` | `mcp/src/tools/budget.ts` | 타입 추가 |
-| `mpl-test-analyzer.mjs` | `mcp/src/tools/test-analyzer.ts` | 타입 추가 |
+| `mpl-state.mjs` | `mcp/src/lib/state.ts` | Add types + export |
+| `mpl-scope-scan.mjs` | `mcp/src/tools/triage.ts` | Add types |
+| `mpl-budget-predictor.mjs` | `mcp/src/tools/budget.ts` | Add types |
+| `mpl-test-analyzer.mjs` | `mcp/src/tools/test-analyzer.ts` | Add types |
 
 ---
 
-## 5. mpl-ambiguity-resolver 에이전트 변경
+## 5. mpl-ambiguity-resolver Agent Changes
 
-MCP 도입 후 Stage 2 에이전트의 Socratic Loop가 단순화된다:
+After MCP introduction, the Stage 2 agent's Socratic Loop is simplified:
 
-### Before (v3.7 현재)
-
-```
-에이전트가 직접:
-1. 대화 컨텍스트 분석
-2. 4차원 점수 산출 (프롬프트로 지시)
-3. 가중 평균 계산
-4. 약한 차원 식별
-5. 질문 생성
-6. 사용자 응답 수집
-7. 1~6 반복
-```
-
-### After (MCP 도입)
+### Before (current v3.7)
 
 ```
-에이전트:
-1. mpl_score_ambiguity(context, PPs) 호출
-2. 결과에서 weakest_dimension + suggested_questions 확인
-3. 질문 생성 (suggested_questions를 참고하되 맥락에 맞게 조정)
-4. 사용자 응답 수집
-5. 1~4 반복 (is_ready == true까지)
+Agent directly:
+1. Analyze conversation context
+2. Calculate 4-dimensional score (instructed via prompt)
+3. Calculate weighted average
+4. Identify weakest dimension
+5. Generate questions
+6. Collect user responses
+7. Repeat 1~6
 ```
 
-에이전트 프롬프트에서 스코어링 관련 섹션 대부분을 제거할 수 있다.
-에이전트는 "좋은 질문을 만드는 것"에만 집중.
+### After (with MCP)
+
+```
+Agent:
+1. Call mpl_score_ambiguity(context, PPs)
+2. Check weakest_dimension + suggested_questions from result
+3. Generate questions (reference suggested_questions but adjust to context)
+4. Collect user responses
+5. Repeat 1~4 (until is_ready == true)
+```
+
+Most scoring-related sections can be removed from the agent prompt.
+Agent focuses only on "crafting good questions."
 
 ---
 
-## 6. 비용 분석
+## 6. Cost Analysis
 
-### mpl_score_ambiguity 1회 호출 비용
+### mpl_score_ambiguity cost per call
 
-| 항목 | 예상 |
+| Item | Estimate |
 |------|------|
-| LLM 입력 | ~1,500 tokens (scoring prompt + context 요약) |
-| LLM 출력 | ~300 tokens (JSON) |
-| 모델 | claude-sonnet-4 (가장 비용 효율적) |
-| 비용/호출 | ~$0.006 |
-| 루프 평균 | 3~5회 → ~$0.02~0.03/인터뷰 |
+| LLM input | ~1,500 tokens (scoring prompt + context summary) |
+| LLM output | ~300 tokens (JSON) |
+| Model | claude-sonnet-4 (most cost-efficient) |
+| Cost/call | ~$0.006 |
+| Loop average | 3~5 calls → ~$0.02~0.03/interview |
 
-Ouroboros와 동일하게 **Sonnet을 스코어링 전용으로 사용**, 인터뷰 에이전트는 Opus 유지.
-이렇게 하면 스코어링의 일관성(temperature 0.1)과 비용 효율을 동시에 확보.
+Same as Ouroboros: **use Sonnet exclusively for scoring**, keep interview agent on Opus.
+This ensures both scoring consistency (temperature 0.1) and cost efficiency.
 
 ---
 
-## 7. 테스트 전략
+## 7. Test Strategy
 
 ```
 Unit Tests:
-  - scoring.ts: 가중 평균 계산, JSON 파싱, 재시도 로직
-  - state.ts: 읽기/쓰기, atomic write, deep merge
-  - triage.ts: 파이프라인 스코어 계산, tier 분류
+  - scoring.ts: weighted average calculation, JSON parsing, retry logic
+  - state.ts: read/write, atomic write, deep merge
+  - triage.ts: pipeline score calculation, tier classification
 
 Integration Tests:
-  - MCP 서버 시작 → tool 호출 → 응답 검증
-  - LLM API mock으로 스코어링 E2E
+  - Start MCP server → call tool → validate response
+  - Scoring E2E with LLM API mock
 
 Manual Validation:
-  - 실제 인터뷰 세션에서 mpl_score_ambiguity 호출 → 점수 변화 관찰
-  - 기존 hooks와 동일 결과 비교 (state, triage)
+  - Call mpl_score_ambiguity in a real interview session → observe score changes
+  - Compare same results as existing hooks (state, triage)
 ```

@@ -16,6 +16,18 @@ MPL can operate without OMC (oh-my-claudecode) installed. When OMC tools
 | `ast_grep_search` | `Grep` with regex patterns | Less structural, more noise |
 | `ast_grep_replace` | `Edit` tool (manual patterns) | Requires exact string matching |
 
+### QMD Fallback Policy
+
+Fallbacks for environments where QMD (semantic search) tools are unavailable:
+
+| QMD Tool | Standalone Fallback | Accuracy |
+|----------|-------------------|--------|
+| `qmd_search` (BM25) | `Grep` with keyword patterns | Equivalent |
+| `qmd_vector_search` (semantic) | `Grep` with expanded keyword set | Lower (semantic search unavailable) |
+| `qmd_deep_search` (hybrid) | `Grep` + `Glob` combination | Medium |
+
+The Scout agent automatically switches to Grep-Only mode when QMD is unavailable (see `mpl-scout.md` Search_Strategy).
+
 ## Detection Logic
 
 At pipeline start (Step -1 LSP Warm-up), MPL detects available tools:

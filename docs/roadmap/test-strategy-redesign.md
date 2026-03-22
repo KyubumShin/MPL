@@ -1,109 +1,109 @@
-# MPL 테스트 전략 재설계
+# MPL Test Strategy Redesign
 
-> MPL ~70 tests vs Ouroboros 900+ tests — 12배 차이의 구조적 원인 분석과 개선 설계
+> MPL ~70 tests vs Ouroboros 900+ tests — structural cause analysis and improvement design for the 12x gap
 
-## 1. 현상 분석
+## 1. Situation Analysis
 
-### 1.1 절대적 테스트량 비교 (유사 프로젝트 규모)
+### 1.1 Absolute Test Count Comparison (similar project scale)
 
-| 지표 | MPL (Yggdrasil) | Ouroboros |
+| Metric | MPL (Yggdrasil) | Ouroboros |
 |------|-----------------|----------|
-| 생성된 테스트 | ~70개 | 900+개 |
-| 테스트 파일 | ~10개 | 95개 |
-| 테스트 계층 | Gate 1 (vitest) | Unit + Integration + E2E |
-| AC → 테스트 변환 | 에이전트 재량 | 코드 자동 분해 |
-| 테스트 축적 | Phase별 독립 | 세대별 단조 증가 |
+| Generated tests | ~70 | 900+ |
+| Test files | ~10 | 95 |
+| Test layers | Gate 1 (vitest) | Unit + Integration + E2E |
+| AC → test conversion | Agent discretion | Automated code decomposition |
+| Test accumulation | Independent per Phase | Monotonically increasing per generation |
 
-### 1.2 구조적 원인 (Root Cause)
+### 1.2 Structural Root Causes
 
-#### 원인 1: AC 분해 밀도 부족
+#### Cause 1: Insufficient AC Decomposition Density
 
-**Ouroboros의 AssertionExtractor**:
+**Ouroboros's AssertionExtractor**:
 ```
 AC: "API should return 200 for valid input and 400 for invalid input with error message"
   → SpecAssertion 1: T1_constant, pattern="status.*200", file_hint="*.py"
   → SpecAssertion 2: T1_constant, pattern="status.*400", file_hint="*.py"
   → SpecAssertion 3: T2_structural, pattern="error_message", file_hint="*.py"
-  = 3개 검증 포인트 자동 생성
+  = 3 verification points auto-generated
 ```
 
-**MPL의 현재**:
+**MPL's current state**:
 ```
 A-item: `npx vitest run tests/api.test.ts` -- Expected: exit 0
-  → mpl-test-agent에게 "이 AC를 테스트해라"
-  → 에이전트 판단으로 1~2개 테스트 작성
-  = 에이전트 재량에 의존, 분해 밀도가 불일정
+  → tell mpl-test-agent "test this AC"
+  → agent writes 1~2 tests at its discretion
+  = depends on agent discretion, decomposition density is inconsistent
 ```
 
-#### 원인 2: 4-Tier 검증 부재
+#### Cause 2: Absence of 4-Tier Verification
 
-Ouroboros는 AC를 **검증 가능성에 따라 4 tier로 분류**한 뒤, 각 tier에 맞는 검증 방법을 적용:
+Ouroboros **classifies AC into 4 tiers by verifiability**, then applies the appropriate verification method for each tier:
 
-| Tier | 대상 | 검증 방법 | 비용 |
+| Tier | Target | Verification Method | Cost |
 |------|------|----------|------|
-| T1 (Constant) | 설정값, 상수, 임계값 | regex로 소스 스캔 | $0 |
-| T2 (Structural) | 파일/클래스/인터페이스 존재 | glob/grep | $0 |
-| T3 (Behavioral) | 기능 동작 | 테스트 실행 | 테스트 비용 |
-| T4 (Unverifiable) | 주관적 판단 | 건너뜀 | $0 |
+| T1 (Constant) | Config values, constants, thresholds | regex source scan | $0 |
+| T2 (Structural) | File/class/interface existence | glob/grep | $0 |
+| T3 (Behavioral) | Functional behavior | test execution | test cost |
+| T4 (Unverifiable) | Subjective judgment | skip | $0 |
 
-MPL은 A/S/H 분류가 있지만:
-- A-item: "명령어가 exit 0을 반환하는가" → T3(행동) 수준만 커버
-- S-item: BDD 시나리오 → 역시 T3
-- T1/T2에 해당하는 **$0 검증**이 누락
+MPL has A/S/H classification but:
+- A-item: "does the command return exit 0?" → covers only T3 (behavioral) level
+- S-item: BDD scenarios → also T3
+- **$0 verification** for T1/T2 is missing
 
-#### 원인 3: 테스트 축적 메커니즘 부재
+#### Cause 3: Absence of Test Accumulation Mechanism
 
 ```
 Ouroboros evolve:
   Gen 1: 50 tests → Gen 2: 50 + 30 new = 80 → Gen 3: 80 + 20 = 100
-  = 세대마다 regression suite가 축적
+  = regression suite accumulates each generation
 
 MPL phases:
   Phase 1: 15 tests → Phase 2: 12 tests → Phase 3: 18 tests
-  = Phase별 독립. Phase 1 테스트가 Phase 3에서 regression으로 실행되는가? 보장 없음
+  = independent per Phase. Is Phase 1 test run as regression in Phase 3? Not guaranteed
 ```
 
-#### 원인 4: Mechanical Verification 부재
+#### Cause 4: Absence of Mechanical Verification
 
-Ouroboros의 Stage 1(Mechanical)은 테스트 실행 전에 lint/build/typecheck/coverage를 **코드로** 실행.
-MPL의 3-Gate는 유사하지만:
-- Gate 1: `tsc` → 타입 체크만 (lint 없음)
-- Gate 2: `vitest` → 테스트 실행
-- Gate 3: `build` → 빌드
+Ouroboros's Stage 1 (Mechanical) runs lint/build/typecheck/coverage **in code** before test execution.
+MPL's 3-Gate is similar but:
+- Gate 1: `tsc` → type check only (no lint)
+- Gate 2: `vitest` → test execution
+- Gate 3: `build` → build
 
-**누락**: lint, coverage threshold, static analysis
+**Missing**: lint, coverage threshold, static analysis
 
 ---
 
-## 2. 개선 설계
+## 2. Improvement Design
 
-### 2.1 전체 아키텍처 변경
+### 2.1 Overall Architecture Change
 
 ```
-현재 MPL:
-  Verification Planner → A/S/H 분류 → Test Agent (에이전트 재량으로 테스트 작성)
+Current MPL:
+  Verification Planner → A/S/H classification → Test Agent (writes tests at agent discretion)
                                            ↓
                                        Gate 1-3
 
-개선 MPL:
-  Verification Planner → A/S/H 분류
+Improved MPL:
+  Verification Planner → A/S/H classification
         ↓
   [NEW] Assertion Extractor (MCP: mpl_extract_assertions)
-        → AC를 T1/T2/T3/T4 SpecAssertion으로 자동 분해
-        → T1/T2는 즉시 자동 검증 (mpl_verify_spec)
+        → automatically decompose AC into T1/T2/T3/T4 SpecAssertions
+        → T1/T2 immediately auto-verified (mpl_verify_spec)
         ↓
-  Test Agent (T3 assertion만 담당 → 에이전트 부담 감소, 테스트 밀도 증가)
+  Test Agent (handles T3 assertions only → reduced agent burden, increased test density)
         ↓
-  [NEW] Regression Accumulator (Phase 간 테스트 축적)
+  [NEW] Regression Accumulator (accumulate tests across Phases)
         ↓
   [ENHANCED] Gate 1-4 (lint + typecheck + test + build + coverage)
 ```
 
-### 2.2 신규 MCP 도구 (2개 추가)
+### 2.2 New MCP Tools (2 added)
 
 #### `mpl_extract_assertions`
 
-AC를 4-Tier SpecAssertion으로 자동 분해. Ouroboros `extractor.py` 패턴.
+Automatically decompose AC into 4-Tier SpecAssertions. Ouroboros `extractor.py` pattern.
 
 ```typescript
 {
@@ -115,11 +115,11 @@ AC를 4-Tier SpecAssertion으로 자동 분해. Ouroboros `extractor.py` 패턴.
       acceptance_criteria: {
         type: "array",
         items: { type: "string" },
-        description: "AC 텍스트 목록 (A/S-item descriptions)"
+        description: "List of AC texts (A/S-item descriptions)"
       },
       pivot_points: {
         type: "string",
-        description: "PP 목록 (검증 기준 보강용)"
+        description: "List of PPs (for strengthening verification criteria)"
       }
     },
     required: ["cwd", "acceptance_criteria"]
@@ -127,7 +127,7 @@ AC를 4-Tier SpecAssertion으로 자동 분해. Ouroboros `extractor.py` 패턴.
 }
 ```
 
-**반환값:**
+**Return value:**
 ```json
 {
   "assertions": [
@@ -169,24 +169,24 @@ AC를 4-Tier SpecAssertion으로 자동 분해. Ouroboros `extractor.py` 패턴.
 }
 ```
 
-**내부 로직:**
+**Internal logic:**
 ```typescript
-// LLM 호출 (sonnet, temperature 0.0, 재현성)
-// Ouroboros의 _SYSTEM_PROMPT 패턴 적용:
-//   - T1: 상수/설정값 → regex 패턴 추출
-//   - T2: 구조적 존재 → 파일/클래스/함수명 패턴
-//   - T3: 행동 → 테스트 실행 필요
-//   - T4: 주관적 → 건너뜀
-// 1 AC → 0~3개 assertion (다중 검증 포인트)
+// LLM call (sonnet, temperature 0.0, reproducibility)
+// Apply Ouroboros's _SYSTEM_PROMPT pattern:
+//   - T1: constants/config values → extract regex pattern
+//   - T2: structural existence → file/class/function name pattern
+//   - T3: behavioral → requires test execution
+//   - T4: subjective → skip
+// 1 AC → 0~3 assertions (multiple verification points)
 ```
 
-**핵심 가치:**
-- 에이전트 재량 의존 → **코드 기반 자동 분해**
-- 1 AC → 평균 1.5~2.5 assertion → **AC 10개면 15~25 검증 포인트**
+**Core value:**
+- Dependency on agent discretion → **code-based automated decomposition**
+- 1 AC → average 1.5~2.5 assertions → **10 ACs yield 15~25 verification points**
 
 #### `mpl_verify_spec`
 
-T1/T2 assertion을 코드로 자동 검증. LLM 호출 없이 $0.
+Automatically verify T1/T2 assertions against code. No LLM calls, $0 cost.
 
 ```typescript
 {
@@ -197,7 +197,7 @@ T1/T2 assertion을 코드로 자동 검증. LLM 호출 없이 $0.
       cwd: { type: "string" },
       assertions: {
         type: "array",
-        description: "mpl_extract_assertions의 반환값 중 t1/t2 assertion 목록"
+        description: "List of t1/t2 assertions from mpl_extract_assertions return value"
       }
     },
     required: ["cwd", "assertions"]
@@ -205,7 +205,7 @@ T1/T2 assertion을 코드로 자동 검증. LLM 호출 없이 $0.
 }
 ```
 
-**반환값:**
+**Return value:**
 ```json
 {
   "results": [
@@ -238,36 +238,36 @@ T1/T2 assertion을 코드로 자동 검증. LLM 호출 없이 $0.
 }
 ```
 
-**내부 로직** (Ouroboros `verifier.py` 패턴):
+**Internal logic** (Ouroboros `verifier.py` pattern):
 ```typescript
-// T1: regex 패턴으로 소스 파일 스캔
-//   - file_hint의 glob으로 파일 목록 수집
-//   - 각 파일에서 pattern 매칭
-//   - expected_value와 실제 값 비교
+// T1: scan source files with regex pattern
+//   - collect file list with file_hint glob
+//   - match pattern in each file
+//   - compare expected_value with actual value
 
-// T2: 파일/클래스/함수 존재 확인
-//   - file_hint의 glob으로 파일 존재 확인
-//   - pattern으로 클래스/함수명 grep
+// T2: confirm file/class/function existence
+//   - confirm file existence with file_hint glob
+//   - grep class/function name with pattern
 
-// 보안: MAX_FILE_SIZE(50KB), MAX_PATTERN_LENGTH(200), ReDoS 방지
+// Security: MAX_FILE_SIZE(50KB), MAX_PATTERN_LENGTH(200), ReDoS prevention
 ```
 
-### 2.3 Verification Planner 확장
+### 2.3 Verification Planner Expansion
 
-기존 A/S/H 분류에 **T1/T2/T3/T4 하위 분류** 추가.
+Add **T1/T2/T3/T4 sub-classification** to existing A/S/H classification.
 
 ```
-현재:
-  AC → A-item (명령어 기반) / S-item (BDD) / H-item (사람)
+Current:
+  AC → A-item (command-based) / S-item (BDD) / H-item (human)
 
-개선:
-  AC → mpl_extract_assertions 호출
-     → T1/T2 assertion: mpl_verify_spec으로 즉시 자동 검증
-     → T3 assertion: A-item 또는 S-item으로 분류 → Test Agent가 테스트 작성
-     → T4 assertion: H-item으로 분류
+Improved:
+  AC → call mpl_extract_assertions
+     → T1/T2 assertions: immediately auto-verify with mpl_verify_spec
+     → T3 assertions: classify as A-item or S-item → Test Agent writes tests
+     → T4 assertions: classify as H-item
 ```
 
-**Verification Planner 출력 변경:**
+**Verification Planner output change:**
 
 ```markdown
 ## 2. A-items (Agent-Verifiable)
@@ -284,40 +284,40 @@ T1/T2 assertion을 코드로 자동 검증. LLM 호출 없이 $0.
 - [A-6] Phase 2: `npx vitest run tests/auth.test.ts` -- Expected: exit 0
 ```
 
-### 2.4 Test Agent 역할 변경
+### 2.4 Test Agent Role Change
 
-**Before:** AC 전체를 에이전트 재량으로 테스트
-**After:** T3 assertion만 집중 → **더 깊은 테스트, 더 높은 밀도**
-
-```
-현재:
-  Test Agent 입력: "이 Phase의 모든 AC를 테스트해라"
-  → 에이전트가 AC 해석 + 테스트 설계 + 작성 + 실행
-  → 결과: ~7 tests/phase (에이전트 재량)
-
-개선:
-  Test Agent 입력:
-    - T3 assertion 목록 (이미 구체적으로 분해됨)
-    - T1/T2 검증 결과 (이미 자동 완료)
-    - "T3 assertion 각각에 대해 테스트를 작성해라"
-  → assertion당 1~2개 테스트 (분해 밀도 보장)
-  → 결과: ~15-20 tests/phase (assertion 기반)
-```
-
-### 2.5 테스트 축적 정책 (Regression Accumulator)
-
-Phase 간 테스트가 축적되는 메커니즘 도입.
+**Before:** Test all ACs at agent discretion
+**After:** Focus only on T3 assertions → **deeper tests, higher density**
 
 ```
-Phase 1 완료: 15 tests → .mpl/regression-suite.json에 등록
-Phase 2 시작: Phase 2 테스트 + Phase 1 regression suite 실행
-Phase 2 완료: 15 + 12 = 27 tests in regression suite
-Phase 3 시작: Phase 3 테스트 + 27 regression tests 실행
+Current:
+  Test Agent input: "test all ACs for this Phase"
+  → agent interprets ACs + designs tests + writes + runs
+  → result: ~7 tests/phase (agent discretion)
+
+Improved:
+  Test Agent input:
+    - T3 assertion list (already concretely decomposed)
+    - T1/T2 verification results (already automatically completed)
+    - "write a test for each T3 assertion"
+  → 1~2 tests per assertion (decomposition density guaranteed)
+  → result: ~15-20 tests/phase (assertion-based)
+```
+
+### 2.5 Test Accumulation Policy (Regression Accumulator)
+
+Introduce a mechanism for tests to accumulate across Phases.
+
+```
+Phase 1 complete: 15 tests → register in .mpl/regression-suite.json
+Phase 2 start: run Phase 2 tests + Phase 1 regression suite
+Phase 2 complete: 15 + 12 = 27 tests in regression suite
+Phase 3 start: run Phase 3 tests + 27 regression tests
 ...
-Phase N 완료: 누적 테스트가 단조 증가
+Phase N complete: accumulated tests monotonically increase
 ```
 
-**regression-suite.json 구조:**
+**regression-suite.json structure:**
 ```json
 {
   "accumulated_tests": [
@@ -341,94 +341,94 @@ Phase N 완료: 누적 테스트가 단조 증가
 }
 ```
 
-**Gate 2 변경:**
+**Gate 2 change:**
 ```
-현재 Gate 2: 현재 Phase 테스트만 실행
-개선 Gate 2: 현재 Phase 테스트 + regression suite 전체 실행
+Current Gate 2: run only current Phase tests
+Improved Gate 2: run current Phase tests + full regression suite
 ```
 
-### 2.6 Gate 확장 (4-Gate)
+### 2.6 Gate Expansion (4-Gate)
 
-| Gate | 현재 | 개선 |
+| Gate | Current | Improved |
 |------|------|------|
-| Gate 1 | `tsc` (타입 체크) | `tsc` + lint (ruff/eslint) |
-| Gate 2 | `vitest` (현재 Phase만) | `vitest` (현재 Phase + regression suite) |
+| Gate 1 | `tsc` (type check) | `tsc` + lint (ruff/eslint) |
+| Gate 2 | `vitest` (current Phase only) | `vitest` (current Phase + regression suite) |
 | Gate 3 | `build` | `build` + **coverage threshold** (>= 70%) |
-| Gate 4 | 없음 | **Spec Verification** (`mpl_verify_spec` T1/T2 자동 검증) |
+| Gate 4 | none | **Spec Verification** (`mpl_verify_spec` T1/T2 auto-verification) |
 
-Gate 4는 $0 비용 (LLM 호출 없음, regex 스캔만). 하지만 에이전트의 "구현했습니다"를 코드로 교차 검증.
-
----
-
-## 3. 예상 효과
-
-### 3.1 테스트 수량 예측
-
-Yggdrasil과 동일 규모(AC ~30개, 7 Phase) 기준:
-
-| 단계 | 현재 | 개선 후 |
-|------|------|--------|
-| AC 분해 | 30 AC → ~30 검증 포인트 | 30 AC → ~60-75 SpecAssertion |
-| T1/T2 자동 검증 | 0 | ~25-30 (즉시, $0) |
-| T3 테스트 생성 | ~70 (전체) | ~35-45 (T3만, 더 집중) |
-| Regression 축적 | 없음 (Phase별 독립) | 7 Phase × ~10 = 70 regression tests |
-| **총 검증 포인트** | **~70** | **~130-145 + 70 regression = ~200** |
-
-3배 증가. 900에는 못 미치지만, 핵심 차이:
-- Ouroboros는 900개가 프로젝트 자체의 단위 테스트 (evolve 루프로 축적)
-- MPL은 "사용자 프로젝트의 테스트"를 생성하는 것이므로 동일 비교는 부적절
-- **AC당 검증 밀도**(assertion/AC)가 핵심 지표: 현재 ~2.3 → 개선 후 ~5-7
-
-### 3.2 품질 개선
-
-| 지표 | 현재 | 개선 후 |
-|------|------|--------|
-| False positive (에이전트가 pass라 했는데 실제 fail) | 감지 불가 | T1/T2 교차 검증으로 감지 |
-| AC 커버리지 | 에이전트 재량 | 모든 AC가 최소 1 assertion |
-| Regression | Phase별 독립 | 누적 regression suite |
-| 검증 비용 | 전부 LLM 비용 | T1/T2는 $0, T3만 LLM |
+Gate 4 is $0 cost (no LLM calls, regex scan only). But cross-verifies agent's "I've implemented it" in code.
 
 ---
 
-## 4. 구현 순서
+## 3. Expected Impact
+
+### 3.1 Test Count Projection
+
+Based on same scale as Yggdrasil (AC ~30, 7 Phases):
+
+| Stage | Current | After Improvement |
+|------|------|--------|
+| AC decomposition | 30 ACs → ~30 verification points | 30 ACs → ~60-75 SpecAssertions |
+| T1/T2 auto-verification | 0 | ~25-30 (immediate, $0) |
+| T3 test generation | ~70 (all) | ~35-45 (T3 only, more focused) |
+| Regression accumulation | none (independent per Phase) | 7 Phases × ~10 = 70 regression tests |
+| **Total verification points** | **~70** | **~130-145 + 70 regression = ~200** |
+
+3x increase. Cannot reach 900, but the key difference:
+- Ouroboros's 900 are the project's own unit tests (accumulated via evolve loop)
+- MPL generates "tests for the user's project" so a direct comparison is inappropriate
+- **Verification density per AC** (assertion/AC) is the key metric: current ~2.3 → after improvement ~5-7
+
+### 3.2 Quality Improvements
+
+| Metric | Current | After Improvement |
+|------|------|--------|
+| False positives (agent says pass but actually fails) | Undetectable | Detectable with T1/T2 cross-verification |
+| AC coverage | Agent discretion | All ACs have at least 1 assertion |
+| Regression | Independent per Phase | Cumulative regression suite |
+| Verification cost | All LLM cost | T1/T2 at $0, only T3 uses LLM |
+
+---
+
+## 4. Implementation Order
 
 ```
-Phase 1: MCP 도구 추가 (mpl_extract_assertions, mpl_verify_spec)
-  → mcp-server-design.md의 도구 목록에 추가 (총 9개)
+Phase 1: Add MCP tools (mpl_extract_assertions, mpl_verify_spec)
+  → Add to tool list in mcp-server-design.md (total 9 tools)
 
-Phase 2: Verification Planner 에이전트 개선
-  → A/S/H + T1/T2/T3/T4 하위 분류 출력
-  → mpl_extract_assertions 호출 통합
+Phase 2: Improve Verification Planner agent
+  → A/S/H + T1/T2/T3/T4 sub-classification output
+  → Integrate mpl_extract_assertions calls
 
-Phase 3: Test Agent 역할 변경
-  → T3 assertion 기반 테스트 작성으로 전환
-  → 에이전트 프롬프트 경량화
+Phase 3: Change Test Agent role
+  → Switch to T3 assertion-based test writing
+  → Lighten agent prompt
 
 Phase 4: Regression Accumulator + Gate 4
-  → regression-suite.json 관리
-  → Gate 2에 regression 통합
-  → Gate 4 (Spec Verification) 추가
+  → Manage regression-suite.json
+  → Integrate regression into Gate 2
+  → Add Gate 4 (Spec Verification)
 
-Phase 5: 에이전트 프롬프트 업데이트
-  → mpl-verification-planner.md: T1/T2/T3/T4 분류 추가
-  → mpl-test-agent.md: T3 assertion 기반으로 전환
-  → mpl-run-execute.md: Gate 4 + regression 반영
+Phase 5: Update agent prompts
+  → mpl-verification-planner.md: add T1/T2/T3/T4 classification
+  → mpl-test-agent.md: switch to T3 assertion basis
+  → mpl-run-execute.md: reflect Gate 4 + regression
 ```
 
 ---
 
-## 5. Ouroboros와의 차이 정리
+## 5. Differences from Ouroboros
 
-MPL은 Ouroboros의 **검증 밀도 메커니즘**을 도입하되, 전체 구조를 그대로 가져오지 않는다.
+MPL adopts Ouroboros's **verification density mechanism** without bringing over the entire structure wholesale.
 
-| 영역 | Ouroboros | MPL 적응 |
+| Domain | Ouroboros | MPL Adaptation |
 |------|----------|---------|
-| Assertion 분해 | `extractor.py` (Python) | `mpl_extract_assertions` MCP 도구 (TypeScript) |
-| Spec 검증 | `verifier.py` (regex scan) | `mpl_verify_spec` MCP 도구 (regex scan) |
+| Assertion decomposition | `extractor.py` (Python) | `mpl_extract_assertions` MCP tool (TypeScript) |
+| Spec verification | `verifier.py` (regex scan) | `mpl_verify_spec` MCP tool (regex scan) |
 | 3-Stage Evaluation | Mechanical → Semantic → Consensus | Gate 1-4 (lint/typecheck/test+regression/build+coverage/spec) |
-| Evolve Loop | 세대별 테스트 축적 | Phase별 regression suite 축적 |
-| Multi-Model Consensus | GPT-4o + Claude + Gemini 투표 | 미도입 (MPL은 PP 기반 검증으로 대체) |
-| Devil's Advocate | 의도적 반론 에이전트 | 미도입 (향후 검토) |
+| Evolve Loop | Per-generation test accumulation | Per-Phase regression suite accumulation |
+| Multi-Model Consensus | GPT-4o + Claude + Gemini voting | Not adopted (MPL uses PP-based verification as replacement) |
+| Devil's Advocate | Intentional counter-argument agent | Not adopted (future consideration) |
 
-MPL은 **PP 기반 coherence guarantee**가 Ouroboros의 Consensus를 대체하는 역할을 한다.
-PP 위반 감지 + Side Interview가 Multi-Model Consensus 없이도 검증 품질을 보장하는 메커니즘.
+MPL's **PP-based coherence guarantee** serves as a replacement for Ouroboros's Consensus.
+PP violation detection + Side Interview is a mechanism that ensures verification quality without Multi-Model Consensus.

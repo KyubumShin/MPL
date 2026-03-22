@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 /**
  * MPL Write Guard Hook (PreToolUse)
- * Blocks orchestrator from directly editing source files when MPL is active.
- * Source file edits must be delegated to mpl-worker agents.
+ *
+ * Two responsibilities:
+ * 1. Blocks orchestrator from directly editing source files when MPL is active.
+ *    Source file edits must be delegated to mpl-worker agents.
+ * 2. Warns on dangerous Bash commands (rm -rf, DROP TABLE, git push --force, etc.)
+ *    that could cause irreversible damage. (T-01, v3.8)
  *
  * Based on: design doc section 9.2 hook 1 + OMC pre-tool-use.mjs pattern
  *
  * When MPL is inactive: does nothing (no interference with normal workflow)
- * When MPL is active: blocks Edit/Write on source files, allows config/state paths
+ * When MPL is active: guards Edit/Write on source files + warns on dangerous Bash
  */
 
 import { dirname, join, extname } from 'path';
@@ -17,13 +21,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Import shared MPL state utility
-const { isMplActive } = await import(
+const { isMplActive, readState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 
 // Import shared stdin reader
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+
+// Import decomposition parser for phase-scoped file lock (T-01 Phase 2, v3.9)
+const { getPhaseScope } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-decomposition-parser.mjs')).href
 );
 
 // Allowed path patterns (orchestrator CAN write to these)
@@ -52,6 +61,38 @@ const SOURCE_EXTENSIONS = new Set([
   '.sh', '.bash', '.zsh',
 ]);
 
+// Dangerous Bash command patterns (T-01, v3.8)
+const DANGEROUS_BASH_PATTERNS = [
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force)/,   // rm -rf, rm -f, rm --force
+  /\bgit\s+push\s+.*--force/,                        // git push --force
+  /\bgit\s+reset\s+--hard/,                          // git reset --hard
+  /\bDROP\s+(TABLE|DATABASE|SCHEMA)\b/i,              // DROP TABLE/DATABASE/SCHEMA
+  /\bTRUNCATE\s+TABLE\b/i,                            // TRUNCATE TABLE
+  /\bkubectl\s+delete\b/,                             // kubectl delete
+  /\bdocker\s+rm\s+(-[a-zA-Z]*f|--force)/,           // docker rm -f
+  /\bdocker\s+system\s+prune/,                        // docker system prune
+  /\bchmod\s+777\b/,                                  // chmod 777
+];
+
+// Safe cleanup patterns that look dangerous but are common/expected
+const SAFE_CLEANUP_PATTERNS = [
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?node_modules/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?\.next/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?dist/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?build/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?\.cache/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?coverage/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?__pycache__/,
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)(\.\/)?\.mpl/,
+];
+
+function isDangerousBashCommand(command) {
+  if (!command) return false;
+  // Check safe cleanup first (allowlist takes priority)
+  if (SAFE_CLEANUP_PATTERNS.some(p => p.test(command))) return false;
+  return DANGEROUS_BASH_PATTERNS.some(p => p.test(command));
+}
+
 function isAllowedPath(filePath) {
   if (!filePath) return true;
   return ALLOWED_PATTERNS.some(pattern => pattern.test(filePath));
@@ -76,8 +117,8 @@ async function main() {
 
   const toolName = data.tool_name || data.toolName || '';
 
-  // Only intercept Edit and Write tools
-  if (!['Edit', 'Write', 'edit', 'write'].includes(toolName)) {
+  // Only intercept Edit, Write, and Bash tools
+  if (!['Edit', 'Write', 'edit', 'write', 'Bash', 'bash'].includes(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -90,8 +131,34 @@ async function main() {
     return;
   }
 
-  // Extract file path
   const toolInput = data.tool_input || data.toolInput || {};
+
+  // --- Bash dangerous command check (T-01, v3.8) ---
+  if (['Bash', 'bash'].includes(toolName)) {
+    const command = toolInput.command || '';
+    if (isDangerousBashCommand(command)) {
+      const message = `[MPL SAFETY WARNING] Potentially dangerous command detected:
+  ${command}
+
+This command may cause irreversible changes. If this is intentional (e.g., cleanup),
+ensure you have the correct target path. The command will proceed, but please verify.`;
+
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          additionalContext: message
+        }
+      }));
+      return;
+    }
+    // Safe Bash command: allow silently
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  // --- Edit/Write source file guard (existing behavior) ---
+  // Extract file path
   const filePath = toolInput.file_path || toolInput.filePath || '';
 
   if (!filePath) {
@@ -125,7 +192,39 @@ Next time, delegate to mpl-worker instead of editing directly.`;
     return;
   }
 
-  // Not a source file, not in allowed paths: allow with warning
+  // --- Phase-Scoped File Lock (T-01 Phase 2, v3.9) ---
+  // Check if the file is within the current phase's declared scope
+  try {
+    const state = readState(cwd);
+    const currentPhase = state?.current_phase;
+    if (currentPhase && filePath) {
+      const scope = getPhaseScope(cwd, currentPhase);
+      if (scope && scope.allowed.length > 0) {
+        const inScope = scope.allowed.some(f =>
+          filePath.endsWith(f) || filePath.includes(f)
+        );
+        if (!inScope) {
+          const message = `[MPL SCOPE WARNING] File "${filePath}" is outside phase "${currentPhase}" scope.
+Declared scope files: ${scope.allowed.slice(0, 5).join(', ')}${scope.allowed.length > 5 ? ` (+${scope.allowed.length - 5} more)` : ''}
+
+This may cause cross-phase side effects. Verify this modification belongs in the current phase.`;
+
+          console.log(JSON.stringify({
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              additionalContext: message
+            }
+          }));
+          return;
+        }
+      }
+    }
+  } catch {
+    // Phase scope check failure: fail-open (don't block on parser errors)
+  }
+
+  // All checks passed: allow
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
@@ -134,4 +233,4 @@ main().catch(() => {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 });
 
-export { isAllowedPath, isSourceFile };
+export { isAllowedPath, isSourceFile, isDangerousBashCommand };

@@ -118,8 +118,9 @@ export function findSimilarPattern(cwd, description, threshold = 0.8) {
   }
 
   if (bestSimilarity >= threshold && bestMatch) {
-    // If the past pattern was escalated, recommend the escalated tier
-    const recommendedTier = bestMatch.escalated_from ? bestMatch.escalated_from : bestMatch.tier;
+    // Use the final tier (post-escalation) so similar tasks start at the tier that
+    // actually succeeded, avoiding repeated escalation overhead.
+    const recommendedTier = bestMatch.tier;
     return {
       match: bestMatch,
       similarity: Math.round(bestSimilarity * 1000) / 1000,

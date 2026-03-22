@@ -2,9 +2,9 @@
 description: MPL Decomposition Protocol - Phase Decomposition, Verification Planning (Critic absorbed into Decomposer)
 ---
 
-# MPL Decomposition: Steps 3 through 3-C
+# MPL Decomposition: Steps 3, 3-F, and 3-B
 
-This file contains Steps 3, 3-B, and 3-C of the MPL orchestration protocol.
+This file contains Steps 3, 3-F, and 3-B of the MPL orchestration protocol.
 Load this when transitioning from pre-execution analysis to phase decomposition.
 
 ---
@@ -51,55 +51,75 @@ Task(subagent_type="mpl-decomposer", model="opus",
      phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
      phase_lang (F-39, optional: rust|go|python|typescript|java),
      scope, impact (create/modify/affected_tests/affected_config),
-     interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/description),
+     interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/qmd_verified/description),
      estimated_complexity (S/M/L).
      Also: architecture_anchor (tech_stack, directory_pattern, naming_convention), shared_resources.
      """)
 ```
 
-### Step 3 확장: phase_domain 태그 부여 (F-28)
+### Step 3 Extension: phase_domain Tag Assignment (F-28)
 
-Decomposer가 Phase 분해 시 각 Phase에 `phase_domain` 태그를 자동 부여한다.
+The Decomposer automatically assigns `phase_domain` tags to each Phase during decomposition.
 
-#### 프로토콜
+#### Protocol
 
-decomposition.yaml 생성 후:
-1. 각 Phase의 `scope` 파일 목록에서 디렉토리/확장자 기반 1차 분류
-2. Phase `name`과 `success_criteria` 의미 분석으로 2차 보정
-3. `phase_domain` 필드를 decomposition.yaml에 추가
+After generating decomposition.yaml:
+1. Primary classification based on directory/extension from each Phase's `scope` file list
+2. Secondary correction via semantic analysis of Phase `name` and `success_criteria`
+3. Add `phase_domain` field to decomposition.yaml
 
-#### 예시
+#### Example
 
 ```yaml
 phases:
   - id: phase-1
-    name: "User 모델 + 마이그레이션"
+    name: "User Model + Migration"
     phase_domain: db
     scope: [src/models/user.py, migrations/001_create_user.py]
     ...
   - id: phase-2
-    name: "회원가입 API 엔드포인트"
+    name: "Registration API Endpoint"
     phase_domain: api
     scope: [src/routes/auth.py, src/controllers/signup.py]
     ...
   - id: phase-3
-    name: "비밀번호 해싱 유틸리티"
+    name: "Password Hashing Utility"
     phase_domain: algorithm
     scope: [src/utils/crypto.py]
     complexity: M
     ...
 ```
 
-#### Decomposer 프롬프트 확장
+#### Decomposer Prompt Extension
 
-mpl-decomposer 에이전트에 다음 지시를 추가:
-> 각 Phase에 `phase_domain` 태그를 부여하라. 가능한 값: db, api, ui, algorithm, test, ai, infra, general.
-> Phase의 scope 파일 경로와 작업 성격을 기반으로 가장 적합한 단일 도메인을 선택하라.
-> 2개 이상 도메인이 혼합되면 가장 비중 높은 것을 선택하되, 동률이면 general로 분류하라.
-> 추가로 F-39 필드를 부여하라 (모두 optional, 감지되지 않으면 생략):
-> - `phase_subdomain`: 기술스택 (e.g. react, nextjs, prisma, langchain). 프로젝트 파일/의존성에서 감지.
-> - `phase_task_type`: 작업 유형 (greenfield|refactor|migration|bugfix|performance|security). Phase 성격에서 감지.
-> - `phase_lang`: 대상 언어 (rust|go|python|typescript|java). 파일 확장자에서 감지.
+Add the following instructions to the mpl-decomposer agent:
+> Assign a `phase_domain` tag to each Phase. Possible values: db, api, ui, algorithm, test, ai, infra, general.
+> Select the single most appropriate domain based on the Phase's scope file paths and the nature of the work.
+> If 2+ domains are mixed, select the one with the highest proportion; if tied, classify as general.
+> Also assign F-39 fields (all optional, omit if not detected):
+> - `phase_subdomain`: tech stack (e.g. react, nextjs, prisma, langchain). Detected from project files/dependencies.
+> - `phase_task_type`: work type (greenfield|refactor|migration|bugfix|performance|security). Detected from Phase characteristics.
+> - `phase_lang`: target language (rust|go|python|typescript|java). Detected from file extensions.
+
+#### qmd_verified Success Criteria Type
+
+`qmd_verified` is a success criterion that combines QMD semantic search + Grep cross-verification. When Phase Runner encounters this type:
+
+1. Perform QMD semantic search with `query` (explore candidate files)
+2. Cross-verify candidate files with `grep_pattern`
+3. Grep match success → PASS, failure → FAIL
+4. If QMD unavailable, fall back to `grep_pattern` only
+
+```yaml
+# decomposition.yaml example
+success_criteria:
+  - type: qmd_verified
+    query: "authentication middleware exports"
+    grep_pattern: "export.*(auth|session|middleware)"
+    description: "Verify the auth module exports the correct interface"
+```
+
+> **Fallback guarantee:** If QMD is unavailable, regular grep verification is performed using only the `grep_pattern` field. Therefore, `qmd_verified` criteria must always include `grep_pattern`.
 
 ### After Receiving Output
 
@@ -111,11 +131,20 @@ mpl-decomposer 에이전트에 다음 지시를 추가:
 6. Update pipeline state: `current_phase: "mpl-phase-running"`
 7. Process `risk_assessment` from decomposer output:
    - If `go_no_go == "NOT_READY"`:
-     AskUserQuestion: "Decomposer가 NOT_READY 판정. HIGH 리스크: {risks}."
-     Options: "재분해 (다른 전략)" | "위험 감수하고 진행" | "취소"
-     - "재분해": return to Step 3 with risk feedback
-     - "진행": proceed with caveats logged
-     - "취소": mpl-failed
+     AskUserQuestion: "Decomposer assessed NOT_READY. HIGH risks: {risks}."
+     Options: "Redecompose (different strategy)" | "Proceed despite risk" | "Cancel"
+     - "Redecompose": return to Step 3 with risk feedback
+     - "Proceed": proceed with caveats logged
+     - "Cancel": mpl-failed
+   - If `go_no_go == "RE_INTERVIEW"` (T-11, v4.0):
+     announce: "[MPL] Decomposer detected feasibility issue requiring clarification."
+     for each question in risk_assessment.re_interview_questions:
+       AskUserQuestion: "{question.question}\nEvidence: {question.evidence}\nAffected PP: {question.pp_affected}"
+       Options: "Relax PP" | "Change approach" | "Accept risk" | "Cancel"
+       - "Relax PP": return to Step 1 Stage 2 with mode: "feasibility_resolution" + question context
+       - "Change approach": return to Step 3 (redecompose) with adjusted constraints
+       - "Accept risk": proceed, log caveat to risk-assessment.md
+       - "Cancel": mpl-failed
    - If `go_no_go == "READY_WITH_CAVEATS"`:
      Report HIGH risks to user (informational, non-blocking)
    - Save risk_assessment to `.mpl/mpl/risk-assessment.md`
