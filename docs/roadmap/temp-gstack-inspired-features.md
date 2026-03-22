@@ -1628,6 +1628,145 @@ Decomposer failure mode:
 
 ---
 
+## B-04: Integration Checkpoints — Phase Group E2E (v0.6.6)
+
+### Problem
+
+Current verification only runs at two extremes:
+- **Per-phase**: L1-L4 static/unit/contract checks → catches type errors, not runtime integration
+- **Final (Step 5.0)**: Full E2E after ALL phases → too late, 27 phases of accumulated errors
+
+Missing: **intermediate E2E verification** after logical feature groups complete.
+
+### Design: Integration Checkpoints
+
+Decomposer inserts **checkpoint phases** at feature boundaries. These are lightweight phases that run integration/E2E tests on the features completed so far.
+
+```yaml
+# Decomposer output with checkpoints:
+phases:
+  - id: phase-1
+    name: "Scaffold"
+    phase_domain: infra
+  - id: phase-2
+    name: "Project CRUD (vertical slice)"
+    phase_domain: api
+  - id: phase-3
+    name: "Chapter CRUD (vertical slice)"
+    phase_domain: api
+
+  - id: checkpoint-1                    # ← Integration Checkpoint
+    name: "Integration Check: Core CRUD"
+    phase_domain: test
+    checkpoint: true                     # flag for orchestrator
+    verifies_phases: ["phase-2", "phase-3"]
+    integration_tests:
+      - scenario: "Create project → create chapter → verify chapter appears in project"
+        type: integration
+      - scenario: "Full build succeeds with all changes"
+        type: build
+      - scenario: "Dev server starts without crash"
+        type: smoke
+
+  - id: phase-4
+    name: "Worldbuilding Characters (vertical slice)"
+    phase_domain: ui
+  - id: phase-5
+    name: "Worldbuilding Locations (vertical slice)"
+    phase_domain: ui
+
+  - id: checkpoint-2                    # ← Integration Checkpoint
+    name: "Integration Check: Worldbuilding"
+    verifies_phases: ["phase-4", "phase-5"]
+    ...
+```
+
+### Checkpoint Insertion Rules (Decomposer)
+
+```
+When to insert a checkpoint:
+  1. After every 3 vertical-slice phases (feature group boundary)
+  2. After ALL CORE phases complete (before EXTENSION phases start)
+  3. After the last EXTENSION phase (before SUPPORT phases)
+  4. Before the final finalization phase
+
+Checkpoint contents:
+  - Full build: all build tools (Gate 0.5 level)
+  - Full test suite: all existing tests (Gate 1 level)
+  - Cross-layer contract re-validation (if multi-layer)
+  - Smoke test: dev server starts (if applicable)
+  - Feature-specific integration test: scenario that exercises the feature group
+
+Checkpoint phase properties:
+  - phase_domain: "test" (so Test Agent is SKIPPED — checkpoint IS the test)
+  - estimated_complexity: "S"
+  - estimated_todos: 1-3
+  - checkpoint: true (flag for orchestrator to recognize)
+  - verifies_phases: [list of phase IDs this checkpoint covers]
+```
+
+### Orchestrator Handling
+
+```
+When executing a checkpoint phase:
+  1. Skip Phase Seed generation (checkpoints don't need Seeds)
+  2. Phase Runner executes integration_tests directly:
+     - Build: Bash("npm run build && cargo build")
+     - Tests: Bash("npm test && cargo test")
+     - Smoke: Bash("timeout 10 npm run dev 2>&1 | head -20")
+     - Scenarios: execute each scenario as a test
+  3. If ANY check fails:
+     announce: "[MPL] Integration Checkpoint FAILED at checkpoint-{N}"
+     → Circuit break — but preserve completed phases
+     → Fix targets: the phases listed in verifies_phases
+  4. If all pass:
+     announce: "[MPL] Integration Checkpoint PASSED: {feature_group} verified"
+     → Continue to next phase group
+```
+
+### Integration Test Scenarios
+
+Decomposer generates scenarios based on the feature group:
+
+```yaml
+# For CRUD features:
+integration_tests:
+  - scenario: "Create → Read → Update → Delete roundtrip"
+    steps:
+      - "Call create API/command with valid input"
+      - "Call read API/command, verify created data returned"
+      - "Call update API/command with modified data"
+      - "Call read again, verify updated data"
+      - "Call delete API/command"
+      - "Call read again, verify 404/empty"
+
+# For UI features:
+integration_tests:
+  - scenario: "Component renders with data from store"
+    steps:
+      - "Build succeeds"
+      - "Component file exists and exports default"
+      - "Store has expected actions/selectors"
+
+# For infrastructure:
+integration_tests:
+  - scenario: "Full stack builds and starts"
+    steps:
+      - "npm run build exits 0"
+      - "cargo build exits 0"
+      - "Dev server starts without crash"
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `agents/mpl-decomposer.md` | Rule 12: checkpoint insertion + schema + integration_tests |
+| `commands/mpl-run-execute.md` | Checkpoint phase handling (skip Seed, direct execution) |
+| `agents/mpl-phase-runner.md` | Checkpoint mode: execute integration_tests instead of TODO plan |
+
+---
+
 ## R-01: Protocol File Split (v0.6.4 refactor)
 
 ### Problem

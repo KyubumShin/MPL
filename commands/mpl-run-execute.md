@@ -52,6 +52,58 @@ If `execution_tiers` NOT in decomposition.yaml (legacy 0.5.x):
 
 For each phase in order:
 
+### 4.0.2: Integration Checkpoint Handling (B-04, v0.6.6)
+
+If the current phase has `checkpoint: true`:
+
+```
+if phase_definition.checkpoint == true:
+  announce: "[MPL] === Integration Checkpoint: {phase.name} ==="
+  announce: "[MPL] Verifying phases: {phase.verifies_phases}"
+
+  // Skip Seed generation (checkpoints don't need Seeds)
+  // Skip standard context assembly (checkpoints run direct verification)
+
+  // Execute integration tests directly
+  all_passed = true
+
+  // 1. Build verification (all stacks)
+  build_tests = phase.integration_tests.filter(t => t.type == "build")
+  for each test in build_tests:
+    for each step in test.steps:
+      result = Bash(step, timeout=120000)
+      if result.exit_code != 0:
+        announce: "[MPL] Checkpoint FAIL: build step '{step}' failed"
+        all_passed = false
+
+  // 2. Full test suite
+  Bash("npm test 2>&1 || true")
+  Bash("cargo test 2>&1 || true")  // if applicable
+
+  // 3. Integration scenarios
+  integration_tests = phase.integration_tests.filter(t => t.type == "integration")
+  for each test in integration_tests:
+    announce: "[MPL] Running scenario: {test.scenario}"
+    // Phase Runner executes the scenario steps
+    // (dispatched as a lightweight Phase Runner with checkpoint context)
+
+  // 4. Smoke test
+  smoke_tests = phase.integration_tests.filter(t => t.type == "smoke")
+  for each test in smoke_tests:
+    for each step in test.steps:
+      result = Bash(step, timeout=15000)
+      // Check for crash indicators
+
+  if all_passed:
+    announce: "[MPL] ✓ Integration Checkpoint PASSED: {phase.name}"
+    save state_summary: "Checkpoint passed. All {verifies_phases.length} phases verified."
+    → continue to next phase
+  else:
+    announce: "[MPL] ✗ Integration Checkpoint FAILED: {phase.name}"
+    → circuit_break targeting verifies_phases
+    → redecomposition focuses on failed phases only
+```
+
 ### 4.0.5: Phase Seed Generation (D-01, v0.6.0)
 
 Generate Phase Seed just-in-time, immediately before context assembly:

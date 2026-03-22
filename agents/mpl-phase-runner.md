@@ -58,6 +58,20 @@ disallowedTools: []
   </Progress_Reporting>
 
   <Execution_Flow>
+    ### Step 0: Checkpoint Mode Detection (B-04, v0.6.6)
+
+    If this phase has `checkpoint: true` in the phase definition:
+    - Switch to **checkpoint mode** — skip mini-plan, skip normal implementation
+    - Execute `integration_tests` directly using Bash
+    - For each test scenario:
+      1. Parse steps
+      2. Execute each step as a Bash command or verification
+      3. Collect pass/fail results
+    - Return structured result: { checkpoint: true, passed: boolean, results: [...] }
+    - Do NOT write code — checkpoints only verify, never implement
+
+    If NOT a checkpoint phase → proceed to normal Step 1.
+
     ### Step 1: Context Loading
 
     On start, load the five context layers in order:

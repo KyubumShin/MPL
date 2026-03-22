@@ -84,6 +84,45 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         Minimum: single-layer = L1+L3. Multi-layer = L1+L2+L3+L4. Final = all levels.
         REJECT criteria with only L1 (static check) for phases that create functions.
 
+    12. **Integration checkpoints (B-04, v0.6.6)**:
+        Insert checkpoint phases at feature group boundaries to catch integration failures early:
+
+        When to insert:
+        - After every 3 vertical-slice phases
+        - After ALL CORE phases complete (before EXTENSION)
+        - After the last EXTENSION phase (before SUPPORT)
+        - Before the final finalization phase
+
+        Checkpoint phase definition:
+        ```yaml
+        - id: "checkpoint-{N}"
+          name: "Integration Check: {feature_group_name}"
+          phase_domain: "test"
+          checkpoint: true               # flag for orchestrator
+          feature_priority: "core"       # checkpoints are not skippable
+          verifies_phases: ["phase-X", "phase-Y", "phase-Z"]
+          integration_tests:
+            - scenario: "{end-to-end scenario description}"
+              type: integration | build | smoke
+              steps: ["{step 1}", "{step 2}", ...]
+          success_criteria:
+            - type: command
+              command: "npm run build"
+            - type: command
+              command: "cargo build"     # or equivalent for the stack
+            - type: command
+              command: "npm test"
+            - type: description
+              description: "All integration scenarios pass"
+          estimated_complexity: "S"
+          estimated_todos: 1
+        ```
+
+        Generate scenarios based on the feature group:
+        - CRUD features: "Create → Read → Update → Delete roundtrip"
+        - UI features: "Component renders with store data + build succeeds"
+        - Infrastructure: "Full stack builds and starts without crash"
+
     10. **Centrality awareness**: High-centrality files (imported by many) should be modified in early phases. Late modification of central files causes cascade rework in already-completed phases.
   </Rules>
 
@@ -263,6 +302,12 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         phase_task_type: string   # F-39: optional, greenfield|refactor|migration|bugfix|performance|security
         phase_lang: string        # F-39: optional, rust|go|python|typescript|java
         feature_priority: string  # T-12: core|extension|support — secondary sort within dependency tier
+        checkpoint: boolean       # B-04: true = integration checkpoint phase (test domain, skip Seed)
+        verifies_phases: [string] # B-04: phase IDs this checkpoint covers (only when checkpoint: true)
+        integration_tests:        # B-04: scenarios to run (only when checkpoint: true)
+          - scenario: string
+            type: "integration" | "build" | "smoke"
+            steps: [string]
         scope: string          # 1-2 sentence scope description
         rationale: string      # why this phase is in this position
 
