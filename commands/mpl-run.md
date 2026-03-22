@@ -161,9 +161,32 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 
 | File | Steps | Contents | ~Tokens |
 |------|-------|----------|---------|
-| `mpl-run-phase0.md` | -1 ~ 2.5 | LSP Warm-up, Triage (with Quick Scope Scan + tier routing), PP Interview, Pre-Execution Analysis, Codebase Analysis, Phase 0 Enhanced | ~14K |
+| `mpl-run-phase0.md` | -1 ~ 1-E | LSP Warm-up, Triage, PP Interview, Pre-Execution Analysis | ~6K |
+| `mpl-run-phase0-analysis.md` | 2 ~ 2.5 | Codebase Analysis, Architecture Decisions, Phase 0 Enhanced | ~8K |
+| `mpl-run-phase0-memory.md` | 0.1.5b-c | 4-Tier Adaptive Memory, Routing Pattern Loading | ~2K |
 | `mpl-run-decompose.md` | 3 ~ 3-B | Phase Decomposition, Verification Planning (Critic absorbed into Decomposer) | ~3K |
-| `mpl-run-execute.md` | 4 | Phase Execution Loop, Context Assembly, 5-Gate Quality, Fix Loop, RUNBOOK updates | ~55K |
-| `mpl-run-finalize.md` | 5 ~ 6 | E2E, Finalize, Resume Protocol, Discovery Processing, Related Skills | ~7K |
+| `mpl-run-execute.md` | 4 | Phase Execution Loop (core), Phase Runner dispatch, Result Processing | ~9K |
+| `mpl-run-execute-context.md` | 4.1 | Context Assembly, Memory Loading, Checkpoint Recovery | ~4K |
+| `mpl-run-execute-gates.md` | 4.5-4.8 | 5-Gate Quality System, Fix Loop, Convergence Detection, Graceful Pause | ~7K |
+| `mpl-run-execute-parallel.md` | 4.2.3-4.2.4 | TODO Parallel Dispatch, Background Execution, Context Cleanup | ~1K |
+| `mpl-run-finalize.md` | 5 | E2E, Learnings, Commits, PR, Metrics | ~5K |
+| `mpl-run-finalize-resume.md` | 6 | Resume Protocol, Budget Pause Resume, Discovery Processing, Related Skills | ~2K |
+
+### Sub-File Loading Rules
+
+When loading **execute protocol**:
+- Load `mpl-run-execute.md` (always)
+- Load `mpl-run-execute-context.md` (when entering Step 4.1)
+- Load `mpl-run-execute-gates.md` (when entering Step 4.5)
+- Load `mpl-run-execute-parallel.md` (when parallel TODOs detected)
+
+When loading **phase0 protocol**:
+- Load `mpl-run-phase0.md` (always)
+- Load `mpl-run-phase0-analysis.md` (when entering Step 2)
+- Load `mpl-run-phase0-memory.md` (when loading memory in Step 0 or 2.5)
+
+When loading **finalize protocol**:
+- Load `mpl-run-finalize.md` (always)
+- Load `mpl-run-finalize-resume.md` (when resuming or processing discoveries)
 
 **IMPORTANT**: Do NOT proceed with any step without loading the corresponding protocol file first. Each file contains the exact agent calls, context assembly rules, and output handling logic for that stage.

@@ -1502,6 +1502,63 @@ Phase Runner Rule (add to Step 3):
 
 ---
 
+## R-01: Protocol File Split (v0.6.4 refactor)
+
+### Problem
+
+Several protocol and agent files have grown beyond effective prompt sizes:
+
+| File | Lines | Issue |
+|------|:-----:|-------|
+| `mpl-run-execute.md` | 1,663 | 8+ responsibilities in one file |
+| `mpl-run-phase0.md` | 1,337 | 6+ responsibilities in one file |
+| `mpl-ambiguity-resolver.md` | 784 | Scoring + Socratic + Requirements in one agent |
+| `mpl-setup/SKILL.md` | 595 | 10 setup steps in one skill |
+| `mpl-phase-runner.md` | 553 | Plan + Implement + Verify + Fix in one agent |
+| `mpl-run-finalize.md` | 538 | 8+ finalization steps |
+
+Context window impact: orchestrator loads one command file per pipeline state. A 1,663-line file consumes ~12K tokens just for the protocol, leaving less room for actual code context.
+
+### Split Plan
+
+**mpl-run-execute.md (1,663 → 4 files)**
+
+| New File | Content | ~Lines |
+|----------|---------|:------:|
+| `mpl-run-execute.md` | Phase loop, tier dispatch, seed generation, Phase Runner dispatch | ~400 |
+| `mpl-run-execute-gates.md` | 5-Gate Quality + Fix Loop + Convergence Detection | ~500 |
+| `mpl-run-execute-context.md` | Context assembly + adaptive memory loading + error files | ~400 |
+| `mpl-run-execute-parallel.md` | Background execution + worktree + TODO dispatch protocol | ~300 |
+
+**mpl-run-phase0.md (1,337 → 3 files)**
+
+| New File | Content | ~Lines |
+|----------|---------|:------:|
+| `mpl-run-phase0.md` | Triage + Interview dispatch + PP confirmation + Arch decisions | ~500 |
+| `mpl-run-phase0-analysis.md` | Codebase analysis + Phase 0 Enhanced delegation | ~450 |
+| `mpl-run-phase0-memory.md` | 4-Tier memory loading + routing pattern matching | ~300 |
+
+**mpl-run-finalize.md (538 → 2 files)**
+
+| New File | Content | ~Lines |
+|----------|---------|:------:|
+| `mpl-run-finalize.md` | E2E + Verification + Learning + Commits + Metrics + PR | ~350 |
+| `mpl-run-finalize-resume.md` | Resume protocol + Budget pause + Discovery processing | ~200 |
+
+**mpl-run.md router update**: The router (`mpl-run.md`) already loads command files by `current_phase`. After split, it loads the specific sub-file needed for the current operation.
+
+### Agent splits NOT recommended
+
+`mpl-ambiguity-resolver.md` (784) and `mpl-phase-runner.md` (553) are single agents — splitting them would create multiple agents for one role. Instead: **trim verbose examples and redundant explanations** to reduce to ~400-500 lines each.
+
+### Migration
+
+- No behavioral changes — pure file reorganization
+- `mpl-run.md` router loads sub-files by adding routing rules
+- Existing `.mpl/state.json` unchanged
+
+---
+
 ## Version Mapping (revised after feasibility assessment)
 
 | Version | Inclusion Candidates | Rationale |
