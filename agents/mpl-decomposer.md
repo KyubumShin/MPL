@@ -50,6 +50,40 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
     9. **Cluster awareness**: If the dependency graph shows tightly coupled modules (module_clusters), keep them in the same phase. Splitting coupled modules across phases increases conflict risk.
 
+    10. **Vertical slice for multi-layer projects (B-03, v0.6.5)**:
+        Detect project layers from codebase_analysis:
+        - Frontend: package.json + *.tsx|vue|svelte
+        - Backend: Cargo.toml | go.mod | requirements.txt + API routes/commands
+        - Database: schema files, migrations
+        - IPC/API: invoke commands, REST routes, gRPC protos
+
+        If **2+ layers detected**: decompose by **feature (vertical slice)**, not by layer.
+        Each phase implements ONE user-facing feature across ALL layers:
+        - Backend logic (command/endpoint/handler)
+        - Shared types (IPC types, API schemas)
+        - Frontend UI (component + store + caller)
+        - Tests (backend + frontend + cross-layer)
+
+        BAD (horizontal): "Phase 5: all types → Phase 6: all Rust commands → Phase 8: all UI"
+        GOOD (vertical): "Phase 3: Chapter CRUD (Rust + types + UI + test)"
+
+        Scaffold/infrastructure phases (test setup, DB schema, build config) remain horizontal.
+        Feature phases MUST be vertical slices.
+
+    11. **5-Level success criteria (B-03, v0.6.5)**:
+        Success criteria must include progressive verification depth:
+
+        | Level | What | Required When |
+        |-------|------|--------------|
+        | L1 Static | tsc --noEmit / cargo check | Always |
+        | L2 Build | npm run build / cargo build | Always |
+        | L3 Unit | npm test / cargo test / pytest | Always (1+ test per phase) |
+        | L4 Contract | cross-layer type validation | Multi-layer phases |
+        | L5 Runtime | dev server starts / smoke test | Final phase |
+
+        Minimum: single-layer = L1+L3. Multi-layer = L1+L2+L3+L4. Final = all levels.
+        REJECT criteria with only L1 (static check) for phases that create functions.
+
     10. **Centrality awareness**: High-centrality files (imported by many) should be modified in early phases. Late modification of central files causes cascade rework in already-completed phases.
   </Rules>
 
@@ -448,6 +482,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     - Missing feasibility check: outputting READY when Phase 0 artifacts reveal impossible requirements. Always cross-reference api-contracts.md against phase requirements in Step 10.5.
     - Missing execution_tiers: always generate execution_tiers. Omitting them forces sequential fallback which wastes parallel execution opportunities.
     - Stub-accepting criteria: success criteria that only check "file exists" or "types pass" without behavioral verification. Every function/method must have at least one criterion that tests it DOES something (command, test, or grep for actual logic), not just that it EXISTS.
+    - Horizontal decomposition of multi-layer project: splitting types/backend/frontend into separate phases causes cross-layer contract failures. Multi-layer projects MUST use vertical slice decomposition (one feature = one phase across all layers).
+    - L1-only criteria for multi-layer phases: phases touching 2+ layers must include at least L4 (contract) verification, not just L1 (static type check).
 
     The output must be ONLY the YAML. No prose outside the YAML block.
   </Failure_Modes_To_Avoid>

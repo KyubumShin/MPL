@@ -1502,6 +1502,132 @@ Phase Runner Rule (add to Step 3):
 
 ---
 
+## B-03: Vertical Slice Decomposition + Runtime Verification (v0.6.5)
+
+### Problem
+
+Yggdrasil 27-phase test revealed that **horizontal decomposition** (all types → all DB → all commands → all UI) causes cross-layer contract failures. Each Phase Runner is an independent session that only sees text summaries of previous phases, not actual code. This leads to:
+
+- IPC type ↔ Rust signature mismatches
+- Frontend calling backend with wrong argument shapes
+- "100% pass rate" (tsc --noEmit) but non-functional app
+
+### Root Cause
+
+```
+Horizontal decomposition:
+  Phase 5: Define ALL IPC types          ← Interpretation A
+  Phase 6: Implement ALL Rust commands   ← Interpretation B (different session!)
+  Phase 8: Build ALL UI calling Phase 5  ← Uses A, but B is the reality
+  → A ≠ B → runtime failure
+```
+
+### Fix 1: Vertical Slice Decomposition Rule
+
+**Decomposer Rule**: When a project has 2+ layers (detected from codebase analysis), decompose by **feature/vertical slice**, not by layer.
+
+```
+Multi-layer detection:
+  layers = count from codebase_analysis:
+    - Frontend: package.json + src/*.tsx|vue|svelte
+    - Backend: Cargo.toml | go.mod | requirements.txt + API routes
+    - Database: schema files, migrations
+    - IPC/API: invoke commands, REST routes, gRPC protos
+
+  if layers >= 2:
+    decomposition_strategy = "vertical_slice"
+    // Each phase implements ONE feature across ALL layers:
+    // Rust command + IPC type + TS caller + UI + test
+  else:
+    decomposition_strategy = "horizontal" (existing behavior)
+```
+
+**Vertical slice phase example:**
+```yaml
+- id: phase-3
+  name: "Chapter CRUD (Full Stack)"
+  scope: "Implement chapter create/read/update/delete across Rust, types, and UI"
+  phase_domain: "api"  # Primary domain
+  impact:
+    create:
+      - path: src-tauri/src/commands/chapter.rs    # Backend
+      - path: src/types/chapter.ts                  # IPC types
+      - path: src/components/ChapterList.tsx         # UI
+      - path: src/stores/chapterStore.ts            # State
+    affected_tests:
+      - path: src-tauri/tests/chapter_test.rs       # Backend test
+      - path: src/components/ChapterList.test.tsx    # UI test
+  success_criteria:
+    - type: command
+      command: "cargo test chapter"                  # Rust compiles + tests pass
+    - type: command
+      command: "npx tsc --noEmit"                    # TS types consistent
+    - type: test
+      test_pattern: "chapter"                        # Frontend tests
+    - type: command
+      command: "npm run test:integration"            # Cross-layer IPC test
+```
+
+**Key benefit**: Phase Runner sees Rust command signature AND TS type AND UI caller in the SAME session → inconsistencies caught immediately.
+
+### Fix 2: Contract-First Architecture Decision
+
+Add to Phase 0 Architecture Decision Checklist (Step 2.4):
+
+```
+if codebase_analysis.layers >= 2 AND has_ipc_boundary:
+  decisions_needed.push({
+    pattern: "cross-layer contracts",
+    question: "How are types shared between layers? Options:
+      A) Contract-First: one layer generates types for the other (specta/ts-rs for Tauri, OpenAPI for REST)
+      B) Shared schema: single schema file generates both sides (protobuf, JSON Schema)
+      C) Manual sync: both sides define types independently (NOT recommended — drift risk)",
+    recommendation: "A or B — auto-generation eliminates structural mismatch"
+  })
+```
+
+If user chooses A or B → Decomposer includes type generation step in scaffold phase.
+If user chooses C → Decomposer adds cross-layer contract test to every vertical slice phase.
+
+### Fix 3: 5-Level Success Criteria
+
+Decomposer must generate success_criteria with progressive verification depth:
+
+```
+Level 1 (Static):   tsc --noEmit / cargo check / go vet          ← Currently the ONLY level
+Level 2 (Build):    npm run build / cargo build                   ← Added in B-02
+Level 3 (Unit):     npm test / cargo test / pytest                ← Tests exist
+Level 4 (Contract): cross-layer IPC type validation               ← NEW
+Level 5 (Runtime):  dev server starts + smoke test                ← Added in B-02
+
+Minimum required per phase:
+  - Single-layer project: Level 1 + Level 3 (static + unit test)
+  - Multi-layer project: Level 1 + Level 2 + Level 3 + Level 4 (must include contract)
+  - Final phase: ALL levels including Level 5
+
+Decomposer failure mode:
+  "success_criteria with only Level 1 (static check) for a multi-layer phase is REJECTED.
+   Must include at least Level 3 (unit test) and Level 4 (contract) for cross-layer phases."
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `agents/mpl-decomposer.md` | Vertical slice rule + 5-Level criteria + multi-layer detection |
+| `agents/mpl-phase-seed-generator.md` | Vertical slice TODO structure + cross-layer acceptance_link |
+| `commands/mpl-run-phase0-analysis.md` | Architecture Decision: cross-layer contract strategy |
+| `agents/mpl-phase-runner.md` | Cross-layer verification in Step 4 |
+
+### Migration Impact (0.6.4 → 0.6.5)
+
+**Breaking changes: NONE**
+- Vertical slice is a Decomposer prompt change — applies to new decompositions only
+- Existing `.mpl/` state unchanged
+- Rollback: Decomposer naturally falls back to horizontal for single-layer projects
+
+---
+
 ## R-01: Protocol File Split (v0.6.4 refactor)
 
 ### Problem

@@ -124,6 +124,14 @@ if codebase_analysis.has_file_io:
     default: "Platform app data directory"
   })
 
+if codebase_analysis.layers.length >= 2:
+  decisions_needed.push({
+    pattern: "cross-layer contracts (B-03)",
+    question: "How are types shared between layers?\n  A) Contract-First: one layer generates types for the other (e.g., specta/ts-rs for Tauri, OpenAPI for REST)\n  B) Shared schema: single schema generates both sides (protobuf, JSON Schema)\n  C) Manual sync: both sides define types independently (NOT recommended — drift risk)",
+    recommendation: "A or B — auto-generation eliminates structural mismatch",
+    default: "A (Contract-First) if tooling exists for the stack"
+  })
+
 // Check if already answered in PP or interview responses
 for each decision in decisions_needed:
   if not answered_in(pivot_points, user_responses):

@@ -247,6 +247,38 @@ disallowedTools: []
 
     This catches "compiles but doesn't run" issues that static checks miss.
 
+    ### Step 4.55: Cross-Layer Contract Verification (B-03, v0.6.5)
+
+    For phases that touch 2+ project layers, verify type consistency across boundaries:
+
+    ```
+    // Detect if this phase is a vertical slice (multi-layer)
+    layers_touched = detect_layers(files_created + files_modified)
+    // e.g., ["rust", "typescript"] or ["python", "typescript"]
+
+    if layers_touched.length >= 2:
+      announce: "[MPL] Cross-layer phase detected: {layers_touched}. Running contract verification."
+
+      // Strategy depends on project's contract approach (from architecture-decisions.md)
+      contract_strategy = Read(".mpl/mpl/phase0/architecture-decisions.md") → find "cross-layer contracts"
+
+      if contract_strategy == "contract-first":
+        // Run type generation and verify output matches
+        // e.g., for Tauri: cargo test (specta generates bindings) → compare with src/types/
+        Bash("{type_generation_command}")
+        // Check for diff between generated types and committed types
+        Bash("git diff --name-only src/types/")
+        if diff exists: "Generated types diverged from committed types → fix"
+
+      else:
+        // Manual sync → grep-based contract validation
+        // Extract Rust/Python function signatures and TS invoke calls
+        // Verify argument types match
+        backend_sigs = Grep("pub fn|def |func ", backend_files)
+        frontend_calls = Grep("invoke|fetch|axios", frontend_files)
+        // Report any mismatches found
+    ```
+
     ### Step 4.6: Anti-Stub Verification (B-02, v0.6.3)
 
     Verify implementations are real, not stubs:
