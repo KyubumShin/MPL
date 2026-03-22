@@ -1,5 +1,5 @@
 ---
-description: Setup and configure MPL plugin - install, verify, detect tool availability, and configure standalone/OMC mode
+description: Setup and configure MPL plugin - install, verify, detect tool availability, and configure standalone mode + MCP server
 ---
 
 # MPL Setup
@@ -214,17 +214,17 @@ Detect available tool tiers to determine `tool_mode`:
 - Read, Write, Edit, Bash, Glob, Grep, Task, Agent
 - Status: always PASS
 
-#### Tier 2: OMC MCP Tools (optional)
-Test each tool's availability:
+#### Tier 2: LSP Tools (optional)
+Test LSP tool availability directly:
 
 ```
 try lsp_hover(file=any_source_file, line=1, character=0)
-  → success: OMC LSP tools available
-  → error: OMC not installed, use fallback
+  → success: LSP tools available
+  → error: LSP not running, use fallback
 
-try ast_grep_search(pattern="function $NAME", language="javascript")
-  → success: AST tools available
-  → error: use Grep fallback
+try lsp_diagnostics_directory(directory=CWD)
+  → success: Type check available
+  → error: use Bash(tsc --noEmit) fallback
 ```
 
 #### Tier 3: LSP Servers (optional, per language)
@@ -242,10 +242,8 @@ for each language:
 #### Determine tool_mode
 
 ```
-if tier2_available AND tier3_available:
+if lsp_available:
   tool_mode = "full"
-elif tier2_available:
-  tool_mode = "enhanced"
 else:
   tool_mode = "standalone"
 ```
@@ -254,7 +252,7 @@ Save to `.mpl/config.json`: `"tool_mode": "{mode}"`
 
 #### Fallback Table
 
-| OMC Tool | Standalone Fallback | Used In |
+| LSP Tool | Standalone Fallback | Used In |
 |----------|-------------------|---------|
 | `lsp_hover` | `Grep` for signatures + `Read` for context | Phase 0 API contracts |
 | `lsp_find_references` | `Grep` for import/require patterns | Codebase analysis centrality |
@@ -290,7 +288,7 @@ Status:     {HEALTHY|REPAIRED|ISSUES_REMAIN}
 
 Tool Availability:
   Built-in (Tier 1) : OK (Read, Write, Edit, Bash, Glob, Grep)
-  OMC MCP (Tier 2)  : {OK|N/A — standalone fallback active}
+  LSP Tools (Tier 2) : {OK|N/A — standalone fallback active}
   QMD Search (Tier 2b): {OK v{version}|N/A — grep fallback active}
   LSP Servers (Tier 3):
     {language}: {OK|N/A}
@@ -307,9 +305,9 @@ Components:
 
 {if tool_mode == "standalone"}
 Standalone Mode Active:
-  MPL is running without OMC. LSP tools are replaced with
-  Grep/Glob/Bash fallbacks. All pipeline features are functional.
-  Install OMC for enhanced analysis (lsp_hover, ast_grep).
+  LSP tools are unavailable. Grep/Glob/Bash fallbacks are active.
+  All pipeline features remain functional.
+  For enhanced analysis, ensure a language server is running for your project.
 {/if}
 
 {if qmd_available}
@@ -322,6 +320,17 @@ QMD Search Engine:
 QMD Search Engine: Not installed
   Install QMD for semantic codebase search and past-analysis recall.
   Run: npm install -g @tobilu/qmd
+{/if}
+
+{if mcp_available}
+MCP Server:
+  Status:       Running (3 tools registered)
+  Tools:        mpl_score_ambiguity, mpl_state_read, mpl_state_write
+  Scoring:      Deterministic (via Claude Agent SDK)
+{else}
+MCP Server: Not configured
+  Scoring uses in-prompt fallback (may have variance).
+  Run /mpl:mpl-setup to build and configure MCP server.
 {/if}
 
 {if REPAIRED}
@@ -414,6 +423,61 @@ if backend == "kitty":
     Report: "  Then restart Kitty."
 ```
 
+### Step 7c: MPL MCP Server Setup (v4.1)
+
+The MPL MCP Server provides deterministic ambiguity scoring and active state access for agents.
+
+#### Detection
+
+```
+mcp_server_path = "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"
+mcp_available = Bash("node --check ${mcp_server_path} 2>/dev/null && echo OK || echo FAIL")
+```
+
+#### Dependencies Check
+
+```
+if mcp_available == "FAIL":
+  // Check if source exists but not built
+  if exists("${CLAUDE_PLUGIN_ROOT}/mcp-server/src/index.ts"):
+    AskUserQuestion: "MPL MCP Server needs to be built. Install dependencies and compile?"
+      - "Build now" → Bash("cd ${CLAUDE_PLUGIN_ROOT}/mcp-server && npm install && npm run build")
+      - "Skip" → MCP server disabled, agents use in-prompt scoring fallback
+  else:
+    Report: "MCP Server source not found. Scoring will use in-prompt fallback (less deterministic)."
+    skip MCP setup
+```
+
+#### Configuration
+
+```
+if mcp_available:
+  // Ensure .mcp.json in plugin root has the server registered
+  mcp_config_path = "${CLAUDE_PLUGIN_ROOT}/.mcp.json"
+
+  ensure mcp_config contains:
+    {
+      "mcpServers": {
+        "mpl-server": {
+          "command": "node",
+          "args": ["mcp-server/dist/index.js"]
+        }
+      }
+    }
+
+  Report: "MPL MCP Server configured. Tools: mpl_score_ambiguity, mpl_state_read, mpl_state_write"
+```
+
+#### Save MCP Config
+
+```
+Write to .mpl/config.json:
+  "mcp_server": {
+    "enabled": true,
+    "tools": ["mpl_score_ambiguity", "mpl_state_read", "mpl_state_write"]
+  }
+```
+
 ### Step 8: HUD Statusline Setup
 
 AskUserQuestion: "Would you like to enable the MPL HUD (statusline)? You can see pipeline progress, token usage, and Gate status in real time."
@@ -446,8 +510,8 @@ settings.statusLine = {
 
 **CRITICAL**: Do NOT use `${CLAUDE_PLUGIN_ROOT}` in statusLine — it is only expanded inside hook execution, not in statusLine which runs as a separate process. Do NOT use hardcoded versioned cache paths like `~/.claude/plugins/cache/mpl/mpl/X.Y.Z/...` — they break on version bump. The wrapper script dynamically resolves the latest cached version.
 
-Note: This replaces any existing statusLine config (e.g. OMC HUD).
-If user has OMC HUD active, warn and ask for confirmation.
+Note: This replaces any existing statusLine config.
+If another HUD is active, warn and ask for confirmation.
 
 ### Step 9: Optional Advanced Configuration
 
@@ -477,7 +541,7 @@ Display final summary (same as Step 6 output) and Quick Start instructions.
 | Hook syntax error | "Hook file has syntax error: {detail}. Check the file manually." |
 | Permission denied | "Cannot create .mpl/ directory. Check file system permissions." |
 | Invalid plugin.json | "Plugin config is corrupted. Recreating from template..." |
-| OMC not detected | "OMC not installed. MPL will run in standalone mode with Grep/Glob fallbacks." |
+| LSP not available | "No LSP server detected. MPL will run in standalone mode with Grep/Glob fallbacks." |
 
 ## Idempotency
 

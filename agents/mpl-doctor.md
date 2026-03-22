@@ -68,7 +68,7 @@ disallowedTools: Write, Edit, Task
     - Read, Write, Edit, Bash, Glob, Grep, Task, Agent
     - These are Claude Code native tools. Always PASS.
 
-    **Tier 2 (OMC MCP tools, optional):**
+    **Tier 2 (LSP tools, optional):**
     - lsp_hover, lsp_goto_definition, lsp_find_references,
       lsp_document_symbols, lsp_diagnostics, lsp_rename
     - ast_grep_search, ast_grep_replace
@@ -86,8 +86,8 @@ disallowedTools: Write, Edit, Task
 
     Report tool_mode:
     - "full": Tier 1 + 2 + 3 available
-    - "enhanced": Tier 1 + 2 (OMC but no LSP servers)
-    - "standalone": Tier 1 only (pure Claude Code, no OMC)
+    - "enhanced": Tier 1 + 2 (LSP tools but no external LSP servers)
+    - "standalone": Tier 1 only (pure Claude Code, LSP not available)
 
     ### Category 8: Configuration
     - If `.mpl/config.json` exists, validate all fields:
@@ -152,10 +152,10 @@ disallowedTools: Write, Edit, Task
     | Tier | Tool | Status | Fallback |
     |------|------|--------|----------|
     | Built-in | Read/Write/Edit/Bash/Glob/Grep | PASS | - |
-    | OMC MCP | lsp_hover | {PASS|N/A} | Grep + ast pattern matching |
-    | OMC MCP | lsp_find_references | {PASS|N/A} | Grep import tracking |
-    | OMC MCP | lsp_diagnostics | {PASS|N/A} | Bash build/typecheck |
-    | OMC MCP | ast_grep_search | {PASS|N/A} | Grep regex patterns |
+    | LSP | lsp_hover | {PASS|N/A} | Grep + ast pattern matching |
+    | LSP | lsp_find_references | {PASS|N/A} | Grep import tracking |
+    | LSP | lsp_diagnostics | {PASS|N/A} | Bash build/typecheck |
+    | LSP | ast_grep_search | {PASS|N/A} | Grep regex patterns |
     | QMD | qmd_deep_search | {PASS|N/A} | Grep + Glob |
     | QMD | qmd_search (BM25) | {PASS|N/A} | Grep keyword search |
     | QMD | qmd_vector_search | {PASS|N/A} | Not available |
@@ -177,7 +177,7 @@ disallowedTools: Write, Edit, Task
 
   <Failure_Modes_To_Avoid>
     - Assuming PASS without checking: always read/run before reporting.
-    - Reporting tool unavailability as FAIL: OMC/LSP tools are optional, report as WARN with fallback.
+    - Reporting tool unavailability as FAIL: LSP tools are optional, report as WARN with fallback.
     - Missing fallback info: every WARN must include what fallback MPL will use.
     - Over-alarming: standalone mode is fully functional, not broken.
   </Failure_Modes_To_Avoid>

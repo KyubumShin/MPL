@@ -1,11 +1,11 @@
 # MPL Standalone Mode
 
-MPL can operate without OMC (oh-my-claudecode) installed. When OMC tools
+MPL can operate without LSP tools installed. When LSP tools
 (lsp_*, ast_grep_*) are unavailable, MPL falls back to built-in Claude Code tools.
 
 ## Tool Fallback Matrix
 
-| OMC Tool | Standalone Fallback | Quality Impact |
+| LSP Tool | Standalone Fallback | Quality Impact |
 |----------|-------------------|----------------|
 | `lsp_hover` | `Grep` for type annotations | Lower precision for type inference |
 | `lsp_goto_definition` | `Grep` + `Glob` for symbol search | May find multiple candidates |
