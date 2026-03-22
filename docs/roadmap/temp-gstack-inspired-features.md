@@ -1196,6 +1196,7 @@ Near 1:1 structural alignment. Future: MPL Phase Seed → Ouroboros Seed convers
 - [ ] Seed immutability: can Phase Runner deviate from `mini_plan_seed` if it discovers issues?
 - [ ] Seed caching: if phase re-executes (circuit break), regenerate or reuse Seed?
 - [ ] Interaction with T-11 Feasibility: should Seed Generator also check feasibility per-phase?
+- [x] **Nested agent limitation (resolved v0.6.0)**: Phase Runner cannot spawn mpl-worker subagents (Agent inside Agent not supported). Resolution: Phase Runner implements directly (full executor). Workers are dispatched by orchestrator only for parallel batch scenarios.
 
 ### Migration Impact Assessment (0.5.1 → 0.6.0)
 

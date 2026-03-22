@@ -389,21 +389,21 @@ phase_model = (phase.complexity == "L" || phase.tags.includes("architecture")) ?
 result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      prompt="""
      You are a Phase Runner for MPL.
-     Execute this single phase: plan TODOs, delegate to Workers, verify, summarize.
+     Execute this single phase: plan TODOs, implement code changes directly, verify, summarize.
 
      ## Rules
      1. Scope discipline: Only work within this phase's scope.
      2. Impact awareness: Impact section lists files to touch. Out-of-scope -> create Discovery.
-     3. Worker delegation: Delegate code changes to mpl-worker via Task tool.
-     4. Incremental testing: After each TODO (or parallel group), immediately test the affected module. Fix failures before moving to the next TODO. Do NOT batch all implementation before testing.
+     3. Direct implementation: Implement code changes DIRECTLY using Edit/Write/Bash. Do NOT attempt to spawn mpl-worker subagents — nested agent dispatch is not supported. You are the implementer.
+     4. Incremental testing: After each TODO, immediately test the affected module. Fix failures before moving to the next TODO. Do NOT batch all implementation before testing.
      5. Cumulative verification: Run ALL tests (current + prior phases) at phase end. Record pass_rate.
      6. Discovery reporting: Unexpected findings -> Discovery with PP conflict assessment.
      7. PD Override: Changing past decisions -> explicit PD Override request.
      8. State Summary: Write thorough summary including pass_rate. This is the ONLY thing the next phase sees.
      9. Retry on failure: Same session retry (max 3). Change approach each time. After 3 -> circuit_break.
      10. Phase 0 reference on failure: When tests fail, consult Phase 0 artifacts (error-spec, type-policy, api-contracts) before fixing. Most failures stem from Phase 0 spec misalignment.
-     11. Self-directed context (F-24): You may use Read/Grep within scope-bounded files (impact files listed below) to gather additional context. Do NOT search outside the phase's impact scope. This replaces passive "given context" with active exploration.
-     12. Task-based TODO (F-23): Use TaskCreate to register TODOs instead of writing mini-plan.md checkboxes. Track TODO status via TaskUpdate (in_progress -> completed/failed). This enables worker dependency tracking and parallel dispatch readiness.
+     11. Self-directed context (F-24): You may use Read/Grep within scope-bounded files (impact files listed below) to gather additional context. Do NOT search outside the phase's impact scope.
+     12. Task-based TODO (F-23): Use TaskCreate to register TODOs. Track TODO status via TaskUpdate (in_progress -> completed/failed).
 
      ---
      ## Pivot Points
