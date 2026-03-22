@@ -1148,6 +1148,46 @@ Report: "[MPL] Type check: clean. Proceeding to Gate 1."
 
 This catches type errors before test execution, reducing fix loop iterations.
 
+**Multi-Stack Build Verification (B-02, v0.6.3):**
+
+Gate 0.5 must verify ALL build tools in the project, not just TypeScript:
+
+```
+build_commands = []
+
+// Auto-detect build tools
+if exists("package.json"):
+  scripts = parse("package.json").scripts
+  if scripts.build:     build_commands.push({ cmd: "npm run build", name: "Frontend build" })
+  if scripts.typecheck:  build_commands.push({ cmd: "npm run typecheck", name: "TypeScript check" })
+
+if exists("Cargo.toml") or exists("src-tauri/Cargo.toml"):
+  cargo_dir = exists("src-tauri") ? "src-tauri" : "."
+  build_commands.push({ cmd: "cd {cargo_dir} && cargo check", name: "Rust check" })
+
+if exists("pyproject.toml") or exists("setup.py"):
+  build_commands.push({ cmd: "python -m py_compile $(find . -name '*.py' -not -path './node_modules/*')", name: "Python check" })
+
+if exists("go.mod"):
+  build_commands.push({ cmd: "go build ./...", name: "Go build" })
+
+if exists("build.gradle") or exists("build.gradle.kts"):
+  build_commands.push({ cmd: "./gradlew compileJava", name: "Gradle compile" })
+
+if exists("pom.xml"):
+  build_commands.push({ cmd: "mvn compile -q", name: "Maven compile" })
+
+// Run all detected build commands
+for each { cmd, name } in build_commands:
+  result = Bash(cmd, timeout=120000)
+  if result.exit_code != 0:
+    announce: "[MPL] Gate 0.5 FAIL: {name} failed (exit {result.exit_code})"
+    announce: "{first 20 lines of result.stderr}"
+    → enter fix loop (target the specific build tool failure)
+  else:
+    announce: "[MPL] Gate 0.5: {name} passed ✓"
+```
+
 #### Gate 1: Automated Tests
 
 Run the full test suite:

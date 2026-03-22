@@ -714,6 +714,54 @@ Summary:
 
 ---
 
+## Step 2.4: Architecture Decision Checklist (B-02, v0.6.3)
+
+Before Phase 0 Enhanced, force critical architecture decisions that affect multiple phases:
+
+```
+// Detect patterns that require early decisions
+decisions_needed = []
+
+if codebase_analysis.has_database:
+  decisions_needed.push({
+    pattern: "database",
+    question: "How is the database path resolved? (app data dir / config / env var / hardcoded)",
+    default: "App data directory via platform API"
+  })
+
+if codebase_analysis.layers.length >= 2:
+  decisions_needed.push({
+    pattern: "multi-layer IPC",
+    question: "What IPC protocol between {layer_A} and {layer_B}? (Tauri invoke / REST / gRPC / WebSocket)",
+    default: "Detect from project config"
+  })
+
+if codebase_analysis.has_auth:
+  decisions_needed.push({
+    pattern: "auth storage",
+    question: "Where are auth tokens stored? (localStorage / httpOnly cookie / keychain / memory)",
+    default: "Depends on platform"
+  })
+
+if codebase_analysis.has_file_io:
+  decisions_needed.push({
+    pattern: "file paths",
+    question: "How are file paths resolved? (relative to CWD / app data / user-specified)",
+    default: "Platform app data directory"
+  })
+
+// Check if already answered in PP or interview responses
+for each decision in decisions_needed:
+  if not answered_in(pivot_points, user_responses):
+    AskUserQuestion: "Architecture decision needed: {decision.question}"
+
+// Save all decisions
+Write(".mpl/mpl/phase0/architecture-decisions.md", decisions_as_markdown)
+announce: "[MPL] {decisions_needed.length} architecture decisions recorded."
+```
+
+These decisions are included in Decomposer input and every Phase Seed's constraints.
+
 ## Step 2.5: Phase 0 Enhanced (Subagent Delegation) [F-36]
 
 > **v3.3 Change**: Changed from orchestrator directly measuring complexity + 4-step analysis

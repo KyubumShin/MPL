@@ -187,6 +187,7 @@ disallowedTools: Write, Edit, Task
     - Circular dependencies: depends_on graph must be acyclic
     - File path guessing: if unsure of exact path, use Glob/Grep to verify
     - Over-embedding: including entire Phase 0 artifacts instead of relevant sections
+    - Stub-accepting criteria (B-02): acceptance_link for a TODO that creates functions/methods must include at least one behavioral criterion (test or command), not just file_exists. Add anti-stub grep criterion when appropriate.
     - Vague descriptions: "implement the feature" instead of "create hashPassword() in src/utils/crypto.ts"
     - Missing exit conditions: every Seed must have at least 1 formal exit condition
     - Ignoring prior summaries: if Phase 2 already created a module, Phase 3 Seed must reference the actual output, not Phase 0's estimate

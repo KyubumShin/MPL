@@ -146,6 +146,9 @@ disallowedTools: []
     - If test fails: analyze failure, fix directly, re-test
     - Max 2 immediate fix attempts per TODO before moving on (mark as needs-attention)
     - Fix should reference Phase 0 artifacts (especially error-spec and type-policy) for guidance
+    - **Anti-stub (B-02)**: after implementing each TODO, verify no stub patterns remain:
+      `Grep("TODO|FIXME|not.implemented|throw.*implement|unimplemented!", modified_files)`
+      If found → replace with real implementation before marking TODO complete
 
     #### 3d. [REMOVED — Moved to Orchestrator (F-40)]
     > Test Agent invocation is now handled by the orchestrator (Step 4.2.2 in mpl-run-execute.md)
@@ -220,6 +223,46 @@ disallowedTools: []
 
     If pass_rate is between 80-94%: attempt targeted fixes (use Step 5 retry budget).
     If pass_rate < 80%: this is abnormal — report as circuit_break with recommendation to review Phase 0 artifacts.
+
+    ### Step 4.5: Runtime Verification (B-02, v0.6.3)
+
+    After static verification passes, check if the application actually runs:
+
+    ```
+    // Detect if runtime check is possible
+    if exists("package.json") and parse("package.json").scripts.dev:
+      result = Bash("timeout 10 npm run dev 2>&1 | head -20", timeout=15000)
+      // Check for crash indicators in output
+      if result contains "Error" or "EADDRINUSE" or "Cannot find module":
+        announce: "[MPL] Runtime check: dev server failed to start"
+        → fix the runtime error before proceeding
+
+    if exists("Cargo.toml") or exists("src-tauri/Cargo.toml"):
+      cargo_dir = exists("src-tauri") ? "src-tauri" : "."
+      result = Bash("cd {cargo_dir} && cargo check 2>&1", timeout=60000)
+      if result.exit_code != 0:
+        announce: "[MPL] Runtime check: Rust compilation failed"
+        → fix before proceeding
+    ```
+
+    This catches "compiles but doesn't run" issues that static checks miss.
+
+    ### Step 4.6: Anti-Stub Verification (B-02, v0.6.3)
+
+    Verify implementations are real, not stubs:
+
+    ```
+    modified_files = all files created or modified in this phase
+    stub_patterns = "TODO|FIXME|not.implemented|throw.*Error.*implement|unimplemented!|todo!|pass$"
+
+    stub_matches = Grep(stub_patterns, modified_files)
+    if stub_matches.count > 0:
+      announce: "[MPL] Anti-stub check: {stub_matches.count} stub patterns found"
+      for each match:
+        announce: "  {file}:{line}: {content}"
+      → fix: replace stubs with actual implementations
+      → do NOT return "complete" until stubs are resolved
+    ```
 
     ### Step 5: Fix (verification failure, max 3 retries, same session)
 

@@ -1327,6 +1327,181 @@ if test_files == 0 AND phase_domain in ["ui", "api", "algorithm", "db", "ai"]:
 
 ---
 
+## B-02: Build & Runtime Verification Hardening (v0.6.3)
+
+### Problem
+
+Yggdrasil test revealed 5 verification gaps. All are generic (not Rust-specific):
+
+| Issue | Root Cause | Impact |
+|-------|-----------|--------|
+| Build tool failure ignored | Gate 0.5 only runs `tsc --noEmit`, ignores other build tools | Backend compiles pass type check but fail actual build |
+| Cross-layer type mismatch | No validation between frontend types and backend signatures | IPC calls fail at runtime despite both sides type-checking |
+| Architecture decisions deferred | Phase 0 doesn't force early decisions on critical patterns | Later phases make inconsistent assumptions |
+| No runtime verification | Only static checks (types, tests), no "does it actually run?" | Stub implementations pass all gates |
+| Stub code passes gates | Success criteria are "file exists + types pass", not "function works" | Dead code masquerades as implementation |
+
+### Fix 1: Multi-Stack Build Verification (Gate 0.5 Enhancement)
+
+Gate 0.5 currently runs only `tsc --noEmit` or language equivalent. Extend to detect and run ALL project build tools:
+
+```
+Gate 0.5 Enhanced:
+  // Auto-detect all build tools in the project
+  build_commands = []
+
+  // Frontend
+  if exists("package.json"):
+    scripts = parse(package.json).scripts
+    if scripts.build: build_commands.push("npm run build")
+    if scripts.typecheck: build_commands.push("npm run typecheck")
+
+  // Rust/Cargo
+  if exists("Cargo.toml") or exists("src-tauri/Cargo.toml"):
+    build_commands.push("cargo check")  // fast type check
+    // Note: full `cargo build` only if cargo check passes (expensive)
+
+  // Python
+  if exists("pyproject.toml") or exists("setup.py"):
+    build_commands.push("python -m py_compile $(find . -name '*.py')")
+
+  // Go
+  if exists("go.mod"):
+    build_commands.push("go build ./...")
+
+  // Java/Kotlin
+  if exists("build.gradle") or exists("pom.xml"):
+    build_commands.push("./gradlew build" or "mvn compile")
+
+  // Run all detected build commands
+  for each cmd in build_commands:
+    result = Bash(cmd)
+    if result.exit_code != 0:
+      Gate 0.5 = FAIL
+      announce: "[MPL] Gate 0.5 FAIL: {cmd} failed with exit {result.exit_code}"
+      announce: "{first 20 lines of stderr}"
+      → enter fix loop
+```
+
+### Fix 2: Cross-Layer Contract Test (new verification type)
+
+For multi-layer projects (frontend + backend, client + server), add cross-layer validation:
+
+```
+// Detect multi-layer project
+layers = detect_project_layers()
+// Examples:
+//   Tauri: frontend(TS) + backend(Rust) + IPC(invoke commands)
+//   Next.js: frontend(React) + API routes(TS)
+//   Django + React: frontend(TS) + backend(Python) + REST API
+
+if layers.length >= 2:
+  // Extract interface contracts between layers
+  for each layer_pair in combinations(layers):
+    // Find IPC/API boundary files
+    frontend_types = Grep("invoke|fetch|axios|trpc", frontend_files)
+    backend_signatures = Grep("command|route|endpoint", backend_files)
+
+    // Verify type alignment
+    for each call in frontend_types:
+      matching_backend = find_matching_signature(call, backend_signatures)
+      if not matching_backend:
+        flag: "Cross-layer mismatch: frontend calls {call} but no backend handler found"
+      elif types_incompatible(call.args, matching_backend.params):
+        flag: "Type mismatch: frontend sends {call.args_type} but backend expects {backend.param_type}"
+```
+
+Add to Phase Runner's Step 4 (Verification) and Phase Seed's exit_conditions.
+
+### Fix 3: Phase 0 Architecture Decision Enforcement
+
+Add mandatory architecture decisions to Phase 0 Enhanced for detected patterns:
+
+```
+Phase 0 Step 0.5: Architecture Decision Checklist (new)
+
+Based on codebase_analysis, identify decisions that MUST be made before decomposition:
+
+| Pattern Detected | Required Decision | Example |
+|-----------------|-------------------|---------|
+| Database present | Storage path strategy | "Where does db_path come from? Config? Env? Hardcoded?" |
+| Multi-process | IPC protocol | "Tauri invoke? REST? gRPC? WebSocket?" |
+| Auth present | Token storage | "localStorage? httpOnly cookie? Keychain?" |
+| File I/O | Path resolution | "Relative to CWD? App data dir? User-specified?" |
+| External API | Error handling | "Retry? Circuit breaker? Fallback?" |
+
+For each required decision:
+  if not answered in PP or user responses:
+    AskUserQuestion: "Architecture decision needed: {question}"
+    Save to .mpl/mpl/phase0/architecture-decisions.md
+
+All phases MUST reference architecture-decisions.md. Decomposer includes
+these decisions in each phase's constraints.
+```
+
+### Fix 4: Phase Completion Runtime Test
+
+After each phase's static verification (types, tests), add a runtime check:
+
+```
+Phase Runner Step 4.5: Runtime Verification (new)
+
+// Detect if a runtime check is possible
+runtime_check = null
+
+if exists("package.json") and scripts.dev:
+  // Start dev server, check it doesn't crash
+  runtime_check = "npm run dev & sleep 3 && curl -s http://localhost:${PORT} > /dev/null && kill %1"
+
+if exists("Cargo.toml"):
+  // Run binary, check it starts
+  runtime_check = "cargo run -- --help 2>&1 | head -5"
+
+if runtime_check:
+  result = Bash(runtime_check, timeout=10000)
+  if result.exit_code != 0:
+    announce: "[MPL] Runtime check failed: application crashes on startup"
+    → enter fix cycle (this is a critical failure, not deferrable)
+```
+
+### Fix 5: Anti-Stub Success Criteria
+
+Strengthen success_criteria in Decomposer and Phase Seed to prevent stub implementations:
+
+```
+Decomposer Rule (add to Failure Modes):
+  - Stub acceptance: success criteria that accept "file exists" or "types pass" without
+    behavioral verification. Every success criterion for functions/methods MUST include
+    at least one of:
+    - type: command — runs the function and checks output
+    - type: test — tests the function with real input/output
+    - type: grep — verifies implementation contains actual logic (not just "TODO" or "throw")
+
+Phase Seed Generator Rule (add to Constraints):
+  - Anti-stub check: for each TODO that creates a function/method:
+    acceptance_link MUST include a criterion that verifies the function DOES something,
+    not just that it EXISTS. Add grep criterion: "function body is not empty/stub/TODO"
+    Example: grep pattern "throw.*not implemented" should FAIL
+
+Phase Runner Rule (add to Step 3):
+  - After implementing each TODO: verify the implementation is not a stub
+    Bash("grep -r 'TODO\|FIXME\|not implemented\|throw.*Error.*implement' {modified_files}")
+    If matches found: implementation is incomplete → fix before marking TODO as done
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `commands/mpl-run-execute.md` | Gate 0.5: multi-stack build detection |
+| `commands/mpl-run-phase0.md` | Phase 0 Step 0.5: architecture decision checklist |
+| `agents/mpl-phase-runner.md` | Step 4.5: runtime verification + Step 3: anti-stub check |
+| `agents/mpl-decomposer.md` | Failure mode: stub acceptance |
+| `agents/mpl-phase-seed-generator.md` | Constraint: anti-stub acceptance_link |
+| `prompts/domains/*.md` | Add build commands per domain |
+
+---
+
 ## Version Mapping (revised after feasibility assessment)
 
 | Version | Inclusion Candidates | Rationale |

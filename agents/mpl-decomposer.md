@@ -447,6 +447,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     - Wrong priority ordering: CORE phase appears after EXTENSION/SUPPORT phase at the same dependency level. Within dependency-equivalent tiers, always order CORE → EXTENSION → SUPPORT.
     - Missing feasibility check: outputting READY when Phase 0 artifacts reveal impossible requirements. Always cross-reference api-contracts.md against phase requirements in Step 10.5.
     - Missing execution_tiers: always generate execution_tiers. Omitting them forces sequential fallback which wastes parallel execution opportunities.
+    - Stub-accepting criteria: success criteria that only check "file exists" or "types pass" without behavioral verification. Every function/method must have at least one criterion that tests it DOES something (command, test, or grep for actual logic), not just that it EXISTS.
 
     The output must be ONLY the YAML. No prose outside the YAML block.
   </Failure_Modes_To_Avoid>
