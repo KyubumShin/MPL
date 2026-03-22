@@ -1,10 +1,10 @@
-# MPL (Micro-Phase Loop) v0.6.0
+# MPL (Micro-Phase Loop) v0.6.6
 
 **Prevention over cure. Specification over debugging.**
 
 A Claude Code plugin that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-fifteen-minds) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-seventeen-minds) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -264,9 +264,9 @@ Keyword hints still work as manual overrides: `"mpl bugfix"` → frugal, `"mpl s
 
 ---
 
-## The Fifteen Minds
+## The Seventeen Minds
 
-Fifteen agents, each with a single purpose. Loaded on-demand, never preloaded:
+Seventeen agents, each with a single purpose. Loaded on-demand, never preloaded:
 
 | Agent | Role | Core Principle |
 |-------|------|---------------|
@@ -284,6 +284,8 @@ Fifteen agents, each with a single purpose. Loaded on-demand, never preloaded:
 | **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
 | **Compound** | Learning extraction and distillation | "What did we learn that future runs should know?" |
 | **Git Master** | Atomic commits | "Each commit tells one story" |
+| **QA Agent** | Browser QA via Claude in Chrome MCP (Gate 1.7) | "Does the UI actually render?" |
+| **Phase Seed Generator** | Per-phase immutable spec with TODO structure | "What exactly should this phase build?" |
 | **Doctor** | Installation diagnostics (11 categories) | "Is everything wired correctly?" |
 
 ### Agent Separation Principle

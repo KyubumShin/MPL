@@ -6,9 +6,8 @@
  * 1. Blocks orchestrator from directly editing source files when MPL is active.
  *    Source file edits must be delegated to mpl-worker agents.
  * 2. Warns on dangerous Bash commands (rm -rf, DROP TABLE, git push --force, etc.)
- *    that could cause irreversible damage. (T-01, v3.8)
- *
- * Based on: design doc section 9.2 hook 1 + OMC pre-tool-use.mjs pattern
+ *    that could cause irreversible damage. (T-01)
+ * 3. Phase-scoped file lock — warns on writes outside current phase's scope. (T-01 P2)
  *
  * When MPL is inactive: does nothing (no interference with normal workflow)
  * When MPL is active: guards Edit/Write on source files + warns on dangerous Bash

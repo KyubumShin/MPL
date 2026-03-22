@@ -14,7 +14,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { scoreAmbiguityTool, handleScoreAmbiguity } from './tools/scoring.js';
 import { stateReadTool, handleStateRead, stateWriteTool, handleStateWrite } from './tools/state.js';
-const server = new Server({ name: 'mpl-server', version: '0.6.1' }, { capabilities: { tools: {} } });
+const server = new Server({ name: 'mpl-server', version: '0.6.6' }, { capabilities: { tools: {} } });
 // Register tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [scoreAmbiguityTool, stateReadTool, stateWriteTool],

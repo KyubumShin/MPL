@@ -91,7 +91,7 @@ describe('VALIDATE_AGENTS', () => {
       'mpl-worker', 'mpl-phase-runner', 'mpl-interviewer',
       'mpl-ambiguity-resolver', 'mpl-codebase-analyzer', 'mpl-phase0-analyzer',
       'mpl-test-agent', 'mpl-code-reviewer', 'mpl-decomposer', 'mpl-git-master', 'mpl-compound',
-      'mpl-doctor',
+      'mpl-doctor', 'mpl-qa-agent', 'mpl-scout', 'mpl-phase-seed-generator',
     ];
     assert.strictEqual(VALIDATE_AGENTS.size, expected.length);
     for (const agent of expected) {

@@ -44,6 +44,9 @@ export const VALIDATE_AGENTS = new Set([
   'mpl-compound',
   'mpl-codebase-analyzer',
   'mpl-phase0-analyzer',
+  'mpl-qa-agent',              // T-03, v0.5.1 — Browser QA
+  'mpl-scout',                 // F-16 — Lightweight exploration
+  'mpl-phase-seed-generator',  // D-01, v0.6.0 — Phase Seed generation
 ]);
 
 // Expected output sections per agent
@@ -126,6 +129,18 @@ export const EXPECTED_SECTIONS = {
   'mpl-phase0-analyzer': [
     'type-policy',
     'error-spec',
+  ],
+  'mpl-qa-agent': [
+    'status',
+    'checks',
+  ],
+  'mpl-scout': [
+    'findings',
+  ],
+  'mpl-phase-seed-generator': [
+    'phase_seed',
+    'goal',
+    'mini_plan_seed',
   ],
 };
 
