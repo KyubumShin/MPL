@@ -202,6 +202,48 @@ Agent count: 12→10 (critic absorbed + gap/tradeoff integrated, deprecated file
 
 ---
 
+## v0.6.0 — 2-Pass Decomposition + Phase Seed + 2-Level Parallelism (2026-03-22)
+
+### Summary
+
+v0.6.0 introduces Phase Seeds — per-phase immutable specifications generated just-in-time. This is the largest structural change since v3.0, replacing ad-hoc mini-plan generation with deterministic, auditable execution specifications.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| D-01a | **2-Pass Decomposition** | Structural | Decomposer Pass 1 produces skeleton (order + deps + scope). New `mpl-phase-seed-generator` (sonnet) produces per-phase Seeds just-in-time with concrete TODO structure, acceptance mapping, embedded Phase 0 context, and formal exit conditions. |
+| D-01b | **TODO Parallel Graph** | Enhancement | Seed's `depends_on` + `files_to_modify` enable pre-planned Worker parallelism. F-13 runtime detection → Seed-based pre-planning. |
+| D-01c | **Phase Parallel Execution** | Structural | CORE phases: always sequential. EXTENSION/SUPPORT phases: parallel in worktree isolation when no file overlap. Decomposer outputs `execution_tiers` with parallel flags. |
+
+### New Agent
+
+| Agent | Role | Model |
+|-------|------|-------|
+| `mpl-phase-seed-generator` | Generate immutable Phase Seed per phase with TODO structure + acceptance mapping | sonnet |
+
+### New Steps
+
+| Step | Name | When |
+|------|------|------|
+| 4.0 | Execution Tier Dispatch | Before phase loop — routes to parallel or sequential |
+| 4.0.5 | JIT Phase Seed Generation | Before each Phase Runner — generates Seed |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `agents/mpl-phase-seed-generator.md` | NEW — Phase Seed generation agent |
+| `agents/mpl-decomposer.md` | execution_tiers + Step 11 + failure mode |
+| `agents/mpl-phase-runner.md` | Layer 3.5 + Step 2 dual mode + exit condition evaluation |
+| `commands/mpl-run-execute.md` | Step 4.0 tier dispatch + Step 4.0.5 JIT seed + context + prompt |
+
+### Migration (0.5.1 → 0.6.0)
+
+Breaking changes: NONE. Phase Runner has Legacy fallback when Seed absent. Rollback: `phase_seed: { enabled: false }` in config.json.
+
+---
+
 ## v4.1 — MCP Server Tier 1: Deterministic Scoring + Active State (2026-03-22)
 
 ### Summary

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.5.1 Design Document
+# MPL (Micro-Phase Loop) v0.6.0 Design Document
 
 ## 1. Overview
 

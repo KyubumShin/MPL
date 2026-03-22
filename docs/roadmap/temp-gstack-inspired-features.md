@@ -72,7 +72,8 @@ Missing:
 | T-10 | ~~Post-Execution Review (Step 5.5)~~ | Ouroboros `/evaluate` | ✅ **v3.9 done** | Low (finalize extension) | ~3-5K |
 | T-11 | ~~Feasibility Check — 2-Layer Defense~~ | Ouroboros interview→seed loop | ✅ **v4.0 done** | Medium (existing extension) | ~1-2K (L1) + 0 (L2) |
 | T-12 | ~~Core-First Phase Ordering~~ | MVP-first strategy | ✅ **v3.8 done** | Low (decomposer prompt) | 0 (prompt only) |
-| M-01 | ~~MCP Server Tier 1 (Score + State)~~ | Ouroboros MCP pattern | ✅ **v4.1 done** | High (new server) | Saves ~3-5K/run |
+| M-01 | ~~MCP Server Tier 1 (Score + State)~~ | Ouroboros MCP pattern | ✅ **v0.5.1 done** | High (new server) | Saves ~3-5K/run |
+| D-01 | ~~2-Pass Decomposition + Phase Seed + 2-Level Parallelism~~ | Ouroboros Seed + F-13 | ✅ **v0.6.0 done** | High (new agent + flow change) | +15-25K, net positive via Fix Loop reduction |
 
 ---
 
@@ -869,6 +870,393 @@ Output:
 
 ---
 
+## D-01: 2-Pass Decomposition + Phase Seed
+
+### Motivation
+
+Current decomposition produces all phase details in a single pass. This creates 5 fundamental gaps:
+
+| # | Problem | Impact |
+|---|---------|--------|
+| 1 | Interface contracts are abstract (`spec: "brief signature"`) | Phase Runner must guess exact signatures |
+| 2 | TODO ↔ success criteria mapping is implicit | No way to trace which TODO satisfies which criterion |
+| 3 | Mini-plan is non-deterministic | Different Runners decompose same phase differently |
+| 4 | Phase 0 artifacts loaded reactively during execution | Slow context assembly, repeated Read calls |
+| 5 | Exit conditions are subjective | "Done" = Runner's judgment, not formal criteria |
+
+### Inspiration
+
+Ouroboros Seed — After interview achieves clarity, a Seed is generated as an immutable, frozen specification that the executor follows exactly. The Seed contains goal, constraints, acceptance_criteria, ontology_schema, exit_conditions, and brownfield_context.
+
+MPL's Phase Seed applies this pattern per-phase: each phase gets its own Seed with Just-in-time context (previous State Summaries inform later Seeds).
+
+### Design: 2-Pass Flow
+
+```
+Current (1-pass):
+  Decomposer → full decomposition.yaml → Phase Runner creates mini-plan → execute
+
+Proposed (2-pass):
+  Pass 1: Decomposer → decomposition.yaml (Skeleton: order + deps + scope)
+           ↓
+  Pass 2: Phase Seed Generator (per phase, just-in-time):
+           Phase N Seed = skeleton[N] + PP + Phase 0 + State Summary[1..N-1]
+           ↓
+  Phase Runner → executes Seed directly (no mini-plan generation)
+```
+
+**Just-in-time advantage**:
+```
+Phase 1 Seed (no prior context) → Execute → State Summary 1
+                                                  ↓
+Phase 2 Seed (uses State Summary 1) → Execute → State Summary 2
+                                                      ↓
+Phase 3 Seed (uses State Summary 1+2) → Execute
+```
+
+Phase 3's Seed is informed by Phase 1-2's actual results — far more accurate than Decomposer guessing Phase 3 details before any execution.
+
+### Phase Seed Schema
+
+```yaml
+phase_seed:
+  metadata:
+    seed_id: string              # unique identifier
+    phase_id: string             # reference to decomposition
+    created_at: string           # ISO timestamp
+    ambiguity_score: number      # how settled this phase definition is
+
+  goal: string                   # 1-sentence goal for this phase
+
+  constraints:                   # PP-derived hard requirements for THIS phase
+    - string
+
+  acceptance_criteria:           # success criteria with explicit TODO mapping
+    - criterion: string
+      type: command | test | file_exists | grep | description
+      touches_todos: [string]    # which TODOs satisfy this criterion
+      verification_detail: string # exact command or pattern
+
+  interface_contract:
+    requires:
+      - type: string
+        name: string
+        from_phase: string
+        import_path: string      # concrete file path
+    produces:
+      - type: string
+        name: string
+        signature: string        # exact function/method signature
+        export_path: string      # concrete file path
+        example: string          # usage example code
+
+  mini_plan_seed:                # deterministic TODO structure
+    todo_structure:
+      - id: string
+        name: string
+        description: string
+        depends_on: [string]     # TODO dependency graph
+        files_to_create: [string]
+        files_to_modify: [string]
+        acceptance_link: [string]  # which criteria this TODO addresses
+        phase0_reference: string   # relevant Phase 0 section
+
+  phase0_context:                # embedded Phase 0 excerpts for this phase
+    error_spec: string           # relevant error spec section
+    type_policy: string          # relevant type policy section
+    api_contracts: string        # relevant API contracts
+
+  exit_conditions:               # formal termination criteria
+    - name: string
+      evaluation_criteria: string
+
+  verification_plan:             # A/S/H items for this phase
+    a_items: [string]
+    s_items: [string]
+    h_items: [string]
+
+  risk_assessment:
+    known_risks:
+      - id: string
+        title: string
+        severity: string
+        mitigation: string
+```
+
+### New Agent: `mpl-phase-seed-generator`
+
+| Field | Value |
+|-------|-------|
+| Model | sonnet |
+| Input | phase skeleton + PP + Phase 0 artifacts + prior State Summaries + verification plan |
+| Output | phase-seed.yaml (YAML only) |
+| Disallowed tools | Write, Edit, Task (read-only analysis) |
+| Allowed tools | Read, Glob, Grep (for codebase inspection during seed generation) |
+
+**Key behaviors:**
+1. Parse phase skeleton → extract goal, scope, impact
+2. Read Phase 0 artifacts → extract sections relevant to this phase
+3. If prior State Summaries exist → incorporate actual implementation details
+4. Generate deterministic TODO structure with file-level specificity
+5. Map each TODO to acceptance criteria explicitly (`touches_todos`)
+6. Define formal exit conditions
+7. Embed Phase 0 context (no lazy loading during execution)
+
+### Pipeline Integration
+
+**New Step 3.5: Phase Seed Generation** (after decomposition, before execution)
+
+```
+// Option A: Generate all Seeds upfront (deterministic, but no JIT)
+for each phase in decomposition.yaml:
+  seed = Task(subagent_type="mpl-phase-seed-generator", model="sonnet",
+    prompt="Generate Phase Seed for {phase.id}. ...")
+  save to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
+
+// Option B: Generate Seeds just-in-time (preferred)
+// Move to Step 4.0.5 — generate Seed immediately before each Phase Runner
+for each phase (in execution order):
+  Step 4.0.5: Generate Phase Seed
+    seed = Task(subagent_type="mpl-phase-seed-generator", ...)
+    // Uses prior State Summaries as input → JIT advantage
+  Step 4.1: Context Assembly (includes seed)
+  Step 4.2: Phase Runner (receives seed, no mini-plan needed)
+```
+
+**Recommended: Option B (JIT)** — seeds for later phases benefit from actual execution results.
+
+### Phase Runner Changes
+
+| Current | After Phase Seed |
+|---------|-----------------|
+| Step 1: Load context | Step 1: Load context + **phase-seed.yaml** |
+| Step 2: Generate mini-plan (novel) | Step 2: **Use `mini_plan_seed.todo_structure`** (deterministic) |
+| Step 3: Execute TODOs (mostly sequential) | Step 3: **Parallel execution via dependency graph** (see below) |
+| Step 4: Verify (implicit criteria) | Step 4: Verify via **`acceptance_criteria[].touches_todos`** mapping |
+| Exit: Runner declares "done" | Exit: **`exit_conditions` evaluation** (formal) |
+
+### TODO Parallel Execution Graph (F-13 Enhancement)
+
+Current F-13 detects file overlap at runtime. With Phase Seed, the dependency graph + file lists are known upfront, enabling **planned parallelism**:
+
+```
+Phase Seed provides:
+  TODO-1: depends_on: [], files: [src/models/user.ts]
+  TODO-2: depends_on: [], files: [src/utils/crypto.ts]
+  TODO-3: depends_on: [TODO-1, TODO-2], files: [src/models/user.ts]
+  TODO-4: depends_on: [], files: [src/routes/auth.ts]
+
+Orchestrator builds execution tiers:
+  Tier 0: [TODO-1, TODO-2, TODO-4]  ← all independent, no file overlap → parallel
+  Tier 1: [TODO-3]                   ← depends on TODO-1,2 → sequential after Tier 0
+
+Execution:
+  Tier 0: spawn 3 Workers simultaneously (run_in_background: true)
+           wait for all 3 to complete
+           run cumulative tests for Tier 0
+  Tier 1: spawn TODO-3 Worker
+           run cumulative tests for Tier 0+1
+```
+
+**Key difference from current F-13:**
+- F-13: Phase Runner decides parallelism at runtime during execution
+- Phase Seed: **Parallelism is pre-planned** in the Seed → Runner executes the plan, doesn't decide it
+- File overlap is validated at Seed generation time, not execution time
+- If Seed Generator detects unavoidable overlap → marks TODOs as sequential in the Seed
+
+**Max concurrent Workers**: 3 (same as current F-13 limit, UI stability)
+
+### Phase-Level Parallel Execution (CORE Sequential, EXTENSION/SUPPORT Parallel)
+
+Leverages T-12 `feature_priority` to determine which phases can run concurrently:
+
+**Rule: CORE phases are NEVER parallelized. EXTENSION/SUPPORT phases CAN be parallelized.**
+
+```
+Decomposer output (with T-12 feature_priority):
+  Phase 1 (CORE)      requires: []
+  Phase 2 (CORE)      requires: [Phase 1]
+  Phase 3 (EXTENSION)  requires: [Phase 2]
+  Phase 4 (EXTENSION)  requires: [Phase 2]     ← same dependency as Phase 3
+  Phase 5 (SUPPORT)    requires: [Phase 2]     ← same dependency as Phase 3-4
+
+Execution plan:
+  ┌─ CORE Zone (sequential, never parallel) ─────────────┐
+  │  Phase 1 → Phase 2                                     │
+  └────────────────────────────────────────────────────────┘
+                    ↓
+  ┌─ EXTENSION/SUPPORT Zone (parallel eligible) ──────────┐
+  │  Phase 3 ──┐                                           │
+  │  Phase 4 ──┼── parallel (no file overlap check first)  │
+  │  Phase 5 ──┘                                           │
+  └────────────────────────────────────────────────────────┘
+```
+
+**Why CORE is always sequential:**
+- CORE phases implement CONFIRMED PPs — the most critical functionality
+- Each CORE phase's State Summary must be complete before the next starts
+- Parallel CORE phases risk inconsistent state if one fails
+- CORE-first ordering (T-12) ensures core value is verified sequentially
+
+**Why EXTENSION/SUPPORT can be parallel:**
+- These are lower-priority features that extend or support CORE
+- If one EXTENSION phase fails, others continue (independent features)
+- Already verified CORE provides stable foundation for parallel extensions
+
+**Orchestrator logic:**
+
+```
+phases_by_priority = group phases by feature_priority
+
+# Step A: Execute CORE phases sequentially
+for phase in phases_by_priority["core"]:
+  seed = generate_seed(phase, prior_summaries)
+  result = execute_phase(seed)
+  if circuit_break: redecompose (existing behavior)
+
+# Step B: Execute EXTENSION/SUPPORT phases in parallel
+extension_phases = phases_by_priority["extension"] + phases_by_priority["support"]
+
+# Group by dependency tier (phases with same requires can be parallel)
+dep_tiers = topological_group(extension_phases)
+
+for tier in dep_tiers:
+  if tier.length == 1:
+    execute sequentially
+  else:
+    # File overlap check
+    if file_overlap(tier.phases):
+      split into non-overlapping subgroups → parallel subgroups, sequential within
+    else:
+      # All phases in this tier run in parallel
+      parallel_map(tier.phases, fn(phase):
+        seed = generate_seed(phase, all_core_summaries + prior_tier_summaries)
+        execute_phase(seed, isolation: "worktree")
+      )
+      # Merge worktrees after all complete
+      merge_results(tier.phases)
+```
+
+**Worktree isolation for parallel phases:**
+- Each parallel phase runs in its own worktree (F-15 extension)
+- After all parallel phases complete, merge worktrees sequentially
+- If merge conflict detected → report to user (Step 5.5 review), keep both changes
+
+**Max concurrent phases**: 3 (matches max concurrent Workers per phase)
+
+### Tier Applicability
+
+| Tier | Phase Seed? | Reason |
+|------|:-----------:|--------|
+| Frugal | ❌ Skip | Single fix cycle, seed overhead > benefit |
+| Standard | ⚠️ Optional | Single phase, seed adds ~3-5K but improves TODO quality |
+| Frontier | ✅ Required | Multi-phase JIT gains maximize accuracy + reduce Fix Loops |
+
+### Cost Analysis
+
+| Scenario | Without Seed | With Seed | Net |
+|----------|:----------:|:---------:|:---:|
+| Frontier 5-phase, 0 Fix Loops | 50-100K | 65-125K (+15-25K) | +15-25K |
+| Frontier 5-phase, 2 Fix Loops avoided | 70-130K | 65-125K | **-5K savings** |
+| Frontier 5-phase, 3+ Fix Loops avoided | 100-160K | 65-125K | **-35K+ savings** |
+
+Break-even: Seeds pay for themselves if they prevent ≥1 Fix Loop (each Fix Loop = ~10-15K).
+
+### Ouroboros Seed Alignment
+
+```
+Ouroboros Seed              MPL Phase Seed
+─────────────               ──────────────
+goal                   ↔    goal
+constraints            ↔    constraints (from PP)
+acceptance_criteria    ↔    acceptance_criteria (with touches_todos)
+ontology_schema        ↔    interface_contract.produces (with examples)
+exit_conditions        ↔    exit_conditions
+brownfield_context     ↔    phase0_context (embedded)
+metadata               ↔    metadata (seed_id, phase_id)
+```
+
+Near 1:1 structural alignment. Future: MPL Phase Seed → Ouroboros Seed conversion for evolutionary workflows.
+
+### Files to Create/Modify
+
+| File | Change |
+|------|--------|
+| `agents/mpl-phase-seed-generator.md` | **NEW** — Seed generation agent |
+| `commands/mpl-run-execute.md` | Add Step 4.0.5 (JIT Seed generation before each phase) |
+| `agents/mpl-phase-runner.md` | Replace mini-plan with Seed consumption |
+| `agents/mpl-decomposer.md` | Optional: reduce detail in phase output (Seed handles detail) |
+| `docs/design.md` | Add Phase Seed architecture section |
+
+### Open Questions
+
+- [ ] JIT (Option B) vs upfront (Option A)? JIT is better but adds latency per phase
+- [ ] Seed validation: what score threshold? (suggest: 0.7, same as feasibility)
+- [ ] Should Decomposer output be simplified now that Seed handles detail?
+- [ ] Seed immutability: can Phase Runner deviate from `mini_plan_seed` if it discovers issues?
+- [ ] Seed caching: if phase re-executes (circuit break), regenerate or reuse Seed?
+- [ ] Interaction with T-11 Feasibility: should Seed Generator also check feasibility per-phase?
+
+### Migration Impact Assessment (0.5.1 → 0.6.0)
+
+**Breaking changes: NONE**
+
+| Component | Backward Compatible? | Change Type | Detail |
+|-----------|:-------------------:|:-----------:|--------|
+| decomposition.yaml schema | ✅ | Additive | `execution_tiers` field added (optional, ignored if absent) |
+| Phase Runner prompt | ✅ | Dual mode | Seed exists → use it. No Seed → Legacy mini-plan (0.5.1 behavior) |
+| New agent (seed-generator) | ✅ | Addition | New file, no existing agent modified |
+| New Step 4.0.5 | ✅ | Insertion | Before existing Step 4.1, no existing steps renumbered |
+| `.mpl/` state directory | ✅ | Additive | `phases/phase-N/phase-seed.yaml` added, existing files unchanged |
+| config.json | ✅ | Additive | `phase_seed: { enabled: true }` (default: true for Frontier, false for others) |
+| hooks | ✅ | No change | — |
+| MCP Server | ✅ | No change | — |
+
+**Migration scenarios:**
+
+| Scenario | Action Required | Risk |
+|----------|:---------------:|:----:|
+| New project | None (auto) | None |
+| Existing project, not running | None (plugin update) | None |
+| Existing project, mid-pipeline resume | None (Legacy fallback for phases without Seed) | None |
+| Frugal/Standard tier | None (Seed skipped by default) | None |
+| Rollback to 0.5.1 behavior | Set `phase_seed.enabled: false` in config.json | None |
+
+**Rollback path:** `config.json` → `phase_seed: { enabled: false }` restores 0.5.1 behavior entirely.
+
+---
+
+## Migration Impact Assessment Template
+
+All future version bumps MUST include this assessment before implementation:
+
+```markdown
+### Migration Impact Assessment (vX.Y.Z → vA.B.C)
+
+**Breaking changes:** YES/NONE
+
+| Component | Backward Compatible? | Change Type | Detail |
+|-----------|:-------------------:|:-----------:|--------|
+| {component} | ✅/⚠️/❌ | Additive/Modified/Removed | {detail} |
+
+**Migration scenarios:**
+
+| Scenario | Action Required | Risk |
+|----------|:---------------:|:----:|
+| New project | | |
+| Existing project, not running | | |
+| Existing project, mid-pipeline | | |
+| Tier-specific impact | | |
+| Rollback path | | |
+
+**If breaking changes exist:**
+- Provide automated migration script or mpl-setup repair step
+- Document manual steps if automation is not possible
+- Specify minimum required user action
+```
+
+---
+
 ## Version Mapping (revised after feasibility assessment)
 
 | Version | Inclusion Candidates | Rationale |
@@ -876,8 +1264,9 @@ Output:
 | **v3.8** | T-01 (Dangerous Command) + T-12 (Core-First) + **F-31** (Compaction Recovery read-side) | Hook + prompt + resume path completion |
 | **v3.9** | T-10 (Post-Exec Review + H-item severity) + T-01 (Phase-Scoped Lock) + **F-33** (Budget watcher completion) | Gate 3 change + session continuity |
 | **v4.0** | T-03 (Browser QA via Chrome MCP) + T-04 (PR creation, Step 5.4b) + T-11 (Decomposer feasibility) | Verification + ship |
-| **v4.1** | **M-01** (MCP Server Tier 1: score + state) | Score variance elimination, active state access |
-| **v4.2** | T-05 (Design Contract) + T-06 (Doc Sync) | UI workflow + documentation |
+| **0.5.1** | ~~**M-01**~~ (MCP Server Tier 1: score + state) | ✅ Done |
+| **0.6.0** | **D-01** (2-Pass Decomposition + Phase Seed) | Structural: JIT seed generation, deterministic TODOs |
+| **0.7.0** | T-05 (Design Contract) + T-06 (Doc Sync) | UI workflow + documentation |
 | **Experiment** | T-02 (same-model dual review) | Validate before committing |
 | **Post-data** | T-08 (Trend Retro) | Requires 10+ runs |
 | **Deferred** | T-09 (Performance Gate) + **F-06** (Multi-Project) | Project-specific / monorepo |

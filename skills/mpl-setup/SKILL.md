@@ -24,6 +24,42 @@ Classify installation state:
 - **INSTALLED**: All components present
 - **CORRUPTED**: Files exist but are invalid (bad JSON, missing fields)
 
+### Step 1b: Settings Scope Selection
+
+Determine where MPL should write settings (permissions, statusLine, MCP config).
+This prevents local-scope plugin installations from polluting global settings.
+
+```
+AskUserQuestion(
+  question: "Where should MPL write its settings?",
+  header: "Settings Scope",
+  options: [
+    { label: "Project-local (recommended)",
+      description: "Write to .claude/settings.local.json in this project. Does not affect other projects." },
+    { label: "Global (user-wide)",
+      description: "Write to ~/.claude/settings.json. Applies to all projects." }
+  ]
+)
+
+if "Project-local":
+  SETTINGS_TARGET = "{CWD}/.claude/settings.local.json"
+  SETTINGS_SCOPE = "local"
+elif "Global":
+  SETTINGS_TARGET = "~/.claude/settings.json"
+  SETTINGS_SCOPE = "global"
+```
+
+**CRITICAL**: All subsequent steps that modify Claude settings (permissions, statusLine, MCP servers)
+MUST use `SETTINGS_TARGET`. Never write to a scope the user didn't select.
+
+Save scope to `.mpl/config.json`:
+```json
+{
+  "settings_scope": "local",
+  "settings_target": ".claude/settings.local.json"
+}
+```
+
 ### Step 2: Route by State
 
 | State | Action |
@@ -77,7 +113,7 @@ For each hook file referenced in `hooks/hooks.json`:
 For each .md file in `agents/`:
 1. Check YAML frontmatter has `name`, `description`, `model`
 2. Validate `model` is one of: haiku, sonnet, opus
-3. Expected: 12 agents (11 active + 1 doctor)
+3. Expected: 16 agents (15 active + 1 doctor)
 4. Report any malformed agents
 
 #### 3e: Verify Skill Definitions
@@ -89,7 +125,8 @@ For each directory in `skills/`:
 
 #### 3f: Ensure Settings
 
-If `MPL/.claude/settings.local.json` doesn't have minimum permissions, create/update:
+Write minimum permissions to `SETTINGS_TARGET` (from Step 1b).
+Merge with existing settings — never replace the file:
 
 ```json
 {
@@ -182,8 +219,8 @@ if qmd_available:
 
 ```
 if qmd_available:
-  // Configure QMD as MCP server for Claude Code
-  settings_file = find_claude_settings()  // ~/.claude/settings.json or project-level
+  // Configure QMD as MCP server — use SETTINGS_TARGET from Step 1b
+  settings_file = SETTINGS_TARGET
 
   ensure mcpServers.qmd exists:
     {
@@ -283,7 +320,8 @@ MPL Setup Complete
 
 Plugin:     MPL v{version}
 Location:   {MPL_ROOT}
-Tool Mode:  {full|enhanced|standalone}
+Settings:   {SETTINGS_SCOPE} ({SETTINGS_TARGET})
+Tool Mode:  {full|standalone}
 Status:     {HEALTHY|REPAIRED|ISSUES_REMAIN}
 
 Tool Availability:
@@ -499,18 +537,22 @@ HUD=$(ls -d ~/.claude/plugins/cache/mpl/mpl/*/hooks/mpl-hud.mjs 2>/dev/null | so
 Bash("chmod +x ~/.claude/mpl-hud-wrapper.sh")
 ```
 
-#### 2. Configure statusLine to use the wrapper:
+#### 2. Configure statusLine in SETTINGS_TARGET (from Step 1b):
 
 ```
-settings.statusLine = {
-  "type": "command",
-  "command": "bash ~/.claude/mpl-hud-wrapper.sh"
-}
+// Write to SETTINGS_TARGET — respects user's scope selection
+Read SETTINGS_TARGET → merge statusLine:
+  {
+    "statusLine": {
+      "type": "command",
+      "command": "bash ~/.claude/mpl-hud-wrapper.sh"
+    }
+  }
 ```
 
 **CRITICAL**: Do NOT use `${CLAUDE_PLUGIN_ROOT}` in statusLine — it is only expanded inside hook execution, not in statusLine which runs as a separate process. Do NOT use hardcoded versioned cache paths like `~/.claude/plugins/cache/mpl/mpl/X.Y.Z/...` — they break on version bump. The wrapper script dynamically resolves the latest cached version.
 
-Note: This replaces any existing statusLine config.
+Note: This replaces any existing statusLine config in the selected scope.
 If another HUD is active, warn and ask for confirmation.
 
 ### Step 9: Optional Advanced Configuration

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.5.1
+# MPL (Micro-Phase Loop) v0.6.0
 
 **Prevention over cure. Specification over debugging.**
 
@@ -404,7 +404,9 @@ MPL/
 - **Feasibility 2-Layer Defense (T-11, v4.0)** — INFEASIBLE detection in Stage 2 + RE_INTERVIEW in Decomposer
 - **Browser QA Gate (T-03, v4.0)** — Claude in Chrome MCP UI verification (Gate 1.7, non-blocking)
 - **PR Creation (T-04, v4.0)** — Auto PR with Gate evidence via `gh pr create`
-- **MCP Server Tier 1 (M-01, v4.1)** — Deterministic ambiguity scoring + active state read/write via MCP tools
+- **MCP Server Tier 1 (M-01, v0.5.1)** — Deterministic ambiguity scoring + active state read/write via MCP tools
+- **2-Pass Decomposition + Phase Seed (D-01, v0.6.0)** — JIT seed generation, deterministic TODOs, acceptance mapping
+- **2-Level Parallelism (D-01, v0.6.0)** — TODO parallel graph (within phase) + EXTENSION/SUPPORT phase parallel (between phases)
 
 </details>
 

@@ -11,7 +11,70 @@ Load this when `current_phase` is `mpl-phase-running`.
 
 ## Step 4: Phase Execution Loop (CORE)
 
+### 4.0: Execution Tier Dispatch (D-01, v0.6.0)
+
+If `execution_tiers` exists in decomposition.yaml AND pipeline_tier == "frontier":
+
+```
+for each tier in execution_tiers:
+  if tier.parallel AND tier.phases.length > 1:
+    // Phase-level parallel execution (EXTENSION/SUPPORT only, never CORE)
+    announce: "[MPL] Tier {tier.tier}: executing {tier.phases.length} phases in parallel"
+
+    results = parallel_map(tier.phases, fn(phase_id):
+      // 4.0.5: Generate Seed (JIT)
+      seed = generate_phase_seed(phase_id, all_prior_summaries)
+      // 4.1: Context Assembly (with seed)
+      context = assemble_context(phase_id, seed)
+      // 4.2: Phase Runner (worktree isolated for parallel phases)
+      return execute_phase(context, isolation: "worktree")
+    , max_concurrent: 3)
+
+    // Merge worktree results sequentially
+    for each result in results:
+      merge_worktree(result)
+      save_state_summary(result)
+
+    // Cumulative test run for entire tier
+    run_cumulative_tests(tier.phases)
+  else:
+    // Sequential execution (CORE phases or single-phase tier)
+    for each phase_id in tier.phases:
+      // Normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
+```
+
+If `execution_tiers` NOT in decomposition.yaml (legacy 0.5.x):
+  Fall back to sequential "For each phase in order:" loop below.
+
+---
+
 For each phase in order:
+
+### 4.0.5: Phase Seed Generation (D-01, v0.6.0)
+
+Generate Phase Seed just-in-time, immediately before context assembly:
+
+```
+if config.phase_seed?.enabled != false AND pipeline_tier == "frontier":
+  prior_summaries = all completed phase state-summary.md files
+  phase0_relevant = extract_relevant_phase0(phase_definition, phase0_artifacts)
+
+  seed_result = Task(subagent_type="mpl-phase-seed-generator", model="sonnet",
+    prompt="Generate Phase Seed for {phase.id}.
+    Phase definition: {phase_definition}
+    Pivot Points: {pivot_points}
+    Phase 0 context (relevant sections): {phase0_relevant}
+    Prior State Summaries: {prior_summaries}
+    Verification Plan: {verification_plan}
+    Codebase hints: {impact_file_paths}
+    Generate phase-seed.yaml output.")
+
+  save seed_result to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
+  context.phase_seed = seed_result
+  announce: "[MPL] Phase Seed generated for {phase.id}: {seed.mini_plan_seed.todo_structure.length} TODOs"
+else:
+  context.phase_seed = null  // Legacy mode — Phase Runner generates mini-plan
+```
 
 ### 4.1: Context Assembly
 
@@ -21,6 +84,7 @@ context = {
   pivot_points:     Read(".mpl/pivot-points.md"),
   phase_decisions:  build_tiered_pd(current_phase), // 3-Tier PD
   phase_definition: phases[current_index],
+  phase_seed:       load_phase_seed(current_phase),   // D-01: JIT seed (null if not generated)
   impact_files:     load_impact_files(phase.impact),
   maturity_mode:    config.maturity_mode,
   prev_summary:     Read previous phase's state-summary.md (if available),
@@ -355,6 +419,15 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
 
      ## Phase Definition
      {phase_definition as YAML}
+
+     ## Phase Seed (D-01, v0.6.0)
+     {context.phase_seed as YAML or "N/A — Legacy mode, generate mini-plan from Phase Definition above"}
+
+     If Phase Seed is provided: use mini_plan_seed.todo_structure as your canonical TODO list.
+     Do NOT generate your own mini-plan — the Seed is your ground truth.
+     Use acceptance_criteria[].touches_todos to know which TODOs satisfy which criteria.
+     Use phase0_context embedded in the Seed instead of loading Phase 0 artifacts separately.
+     Use exit_conditions to determine when this phase is formally complete.
 
      ## Impact Files
      {impact_files content}

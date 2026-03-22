@@ -64,12 +64,30 @@ disallowedTools: []
     - Layer 2 (accumulated): Read phase-decisions.md — all decisions made by prior phases
     - Layer 2.5 (verification plan): Read verification_plan for this phase from context — A/S/H-items classification that determines what to verify and how
     - Layer 3 (this phase): Parse phase_definition — scope, impact, interface_contract, success_criteria, inherited_criteria
+    - Layer 3.5 (phase seed, D-01): If phase-seed.yaml provided in context, load as ground truth for TODO structure.
+      Contains: goal, constraints, mini_plan_seed (deterministic TODOs), acceptance_criteria mapping,
+      phase0_context (embedded), exit_conditions. When present, Layer 3.5 SUPERSEDES Step 2 mini-plan generation.
     - Layer 4 (actual state): Survey impact files listed in phase_definition.impact
     - Layer 5 (working memory, F-25): Read `.mpl/memory/working.md`
       - Reference notes and interface information left by previous phases
       - Skip if absent or empty (first phase)
 
-    ### Step 2: Mini-Plan Generation
+    ### Step 2: Mini-Plan Resolution (D-01 dual mode, v0.6.0)
+
+    **If Phase Seed is provided (Layer 3.5 present):**
+
+    Use `mini_plan_seed.todo_structure` as the canonical mini-plan:
+    - TODOs are pre-determined — do NOT generate new ones
+    - `depends_on` graph defines execution order
+    - `acceptance_link` maps each TODO to success criteria
+    - `phase0_reference` points to relevant Phase 0 sections (already embedded in seed)
+    - Build parallel execution tiers from `mini_plan_seed.execution_tiers`:
+      Each tier lists TODO ids + parallel flag
+      Tier 0: TODOs with no dependencies (parallel eligible if no file overlap)
+      Tier 1: TODOs depending on Tier 0 completions, etc.
+    - If Seed's exit_conditions are defined, use them as formal completion criteria
+
+    **If Phase Seed is NOT provided (Legacy mode):**
 
     Create 1-7 TODOs scoped to this phase only:
     - Check each TODO against PP constraints (note any PROVISIONAL conflicts)
@@ -78,11 +96,12 @@ disallowedTools: []
     - **File conflict detection**: For TODOs marked as parallel, verify their target files do not overlap. If two TODOs modify the same file, they MUST be sequential (add dependency edge). Log: `[Phase {N}] File conflict: {file} touched by TODO-{A} and TODO-{B}. Forcing sequential.`
     - Format as markdown checklist with explicit dependency declarations
 
-    **Working Memory Recording (F-25)**: After Mini-Plan generation, record current phase state in working.md:
+    **Working Memory Recording (F-25)**: After mini-plan resolution (both modes), record current phase state in working.md:
     ```
     Write(".mpl/memory/working.md", """
     # Working Memory — Phase {N}: {phase_name}
     Updated: {timestamp}
+    Mode: {seed | legacy}
 
     ## TODOs
     - [ ] TODO-1: {description} — pending
@@ -163,6 +182,16 @@ disallowedTools: []
        Record which H-items need human verification in the output.
 
     Record evidence for each criterion including pass_rate.
+
+    **If Phase Seed provided (D-01):**
+    - Cross-reference results against `acceptance_criteria[].touches_todos`:
+      For each failing criterion, identify exact TODOs that need fixing.
+      Report: "Criterion '{criterion}' failed — linked TODOs: {touches_todos}"
+    - **Exit condition evaluation**: Evaluate each `exit_conditions` entry formally.
+      Phase is DONE only when ALL exit conditions pass.
+      Exit conditions are machine-evaluable (not subjective judgment).
+
+    **If Legacy mode:**
     A phase is NOT complete until ALL criteria pass AND pass_rate >= 95%.
 
     If pass_rate is between 80-94%: attempt targeted fixes (use Step 5 retry budget).

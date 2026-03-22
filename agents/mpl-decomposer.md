@@ -199,6 +199,16 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - If feasibility issue found that Stage 2 didn't catch:
         → Set go_no_go = "RE_INTERVIEW" with specific questions in re_interview_questions
         → Each question includes: which dimension failed, what evidence was found, affected PP
+
+    Step 11: Execution tier generation (D-01, v0.6.0)
+      - Group phases by dependency level (topological tiers)
+      - Within each tier, apply parallelism rule:
+        CORE phases (feature_priority == "core"): parallel = false (always sequential)
+        EXTENSION/SUPPORT phases: parallel = true (if no file overlap within tier)
+      - File overlap check: compare impact.create + impact.modify across tier members
+        If overlap → split overlapping phases into sequential sub-tiers
+      - Output: execution_tiers array in decomposition YAML
+      - Note: if only 1 phase per tier, parallel field is irrelevant (sequential by default)
   </Reasoning_Steps>
 
   <Output_Schema>
@@ -262,6 +272,14 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
       - id: "phase-2"
         # ...
+
+    execution_tiers:                 # D-01 v0.6.0: phase-level parallel execution groups
+      - tier: 0
+        phases: [string]             # phase IDs in this tier
+        parallel: false              # CORE phases: always false. EXTENSION/SUPPORT: true if no file overlap
+      - tier: 1
+        phases: [string]
+        parallel: true               # example: parallel EXTENSION phases
 
     shared_resources:
       - file: string
@@ -428,6 +446,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     - No mitigation: identifying HIGH risks without concrete mitigation recommendations.
     - Wrong priority ordering: CORE phase appears after EXTENSION/SUPPORT phase at the same dependency level. Within dependency-equivalent tiers, always order CORE → EXTENSION → SUPPORT.
     - Missing feasibility check: outputting READY when Phase 0 artifacts reveal impossible requirements. Always cross-reference api-contracts.md against phase requirements in Step 10.5.
+    - Missing execution_tiers: always generate execution_tiers. Omitting them forces sequential fallback which wastes parallel execution opportunities.
 
     The output must be ONLY the YAML. No prose outside the YAML block.
   </Failure_Modes_To_Avoid>
