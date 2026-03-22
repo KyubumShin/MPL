@@ -1,4 +1,4 @@
-# MPL Roadmap: v1.0→v3.0 Evolution and Remaining Plans
+# MPL Roadmap: v1.0→v5.0 Evolution and Remaining Plans
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 

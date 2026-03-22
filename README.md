@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v4.1
+# MPL (Micro-Phase Loop) v0.5.1
 
 **Prevention over cure. Specification over debugging.**
 
@@ -482,6 +482,19 @@ mpl small add retry logic                     # → forces Standard
 ```bash
 node --test hooks/__tests__/*.test.mjs
 ```
+
+## Versioning
+
+MPL is pre-1.0 (development stage). Follows `0.MAJOR.PATCH`:
+
+| Position | Meaning | Examples |
+|----------|---------|---------|
+| 0.**X**.0 | Structural change or major feature batch | MCP server, Stage 2 redesign, new gates |
+| 0.0.**X** | Bug fix, prompt change, skill update, translation | OMC cleanup, Korean→English |
+
+`1.0.0` will be assigned after production validation and stabilization.
+
+---
 
 ## Design Reference
 

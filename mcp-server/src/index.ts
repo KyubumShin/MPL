@@ -21,7 +21,7 @@ import { scoreAmbiguityTool, handleScoreAmbiguity } from './tools/scoring.js';
 import { stateReadTool, handleStateRead, stateWriteTool, handleStateWrite } from './tools/state.js';
 
 const server = new Server(
-  { name: 'mpl-server', version: '4.1.0' },
+  { name: 'mpl-server', version: '0.5.1' },
   { capabilities: { tools: {} } },
 );
 
