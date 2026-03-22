@@ -696,6 +696,9 @@ phase_model = determine_model(phase):
 
 ### 4.2.2: Test Agent — Mandatory Independent Verification (F-40)
 
+**ENFORCEMENT (B-01, v0.6.2): This step is NOT optional. The orchestrator MUST execute this check
+after EVERY Phase Runner completion. Skipping this step is the #1 cause of "0 tests" pipelines.**
+
 After Phase Runner completes with status `"complete"`, the Test Agent is dispatched as a **mandatory gate** based on phase_domain rules.
 
 #### Domain-Based Invocation Rules
@@ -1151,6 +1154,30 @@ Run the full test suite:
 - Execute all test commands (pytest, npm test, etc.)
 - pass_rate must be >= 95% to proceed to Gate 2
 - If pass_rate < 95%: enter fix loop (see 4.6)
+
+**Zero-Test Block (B-01, v0.6.2):**
+```
+test_count = count total tests from test runner output
+mandatory_domains = phases.filter(p => p.phase_domain in ["ui", "api", "algorithm", "db", "ai"])
+
+if test_count == 0 AND mandatory_domains.length > 0:
+  Gate 1 = FAIL
+  announce: "[MPL] Gate 1 FAIL: 0 tests found but {mandatory_domains.length} mandatory-domain phases exist."
+  announce: "[MPL] Forcing Test Agent dispatch for mandatory phases."
+
+  // Force Test Agent for each mandatory-domain phase that has no tests
+  for each phase in mandatory_domains:
+    test_files = Glob("{phase.impact_dir}/**/*.{test,spec}.*")
+    if test_files.length == 0:
+      Task(subagent_type="mpl-test-agent", model="sonnet",
+        prompt="Write tests for phase {phase.id} ({phase.phase_domain}).
+        Implemented files: {phase.created + phase.modified files}
+        Interface contracts: {phase.interface_contract}
+        Write and run tests. Return test results.")
+
+  // Re-run Gate 1 after Test Agent
+  re-execute test suite → check pass_rate again
+```
 
 #### Gate 1.5: Coverage + Duplication + Bundle Metrics (F-50)
 

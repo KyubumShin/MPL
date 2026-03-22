@@ -189,6 +189,22 @@ disallowedTools: []
        - H-items: flag for Side Interview (orchestrator handles human verification)
        Record which H-items need human verification in the output.
 
+    **Self-Test Requirement (B-01, v0.6.2):**
+    Before returning "complete", verify that test files exist for this phase:
+    ```
+    if phase_domain in ["ui", "api", "algorithm", "db", "ai"]:
+      test_files = Glob("{impact_files_dir}/**/*.{test,spec}.*")
+      if test_files.length == 0:
+        // No tests exist — write basic tests directly
+        announce: "[MPL] Phase {N}: No test files found for {domain} domain. Writing basic tests."
+        // Write tests for core functions/components implemented in this phase
+        // At minimum: 1 test per created file, testing primary export
+        // Run tests after writing
+        // Update pass_rate with actual test results
+    ```
+    This ensures Phase Runner never returns "complete" with 0 tests for mandatory domains.
+    The orchestrator's Test Agent (Step 4.2.2) provides additional independent verification.
+
     Record evidence for each criterion including pass_rate.
 
     **If Phase Seed provided (D-01):**

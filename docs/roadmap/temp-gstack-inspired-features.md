@@ -1258,6 +1258,75 @@ All future version bumps MUST include this assessment before implementation:
 
 ---
 
+## B-01: Zero-Test Gate Enforcement (v0.6.2 hotfix)
+
+### Problem
+
+Yggdrasil playground test (27 phases, v0.5.0) completed with 100% pass rate but **generated 0 test files**. Root causes:
+
+1. **Gate 1 blind spot**: `npm test -- --passWithNoTests` exits 0 → pass_rate = 100% with 0 tests
+2. **Test Agent not dispatched**: Step 4.2.2 (F-40) defines Test Agent dispatch after Phase Runner, but orchestrator didn't execute it — the protocol is documented but not enforced at the execution level
+3. **Nested agent limitation**: Even if Test Agent protocol was followed, Phase Runner couldn't verify because it can't spawn agents
+
+### Fixes
+
+**Fix 1: Gate 1 Zero-Test Block**
+
+Gate 1 must detect and reject "0 tests passed" scenarios for mandatory domains:
+
+```
+Gate 1 enhanced logic:
+  run test suite → get pass_rate AND total_test_count
+
+  if total_test_count == 0:
+    if any phase has domain in ["ui", "api", "algorithm", "db", "ai"]:
+      Gate 1 = FAIL
+      announce: "[MPL] Gate 1 FAIL: 0 tests found for mandatory domains. Test Agent dispatch required."
+      → Force Test Agent dispatch for each mandatory-domain phase
+    else:
+      Gate 1 = WARN (pass with warning for infra/general-only projects)
+```
+
+**Fix 2: Test Agent Dispatch Enforcement**
+
+Add explicit checkpoint in orchestrator flow after Phase Runner returns:
+
+```
+// After Phase Runner returns "complete":
+// MANDATORY: Check if Test Agent needs to dispatch (Step 4.2.2)
+// This is NOT optional — orchestrator MUST execute this check
+
+if phase_domain in MANDATORY_TEST_DOMAINS:
+  test_files = Glob("**/*.{test,spec}.{ts,tsx,js,jsx,py}")
+  if test_files for this phase == 0:
+    announce: "[MPL] No tests for phase {id} ({domain}). Dispatching Test Agent."
+    // Force Test Agent dispatch
+```
+
+**Fix 3: Phase Runner self-test requirement**
+
+Phase Runner's Step 4 (Verification) must include:
+
+```
+// After all TODOs complete, BEFORE returning "complete":
+test_files = Glob("{impact_files_dir}/**/*.{test,spec}.*")
+if test_files == 0 AND phase_domain in ["ui", "api", "algorithm", "db", "ai"]:
+  // Write basic tests directly (since Test Agent can't be spawned)
+  Write test files for core functions/components implemented
+  Run tests
+  // Only then return "complete" with actual pass_rate
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `commands/mpl-run-execute.md` | Gate 1: add zero-test detection + block for mandatory domains |
+| `commands/mpl-run-execute.md` | Step 4.2.2: add enforcement checkpoint after Phase Runner |
+| `agents/mpl-phase-runner.md` | Step 4: add self-test requirement before "complete" |
+
+---
+
 ## Version Mapping (revised after feasibility assessment)
 
 | Version | Inclusion Candidates | Rationale |
