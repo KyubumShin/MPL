@@ -1824,20 +1824,52 @@ Context window impact: orchestrator loads one command file per pipeline state. A
 
 ---
 
-## Version Mapping (revised after feasibility assessment)
+## GitHub Issues Triage (2026-03-23)
 
-| Version | Inclusion Candidates | Rationale |
-|---------|---------------------|-----------|
-| **v3.8** | T-01 (Dangerous Command) + T-12 (Core-First) + **F-31** (Compaction Recovery read-side) | Hook + prompt + resume path completion |
-| **v3.9** | T-10 (Post-Exec Review + H-item severity) + T-01 (Phase-Scoped Lock) + **F-33** (Budget watcher completion) | Gate 3 change + session continuity |
-| **v4.0** | T-03 (Browser QA via Chrome MCP) + T-04 (PR creation, Step 5.4b) + T-11 (Decomposer feasibility) | Verification + ship |
-| **0.5.1** | ~~**M-01**~~ (MCP Server Tier 1: score + state) | ✅ Done |
-| **0.6.0** | **D-01** (2-Pass Decomposition + Phase Seed) | Structural: JIT seed generation, deterministic TODOs |
-| **0.7.0** | T-05 (Design Contract) + T-06 (Doc Sync) | UI workflow + documentation |
-| **Experiment** | T-02 (same-model dual review) | Validate before committing |
-| **Post-data** | T-08 (Trend Retro) | Requires 10+ runs |
-| **Deferred** | T-09 (Performance Gate) + **F-06** (Multi-Project) | Project-specific / monorepo |
-| **Absorbed** | T-07 (Premise Challenge) | Into Stage 2 PP Conformance Check |
+### Issues reviewed from [KyubumShin/MPL](https://github.com/KyubumShin/MPL/issues)
+
+| # | Issue | Verdict | Action | Author Agreed |
+|---|-------|:-------:|--------|:-------------:|
+| **#6** | Ambiguity Hard Gate | ✅ **Apply (v0.6.7)** | Add blocking check: ambiguity > 0.2 → Phase 0 blocked. Show per-dimension scores in block message. | ✅ + dimension display suggestion |
+| **#9** | Drift Measurement MVP | ✅ **Apply (v0.6.7)** | Scope Drift only: declared vs actual files. Add "intentional expansion" tag (question, not auto-block). | ✅ + intentional expansion tag |
+| **#1** | Convention Scan | ⏸️ **Defer** | Alternative: Phase Seed auto-selects 2-3 reference files from same directory (v0.6.8) | ✅ + reference file selection |
+| **#7** | Hashline Edit | ⏸️ **Defer** | Claude Code Edit is content-matching, not line-number-based. Revisit if edit failure rate > 10%. | ✅ |
+| **#8** | Cross-Project Learning | ⏸️ **Defer** | Staleness/pollution risk. Revisit after 10+ project data accumulated. | ✅ |
+| **#4** | Legacy Awareness | ⏸️ **Defer** | Do-Not-Touch config only (brownfield.json, 0.5 day). Rest is over-engineering. | ✅ |
+| **#2** | Impact Radius Analysis | 🏗️ **Brownfield** | Greenfield: no code to analyze. Implement with brownfield mode launch. | ✅ |
+| **#3** | Regression Shield | 🏗️ **Brownfield** | Gate 0.8 Pre-Baseline. Implement with brownfield mode launch. | ✅ |
+| **#5** | Incremental Merge | ❌ **Skip** | Git workflow problem, not MPL's responsibility. T-04 already handles PR. | ✅ |
+
+---
+
+## Version Mapping (revised 2026-03-23)
+
+### Completed
+
+| Version | Features | Status |
+|---------|----------|:------:|
+| v3.7 | Baseline: 2-Stage Interview, 15 agents, Adaptive Router, 5-Gate | ✅ |
+| v3.8→0.5.1 | Stage 2 redesign, MCP Server, T-01/03/04/10/11/12, F-31/33, translation | ✅ |
+| 0.6.0 | D-01 Phase Seed + 2-Level Parallelism + 17 agents | ✅ |
+| 0.6.1 | Nested agent limitation fix | ✅ |
+| 0.6.2 | B-01 Zero-test gate enforcement | ✅ |
+| 0.6.3 | B-02 Multi-stack build + runtime + anti-stub | ✅ |
+| 0.6.4 | R-01 Protocol file split (1,663→765 max) | ✅ |
+| 0.6.5 | B-03 Vertical slice + cross-layer contracts | ✅ |
+| 0.6.6 | B-04 Integration checkpoints + agent model optimization + audit fixes | ✅ |
+
+### Planned
+
+| Version | Features | Type |
+|---------|----------|------|
+| **0.6.7** | **#6** Ambiguity hard gate + **#9** Scope Drift MVP | Patch: quality hardening |
+| **0.6.8** | **#1 alt** Phase Seed reference file auto-selection | Patch: convention hint |
+| **0.7.0** | T-05 Design Contract + T-06 Doc Sync | Feature: UI workflow |
+| **Brownfield** | **#4** Do-Not-Touch + **#2** IRA + **#3** Regression Shield | Feature: brownfield mode |
+| **Experiment** | T-02 Same-model dual review | Validate effectiveness |
+| **Deferred** | T-08 Trend Retro, T-09 Performance Gate, F-06 Multi-Project, #7 Hashline, #8 Cross-Project Learning | Pending data/need |
+| **Absorbed** | T-07 Premise Challenge → Stage 2 PP Conformance | Already covered |
+| **Skipped** | #5 Incremental Merge | Out of MPL scope |
 
 ---
 
@@ -1850,6 +1882,8 @@ When confirming each candidate, review the following:
 3. **Standalone compatibility** — Does it operate gracefully without external dependencies (Playwright, OpenAI API, etc.)?
 4. **Existing pipeline impact** — Does it not compromise the stability of the existing 9-step pipeline?
 5. **Actual usage frequency** — Does this feature provide value in the majority of MPL executions?
+6. **Greenfield safety** — Does it NOT break existing greenfield code generation? (added v0.6.6)
+7. **Migration impact** — Does it include backward-compatible fallback? (added v0.6.0)
 
 ---
 
