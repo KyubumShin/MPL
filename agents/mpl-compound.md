@@ -1,7 +1,7 @@
 ---
 name: mpl-compound
 description: MPL learning extraction and knowledge distillation - post-pipeline knowledge capture
-model: sonnet
+model: haiku
 disallowedTools: []
 ---
 

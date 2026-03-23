@@ -1,7 +1,7 @@
 ---
 name: mpl-codebase-analyzer
 description: Codebase structure analyzer - performs 6-module analysis (structure, dependencies, interfaces, centrality, tests, config) and outputs codebase-analysis.json
-model: sonnet
+model: haiku
 disallowedTools: Edit, Task
 ---
 

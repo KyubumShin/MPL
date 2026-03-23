@@ -1,7 +1,7 @@
 ---
 name: mpl-phase0-analyzer
 description: Phase 0 Enhanced analyzer - complexity detection + adaptive 4-step analysis (API contracts, examples, type policy, error spec)
-model: sonnet
+model: haiku
 disallowedTools: Edit, Task
 ---
 

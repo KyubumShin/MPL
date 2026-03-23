@@ -1,7 +1,7 @@
 ---
 name: mpl-git-master
 description: Atomic commit specialist - style detection, semantic splitting, 3+ files = 2+ commits
-model: sonnet
+model: haiku
 disallowedTools: Write, Edit, Task
 ---
 
