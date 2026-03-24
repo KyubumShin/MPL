@@ -134,7 +134,7 @@ else:
 ### 4.1: Context Assembly
 
 > **Full context assembly protocol has been moved to `mpl-run-execute-context.md`.**
-> This includes: context structure, F-11 learnings loading, F-25 4-Tier memory, F-30 error files, F-31 checkpoint recovery, F-32 adaptive loading, Phase 0 artifacts loading, dependency summaries, PD 3-Tier classification, impact files loading, F-24 self-directed context, and 4.1.5 Worktree Isolation.
+> This includes: context structure, F-11 learnings loading, F-25 4-Tier memory, F-30 error files, F-31 checkpoint recovery, F-32 adaptive loading, Phase 0 artifacts loading, dependency summaries, PD 2-Tier classification, impact files loading, F-24 self-directed context, and 4.1.5 Worktree Isolation.
 >
 > Load `mpl-run-execute-context.md` when entering Step 4.1.
 
@@ -183,8 +183,6 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      {tier1_pd}
      ### Summary (1-line each)
      {tier2_pd}
-     ### Archived (IDs only)
-     {tier3_list}
 
      ## Phase Definition
      {phase_definition as YAML}
@@ -204,8 +202,13 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      ## Maturity Mode
      {maturity_mode}
 
-     ## Previous Phase State Summary
+     ## Previous Phase Context (N-1 only)
+     ### State Summary
      {previous phase's state-summary.md if available, or "N/A (first phase)"}
+     ### Verification Results
+     {previous phase's verification.md if available, or "N/A"}
+     ### Code Changes (diff)
+     {previous phase's changes.diff if available, or "N/A"}
 
      ## Dependency Phase Summaries
      {dep_summaries — summaries from non-adjacent dependency phases, or "N/A"}
@@ -557,6 +560,10 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
 1. Validate state_summary required sections: ["What was implemented", "Phase Decisions", "Verification results"]
    - Missing -> request supplement (1 attempt). Still missing -> warn, proceed (non-blocking)
 2. Save state_summary to .mpl/mpl/phases/phase-N/state-summary.md
+2.5. Generate and save code diff for N-1 context transfer (v0.7.0):
+     diff = Bash("git diff HEAD~1 --stat --patch -- {phase_impact_files}", timeout=10000)
+     Write(".mpl/mpl/phases/phase-N/changes.diff", diff)
+     // If git diff fails (no commits yet, etc.), skip silently — diff is optional context
 3. Save verification to .mpl/mpl/phases/phase-N/verification.md
 4. Update phase-decisions.md with result.new_decisions
 5. Process discoveries (see Discovery Processing section)

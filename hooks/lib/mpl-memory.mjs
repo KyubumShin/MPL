@@ -141,7 +141,7 @@ export async function appendEpisodic(cwd, phaseId, summary) {
  * @param {string} cwd
  * @param {number} keepDetailedCount - Number of recent Phases to keep in detail (default 2)
  */
-export async function compressEpisodic(cwd, keepDetailedCount = 2) {
+export async function compressEpisodic(cwd, keepDetailedCount = 5) {
   const sections = await readEpisodicMemory(cwd);
   if (sections.length <= keepDetailedCount) return;
 
@@ -413,7 +413,7 @@ export async function loadRelevantMemory(cwd, taskDescription, maxTokens = 2000)
 
   // 3. Episodic (last 2 in detail)
   const sections = await readEpisodicMemory(cwd);
-  const recentSections = sections.slice(-2);
+  const recentSections = sections.slice(-5);
   let episodic = recentSections
     .map(s => `### Phase ${s.phase}: ${s.name} (${s.timestamp})\n${s.body}`)
     .join('\n\n');

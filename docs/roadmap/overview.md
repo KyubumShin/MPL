@@ -202,6 +202,163 @@ Agent count: 12→10 (critic absorbed + gap/tradeoff integrated, deprecated file
 
 ---
 
+## v0.6.7 — 1M Context Parameter Tuning (2026-03-24)
+
+### Summary
+
+v0.6.7 adapts MPL parameters to the Claude Opus 4.6 1M context window (5× increase from ~200K). The micro-phase structure is preserved for its structural benefits (functional isolation, worker consistency, parallel execution, failure containment). Only constants and token budgets are tuned; protocol-level structural changes are deferred to v0.7.0.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| C-01 | **max_total_tokens 900K** | Config | Raise default from 500K to 900K (1M minus ~100K system overhead). Tier-based limits also raised proportionally. |
+| C-02 | **Impact file cap 2,000 lines** | Prompt | Raise from 500 to 2,000 lines per file in context assembly. Reduces worker errors from truncated files. |
+| C-03 | **Phase 0 token budget increase** | Design guidance | Simple 10K, Medium 18K, Complex 30K (from 8K/12K/20K). More Phase 0 investment = less downstream debugging. |
+| C-04 | **Episodic memory 5 phases** | Code | Keep last 5 phases in detail (from 2). Better cross-phase knowledge retention. |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `mcp-server/src/lib/state-manager.ts` | max_total_tokens: 500000 → 900000 |
+| `hooks/lib/mpl-config.mjs` | max_total_tokens: 500000 → 900000 |
+| `hooks/lib/mpl-state.mjs` | max_total_tokens defaults + tier-based limits |
+| `skills/mpl-setup/SKILL.md` | Config template max_total_tokens |
+| `hooks/lib/mpl-memory.mjs` | compressEpisodic default 2→5, loadRelevantMemory slice(-2)→slice(-5) |
+| `commands/mpl-run-execute-context.md` | "cap at 500 lines" → "cap at 2000 lines" |
+| `docs/design.md` | Version bump, Phase 0 budgets, §8 config, §9 version history |
+
+### v0.7.0 — 1M Context Protocol Restructuring (2026-03-24)
+
+Structural protocol changes leveraging 1M context for richer cross-phase information flow.
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| C-05 | **PD 2-Tier Classification** | Protocol | 3-Tier→2-Tier: Archived tier removed, all PDs kept as Active or Summary. Classification logic rewritten. |
+| C-06 | **Sliding Window Cleanup** | Protocol | Immediate release → sliding window (N=3). Last 3 phases retain detailed data (~60-90K tokens). |
+| C-07 | **N-1 Phase Context Transfer** | Protocol | Previous phase verification.md + changes.diff forwarded to next phase. Diff capped at 3K tokens. |
+| C-08 | **Budget Predictor 1M** | Code | Fallback 200K→1M, safety margin 1.15→1.10. |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `commands/mpl-run-execute-context.md` | PD 2-Tier logic, N-1 diff/verification context, load_prev_phase_diff |
+| `commands/mpl-run-execute.md` | Archived removed, diff saving step 2.5, N-1 context template |
+| `commands/mpl-run-execute-parallel.md` | §4.3.7 sliding window cleanup |
+| `commands/mpl-run-decompose.md` | PD init Active/Summary only |
+| `hooks/lib/mpl-budget-predictor.mjs` | fallback 1M, margin 1.10 |
+| `skills/mpl/SKILL.md` | 2-Tier |
+| `README.md` | 2-Tier (2 locations) |
+| `README_ko.md` | 2-Tier (2 locations) |
+| `docs/design.md` | v0.7.0 version bump, all planned notes resolved |
+
+Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
+
+---
+
+## v0.6.6 — Integration Checkpoints + Agent Model Optimization (2026-03-23)
+
+### Summary
+
+v0.6.6 adds intermediate E2E verification at feature group boundaries, preventing accumulated errors across many phases.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| B-04 | **Integration Checkpoints** | Decomposer + Phase Runner | Decomposer inserts checkpoint phases at feature boundaries (every 3 vertical slices, CORE→EXTENSION transition). Checkpoints run full build + test suite + smoke test + feature-specific integration scenarios. Non-blocking skip for Frugal/Standard tiers. |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `agents/mpl-decomposer.md` | Rule 12: checkpoint insertion + schema + integration_tests |
+| `commands/mpl-run-execute.md` | Checkpoint phase handling (skip Seed, direct execution) |
+| `agents/mpl-phase-runner.md` | Checkpoint mode: execute integration_tests instead of TODO plan |
+
+---
+
+## v0.6.5 — Vertical Slice Decomposition + Cross-Layer Contracts (2026-03-23)
+
+### Summary
+
+v0.6.5 switches multi-layer projects from horizontal decomposition to vertical slice decomposition, preventing cross-layer contract failures.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| B-03 | **Vertical Slice Decomposition** | Decomposer rule | Multi-layer projects (2+ layers) decompose by feature/vertical slice, not by layer. Each phase implements one feature across all layers. Contract-first architecture decision added to Phase 0. 5-Level success criteria (Static→Build→Unit→Contract→Runtime). |
+
+### Affected Files
+
+| File | Change |
+|------|--------|
+| `agents/mpl-decomposer.md` | Vertical slice rule + 5-Level criteria + multi-layer detection |
+| `agents/mpl-phase-seed-generator.md` | Vertical slice TODO structure + cross-layer acceptance_link |
+| `commands/mpl-run-phase0-analysis.md` | Architecture Decision: cross-layer contract strategy |
+| `agents/mpl-phase-runner.md` | Cross-layer verification in Step 4 |
+
+---
+
+## v0.6.4 — Protocol File Split (2026-03-23)
+
+### Summary
+
+v0.6.4 splits oversized protocol files to reduce per-step token consumption. Pure refactoring — no behavioral changes.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| R-01 | **Protocol File Split** | Refactor | `mpl-run-execute.md` (1,663→4 files), `mpl-run-phase0.md` (1,337→3 files), `mpl-run-finalize.md` (538→2 files). Max file size reduced from 1,663 to ~500 lines. |
+
+---
+
+## v0.6.3 — Build & Runtime Verification Hardening (2026-03-23)
+
+### Summary
+
+v0.6.3 addresses 5 verification gaps discovered in Yggdrasil 27-phase test: build tool failures, cross-layer mismatches, deferred architecture decisions, missing runtime checks, and stub code acceptance.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| B-02 | **Multi-Stack Build Verification** | Gate 0.5 enhancement | Auto-detect and run ALL project build tools (npm, cargo, go, python, etc.). |
+| B-02 | **Cross-Layer Contract Test** | New verification type | Validate IPC/API type alignment between frontend and backend layers. |
+| B-02 | **Architecture Decision Enforcement** | Phase 0 extension | Mandatory architecture decisions for detected patterns (DB path, IPC protocol, auth). |
+| B-02 | **Runtime Verification** | Phase Runner extension | Dev server startup check after static verification passes. |
+| B-02 | **Anti-Stub Criteria** | Decomposer + Phase Runner | Success criteria must verify behavioral output, not just file existence. |
+
+---
+
+## v0.6.2 — Zero-Test Gate Enforcement (2026-03-23)
+
+### Summary
+
+v0.6.2 fixes the blind spot where Gate 1 reported 100% pass rate with 0 tests. Mandatory test enforcement for core domains.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| B-01 | **Zero-Test Detection** | Gate 1 enhancement | Gate 1 detects and rejects 0-test scenarios for mandatory domains (ui, api, algorithm, db, ai). |
+| B-01 | **Test Agent Dispatch Enforcement** | Orchestrator checkpoint | Mandatory check after Phase Runner returns — forces Test Agent dispatch if no tests exist. |
+| B-01 | **Phase Runner Self-Test** | Phase Runner extension | Write basic tests before returning "complete" if no tests exist for mandatory domains. |
+
+---
+
+## v0.6.1 — Nested Agent Limitation Fix (2026-03-23)
+
+### Summary
+
+v0.6.1 resolves the nested agent limitation where Phase Runner could not spawn worker subagents. Phase Runner now implements directly as full executor.
+
+---
+
 ## v0.6.0 — 2-Pass Decomposition + Phase Seed + 2-Level Parallelism (2026-03-22)
 
 ### Summary
@@ -423,6 +580,19 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 
 ---
 
+## Planned Versions
+
+| Version | Features | Type |
+|---------|----------|------|
+| **0.6.7** | Cluster Ralph (B-04→feature E2E) + Lint Gate + TSConfig Strict + Config Schema + Scope Drift | Feature: layered verification |
+| **0.6.8** | #1 alt Phase Seed reference file + TS-03 Regression Accumulator | Patch: convention + regression |
+| **0.7.0** | TS-01/02 MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
+| **Brownfield** | #4 Do-Not-Touch + #2 IRA + #3 Regression Shield | Feature: brownfield mode |
+| **Experiment** | T-02 Same-model dual review | Validate effectiveness |
+| **Deferred** | T-08, T-09, F-06, F-269, #7, #8 | Pending data/need |
+
+---
+
 ## v3.2 Roadmap — "Documents as Memory + Adaptive Routing" (2026-03-07)
 
 ### Design Direction
@@ -557,9 +727,9 @@ After: System auto-determines + dynamic switching
 | ID | Item | Status | Description |
 |----|------|--------|-------------|
 | F-30 | **Error Context File Preservation** | ✅ **S5 complete** | Preserve full error text in `.mpl/mpl/phases/phase-N/errors/` file on Worker failure. Fix loop converges with accurate error info even after compaction. Phase Runner writes error file, orchestrator receives only the path |
-| F-31 | **Compaction-Aware Context Recovery** | Partially implemented | Create `.mpl/mpl/checkpoints/compaction-{N}.md` checkpoint in PreCompact hook. Warn at 3 compaction_count, recommend session reset at 4+. Write-side implementation complete, orchestrator read-side path specification TBD |
+| F-31 | **Compaction-Aware Context Recovery** | ✅ **v3.8 complete** | Create `.mpl/mpl/checkpoints/compaction-{N}.md` checkpoint in PreCompact hook. Warn at 3 compaction_count, recommend session reset at 4+. Write-side (PreCompact hook) + Read-side (Context Assembly Case 2 + Phase Runner injection + Step 6 resume). Full write→read loop complete |
 | F-32 | **Adaptive Context Loading** | ✅ **S5 complete** | Assess context state at phase transition and 3-way branch load amount: same session (minimal load) / after compaction (selective load+checkpoint) / new session (full load). Compaction detection via `last_phase_compaction_count` field |
-| F-33 | **Session Budget Prediction & Auto-Continue** | Partially implemented | Predict remaining Phase budget based on HUD context_window data at Phase completion. Graceful pause when insufficient → create `.mpl/signals/session-handoff.json`. **Implemented**: budget predictor library (`hooks/lib/mpl-budget-predictor.mjs`), HUD bridge (`context-usage.json` recording), orchestrator command (Step 4.8 Graceful Pause Protocol). **Not implemented**: external session watcher (`mpl-session-watcher.sh`), hooks.json registration, end-to-end integration tests |
+| F-33 | **Session Budget Prediction & Auto-Continue** | ✅ **v3.9 complete** | Predict remaining Phase budget based on HUD context_window data at Phase completion. Graceful pause when insufficient → create `.mpl/signals/session-handoff.json`. predictBudget + writeSessionHandoff + Step 4.8 Graceful Pause + watcher docs. Full predict→pause→signal→resume loop complete |
 
 #### Sprint 5-6 New Features
 

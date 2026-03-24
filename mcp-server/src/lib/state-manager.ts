@@ -84,7 +84,7 @@ const DEFAULT_STATE: MplState = {
   session_id: null,
   cost: {
     total_tokens: 0,
-    max_total_tokens: 500000,
+    max_total_tokens: 900000,
     estimated_usd: 0,
   },
   convergence: {

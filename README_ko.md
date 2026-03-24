@@ -350,7 +350,7 @@ MPL/
 - **Gate 0.5 Type Check (F-17)** — Gate 1 전 프로젝트 전체 `lsp_diagnostics_directory`
 - **Standalone Mode (F-04)** — 도구 가용성 자동 감지, LSP/AST 미설치 시 Grep/Glob 폴백
 - **Phase 0 Caching** — 해시 기반 캐시 키, 캐시 히트 시 Phase 0 전체 스킵 (~8-25K 토큰 절감)
-- **3-Tier PD** — Phase Decisions를 Active/Summary/Archived로 분류, 페이즈당 일정 토큰 예산
+- **2-Tier PD** — Phase Decisions를 Active/Summary로 분류, 페이즈당 일정 토큰 예산
 - **Convergence Detection** — 정체(variance < 5%), 회귀(delta < -10%), 전략 제안
 
 </details>
@@ -365,7 +365,7 @@ MPL/
 | `.mpl/mpl/state.json` | MPL 실행 상태 (페이즈, 통계) |
 | `.mpl/mpl/RUNBOOK.md` | 세션 연속성을 위한 통합 실행 로그 (F-10) |
 | `.mpl/mpl/decomposition.yaml` | 페이즈 분해 출력 |
-| `.mpl/mpl/phase-decisions.md` | 축적된 Phase Decisions (3-Tier) |
+| `.mpl/mpl/phase-decisions.md` | 축적된 Phase Decisions (2-Tier) |
 | `.mpl/mpl/phase0/` | Phase 0 Enhanced 산출물 |
 | `.mpl/mpl/phases/phase-N/` | 페이즈별 산출물 (mini-plan, state-summary, verification) |
 | `.mpl/mpl/profile/` | 토큰/타이밍 프로파일 (phases.jsonl, run-summary.json) |

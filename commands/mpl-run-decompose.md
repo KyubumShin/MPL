@@ -125,7 +125,7 @@ success_criteria:
 
 1. Parse YAML, validate phase count vs maturity mode sizing
 2. Save to `.mpl/mpl/decomposition.yaml`
-3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary/Archived sections
+3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
 5. Update MPL state with `phase_details` (all phases as `"pending"`)
 6. Update pipeline state: `current_phase: "mpl-phase-running"`

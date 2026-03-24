@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const DEFAULT_TOKENS_PER_PHASE = 15000; // conservative estimate
-const SAFETY_MARGIN = 1.15; // 15% buffer
+const SAFETY_MARGIN = 1.10; // 10% buffer (relaxed for 1M context)
 const STALE_THRESHOLD_MS = 30000; // 30s — context-usage.json freshness
 const CRITICAL_REMAINING_PCT = 10; // below this = pause_now regardless
 
@@ -119,7 +119,7 @@ export function predictBudget(cwd) {
 
   // 2. Remaining budget
   const remainingPct = Math.max(0, 100 - usage.pct);
-  const totalTokens = usage.total_tokens || 200000; // fallback to 200K
+  const totalTokens = usage.total_tokens || 1000000; // fallback to 1M context
   const remainingTokens = totalTokens - usage.used_tokens;
 
   // 3. Critical check: <10% remaining = pause regardless

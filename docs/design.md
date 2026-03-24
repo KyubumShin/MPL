@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.6.6 Design Document
+# MPL (Micro-Phase Loop) v0.7.0 Design Document
 
 ## 1. Overview
 
@@ -41,7 +41,7 @@ Phase Runner retries internally up to 3 times. The orchestrator re-decomposes up
 
 ### Principle 5: Knowledge Accumulation
 
-**State Summary** is the sole means of knowledge transfer between phases. Phase Decisions are managed with a 3-Tier classification system (Active/Summary/Archived) to maintain a constant token budget.
+**State Summary** is the primary means of knowledge transfer between phases. Additionally, the **immediately preceding phase's verification results and code diff** are selectively forwarded when the next phase directly depends on that work. Phase Decisions are managed with a 2-Tier classification system (Active/Summary) to preserve decision context across all phases.
 
 ---
 
@@ -142,9 +142,11 @@ complexity_score = (number of modules × 10) + (external dependencies × 5) + (t
 
 | Score | Grade | Phase 0 Step | Token Budget |
 |------|------|-------------|----------|
-| 0~29 | Simple | Step 4 only (Error Spec) | ~8K |
-| 30~79 | Medium | Step 2 + Step 4 | ~12K |
-| 80+ | Complex | Steps 1~4 all | ~20K |
+| 0~29 | Simple | Step 4 only (Error Spec) | ~10K |
+| 30~79 | Medium | Step 2 + Step 4 | ~18K |
+| 80+ | Complex | Steps 1~4 all | ~30K |
+
+> **v0.6.7 change (1M adaptation):** Token budgets increased from 8K/12K/20K to 10K/18K/30K. With 1M context, investing more tokens in Phase 0 pre-specification has negligible impact on total budget (~3% of 900K max) while improving specification quality and reducing downstream debugging.
 
 **4-Step Process**:
 
@@ -188,10 +190,10 @@ The core execution unit of the pipeline. Executes each phase in order.
 **4.1 Context Assembly** — Assembles the necessary context before each phase execution:
 - Phase 0 artifacts (selectively loaded based on complexity grade)
 - Pivot Points
-- Phase Decision (3-Tier classification applied)
+- Phase Decision (2-Tier classification applied)
 - Phase definition (from decomposition.yaml)
-- Impact files (maximum 500 lines per file)
-- Previous phase State Summary
+- Impact files (maximum 2,000 lines per file)
+- Previous phase State Summary + verification results + code diff (N-1 only)
 - Dependency phase Summary (based on interface_contract.requires)
 - Verification plan (A/S/H items for the relevant phase)
 
@@ -206,7 +208,7 @@ The core execution unit of the pipeline. Executes each phase in order.
 
 **4.3.5 Side Interview** — Requests user confirmation when CRITICAL discovery, H-items, or AD (After Decision) markers are present.
 
-**4.3.6 Context Cleanup** — After each phase completes, releases detailed data from orchestrator memory, maintaining a constant context size regardless of the number of phases.
+**4.3.6 Context Cleanup (Sliding Window)** — After each phase completes, applies a sliding window retention policy: the most recent N phases (default: 3, configurable via `context_cleanup_window`) retain detailed data in orchestrator memory, while older phases are compressed to State Summary only. Token impact: ~60-90K for 3 retained phases (≈7-10% of 900K budget).
 
 **4.4 Re-decomposition** — When circuit break occurs, `mpl-decomposer` re-decomposes the failed phase with a different strategy. Allowed up to 2 times; completed phases are preserved.
 
@@ -399,17 +401,16 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
         └── learnings.md          # Accumulated learnings across runs (F-11)
 ```
 
-### 6.2 Phase Decision 3-Tier Classification
+### 6.2 Phase Decision 2-Tier Classification
 
-Phase Decisions are classified into 3 tiers to maintain constant token cost between phases:
+Phase Decisions are classified into 2 tiers to balance context preservation with token efficiency:
 
 | Tier | Name | Contents | Token Budget | Classification Criteria |
 |------|------|----------|----------|----------|
-| Tier 1 | Active | Full detail | ~400~800 | PD's affected_files intersects with current phase impact |
-| Tier 2 | Summary | 1-line summary | ~90~240 | DB Schema/API Contract/Architecture type but no direct contact |
-| Tier 3 | Archived | ID only | ~0 | Everything else |
+| Tier 1 | Active | Full detail | ~400~800 | PD's affected_files intersects with current phase impact, or PD from a dependency phase |
+| Tier 2 | Summary | 1-line summary | ~90~240 | All other decisions |
 
-Total PD token cost: ~500~1000 tokens (stable regardless of number of phases).
+Total PD token cost: ~2K~5K tokens for a 10-phase project (well within 1M budget).
 
 ### 6.3 Discovery Handling
 
@@ -448,7 +449,8 @@ The following options are supported in `.mpl/config.json`:
 |------|--------|------|
 | `maturity_mode` | `"standard"` | Maturity mode (explore/standard/strict) |
 | `max_fix_loops` | `10` | Maximum Fix Loop iterations |
-| `max_total_tokens` | `500000` | Total token upper limit |
+| `max_total_tokens` | `900000` | Total token upper limit (v0.6.7: raised from 500K for 1M context) |
+| `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |
 | `convergence.stagnation_window` | (per config) | Stagnation detection window size |
@@ -457,7 +459,54 @@ The following options are supported in `.mpl/config.json`:
 
 ---
 
-## 9. Known Issues and Remaining Work
+## 9. Version History
+
+### v0.6.7 — 1M Context Parameter Tuning (2026-03-24)
+
+Adapts MPL parameters to the Claude Opus 4.6 1M context window (5× increase from ~200K). The micro-phase structure is preserved for its structural benefits (functional isolation, worker consistency, parallel execution, failure containment). This version tunes constants and token budgets; protocol-level structural changes are deferred to v0.7.0.
+
+| Change | Before (v0.6.6) | After (v0.6.7) | Type | Rationale |
+|--------|-----------------|----------------|------|-----------|
+| max_total_tokens | 500K | 900K | Code (4 files) | 1M minus ~100K system overhead |
+| Impact file cap | 500 lines | 2,000 lines | Prompt (1 file) | Reduce worker errors from truncated files |
+| Phase 0 token budget | 8K/12K/20K | 10K/18K/30K | Design guidance | More Phase 0 investment = less Phase 5 debugging |
+| Episodic memory retention | Last 2 phases | Last 5 phases | Code (1 file) | Better cross-phase knowledge retention |
+
+**Affected files:**
+- `mcp-server/src/lib/state-manager.ts` — max_total_tokens default
+- `hooks/lib/mpl-config.mjs` — max_total_tokens default
+- `hooks/lib/mpl-state.mjs` — max_total_tokens default + tier-based limits
+- `skills/mpl-setup/SKILL.md` — config template
+- `hooks/lib/mpl-memory.mjs` — compressEpisodic default + loadRelevantMemory slice
+- `commands/mpl-run-execute-context.md` — impact file line cap
+
+### v0.7.0 — 1M Context Protocol Restructuring (2026-03-24)
+
+Structural protocol changes that leverage 1M context for richer cross-phase information flow.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Phase Decision tiers | 3-Tier (Active/Summary/Archived) | 2-Tier (Active/Summary) | Protocol (6+ files) | Tier 3 dropped all decision detail for ~0 token savings |
+| Context Cleanup | Immediate full release | Sliding window (N=3 recent phases) | Protocol | ~60-90K retained = ~7-10% of budget |
+| Knowledge transfer | State Summary only | State Summary + N-1 phase diff/verification | Protocol | Reduce cross-phase inconsistency |
+| Budget predictor fallback | 200K | 1M | Code (1 file) | Match actual context window |
+| Safety margin | 1.15× | 1.10× | Code (1 file) | Absolute headroom increased 5× |
+
+**Affected files:**
+- `commands/mpl-run-execute-context.md` — PD 2-Tier classification logic, N-1 diff/verification context, `load_prev_phase_diff` pseudocode
+- `commands/mpl-run-execute.md` — Archived section removed, diff saving step 2.5, N-1 context template
+- `commands/mpl-run-execute-parallel.md` — §4.3.7 sliding window cleanup logic
+- `commands/mpl-run-decompose.md` — PD initialization (Active/Summary only)
+- `hooks/lib/mpl-budget-predictor.mjs` — fallback 1M, safety margin 1.10
+- `skills/mpl/SKILL.md`, `README.md`, `README_ko.md` — 2-Tier documentation updates
+
+**Preserved (unchanged across both versions):** Micro-phase decomposition, orchestrator-worker separation, 5-Gate quality system, A/S/H verification, convergence detection, build-test-fix micro-cycle, bounded retries, write guard hook.
+
+Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
+
+---
+
+## 10. Known Issues and Remaining Work
 
 > Last audit date: 2026-03-05. Items below were identified through cross-validation between v3.0 codebase and documentation.
 

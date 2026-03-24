@@ -43,7 +43,7 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 | `.mpl/state.json` | Pipeline state (run_mode: "mpl", current_phase) |
 | `.mpl/mpl/state.json` | MPL execution state (phases, phase_details) |
 | `.mpl/mpl/decomposition.yaml` | Phase Decomposer output |
-| `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (3-Tier) |
+| `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (2-Tier) |
 | `.mpl/mpl/codebase-analysis.json` | Codebase structure analysis |
 | `.mpl/mpl/phase0/complexity-report.json` | Complexity grade and score |
 | `.mpl/mpl/phase0/summary.md` | Phase 0 Enhanced output summary |

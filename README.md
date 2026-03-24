@@ -395,7 +395,7 @@ MPL/
 - **4-Layer Templates (F-39)** — Domain + Subdomain + Task Type + Language prompt composition
 - **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable
 - **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)
-- **3-Tier PD** — Phase Decisions classified Active/Summary/Archived per phase for constant token budget
+- **2-Tier PD** — Phase Decisions classified Active/Summary per phase for bounded token budget
 - **Convergence Detection** — Stagnation (variance < 5%), regression (delta < -10%), strategy suggestions
 - **Dangerous Command Detection (T-01, v3.8)** — Bash safety guard for rm -rf, DROP TABLE, git push --force, etc.
 - **Core-First Phase Ordering (T-12, v3.8)** — CORE → EXTENSION → SUPPORT sort within dependency tiers
@@ -422,7 +422,7 @@ MPL/
 | `.mpl/mpl/state.json` | MPL execution state (phases, statistics) |
 | `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
 | `.mpl/mpl/decomposition.yaml` | Phase decomposition output |
-| `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (3-Tier) |
+| `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (2-Tier) |
 | `.mpl/mpl/phase0/` | Phase 0 Enhanced artifacts |
 | `.mpl/mpl/phases/phase-N/` | Per-phase artifacts (mini-plan, state-summary, verification) |
 | `.mpl/mpl/profile/` | Token/timing profile (phases.jsonl, run-summary.json) |

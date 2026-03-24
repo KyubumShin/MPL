@@ -89,7 +89,7 @@ If `.mpl/config.json` does not exist, create it:
 {
   "maturity_mode": "standard",
   "max_fix_loops": 10,
-  "max_total_tokens": 500000,
+  "max_total_tokens": 900000,
   "gate1_strategy": "auto",
   "hitl_timeout_seconds": 30,
   "tool_mode": "auto",

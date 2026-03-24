@@ -47,7 +47,7 @@ const DEFAULT_STATE = {
   session_id: null,
   cost: {
     total_tokens: 0,
-    max_total_tokens: 500000,
+    max_total_tokens: 900000,
     estimated_usd: 0
   },
   convergence: {
@@ -328,7 +328,7 @@ export function initState(cwd, featureName, runMode = 'full', tierHint = null) {
   const isFrugal = tierHint === 'frugal';
 
   const maxFixLoops = config.max_fix_loops ?? (isFrugal ? 3 : isSmall ? 5 : 10);
-  const maxTokens = config.max_total_tokens ?? (isFrugal ? 80000 : isSmall ? 150000 : 500000);
+  const maxTokens = config.max_total_tokens ?? (isFrugal ? 150000 : isSmall ? 300000 : 900000);
   const convergenceConfig = config.convergence ?? {};
 
   const tierPrefix = isFrugal ? 'frugal-' : isSmall ? 'small-' : '';

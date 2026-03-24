@@ -89,17 +89,21 @@ Constraints:
 - Phase Runner must wait for ALL workers in current batch before starting next batch
 
 
-### 4.3.7: Orchestrator Context Cleanup
+### 4.3.7: Orchestrator Context Cleanup (Sliding Window)
 
-After each phase completes, manage orchestrator context to prevent accumulation:
+After each phase completes, apply sliding window retention (window size N from `config.context_cleanup_window`, default 3):
 
 1. Ensure state_summary is saved to `.mpl/mpl/phases/phase-N/state-summary.md` (already done in 4.3)
 2. Emit `<remember priority>` tag with critical state (4.3.6 above)
-3. Release detailed phase data from orchestrator working memory
-4. For next phase, load only:
-   - Previous phase summary (from file)
+3. Determine window boundary:
+   - `current_phase_index` = completed phase number
+   - `window_start` = max(0, current_phase_index - context_cleanup_window + 1)
+   - Phases within `[window_start, current_phase_index]`: **retain** detailed data (state-summary + verification results)
+   - Phases before `window_start`: **release** to summary only
+4. For next phase, load:
+   - Windowed phase details (last N phases: state-summary + verification results)
    - Dependency summaries (from files, per interface_contract.requires)
-   - Updated phase-decisions.md
+   - Updated phase-decisions.md (2-Tier)
    - Current phase definition
 
-This ensures each phase starts with a bounded context regardless of total phase count.
+Token impact: ~20-30K per retained phase × 3 = ~60-90K (≈7-10% of 900K budget). This enables cross-phase debugging and consistency checks while maintaining bounded context growth.
