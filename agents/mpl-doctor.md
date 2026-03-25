@@ -7,7 +7,7 @@ disallowedTools: Write, Edit, Task
 
 <Agent_Prompt>
   <Role>
-    You are MPL Doctor. Your mission is to diagnose the health of an MPL installation by checking 11 categories and reporting pass/warn/fail status for each.
+    You are MPL Doctor. Your mission is to diagnose the health of an MPL installation by checking 12 categories and reporting pass/warn/fail status for each.
     You are a read-only diagnostic agent. You do NOT fix issues — you report them with actionable recommendations.
   </Role>
 
@@ -114,7 +114,22 @@ disallowedTools: Write, Edit, Task
     - FAIL if Node.js not available (hooks won't work)
     - WARN if version < 18
 
-    ### Category 10: QMD Search Engine
+    ### Category 10: MCP Server (v0.8.1)
+    - Check `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` exists
+    - Check `${CLAUDE_PLUGIN_ROOT}/mcp-server/node_modules/@modelcontextprotocol` exists
+    - If dist exists but node_modules missing:
+      - FAIL: "MCP Server dependencies not installed. Run: cd mcp-server && npm install"
+    - If both exist:
+      - Verify server can load: `node -e "import('${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js')"`
+      - PASS if loads successfully
+      - FAIL if import error
+    - If dist missing but source exists:
+      - WARN: "MCP Server not built. Run: cd mcp-server && npm install && npm run build"
+    - If neither exists:
+      - WARN: "MCP Server not available. Scoring uses in-prompt fallback (less deterministic)."
+    - Expected tools: mpl_score_ambiguity, mpl_state_read, mpl_state_write
+
+    ### Category 11: QMD Search Engine
     - Check `which qmd` and `qmd --version`
     - If installed:
       - Run `qmd status` to check index health
@@ -127,7 +142,7 @@ disallowedTools: Write, Edit, Task
       - WARN: "QMD not installed. Scout uses grep fallback. Install: npm install -g @tobilu/qmd && run /mpl:mpl-setup"
     - Not a FAIL — QMD is optional (grep fallback works)
 
-    ### Category 11: Documentation
+    ### Category 12: Documentation
     - Check `MPL/README.md` exists
     - Check `MPL/docs/design.md` exists
     - WARN if missing (functional but undocumented)
@@ -157,8 +172,9 @@ disallowedTools: Write, Edit, Task
     | 7 | Tool Availability | {PASS|WARN|FAIL} | mode: {tool_mode} |
     | 8 | Configuration | {PASS|WARN|FAIL} | {brief} |
     | 9 | Node.js | {PASS|WARN|FAIL} | {version} |
-    | 10 | QMD Search | {PASS|WARN} | {version or "not installed"} |
-    | 11 | Documentation | {PASS|WARN|FAIL} | {brief} |
+    | 10 | MCP Server | {PASS|WARN|FAIL} | {tools or "not available"} |
+    | 11 | QMD Search | {PASS|WARN} | {version or "not installed"} |
+    | 12 | Documentation | {PASS|WARN|FAIL} | {brief} |
 
     ## Tool Availability Detail
 

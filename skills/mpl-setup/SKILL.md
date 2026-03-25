@@ -465,21 +465,38 @@ if backend == "kitty":
 
 The MPL MCP Server provides deterministic ambiguity scoring and active state access for agents.
 
-#### Detection
+#### Detection (v0.8.1 — fixed dependency check)
 
 ```
-mcp_server_path = "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"
-mcp_available = Bash("node --check ${mcp_server_path} 2>/dev/null && echo OK || echo FAIL")
+mcp_server_dir = "${CLAUDE_PLUGIN_ROOT}/mcp-server"
+mcp_dist_path = "${mcp_server_dir}/dist/index.js"
+
+// Step 1: Check if dist exists
+dist_exists = exists(mcp_dist_path)
+
+// Step 2: Check if node_modules exists (CRITICAL — npm install needed after plugin cache)
+deps_installed = exists("${mcp_server_dir}/node_modules/@modelcontextprotocol")
+
+// Step 3: Determine status
+if dist_exists AND deps_installed:
+  mcp_available = true
+elif dist_exists AND NOT deps_installed:
+  // Built but dependencies missing (common after plugin install from cache)
+  Report: "MCP Server built but dependencies missing. Installing..."
+  Bash("cd ${mcp_server_dir} && npm install --production")
+  mcp_available = true
+elif NOT dist_exists:
+  mcp_available = false
 ```
 
 #### Dependencies Check
 
 ```
-if mcp_available == "FAIL":
+if NOT mcp_available:
   // Check if source exists but not built
-  if exists("${CLAUDE_PLUGIN_ROOT}/mcp-server/src/index.ts"):
+  if exists("${mcp_server_dir}/src/index.ts"):
     AskUserQuestion: "MPL MCP Server needs to be built. Install dependencies and compile?"
-      - "Build now" → Bash("cd ${CLAUDE_PLUGIN_ROOT}/mcp-server && npm install && npm run build")
+      - "Build now" → Bash("cd ${mcp_server_dir} && npm install && npm run build")
       - "Skip" → MCP server disabled, agents use in-prompt scoring fallback
   else:
     Report: "MCP Server source not found. Scoring will use in-prompt fallback (less deterministic)."
