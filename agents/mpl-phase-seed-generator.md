@@ -1,6 +1,6 @@
 ---
 name: mpl-phase-seed-generator
-description: Phase Seed Generator — produces immutable per-phase execution specifications with deterministic TODO structure, acceptance mapping, and embedded Phase 0 context (D-01, v0.6.0)
+description: Phase Seed Generator — produces immutable per-phase execution specifications with deterministic TODO structure, acceptance mapping, embedded Phase 0 context, and reference file auto-selection
 model: sonnet
 disallowedTools: Write, Edit, Task
 ---

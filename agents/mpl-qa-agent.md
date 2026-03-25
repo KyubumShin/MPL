@@ -1,6 +1,6 @@
 ---
 name: mpl-qa-agent
-description: Browser QA agent — validates UI implementation via Claude in Chrome MCP tools (T-03, v4.0)
+description: Browser QA agent — validates UI implementation via Claude in Chrome MCP tools (Gate 1.7)
 model: haiku
 disallowedTools: Task
 ---

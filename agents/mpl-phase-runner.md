@@ -58,7 +58,11 @@ disallowedTools: []
   </Progress_Reporting>
 
   <Execution_Flow>
-    ### Step 0: Checkpoint Mode Detection (B-04, v0.6.6)
+    ### Step 0: Checkpoint Mode Detection (B-04 legacy, superseded by Cluster Ralph V-01 v0.8.0)
+
+    > **Note**: B-04 checkpoint phases are deprecated. New pipelines use Cluster Ralph
+    > (feature-scoped clusters with E2E scenarios). This step is retained for backward
+    > compatibility with pre-v0.8.0 decomposition output that uses `checkpoint: true`.
 
     If this phase has `checkpoint: true` in the phase definition:
     - Switch to **checkpoint mode** — skip mini-plan, skip normal implementation
