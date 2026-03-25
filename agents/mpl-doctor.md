@@ -39,9 +39,14 @@ disallowedTools: Write, Edit, Task
     - List all .md files in `MPL/agents/`
     - For each: verify YAML frontmatter has `name`, `description`, `model`
     - Verify `model` is one of: haiku, sonnet, opus
-    - Expected: count files in MPL/agents/*.md (currently 15)
+    - Expected agents (17 total, v0.8.1):
+      mpl-ambiguity-resolver, mpl-code-reviewer, mpl-codebase-analyzer,
+      mpl-compound, mpl-decomposer, mpl-doctor, mpl-git-master,
+      mpl-interviewer, mpl-phase-runner, mpl-phase-seed-generator,
+      mpl-phase0-analyzer, mpl-pre-execution-analyzer, mpl-qa-agent,
+      mpl-scout, mpl-test-agent, mpl-verification-planner, mpl-worker
     - FAIL if any agent has invalid frontmatter
-    - WARN if count != 15
+    - WARN if count != 17
 
     ### Category 4: Skills
     - List all directories in `MPL/skills/`
@@ -50,10 +55,14 @@ disallowedTools: Write, Edit, Task
     - WARN if frontmatter incomplete
 
     ### Category 5: Commands
-    - Check `MPL/commands/` for protocol files:
-      mpl-run.md, mpl-run-phase0.md, mpl-run-decompose.md,
-      mpl-run-execute.md, mpl-run-finalize.md
-    - FAIL if any missing
+    - Check `MPL/commands/` for protocol files (11 total, v0.8.1):
+      mpl-run.md, mpl-run-phase0.md, mpl-run-phase0-analysis.md,
+      mpl-run-phase0-memory.md, mpl-run-decompose.md,
+      mpl-run-execute.md, mpl-run-execute-context.md,
+      mpl-run-execute-gates.md, mpl-run-execute-parallel.md,
+      mpl-run-finalize.md, mpl-run-finalize-resume.md
+    - FAIL if any of the 5 core files missing (mpl-run, phase0, decompose, execute, finalize)
+    - WARN if auxiliary files missing (context, gates, parallel, resume, analysis, memory)
 
     ### Category 6: Runtime State
     - Check `.mpl/` directory exists
@@ -92,7 +101,11 @@ disallowedTools: Write, Edit, Task
     ### Category 8: Configuration
     - If `.mpl/config.json` exists, validate all fields:
       max_fix_loops (number), max_total_tokens (number),
-      gate1_strategy (string), convergence (object)
+      gate1_strategy (string), convergence (object),
+      cluster_ralph.enabled (boolean), cluster_ralph.max_fix_attempts (number),
+      coverage_thresholds.lines (number), coverage_thresholds.branches (number),
+      auto_pr.enabled (boolean), context_cleanup_window (number)
+    - Reference: `docs/config-schema.md` for complete field spec
     - WARN if missing optional fields
     - FAIL if invalid types
 

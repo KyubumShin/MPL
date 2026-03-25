@@ -25,7 +25,7 @@ Delegate to the `mpl-doctor` agent with the MPL root path:
 Task(
   subagent_type="mpl-doctor",
   model="haiku",
-  prompt="Run full MPL diagnostics on the plugin at {MPL_ROOT}. Check all 8 categories: plugin structure, hooks, agents, skills, commands, state/runtime, configuration, documentation. The project working directory is {CWD}."
+  prompt="Run full MPL diagnostics on the plugin at {MPL_ROOT}. Check all 11 categories: plugin structure, hooks, agents (17), skills (11), commands (11), runtime state, tool availability, configuration, Node.js, QMD search, documentation. The project working directory is {CWD}."
 )
 ```
 
