@@ -50,59 +50,59 @@ If `execution_tiers` NOT in decomposition.yaml (legacy 0.5.x):
 
 ---
 
+### 4.0.1: Cluster Ralph Initialization (V-01, v0.8.0)
+
+Parse clusters from decomposition.yaml. If `clusters` field exists AND `config.cluster_ralph.enabled != false`:
+
+```
+clusters = decomposition.clusters
+final_e2e = decomposition.final_e2e
+
+if clusters:
+  // Cluster Ralph mode — iterate by cluster
+  for each cluster in clusters:
+    // Step 4.0.1a: Announce cluster start
+    announce: "[MPL] Starting Cluster '{cluster.name}' ({cluster.phases.length} phases, PP: {cluster.pp_link})"
+
+    // Execute all phases within this cluster (Steps 4.0.5 → 4.1 → 4.2 → 4.3)
+    for each phase_id in cluster.phases:
+      // Normal phase flow below (4.0.5 → 4.1 → 4.2 → 4.3 → 4.3.6 → budget check)
+
+    // Step 4.4: Cluster E2E Verification (after all cluster phases complete)
+    → See Step 4.4 below
+
+  // Step 4.5a: Final Cross-Feature E2E
+  → See Step 4.5a below
+
+  // Step 4.5: 5-Gate Quality (existing, unchanged)
+
+else:
+  // Legacy mode (no clusters) — sequential phase loop
+```
+
+### 4.0.2: B-04 Checkpoint Backward Compatibility (V-01, v0.8.0)
+
+If a phase has `checkpoint: true` (B-04 legacy format), map it to a single-phase cluster:
+
+```
+if phase_definition.checkpoint == true AND clusters not present:
+  // Convert B-04 checkpoint to Cluster Ralph format
+  legacy_cluster = {
+    id: "legacy-checkpoint-{phase.id}",
+    name: phase.name,
+    pp_link: [],
+    phases: phase.verifies_phases,
+    feature_e2e: phase.integration_tests.map(t => ({
+      id: t.scenario.substring(0, 20),
+      scenario: t.scenario,
+      type: t.type,
+      commands: t.steps
+    }))
+  }
+  // Execute as Cluster Ralph (Step 4.4)
+```
+
 For each phase in order:
-
-### 4.0.2: Integration Checkpoint Handling (B-04, v0.6.6)
-
-If the current phase has `checkpoint: true`:
-
-```
-if phase_definition.checkpoint == true:
-  announce: "[MPL] === Integration Checkpoint: {phase.name} ==="
-  announce: "[MPL] Verifying phases: {phase.verifies_phases}"
-
-  // Skip Seed generation (checkpoints don't need Seeds)
-  // Skip standard context assembly (checkpoints run direct verification)
-
-  // Execute integration tests directly
-  all_passed = true
-
-  // 1. Build verification (all stacks)
-  build_tests = phase.integration_tests.filter(t => t.type == "build")
-  for each test in build_tests:
-    for each step in test.steps:
-      result = Bash(step, timeout=120000)
-      if result.exit_code != 0:
-        announce: "[MPL] Checkpoint FAIL: build step '{step}' failed"
-        all_passed = false
-
-  // 2. Full test suite
-  Bash("npm test 2>&1 || true")
-  Bash("cargo test 2>&1 || true")  // if applicable
-
-  // 3. Integration scenarios
-  integration_tests = phase.integration_tests.filter(t => t.type == "integration")
-  for each test in integration_tests:
-    announce: "[MPL] Running scenario: {test.scenario}"
-    // Phase Runner executes the scenario steps
-    // (dispatched as a lightweight Phase Runner with checkpoint context)
-
-  // 4. Smoke test
-  smoke_tests = phase.integration_tests.filter(t => t.type == "smoke")
-  for each test in smoke_tests:
-    for each step in test.steps:
-      result = Bash(step, timeout=15000)
-      // Check for crash indicators
-
-  if all_passed:
-    announce: "[MPL] ✓ Integration Checkpoint PASSED: {phase.name}"
-    save state_summary: "Checkpoint passed. All {verifies_phases.length} phases verified."
-    → continue to next phase
-  else:
-    announce: "[MPL] ✗ Integration Checkpoint FAILED: {phase.name}"
-    → circuit_break targeting verifies_phases
-    → redecomposition focuses on failed phases only
-```
 
 ### 4.0.5: Phase Seed Generation (D-01, v0.6.0)
 
@@ -143,8 +143,26 @@ Context structure reference:
 context = {
   phase0_artifacts, pivot_points, phase_decisions, phase_definition,
   phase_seed, impact_files, maturity_mode, prev_summary, dep_summaries,
-  verification_plan, learnings, error_files
+  verification_plan, learnings, error_files, regression_suite
 }
+```
+
+#### 4.1.6: Regression Suite Loading (TS-03, v0.8.1)
+
+Load accumulated regression tests for Phase Runner's cumulative verification:
+
+```
+regression_suite = Read(".mpl/regression-suite.json") or null
+
+if regression_suite AND regression_suite.accumulated_tests.length > 0:
+  context.regression_suite = {
+    regression_command: regression_suite.regression_command,
+    total_assertions: regression_suite.total_assertions,
+    phase_count: regression_suite.accumulated_tests.length
+  }
+  // Phase Runner uses this command for cumulative verification (Rule 5)
+else:
+  context.regression_suite = null
 ```
 
 ### 4.2: Phase Runner Execution (Fresh Session)
@@ -263,6 +281,9 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      Record TODO state changes and key findings in working.md during execution.
      On Phase completion, convert working.md content to episodic format and return it.
      {working_md_content or "N/A — first Phase, working memory empty"}
+
+     ## Regression Suite (TS-03, v0.8.1)
+     {context.regression_suite ? "Run this command at phase end for cumulative verification:\n" + context.regression_suite.regression_command + "\nAccumulated: " + context.regression_suite.total_assertions + " assertions from " + context.regression_suite.phase_count + " prior phases" : "N/A — first phase, no regression suite yet"}
 
      ## Expected Output
      Return structured JSON:
@@ -597,9 +618,34 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
     - **Discoveries**: {discovery_count}
     - **Timestamp**: {ISO timestamp}
     ```
-11. More phases -> current_phase = "mpl-phase-running", continue 4.1
+11. **Regression Suite Accumulation (TS-03, v0.8.1)**:
+    Append this phase's test files to the regression suite:
+    ```
+    // Detect test files created/modified by this phase
+    phase_test_files = result.test_files_created or
+      Glob("{phase.impact_dir}/**/*.{test,spec}.{ts,tsx,js,jsx,py,rs}")
+
+    if phase_test_files.length > 0:
+      regression_suite = Read(".mpl/regression-suite.json") or { accumulated_tests: [], total_assertions: 0 }
+
+      regression_suite.accumulated_tests.push({
+        phase: phase.id,
+        test_files: phase_test_files,
+        test_command: detect_test_command(phase_test_files),  // e.g., "npx vitest run {files}"
+        added_at: now_iso(),
+        assertion_count: result.verification.test_count or 0
+      })
+
+      regression_suite.total_assertions += result.verification.test_count or 0
+      regression_suite.regression_command = build_regression_command(regression_suite.accumulated_tests)
+
+      Write(".mpl/regression-suite.json", JSON.stringify(regression_suite, null, 2))
+      announce: "[MPL] Regression suite: {regression_suite.total_assertions} assertions accumulated across {regression_suite.accumulated_tests.length} phases"
+    ```
+
+12. More phases -> current_phase = "mpl-phase-running", continue 4.1
     → **Budget Check (F-33)**: See Step 4.3 extension — check session budget before starting next Phase.
-12. All done -> proceed to Step 4.5 (5-Gate Quality)
+13. All done -> proceed to Step 4.5 (5-Gate Quality)
 
 #### Step 4.3 Extension: Budget Check (F-33)
 
@@ -641,8 +687,8 @@ else:
        Re-run Triage with new tier (reload skipped steps)
        Continue from failed phase with expanded pipeline
    - If pipeline_tier == "frontier" or escalation returns null:
-     Proceed to Redecomposition (4.4)
-5. Proceed to Redecomposition (4.4) if no escalation
+     Proceed to Redecomposition (4.4b)
+5. Proceed to Redecomposition (4.4b) if no escalation
 ```
 
 ### 4.3.5: Side Interview (Conditional — CRITICAL Only)
@@ -770,7 +816,133 @@ if budget.recommendation == "pause_now":
 
 **Note**: `predictBudget()` requires `.mpl/context-usage.json` to be fresh (<30s). This file is written by the HUD statusline on each render cycle. If HUD is not active, predictBudget returns fail-open (recommendation: "continue").
 
-### 4.4: Redecomposition (on circuit break)
+### 4.4: Cluster E2E Verification (V-01, v0.8.0)
+
+After all phases in a cluster complete, run the cluster's feature E2E scenarios:
+
+```
+// Called after each cluster's phases complete (within Step 4.0.1 cluster loop)
+announce: "[MPL] Cluster '{cluster.name}' — running feature E2E ({cluster.feature_e2e.length} scenarios)"
+
+cluster_results = []
+for each scenario in cluster.feature_e2e:
+  result = execute_scenario(scenario)
+  cluster_results.append(result)
+
+if all_pass(cluster_results):
+  announce: "[MPL] Cluster '{cluster.name}' E2E PASSED ✓"
+  // RUNBOOK update
+  append to RUNBOOK.md:
+    ## Cluster: {cluster.name} ({cluster.id})
+    - Phases: {cluster.phases}
+    - PP Link: {cluster.pp_link}
+    - E2E Scenarios: {cluster.feature_e2e.length} total
+    - Result: PASS
+  continue to next cluster
+
+else:
+  // Cluster Ralph: Fix Loop (max 2 attempts)
+  announce: "[MPL] Cluster '{cluster.name}' E2E FAILED — entering Cluster Fix Loop"
+
+  max_attempts = config.cluster_ralph?.max_fix_attempts || 2
+
+  for attempt in 1..max_attempts:
+    failed_scenarios = [s for s in cluster_results if s.status == FAIL]
+
+    // Step 4.4.1: Scout Dispatch (root cause analysis)
+    scout_result = Task(subagent_type="mpl:mpl-scout", model="haiku",
+      prompt="Analyze cluster E2E failures: {failed_scenarios}.
+              Identify which phase and which files caused each failure.
+              Cluster phases: {cluster.phases}.
+              Check the actual code, not just descriptions.")
+
+    // Step 4.4.2: Targeted Fix
+    for each identified_issue in scout_result.issues:
+      Task(subagent_type="mpl:mpl-phase-runner", model="sonnet",
+        prompt="Fix the following issue in {identified_issue.phase}:
+                Problem: {identified_issue.description}
+                Files: {identified_issue.files}
+                Expected: {identified_issue.expected}
+                Scope: ONLY modify files within this cluster's phases.")
+
+    // Step 4.4.3: Re-verify
+    cluster_results = []
+    for each scenario in cluster.feature_e2e:
+      result = execute_scenario(scenario)
+      cluster_results.append(result)
+
+    if all_pass(cluster_results):
+      announce: "[MPL] Cluster '{cluster.name}' E2E PASSED after fix attempt {attempt} ✓"
+      append to RUNBOOK.md:
+        ## Cluster: {cluster.name} ({cluster.id})
+        - Result: PASS (fixed, attempt {attempt})
+        - Fix History: {fix_details}
+      break
+
+    announce: "[MPL] Cluster '{cluster.name}' fix attempt {attempt} — still failing"
+
+  if not all_pass(cluster_results):
+    announce: "[MPL] Cluster '{cluster.name}' E2E deferred after {max_attempts} fix attempts"
+    append to RUNBOOK.md:
+      ## Cluster: {cluster.name} ({cluster.id})
+      - Result: DEFERRED
+      - Failed Scenarios: {failed_scenarios}
+    continue to next cluster
+```
+
+#### execute_scenario Helper
+
+```
+function execute_scenario(scenario):
+  results = []
+  for each command in scenario.commands:
+    result = Bash(command, timeout=30000)
+    results.append({
+      command: command,
+      exit_code: result.exit_code,
+      stdout: result.stdout[:500],
+      stderr: result.stderr[:500]
+    })
+
+  return {
+    scenario_id: scenario.id,
+    scenario_name: scenario.scenario,
+    status: all(r.exit_code == 0 for r in results) ? PASS : FAIL,
+    details: results
+  }
+```
+
+#### Tier Applicability
+
+| Tier | Cluster Behavior |
+|------|-----------------|
+| **Frugal** | Single cluster (1 phase) — Cluster E2E = existing Gate 1 behavior |
+| **Standard** | Single cluster (1-3 phases) — Cluster E2E adds feature scenarios |
+| **Frontier** | Multiple clusters — Full Cluster Ralph with fix loops |
+
+### 4.5a: Final Cross-Feature E2E (V-01, v0.8.0)
+
+After all clusters complete, run cross-feature E2E scenarios:
+
+```
+if final_e2e:
+  announce: "[MPL] Running Final Cross-Feature E2E ({final_e2e.length} scenarios)"
+  for each scenario in final_e2e:
+    result = execute_scenario(scenario)
+    if result.status == FAIL:
+      announce: "[MPL] Final E2E FAILED: {scenario.scenario}"
+      → enter existing 5-Gate Fix Loop (Step 4.6)
+
+  announce: "[MPL] Final Cross-Feature E2E PASSED ✓"
+  append to RUNBOOK.md:
+    ## Final Cross-Feature E2E
+    - Scenarios: {final_e2e.length}
+    - Result: PASS
+```
+
+---
+
+### 4.4b: Redecomposition (on circuit break)
 
 ```
 redecompose_count = mpl_state.redecompose_count + 1

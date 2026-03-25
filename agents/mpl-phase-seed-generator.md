@@ -54,6 +54,36 @@ disallowedTools: Write, Edit, Task
       - CONFIRMED PPs that touch this phase → hard constraints
       - PROVISIONAL PPs → soft constraints (note for Phase Runner)
 
+    Step 2.5: TSConfig Strict Enforcement (V-03, v0.8.0)
+      - If this phase is a scaffold/infrastructure phase AND creates a TypeScript project:
+        Add the following as a hard constraint:
+        "TypeScript projects MUST use strict tsconfig. Required fields:
+         strict: true, noUncheckedIndexedAccess: true,
+         noUncheckedSideEffectImports: true, exactOptionalPropertyTypes: true,
+         noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true"
+      - Detection: phase creates tsconfig.json OR package.json with typescript dependency
+      - Brownfield projects: skip (respect existing tsconfig)
+
+    Step 2.7: Reference File Auto-Selection (#1 alt, v0.8.1)
+      - For each file in phase_definition.impact.create (new files to create):
+        Use Glob to find 2-3 existing files in the SAME directory or sibling directories
+        that share similar purpose/naming pattern.
+      - Selection criteria:
+        - Same file extension as target
+        - Same directory or parent directory
+        - Similar naming pattern (e.g., creating user.controller.ts → find auth.controller.ts)
+        - Prefer files recently modified (more likely to follow current conventions)
+      - If found, embed as `reference_files` in the Seed:
+        ```yaml
+        reference_files:
+          - path: "src/controllers/auth.controller.ts"
+            reason: "Same directory, same pattern — follow naming, export style, error handling"
+          - path: "src/controllers/health.controller.ts"
+            reason: "Simplest example in same directory — use as structural template"
+        ```
+      - Phase Runner uses these as convention templates (not copy targets)
+      - If no suitable references found: omit field (not an error)
+
     Step 3: Read Phase 0 artifacts
       - From api-contracts: extract function signatures relevant to this phase's impact files
       - From type-policy: extract typing rules for this phase's domain
@@ -110,6 +140,10 @@ disallowedTools: Write, Edit, Task
         created_at: string           # ISO timestamp
 
       goal: string                   # 1-sentence phase objective
+
+      reference_files:               # #1 alt v0.8.1: convention template files from same directory
+        - path: string               # existing file path
+          reason: string             # why this file is a good reference
 
       constraints:                   # PP-derived hard requirements for this phase
         - constraint: string

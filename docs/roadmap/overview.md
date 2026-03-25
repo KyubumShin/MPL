@@ -580,15 +580,19 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 
 ---
 
-## Planned Versions
+## Planned Versions (revised 2026-03-25)
+
+> **Note**: v0.6.7/v0.7.0은 1M context adaptation으로 구현 완료. 원래 해당 버전에 계획되었던 미구현 기능들은 v0.8.0 이후로 재배정.
 
 | Version | Features | Type |
 |---------|----------|------|
-| **0.6.7** | Cluster Ralph (B-04→feature E2E) + Lint Gate + TSConfig Strict + Config Schema + Scope Drift | Feature: layered verification |
-| **0.6.8** | #1 alt Phase Seed reference file + TS-03 Regression Accumulator | Patch: convention + regression |
-| **0.7.0** | TS-01/02 MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
+| ~~**0.8.0**~~ | ~~V-01 Cluster Ralph + V-02 Lint Gate + V-03 TSConfig Strict + V-04 Config Schema + V-05 Scope Drift Report~~ | ✅ **Implemented** |
+| ~~**0.8.1**~~ | ~~#1 alt Ref files + TS-03 Regression + Round 1-T Test Strategy + Step 8.6 E2E framework~~ | ✅ **Implemented** |
+| **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
 | **Brownfield** | #4 Do-Not-Touch + #2 IRA + #3 Regression Shield | Feature: brownfield mode |
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
+| **0.10.0** (TBD) | **P-03** Scout Observability + **P-01** State Summary L0 | Feature: observability + context intelligence |
+| **0.11.0** (TBD) | **P-04** Skill Audit CLI (auto-dream 패턴 채택) | Feature: lifecycle management |
 | **Deferred** | T-08, T-09, F-06, F-269, #7, #8 | Pending data/need |
 
 ---

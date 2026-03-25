@@ -16,9 +16,46 @@ See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-context.md` (contex
 
 After all phases complete, apply the 5-Gate Quality system before finalization.
 
-#### Gate 0.5: Project-Wide Type Check (F-17)
+#### Gate 0.5: Lint + Type Check (F-17, V-02 v0.8.0)
 
-Before running tests, perform project-level type checking:
+Before running tests, perform lint detection and project-level type checking.
+
+**Step 1: Lint Auto-Detection and Execution (V-02, v0.8.0)**
+
+```
+lint_commands = []
+
+// Auto-detect lint tools
+if exists("package.json"):
+  pkg = Read("package.json")
+  if "eslint" in pkg.devDependencies or exists(".eslintrc*") or exists("eslint.config.*"):
+    lint_commands.push({ cmd: "npx eslint . --max-warnings=0", name: "ESLint" })
+
+if exists("pyproject.toml") or exists("ruff.toml"):
+  lint_commands.push({ cmd: "ruff check .", name: "Ruff" })
+elif exists(".flake8") or exists("setup.cfg"):
+  lint_commands.push({ cmd: "flake8 .", name: "Flake8" })
+
+if exists("biome.json"):
+  lint_commands.push({ cmd: "npx biome check .", name: "Biome" })
+
+// Execute lint commands
+lint_failures = []
+for each { cmd, name } in lint_commands:
+  result = Bash(cmd, timeout=60000)
+  if result.exit_code != 0:
+    announce: "[MPL] Gate 0.5 FAIL: {name} lint failed"
+    announce: "{first 20 lines of result.stderr}"
+    lint_failures.append({ tool: name, errors: result.stderr })
+  else:
+    announce: "[MPL] Gate 0.5: {name} lint passed ✓"
+
+if lint_failures.length > 0:
+  announce: "[MPL] Gate 0.5: {lint_failures.length} lint tool(s) failed. Entering fix loop."
+  → Enter fix loop targeting lint errors first
+```
+
+**Step 2: Project-Wide Type Check**
 
 ```
 diagnostics = lsp_diagnostics_directory(path=".", strategy="auto")
@@ -32,12 +69,12 @@ if diagnostics.errors > 0:
 if diagnostics.warnings > 5:
   Report: "[MPL] Type check: {warnings} warnings. Proceeding with caution."
 
-Report: "[MPL] Type check: clean. Proceeding to Gate 1."
+Report: "[MPL] Gate 0.5: Lint + Type check clean. Proceeding to Gate 1."
 ```
 
-This catches type errors before test execution, reducing fix loop iterations.
+This catches lint and type errors before test execution, reducing fix loop iterations.
 
-**Multi-Stack Build Verification (B-02, v0.6.3):**
+**Step 3: Multi-Stack Build Verification (B-02, v0.6.3)**
 
 Gate 0.5 must verify ALL build tools in the project, not just TypeScript:
 
@@ -77,11 +114,22 @@ for each { cmd, name } in build_commands:
     announce: "[MPL] Gate 0.5: {name} passed ✓"
 ```
 
-#### Gate 1: Automated Tests
+#### Gate 1: Automated Tests + Regression Suite (TS-03, v0.8.1)
 
-Run the full test suite:
+Run the full test suite **including accumulated regression tests**:
 - Execute all test commands (pytest, npm test, etc.)
-- pass_rate must be >= 95% to proceed to Gate 2
+- **Additionally run regression suite** if `.mpl/regression-suite.json` exists:
+  ```
+  regression_suite = Read(".mpl/regression-suite.json") or null
+  if regression_suite AND regression_suite.regression_command:
+    regression_result = Bash(regression_suite.regression_command, timeout=120000)
+    if regression_result.exit_code != 0:
+      announce: "[MPL] Gate 1: Regression suite FAILED ({regression_suite.total_assertions} assertions)"
+      → include regression failures in fix loop context
+    else:
+      announce: "[MPL] Gate 1: Regression suite PASSED ✓ ({regression_suite.total_assertions} assertions)"
+  ```
+- Combined pass_rate (current + regression) must be >= 95% to proceed to Gate 2
 - If pass_rate < 95%: enter fix loop (see 4.6)
 
 **Zero-Test Block (B-01, v0.6.2):**

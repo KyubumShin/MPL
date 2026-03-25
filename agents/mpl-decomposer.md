@@ -84,44 +84,39 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         Minimum: single-layer = L1+L3. Multi-layer = L1+L2+L3+L4. Final = all levels.
         REJECT criteria with only L1 (static check) for phases that create functions.
 
-    12. **Integration checkpoints (B-04, v0.6.6)**:
-        Insert checkpoint phases at feature group boundaries to catch integration failures early:
+    12. **Cluster Ralph — Feature-Scoped Verify-Fix Loop (V-01, v0.8.0)**:
+        Group phases into **clusters** by PP linkage. Each cluster gets its own E2E scenarios
+        and fix loop, replacing the mechanical B-04 checkpoint system.
 
-        When to insert:
-        - After every 3 vertical-slice phases
-        - After ALL CORE phases complete (before EXTENSION)
-        - After the last EXTENSION phase (before SUPPORT)
-        - Before the final finalization phase
+        **Clustering Rules:**
 
-        Checkpoint phase definition:
-        ```yaml
-        - id: "checkpoint-{N}"
-          name: "Integration Check: {feature_group_name}"
-          phase_domain: "test"
-          checkpoint: true               # flag for orchestrator
-          feature_priority: "core"       # checkpoints are not skippable
-          verifies_phases: ["phase-X", "phase-Y", "phase-Z"]
-          integration_tests:
-            - scenario: "{end-to-end scenario description}"
-              type: integration | build | smoke
-              steps: ["{step 1}", "{step 2}", ...]
-          success_criteria:
-            - type: command
-              command: "npm run build"
-            - type: command
-              command: "cargo build"     # or equivalent for the stack
-            - type: command
-              command: "npm test"
-            - type: description
-              description: "All integration scenarios pass"
-          estimated_complexity: "S"
-          estimated_todos: 1
+        ```
+        Rule 1: Group phases by PP linkage.
+          Phases implementing the same PP(s) belong to the same cluster.
+
+        Rule 2: Respect dependency order within cluster.
+          Phases within a cluster maintain their topological order.
+
+        Rule 3: CORE clusters come first (T-12 Core-First Ordering).
+          CORE clusters → EXTENSION clusters → SUPPORT clusters.
+
+        Rule 4: Max cluster size = 5 phases.
+          If a PP spans more than 5 phases, split into sub-clusters at natural boundaries.
+
+        Rule 5: Min cluster size = 1 phase.
+          Single-phase clusters are valid (e.g., infrastructure scaffold).
+
+        Rule 6: Generate 3-5 E2E scenarios per cluster.
+          At least 1 integration + 1 smoke scenario per cluster.
+          E2E scenarios must be executable (commands field, not descriptions).
+
+        Rule 7: Generate final_e2e for cross-feature interactions.
+          At least 1 full-journey scenario + 1 full-build smoke.
         ```
 
-        Generate scenarios based on the feature group:
-        - CRUD features: "Create → Read → Update → Delete roundtrip"
-        - UI features: "Component renders with store data + build succeeds"
-        - Infrastructure: "Full stack builds and starts without crash"
+        **B-04 backward compatibility:** If old `checkpoint: true` format is detected,
+        orchestrator treats it as a single-phase cluster with the checkpoint's
+        `integration_tests` as `feature_e2e`.
 
     10. **Centrality awareness**: High-centrality files (imported by many) should be modified in early phases. Late modification of central files causes cascade rework in already-completed phases.
   </Rules>
@@ -232,6 +227,38 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - If ANY of B, C, D is false: skip (test infrastructure already exists)
       - Monorepo: evaluate conditions per-workspace. Only frontend workspaces need test infra.
 
+    Step 8.6: Test Strategy PP-Driven Framework Selection (v0.8.1)
+      - Check for test strategy PP from Round 1-T interview:
+
+        | PP Test Strategy | F-44 Extension | Cluster E2E Depth | Gate Effect |
+        |-----------------|----------------|-------------------|-------------|
+        | Minimal | Skip unit test framework | smoke commands only | Gate 1.5: skip |
+        | Standard | vitest/jest/pytest (existing F-44) | basic feature commands | Gate 1.5: coverage enforced |
+        | Scenario | F-44 + e2e test setup phase | feature_e2e with dev server | Gate 1.7: optional |
+        | Visual | F-44 + playwright/cypress setup phase | feature_e2e + browser scenarios | Gate 1.7: forced |
+
+      - If test strategy PP == "Scenario" or "Visual" AND no e2e framework exists:
+        → Insert additional "E2E Framework Setup" phase with phase_domain: "test"
+        → Position: after unit test infra phase (F-44), before first feature phase
+        → Framework detection:
+          | Stack | Install Packages | Config |
+          |-------|-----------------|--------|
+          | React/Next/Vue | playwright, @playwright/test | playwright.config.ts |
+          | Python web | pytest, httpx (or requests) | conftest.py |
+          | Tauri | playwright + tauri-driver | playwright.config.ts |
+        → Success criteria:
+          - command: "npx playwright install --with-deps chromium" or equivalent
+          - file_exists: playwright.config.ts (or equivalent)
+          - command: "npx playwright test --list" (list tests without running)
+
+      - If test strategy PP == "Minimal":
+        → F-44 still inserts test infra but with minimal scope (build check only)
+        → Cluster Ralph feature_e2e limited to smoke type scenarios
+
+      - Coverage threshold from Q-T2 flows to Gate 1.5:
+        → Store in decomposition metadata for orchestrator reference
+        → Default: 60% (Standard), override from PP if specified
+
     Step 9: Domain classification (F-28)
       - For each phase, assign phase_domain based on scope files and work description
       - See phase_domain Classification section for rules
@@ -302,9 +329,9 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         phase_task_type: string   # F-39: optional, greenfield|refactor|migration|bugfix|performance|security
         phase_lang: string        # F-39: optional, rust|go|python|typescript|java
         feature_priority: string  # T-12: core|extension|support — secondary sort within dependency tier
-        checkpoint: boolean       # B-04: true = integration checkpoint phase (test domain, skip Seed)
-        verifies_phases: [string] # B-04: phase IDs this checkpoint covers (only when checkpoint: true)
-        integration_tests:        # B-04: scenarios to run (only when checkpoint: true)
+        checkpoint: boolean       # B-04 legacy: true = integration checkpoint phase. Deprecated by Cluster Ralph (V-01, v0.8.0) — orchestrator maps to single-phase cluster for backward compat
+        verifies_phases: [string] # B-04 legacy: phase IDs this checkpoint covers (only when checkpoint: true)
+        integration_tests:        # B-04 legacy: scenarios to run (only when checkpoint: true)
           - scenario: string
             type: "integration" | "build" | "smoke"
             steps: [string]
@@ -351,6 +378,24 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
       - id: "phase-2"
         # ...
+
+    clusters:                          # V-01 v0.8.0: Cluster Ralph — feature-scoped verification groups
+      - id: "cluster-1"
+        name: string                   # descriptive name (e.g., "Core CRUD")
+        pp_link: [string]              # linked PP IDs (e.g., ["PP-1", "PP-2"])
+        feature_priority: string       # core | extension | support
+        phases: [string]               # phase IDs in this cluster, in execution order
+        feature_e2e:                   # 3-5 executable E2E scenarios per cluster
+          - id: string                 # e.g., "e2e-1a"
+            scenario: string           # human-readable scenario description
+            type: "integration" | "smoke" | "contract"
+            commands: [string]         # executable shell commands
+
+    final_e2e:                         # V-01: cross-feature E2E after all clusters
+      - id: string
+        scenario: string
+        type: "integration" | "smoke"
+        commands: [string]
 
     execution_tiers:                 # D-01 v0.6.0: phase-level parallel execution groups
       - tier: 0

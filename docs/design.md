@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.7.0 Design Document
+# MPL (Micro-Phase Loop) v0.8.1 Design Document
 
 ## 1. Overview
 
@@ -452,6 +452,8 @@ The following options are supported in `.mpl/config.json`:
 | `max_total_tokens` | `900000` | Total token upper limit (v0.6.7: raised from 500K for 1M context) |
 | `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
+| `cluster_ralph.enabled` | `true` | Enable Cluster Ralph feature-scoped verify-fix loop (v0.8.0) |
+| `cluster_ralph.max_fix_attempts` | `2` | Max fix attempts per cluster E2E failure (v0.8.0) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |
 | `convergence.stagnation_window` | (per config) | Stagnation detection window size |
 | `convergence.min_improvement` | (per config) | Minimum improvement rate |
@@ -503,6 +505,58 @@ Structural protocol changes that leverage 1M context for richer cross-phase info
 **Preserved (unchanged across both versions):** Micro-phase decomposition, orchestrator-worker separation, 5-Gate quality system, A/S/H verification, convergence detection, build-test-fix micro-cycle, bounded retries, write guard hook.
 
 Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
+
+### v0.8.0 — Cluster Ralph: Feature-Scoped Verify-Fix Loop (2026-03-25)
+
+Replaces the mechanical B-04 checkpoint system with semantic, feature-aligned cluster verification. Includes 4 quality-of-life improvements.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Cluster Ralph | V-01 | Feature-scoped verify-fix loop with per-cluster E2E and fix loop (max 2) | Core: B-04 evolution |
+| Lint Gate | V-02 | Gate 0.5 extended with auto-detection of eslint/ruff/biome/flake8 | Gate extension |
+| TSConfig Strict | V-03 | Scaffold phases enforce strict TypeScript baseline | Prompt constraint |
+| Config Schema | V-04 | `docs/config-schema.md` — single source of truth for all config fields | Documentation |
+| Scope Drift Report | V-05 | Step 5.1.5 — declared vs actual file drift measurement (informational) | Finalize extension |
+
+**Design principles (1M context era):**
+- No token optimization — ~220K pipeline usage = 22% of 1M. Plenty of headroom.
+- Verify everything — every cluster gets full E2E.
+- Fix immediately — fix while context is fresh.
+- 2-Layer verification — Phase Runner micro-fix + Cluster Ralph + Final E2E.
+
+**Affected files:**
+- `agents/mpl-decomposer.md` — Cluster output schema, clustering rules (Rule 1-7), B-04 legacy compat
+- `commands/mpl-run-execute.md` — Step 4.0.1 cluster init, Step 4.4 Cluster E2E + Fix Loop, Step 4.5a Final E2E, execute_scenario helper
+- `commands/mpl-run-execute-gates.md` — Gate 0.5 lint auto-detection + execution (V-02)
+- `commands/mpl-run-finalize.md` — Step 5.1.5 Scope Drift Report (V-05)
+- `agents/mpl-phase-seed-generator.md` — Step 2.5 TSConfig strict constraint (V-03)
+- `prompts/langs/typescript.md` — TSConfig strict baseline (V-03)
+- `docs/config-schema.md` — NEW: consolidated config reference (V-04)
+- `docs/design.md` — Version bump, v0.8.0 history
+
+**Breaking changes: NONE.** Backward compatible — old `checkpoint: true` format maps to single-phase cluster. Rollback: `cluster_ralph: { enabled: false }` in config.json.
+
+Full spec: `docs/roadmap/v0.6.7-cluster-ralph.md`
+
+### v0.8.1 — Test Strategy + Convention + Regression (2026-03-25)
+
+4 features that strengthen the test pipeline through interview-driven configuration and cross-phase test accumulation.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Test Strategy Interview | Round 1-T | Phase 0 interview asks test verification level → PP → pipeline adapts | Interviewer extension |
+| E2E Framework Auto-Insertion | Step 8.6 | Decomposer inserts e2e framework setup phase based on test strategy PP | Decomposer extension |
+| Reference File Auto-Selection | #1 alt | Phase Seed finds 2-3 existing files in same directory as convention templates | Phase Seed extension |
+| Regression Accumulator | TS-03 | Tests accumulate across phases in `.mpl/regression-suite.json`, run at each phase end + Gate 1 | Test infra |
+
+**Affected files:**
+- `agents/mpl-interviewer.md` — Round 1-T (Q-T1 Test Strategy, Q-T2 Coverage Target)
+- `agents/mpl-decomposer.md` — Step 8.6 (test strategy PP-driven framework selection)
+- `agents/mpl-phase-seed-generator.md` — Step 2.7 (reference file auto-selection) + `reference_files` output field
+- `commands/mpl-run-execute.md` — Step 4.1.6 (regression suite loading) + Step 4.3 item 11 (regression accumulation) + Phase Runner regression context
+- `commands/mpl-run-execute-gates.md` — Gate 1 (regression suite execution)
+
+**Breaking changes: NONE.** All features are additive with graceful fallbacks.
 
 ---
 

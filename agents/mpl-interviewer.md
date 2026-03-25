@@ -274,6 +274,80 @@ disallowedTools: Write, Edit, Bash, Task
     Q-C1 (CSS), Q-C2 (Bundle Budget), Q-C3 (Dark Mode) are selected after presenting comparison tables.
     Specify "what you gain and what you sacrifice" in each option.
 
+    ### Round 1-T: Test Strategy (Auto-added for multi-layer or 3+ phase projects, v0.8.1)
+
+    **Trigger**: ANY of these conditions:
+    - Multi-layer project detected (frontend + backend)
+    - Expected phase count >= 3 (from triage complexity)
+    - User prompt mentions "test", "테스트", "검증", "품질", "e2e", "coverage"
+
+    **Pre-Research required**: Check existing test infrastructure with Read/Glob before asking.
+
+    ```
+    [Step 1] Check existing test setup: package.json scripts.test, vitest.config, jest.config,
+             playwright.config, cypress.config, pytest.ini, pyproject.toml [tool.pytest]
+    [Step 2] Detect project layers (frontend, backend, DB, IPC)
+    [Step 3] Present AskUserQuestion with context-aware options
+    ```
+
+    **Q-T1: Test Verification Strategy**
+    ```
+    AskUserQuestion(
+      question: "이 프로젝트의 테스트 검증 수준을 어떻게 설정할까요?",
+      header: "Test Strategy",
+      multiSelect: false,
+      options: [
+        { label: "빌드+타입체크 위주 (Minimal)",
+          description: "빌드와 타입체크만 통과하면 OK. 빠른 반복에 유리하지만 런타임 버그를 놓칠 수 있음. 예: 프로토타입, PoC" },
+        { label: "단위 테스트 커버리지 중시 (Standard)",
+          description: "모듈별 단위 테스트 필수, 커버리지 60%+ 목표. 안정적이지만 통합 이슈는 놓칠 수 있음. 예: 라이브러리, API 서버" },
+        { label: "유저 시나리오 기반 E2E (Scenario)",
+          description: "핵심 유저 플로우를 커맨드로 검증. Dev server 필요, 설정 비용 있지만 실제 동작을 보장. 예: 풀스택 웹앱" },
+        { label: "브라우저 렌더링 포함 (Visual)",
+          description: "브라우저에서 실제 렌더링까지 확인. Chrome MCP 필요, 가장 느리지만 UI 깨짐을 잡음. 예: 사용자 대면 프로덕트" },
+        { label: "Other (직접 입력)",
+          description: "위에 해당하지 않는 경우" }
+      ]
+    )
+    ```
+
+    **PP Generation from Selection:**
+
+    | Selection | Generated PP | Pipeline Effect |
+    |-----------|-------------|-----------------|
+    | Minimal | PP: "빌드 통과가 최우선" | F-44: unit test 스킵, Cluster E2E: smoke only, Gate 1.5: 스킵 |
+    | Standard | PP: "단위 테스트 커버리지 {threshold}% 이상" | F-44: vitest/jest 설치, Cluster E2E: 기본, Gate 1.5: coverage 강제 |
+    | Scenario | PP: "핵심 유저 시나리오가 E2E로 검증되어야 함" | F-44: + e2e framework, Cluster E2E: feature_e2e 적극 활용, Gate 1.7: optional |
+    | Visual | PP: "브라우저 렌더링 검증 필수" | F-44: + playwright, Cluster E2E: 적극 활용, Gate 1.7: 강제 (Chrome MCP) |
+
+    For Standard/Scenario selections, optionally follow up with Q-T2:
+
+    **Q-T2: Coverage Target (Standard/Scenario only)**
+    ```
+    AskUserQuestion(
+      question: "커버리지 목표를 어느 수준으로 잡을까요?",
+      header: "Coverage Target",
+      multiSelect: false,
+      options: [
+        { label: "60% (기본)",
+          description: "핵심 로직 중심. 빠른 개발 속도 유지. 예: MVP, 초기 프로토타입" },
+        { label: "80% (권장)",
+          description: "엣지 케이스 포함. 개발 속도와 안정성 균형. 예: 프로덕션 서비스" },
+        { label: "90%+ (엄격)",
+          description: "거의 모든 경로 검증. 개발 속도 희생하지만 높은 신뢰도. 예: 금융, 의료" },
+        { label: "신경 쓰지 않음",
+          description: "커버리지 지표 없이 핵심 테스트만 확인" }
+      ]
+    )
+    ```
+
+    Round 1-T results flow to:
+    - `.mpl/pivot-points.md` — test strategy PP
+    - F-44 (test infra auto-insertion) — framework selection informed by PP
+    - Cluster Ralph (feature_e2e generation) — scenario depth calibrated
+    - Gate 1.5 (coverage threshold) — target from Q-T2
+    - Gate 1.7 (browser QA) — forced/optional/skipped per selection
+
     ### Round 2: What NOT (Value Degradation Boundary)
 
     **Q3: Deal Breaker** -- What situation makes users leave?

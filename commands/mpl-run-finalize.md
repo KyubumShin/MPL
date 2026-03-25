@@ -36,6 +36,44 @@ Bash("npm run build")
 Bash("npm test")
 ```
 
+### 5.1.5: Scope Drift Report (V-05, v0.8.0)
+
+Compare declared scope vs actual changes to detect implementation drift:
+
+```
+// Collect declared files from decomposition.yaml
+declared_files = []
+for each phase in decomposition.phases:
+  for each file in phase.impact.create:
+    declared_files.push(file.path)
+  for each file in phase.impact.modify:
+    declared_files.push(file.path)
+declared_files = unique(declared_files)
+
+// Collect actual changed files from git
+commit_count = mpl_state.phases.completed  // approximate
+actual_result = Bash("git diff --name-only HEAD~{commit_count} 2>/dev/null || git diff --name-only --cached")
+actual_files = parse_lines(actual_result.stdout)
+
+// Calculate drift
+added_files = actual_files.filter(f => !declared_files.includes(f))     // changed but not declared
+missed_files = declared_files.filter(f => !actual_files.includes(f))    // declared but not changed
+drift_ratio = added_files.length / Math.max(declared_files.length, 1)
+
+// Report in RUNBOOK (informational only — does NOT block)
+append to RUNBOOK.md:
+  ## Scope Drift Report (V-05)
+  - Declared files: {declared_files.length}
+  - Actual files: {actual_files.length}
+  - Undeclared changes: {added_files.length} ({(drift_ratio * 100).toFixed(0)}% drift)
+  - Unimplemented declared: {missed_files.length}
+  - Undeclared files: {added_files.join(", ") || "none"}
+  - Missing files: {missed_files.join(", ") || "none"}
+
+announce: "[MPL] Scope Drift: {(drift_ratio * 100).toFixed(0)}% ({added_files.length} undeclared, {missed_files.length} unimplemented)"
+// No blocking — data collection for future Gate integration
+```
+
 ### 5.5: Post-Execution Review Report (T-10, v3.9)
 
 Aggregate all deferred items accumulated during execution into a structured review report.

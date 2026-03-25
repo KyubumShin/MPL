@@ -278,7 +278,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 ---
 
-## Version Mapping (revised 2026-03-23)
+## Version Mapping (revised 2026-03-25)
 
 ### Completed
 
@@ -293,21 +293,313 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | 0.6.4 | R-01 Protocol file split (1,663→765 max) | ✅ |
 | 0.6.5 | B-03 Vertical slice + cross-layer contracts | ✅ |
 | 0.6.6 | B-04 Integration checkpoints + agent model optimization + audit fixes | ✅ |
+| 0.6.7 | 1M context parameter tuning (토큰 예산 증가, 임팩트 파일 캡 2000줄, episodic memory 5 phases) | ✅ |
+| 0.7.0 | 1M context protocol restructuring (PD 2-Tier, Sliding Window N=3, N-1 diff 전달, budget predictor 1M) | ✅ |
+| 0.8.0 | V-01 Cluster Ralph + V-02 Lint Gate + V-03 TSConfig Strict + V-04 Config Schema + V-05 Scope Drift Report | ✅ |
+| 0.8.1 | #1 alt Reference file auto-selection + TS-03 Regression Accumulator + Round 1-T Test Strategy Interview + Step 8.6 E2E framework auto-insertion | ✅ |
 
 ### Planned
 
 | Version | Features | Type |
 |---------|----------|------|
-| **0.6.7** | **V-01** Cluster Ralph (B-04 진화) + **V-02** Lint Gate + **V-03** TSConfig Strict + **V-04** Config Schema + **V-05** Scope Drift Report | Feature: layered verification |
-| **0.6.8** | **#1 alt** Phase Seed reference file auto-selection + **TS-03** Regression Accumulator | Patch: convention + regression |
-| **0.7.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
+| **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
 | **Brownfield** | **#4** Do-Not-Touch + **#2** IRA + **#3** Regression Shield | Feature: brownfield mode |
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
+| **0.10.0** (TBD) | **P-03** Scout Observability (최소 로깅) + **P-01** State Summary L0 (의존성 기반 압축) | Feature: observability + context intelligence |
+| **0.11.0** (TBD) | **P-04** Skill Audit CLI (P-03 데이터 기반, auto-dream 패턴 채택) | Feature: lifecycle management |
+| **Dropped** | **P-02** Phase 0 L0 (P-01에 흡수), **P-05** Context Assembly YAML (시기상조) | Debate consensus 2026-03-24 |
 | **Deferred** | T-08 Trend Retro, T-09 Performance Gate, F-06 Multi-Project, F-269 RUNBOOK format, #6 (already implemented), #7 Hashline, #8 Cross-Project Learning | Pending data/need |
 | **Absorbed** | T-07 Premise Challenge → Stage 2 PP Conformance | Already covered |
 | **Skipped** | #5 Incremental Merge | Out of MPL scope |
 
-> **v0.6.7 detailed spec**: [v0.6.7-cluster-ralph.md](./v0.6.7-cluster-ralph.md)
+> **v0.8.0 detailed spec**: [v0.6.7-cluster-ralph.md](./v0.6.7-cluster-ralph.md) (파일명은 원래 v0.6.7 기준, 내용은 v0.8.0에 해당)
+
+---
+
+## Context Intelligence Features (from OpenViking/DeerFlow analysis, 2026-03-24)
+
+> **Source**: ByteDance OpenViking (context database) + DeerFlow 2.0 (super agent harness) 비교 분석에서 도출.
+> Analysis: `analysis/bytedance-openviking-deerflow-analysis.md` (TBD)
+
+### P-01: State Summary L0/L1/L2 Tiering
+
+| ID | Feature | Status | Priority |
+|----|---------|--------|----------|
+| P-01 | State Summary L0 (의존성 기반 압축) | ❌ Not implemented | 🟠 Medium-High (debate revised) |
+
+**Inspiration**: OpenViking L0/L1/L2 tiered context loading — 83% token reduction, 49% retrieval accuracy improvement on LoCoMo10 benchmark.
+
+**Current MPL State**:
+- State Summary is single-resolution (full text, ~400-800 tokens per phase)
+- Context Assembly (Step 4.1) loads all dependency phase summaries at full resolution
+- 10-phase project → ~4K-8K tokens for summaries alone
+
+**Proposal**:
+State Summary를 3-tier resolution으로 생성:
+
+| Tier | Content | Token Budget | Load Condition |
+|------|---------|-------------|----------------|
+| L0 | 1-line: "무엇을 했고 결과가 무엇인가" | ~20 tok | 모든 phase에서 항상 로드 |
+| L1 | L0 + 생성/수정 파일 목록 + 인터페이스 변경 요약 | ~200 tok | 같은 모듈 내 phase |
+| L2 | L1 + 전체 상세 + 결정 배경 + 검증 결과 | ~800 tok | 직접 의존 phase (interface_contract.requires) |
+
+**Context Assembly 로딩 규칙**:
+- `interface_contract.requires`에 명시된 phase → L2
+- impact_files 교집합이 있는 phase → L1
+- 그 외 모든 phase → L0
+
+**Expected Token Savings**: 10-phase 기준 ~4K-8K → ~1.5K-3K (50-60% 절감)
+
+**Implementation Location**:
+- Phase Runner state-summary.md output format 변경
+- `commands/mpl-run-execute-context.md` Context Assembly 로직
+- `docs/design.md` §4.1 Context Assembly
+
+**Open Questions**:
+- [ ] Phase Runner가 L0/L1/L2를 한 번에 생성? 아니면 L2만 생성 후 orchestrator가 L0/L1을 자동 추출?
+- [ ] Sliding window(N=3)와의 상호작용 — window 밖 phase는 L0만 유지?
+- [ ] Phase 0 산출물에도 동일 tiering 적용?
+
+---
+
+### P-02: Phase 0 Artifact L0 Summary
+
+| ID | Feature | Status | Priority |
+|----|---------|--------|----------|
+| P-02 | ~~Phase 0 artifact progressive loading~~ | ❌ Dropped (P-01에 흡수) | ~~🟡 Medium~~ |
+
+**Inspiration**: OpenViking L0/L1/L2 + DeerFlow progressive skill loading.
+
+**Current MPL State**:
+- Phase 0 산출물(api-contracts.md, type-policy.md, error-spec.md, examples.md)이 complexity grade에 따라 선택적 생성
+- 하지만 생성된 산출물은 Phase Runner에게 **전문** 전달
+- Simple grade phase에 Complex grade Phase 0 전체를 주는 것은 비효율
+
+**Proposal**:
+각 Phase 0 산출물에 L0 summary (3-5줄) 헤더 추가:
+
+```markdown
+<!-- L0 -->
+> API Contracts: 3 endpoints (POST /auth/login, POST /auth/register, GET /auth/me).
+> All return { success: boolean, data: T, error?: string }. Auth via Bearer token.
+
+<!-- L1: full content below -->
+## POST /auth/login
+...
+```
+
+Phase Runner context assembly 시:
+- Phase complexity S → Phase 0 L0만 로드
+- Phase complexity M → Phase 0 L1 (현재와 동일)
+- Phase complexity L → Phase 0 전문 (현재와 동일)
+
+**Expected Token Savings**: S-complexity phase에서 ~5-10K → ~500 tokens
+
+**Implementation Location**:
+- Phase 0 Enhanced (Step 2.5) 산출물 format
+- `commands/mpl-run-execute-context.md` Phase 0 로딩 로직
+
+---
+
+### P-03: Search Trajectory Logging
+
+| ID | Feature | Status | Priority |
+|----|---------|--------|----------|
+| P-03 | Scout search path observability | ❌ Not implemented | 🔴 High (debate revised — P-01 선행 조건) |
+
+**Inspiration**: OpenViking "visualized retrieval trajectory" — 검색 궤적을 시각화하여 잘못된 검색 결과의 원인을 디버깅.
+
+**Current MPL State**:
+- Scout(F-16)는 findings를 JSON으로 반환하지만 **어떤 경로를 탐색했는지**는 기록하지 않음
+- Phase Runner 실패 시 "왜 잘못된 파일을 수정했는가" 추적 불가
+- `phases.jsonl`에 token/time만 기록, 검색 과정은 미기록
+
+**Proposal**:
+Scout output에 `search_trajectory` 필드 추가:
+
+```json
+{
+  "search_mode": "qmd_first",
+  "search_trajectory": [
+    { "step": 1, "tool": "qmd_deep_search", "query": "auth middleware", "results": 5, "selected": 2 },
+    { "step": 2, "tool": "Grep", "pattern": "authenticateUser", "results": 3, "verified": 3 },
+    { "step": 3, "tool": "lsp_goto_definition", "symbol": "AuthMiddleware", "found": true }
+  ],
+  "findings": [...],
+  "summary": "..."
+}
+```
+
+Phase Runner 실패 시 orchestrator가 trajectory를 분석하여:
+- "Step 2에서 잘못된 패턴으로 검색" → 다른 패턴으로 재탐색
+- "Step 1에서 QMD가 stale 결과 반환" → Grep-Only fallback
+
+**Implementation Location**:
+- `agents/mpl-scout.md` output format 확장
+- `commands/mpl-run-execute.md` Phase Runner 실패 분석 로직
+- `.mpl/mpl/phases/phase-N/search-trajectory.json` 저장
+
+---
+
+### P-04: Skill Filtering & Memory Cleansing
+
+| ID | Feature | Status | Priority |
+|----|---------|--------|----------|
+| P-04 | Skill Audit CLI (P-03 데이터 기반) | ❌ Not implemented → deferred v0.9.0 | 🟡 Medium (debate revised — P-03 데이터 축적 후) |
+
+**Inspiration**: OpenViking "context self-evolving" (역방향 적용) + DeerFlow fact confidence scoring + **Claude Code auto-dream** (memory consolidation, v2.1.78).
+
+> **📌 Auto-Dream 영향 분석 (2026-03-25)**: Claude Code의 auto-dream 기능이 P-04 ① Memory Cleansing에 검증된 패턴(4-phase consolidation)을 제공. Decay function 폐기 → rule-based consolidation 채택 권장. 일정은 유지(v0.9.0), 범위 조정. 상세: `analysis/auto-dream-p04-impact-analysis.md`
+
+**Motivation**: 모델 성능 향상(context window 확대, reasoning 강화)에 따라 과거에 필요했던 스킬/hook/agent가 과잉 보호 상태가 됨. MPL 자체 히스토리에서 이미 수동으로 발생: `mpl-critic` 흡수(v3.1), gap+tradeoff 통합, PD 3-Tier→2-Tier(v0.7.0). 이를 체계화.
+
+**Proposal: 2-Layer Pruning System**
+
+**Layer 1: Usage Statistics (Passive, every N runs)**
+
+`mpl-validate-output` hook 확장으로 각 hook/skill 발동 통계 수집:
+
+```json
+// .mpl/memory/usage-stats.jsonl (append-only)
+{
+  "run_id": "...",
+  "timestamp": "2026-03-24T10:30:00Z",
+  "hook_stats": {
+    "mpl-write-guard": { "triggered": 3, "false_positive": 1 },
+    "mpl-auto-permit": { "triggered": 47, "false_positive": 2 }
+  },
+  "skill_stats": {
+    "mpl-small": { "invoked": 0 },
+    "mpl-bugfix": { "invoked": 1 }
+  }
+}
+```
+
+Pruning candidate detection thresholds:
+
+| Metric | Threshold | Meaning |
+|--------|-----------|---------|
+| `trigger_count_30d == 0` | 30일 미발동 | 사용되지 않는 스킬/hook |
+| `false_positive_rate > 0.5` | 절반 이상 오탐 | 과잉 보호 |
+| `learning.last_referenced > 60d` | 2달 미참조 | 사라진 메모리 |
+| `routing_pattern.accuracy < 0.3` | 정확도 30% 미만 | 오래된 패턴 |
+
+Output: `.mpl/memory/pruning-candidates.md`
+
+**Layer 2: Model Generation Audit (Active, on model upgrade)**
+
+모델 업그레이드 시 일회성 audit — 각 스킬/hook의 `model_dependency` (존재 이유)가 새 모델에서 여전히 유효한지 검증.
+
+```yaml
+# .mpl/memory/skill-metadata.yaml (proposed)
+skills:
+  mpl-write-guard:
+    created: 2025-12-15
+    model_dependency: "weak self-discipline in orchestrator role"
+    last_audit: 2026-03-24
+    audit_result: "still needed (2/10 violations without guard)"
+  mpl-auto-permit:
+    created: 2026-02-10
+    model_dependency: "permission friction slowing pipeline"
+    last_audit: 2026-03-24
+    audit_result: "high value (156 triggers/month, 3% FP)"
+```
+
+Output: `.mpl/memory/pruning-report.md` → 사용자 확인 후 제거/archive
+
+**Memory Cleansing: Confidence Decay**
+
+`learnings.md`와 `routing-patterns.jsonl`에 confidence decay 적용:
+
+```
+confidence(t) = initial_confidence × decay^(days_since_last_use / half_life)
+
+half_life = 90 days
+prune_threshold = 0.1
+```
+
+`mpl-compound` run 완료 시:
+1. 참조된 learning → confidence 복원 (max 1.0)
+2. 미참조 learning → decay 적용
+3. threshold 미달 → pruning-candidates.md에 추가
+4. 사용자 확인 후 제거 또는 `.mpl/memory/archive/`로 이동
+
+**Implementation Location**:
+- `hooks/lib/mpl-usage-tracker.mjs` (new) — hook/skill 통계 수집
+- `hooks/mpl-validate-output.mjs` 확장 — 통계 기록
+- `agents/mpl-compound.md` 확장 — decay 계산 + pruning report
+- `.mpl/memory/usage-stats.jsonl` (new)
+- `.mpl/memory/skill-metadata.yaml` (new)
+- `.mpl/memory/pruning-candidates.md` (new)
+- `/mpl:mpl-audit` skill (new) — Model Generation Audit 트리거
+
+**Open Questions**:
+- [ ] half_life 기본값? (90일 vs 60일 vs 사용자 설정)
+- [ ] Pruning 자동 실행? 아니면 항상 사용자 확인 필요?
+- [ ] Archive된 메모리 복원 경로?
+- [ ] Model upgrade 감지 방식? (agent frontmatter의 model 필드 변경 감지? 수동?)
+
+---
+
+### P-05: Context Assembly Middleware Pattern
+
+| ID | Feature | Status | Priority |
+|----|---------|--------|----------|
+| P-05 | ~~Codified context assembly pipeline~~ | ❌ Dropped (시기상조) | ~~🟢 Low~~ |
+
+**Inspiration**: DeerFlow 12-stage middleware chain — 순서 보장 + 앞 단계 결과를 뒤 단계가 참조.
+
+**Current MPL State**:
+- Context Assembly(Step 4.1)가 프로토콜 문서(`mpl-run-execute-context.md`)에 절차적으로 정의
+- 순서: Phase 0 → PD → 이전 phase summary → verification plan → impact files
+- 프로토콜 문서는 LLM이 해석하므로 순서 보장이 "soft" (LLM 재량)
+
+**Proposal**:
+Context Assembly를 코드화된 미들웨어 체인으로 변환:
+
+```javascript
+// hooks/lib/mpl-context-assembler.mjs (proposed)
+const ASSEMBLY_PIPELINE = [
+  { name: 'phase0_artifacts', loader: loadPhase0, tier: 'by_complexity' },
+  { name: 'pivot_points', loader: loadPP, tier: 'always' },
+  { name: 'phase_decisions', loader: loadPD, tier: '2tier' },
+  { name: 'prev_summary', loader: loadPrevSummary, tier: 'l0_l1_l2' },
+  { name: 'verification_plan', loader: loadVerificationPlan, tier: 'always' },
+  { name: 'impact_files', loader: loadImpactFiles, tier: 'capped_2000' },
+];
+```
+
+**현재는 우선순위 낮음** — 프로토콜 문서 기반 Context Assembly가 충분히 동작하고 있고, 코드화의 이점(순서 엄격 보장)이 비용(구현 + 유지보수)을 아직 정당화하지 못함. P-01 (L0/L1/L2) 구현 이후 복잡도가 증가하면 재검토.
+
+**Implementation Location**:
+- `hooks/lib/mpl-context-assembler.mjs` (new)
+- `commands/mpl-run-execute-context.md` → 코드 참조로 전환
+
+---
+
+### Feasibility Assessment (Context Intelligence Features)
+
+**Original assessment (pre-debate):**
+
+| # | Feature | ① Philosophy | ② Token Eff. | ③ Standalone | ④ Impact | ⑤ Frequency | **Verdict** |
+|---|---------|:----------:|:----------:|:----------:|:------:|:---------:|:----------:|
+| P-01 | State Summary L0/L1/L2 | ✅ context isolation | ✅ 50-60% savings | ✅ | ✅ every phase | ✅ every run | **✅ High** |
+| P-02 | Phase 0 L0 Summary | ✅ prevention | ✅ S-phase savings | ✅ | ⚠️ S-phase only | ⚠️ conditional | **🟡 Medium** |
+| P-03 | Search Trajectory | ⚠️ observability | ⚠️ ~200 tok/phase | ✅ | ✅ debug quality | ⚠️ on failure | **🟡 Medium** |
+| P-04 | Skill Filter + Memory Decay | ✅ self-evolving | ✅ long-term savings | ✅ | ✅ maintenance | ⚠️ periodic | **✅ High** |
+| P-05 | Context Middleware | ⚠️ engineering | ✅ 0 tok | ✅ | ⚠️ existing works | ❌ rare benefit | **🟢 Low (post P-01)** |
+
+**Post-debate revision (2026-03-24, Architect vs Contrarian 3-round debate):**
+
+| # | Feature | Debate Verdict | Revised Priority | Key Insight |
+|---|---------|:--------------:|:----------------:|-------------|
+| P-03 | Scout Observability | ✅ IMPLEMENT v0.8.0 | 🔴 **HIGH** | 관찰 불가능성은 아키텍처 결함. P-01 검증의 선행 조건 |
+| P-01 | State Summary L0 | ✅ IMPLEMENT v0.8.0 | 🟠 **MED-HIGH** | L0 단일 계층으로 축소. 의존성 기반 압축으로 재정의 |
+| P-04 | Skill Audit CLI | ⏸️ DEFER v0.9.0 | 🟡 **MEDIUM** | P-03 데이터 10회+ 축적 후 설계. Decay function 제거 |
+| P-02 | Phase 0 L0 | ❌ DROP | — | Phase 0 = 전체 예산 ~3%. P-01에 흡수 |
+| P-05 | Context YAML | ❌ DROP | — | v0.7.0 직후 안정화 필요. 해결 < 생성 문제 |
+
+> **Debate transcript**: `analysis/p01-p05-debate-transcript.md`
 
 ---
 
@@ -334,6 +626,11 @@ When confirming each candidate, review the following:
 1. **MPL philosophy alignment** — Does it align with "Prevention over Cure" + "Orchestrator-Worker separation"?
 2. **Token efficiency** — Does it avoid adding unnecessary cost in Frugal/Standard tier?
 3. **Standalone compatibility** — Does it operate gracefully without external dependencies (Playwright, OpenAI API, etc.)?
+   - **Platform dependencies** (Claude Agent SDK, MCP SDK): `^` range allowed — shares lifecycle with Claude Code platform
+   - **Runtime prerequisites** (Node.js, git): accepted as essential dev environment tools
+   - **Optional MCP integrations** (QMD, Chrome MCP): graceful fallback required
+   - **Third-party packages**: prohibited by default. If unavoidable, exact pin + security audit required
+   - **Background**: litellm supply chain attack (2025, BerriAI/litellm#24512) — agent toolchain dependency became a credential stealer vector
 4. **Existing pipeline impact** — Does it not compromise the stability of the existing 9-step pipeline?
 5. **Actual usage frequency** — Does this feature provide value in the majority of MPL executions?
 6. **Greenfield safety** — Does it NOT break existing greenfield code generation? (added v0.6.6)
