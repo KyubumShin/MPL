@@ -269,6 +269,26 @@ Report: "[MPL] Step 3-F: Applied {feedback_conditions.length} feedback condition
 
 ## Step 3-B: Verification Planning
 
+### GUI App Mandatory Check (F-E2E-1c, v0.8.3)
+
+Before deciding whether to run Step 3-B, check for GUI app indicators:
+
+```
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+tech_stack = decomposition.architecture_anchor.tech_stack
+dir_pattern = decomposition.architecture_anchor.directory_pattern
+
+gui_app_detected = any of:
+  - "src-tauri/" in dir_pattern or directory exists
+  - "electron/" or "src-electron/" in dir_pattern or directory exists
+  - "Tauri" in tech_stack
+  - "Electron" in tech_stack
+
+if gui_app_detected:
+  announce: "[MPL] GUI app detected. Step 3-B (Verification Planning) is mandatory."
+  → MUST execute Step 3-B. Do NOT skip.
+```
+
 After decomposition, create per-phase verification plans with A/S/H-item classification.
 
 ```

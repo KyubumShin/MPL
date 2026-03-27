@@ -271,9 +271,9 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | **#1** | Convention Scan | ⏸️ **Defer** | Alternative: Phase Seed auto-selects 2-3 reference files from same directory (v0.6.8) | ✅ + reference file selection |
 | **#7** | Hashline Edit | ⏸️ **Defer** | Claude Code Edit is content-matching, not line-number-based. Revisit if edit failure rate > 10%. | ✅ |
 | **#8** | Cross-Project Learning | ⏸️ **Defer** | Staleness/pollution risk. Revisit after 10+ project data accumulated. | ✅ |
-| **#4** | Legacy Awareness | ⏸️ **Defer** | Do-Not-Touch config only (brownfield.json, 0.5 day). Rest is over-engineering. | ✅ |
-| **#2** | Impact Radius Analysis | 🏗️ **Brownfield** | Greenfield: no code to analyze. Implement with brownfield mode launch. | ✅ |
-| **#3** | Regression Shield | 🏗️ **Brownfield** | Gate 0.8 Pre-Baseline. Implement with brownfield mode launch. | ✅ |
+| **#4** | Legacy Awareness | 🔀 **Out of MPL scope** | Field 3(진정한 레거시)만 범위 밖. 별도 CEP 도구로 이관. Field 2(Well-Documented)는 MPL 지원 (4-Field 분류, 2026-03-27) | ✅ |
+| **#2** | Impact Radius Analysis | 🔀 **Out of MPL scope** | 레거시 코드(Field 3) 영향도 분석은 CEP 도구. Field 2는 Codebase Analyzer 확장으로 부분 지원 | ✅ |
+| **#3** | Regression Shield | ✅ **Scope restored** | Gate 0.8을 Field 2(기존 테스트 baseline) + Field 4(.mpl/ baseline) 모두 적용. Field 3만 제외 (팀 토론 합의, 2026-03-27) | ✅ |
 | **#5** | Incremental Merge | ❌ **Skip** | Git workflow problem, not MPL's responsibility. T-04 already handles PR. | ✅ |
 
 ---
@@ -303,7 +303,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | Version | Features | Type |
 |---------|----------|------|
 | **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
-| **Brownfield** | **#4** Do-Not-Touch + **#2** IRA + **#3** Regression Shield | Feature: brownfield mode |
+| ~~**Brownfield**~~ | ~~#4 Do-Not-Touch + #2 IRA + #3 Regression Shield~~ | **4-Field Rescoped (2026-03-27)**: #4/#2 Field 3 전용→CEP 이관. #3 범위 복원(Field 2+4). See `analysis/mpl-3field-classification.md` |
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
 | **0.10.0** (TBD) | **P-03** Scout Observability (최소 로깅) + **P-01** State Summary L0 (의존성 기반 압축) | Feature: observability + context intelligence |
 | **0.11.0** (TBD) | **P-04** Skill Audit CLI (P-03 데이터 기반, auto-dream 패턴 채택) | Feature: lifecycle management |
@@ -616,6 +616,210 @@ Items designed but not yet scheduled:
 
 Expected impact: Test count ~70 → ~200 (3x), Verification density 2.3 → 5-7 assertions/AC.
 See `test-strategy-redesign.md` for full design.
+
+---
+
+## E2E Execution Fix (Yggdrasil Post-Mortem, 2026-03-26)
+
+> **발견 경위**: Yggdrasil (Tauri 소설 작성 도구) MPL 실행 후 E2E 테스트가 전혀 실행되지 않음.
+> Cluster Ralph는 정상 동작하여 7개 클러스터 × feature_e2e + final_e2e를 정의했으나,
+> (1) Step 5.0이 Cluster E2E를 소비하지 않았고, (2) E2E commands가 전부 `npm run build`뿐이었으며,
+> (3) Step 3-B가 스킵되어 S-items도 없었음.
+> **분석**: `analysis/yggdrasil-e2e-gap-analysis.md`
+>
+> **설계 의사결정**: 2차례 팀 토론(Architect/Contrarian/Evaluator)을 통해 합의 도출.
+> 원래 4-feature 아키텍처 리디자인이 제안되었으나, "이것은 버그 수정이지 아키텍처 리디자인이 아니다"라는
+> 합의에 따라 최소 수정으로 축소. F-E2E-1 + 프롬프트 패치로 원래 문제의 95% 해결 판정.
+
+---
+
+### F-E2E-1: Step 5.0 E2E Source Fallback Chain
+
+| ID | Feature | Status | Target | Priority |
+|----|---------|--------|--------|----------|
+| F-E2E-1 | Step 5.0이 다중 소스에서 E2E 시나리오를 수집하여 실행 | ❌ Not implemented | **v0.8.3** | 🔴 High |
+
+**현재 문제**: Step 5.0이 Verification Planner의 S-items만 참조 → Step 3-B 스킵 시 실행 대상 없음.
+
+**변경**: 3단계 Fallback Chain 도입.
+
+```
+E2E Source Resolution Order:
+  1. S-items (Step 3-B Verification Planner) — 가장 정밀한 시나리오
+  2. Cluster E2E (Decomposer feature_e2e + final_e2e) — 실행 가능한 commands 포함
+  3. 기본 smoke test (npm test / npm run build) — 최소한의 빌드 검증
+
+  → 소스 1 존재 시 1 사용, 없으면 2, 2도 없으면 3
+  → 소스 혼합 가능: S-items + Cluster E2E 합집합 실행 (중복 제거)
+```
+
+Step 5.0 finalize 프로토콜 변경 (`mpl-run-finalize.md`):
+```markdown
+### 5.0: E2E Test (Final)
+
+After 5-Gate Quality passes, run final E2E validation:
+
+1. **Collect E2E sources** (fallback chain):
+   a. Read Verification Planner S-items (domain: "e2e") from `.mpl/mpl/verification-plan.yaml`
+   b. Read decomposition.yaml `clusters[].feature_e2e` + `final_e2e`
+   c. Default smoke: `npm test` (or `cargo test` / `pytest`)
+   → Merge (a ∪ b), deduplicate by scenario similarity, append (c) if no overlap
+
+2. **Execute collected scenarios** sequentially:
+   - Each scenario: run commands[], check exit code
+   - Timeout: 60s per scenario (configurable)
+   - On failure: log but continue (non-blocking by default)
+
+3. **Report**:
+   - `[MPL] E2E Test: {passed}/{total} scenarios passed. (source: S-items|cluster|smoke)`
+   - Fallback 사용 시: `[MPL] WARNING: Using Cluster E2E fallback (Verification Planner was skipped)`
+```
+
+- **수정 범위**: `mpl-run-finalize.md` 1곳
+- **토큰 비용**: ~1K (decomposition.yaml 파싱)
+- **위험도**: 낮음 — 기존 S-items 우선, 추가 소스는 fallback. 최악의 경우 smoke test 실행 (현재보다 나음)
+
+---
+
+### F-E2E-1b: Decomposer Rule 12 Few-Shot 강화
+
+| ID | Feature | Status | Target | Priority |
+|----|---------|--------|--------|----------|
+| F-E2E-1b | Cluster Ralph E2E commands가 실제 검증 명령어를 생성하도록 프롬프트 강화 | ❌ Not implemented | **v0.8.3** | 🔴 High |
+
+**현재 문제**: Rule 12에 "E2E scenarios must be executable"이라고 명시되어 있지만,
+실제 출력에서 commands가 전부 `npm run build`로 생성됨. 규칙은 있으나 따르지 않은 것.
+
+**변경**: Rule 12에 few-shot 예시 + validation 규칙 추가.
+
+```markdown
+Rule 12 (강화):
+  E2E scenarios의 commands는 실제 기능 검증이어야 한다.
+  "npm run build"만으로 구성된 E2E 시나리오는 거부한다.
+
+  ❌ BAD:
+    scenario: "Chapter CRUD가 동작한다"
+    commands: ["npm run build"]
+
+  ✅ GOOD:
+    scenario: "Chapter CRUD가 동작한다"
+    commands: ["npm test -- --grep 'chapter'"]
+
+  ✅ GOOD (GUI app):
+    scenario: "앱이 빌드되고 Rust 바이너리가 생성된다"
+    commands: ["npm run build", "ls src-tauri/target/debug/yggdrasil"]
+
+  GUI app (src-tauri/, electron/) 프로젝트의 경우:
+    - 최소 1개 시나리오는 빌드 산출물(binary/dist) 존재를 확인해야 함
+    - 가능하면 관련 테스트 파일 실행 명령어 포함 (npm test -- --grep ...)
+```
+
+- **수정 범위**: `mpl-decomposer.md` Rule 12 부분 1곳
+- **토큰 비용**: ~0.5K (few-shot 예시 추가)
+- **위험도**: 매우 낮음 — 프롬프트 개선, 기존 동작에 영향 없음
+
+---
+
+### F-E2E-1c: GUI App 감지 시 Step 3-B Mandatory
+
+| ID | Feature | Status | Target | Priority |
+|----|---------|--------|--------|----------|
+| F-E2E-1c | src-tauri/ 또는 electron/ 감지 시 Step 3-B를 mandatory로 전환 | ❌ Not implemented | **v0.8.3** | 🟠 Medium |
+
+**현재 문제**: Step 3-B가 무조건 optional이어서, GUI app에서도 Verification Planning이 스킵됨.
+
+**변경**: 오케스트레이터에서 간단한 조건 추가.
+
+```
+Step 3 진입 시:
+  if codebase contains "src-tauri/" OR "electron/" OR "src-electron/":
+    → Step 3-B mandatory. 스킵 시 경고:
+      "[MPL] WARNING: GUI app detected. Step 3-B (Verification Planning) is required."
+  else:
+    → 현행 유지 (optional)
+```
+
+- **수정 범위**: 오케스트레이터 프로토콜 1곳
+- **토큰 비용**: 없음 (조건 분기만)
+- **위험도**: 매우 낮음 — 오탐지 시에도 Step 3-B가 추가 실행될 뿐 (해가 없음)
+- **하위 호환**: 기존 프로젝트에 영향 없음 (Step 3-B가 실행 안 됐던 것이 실행되는 것뿐)
+
+---
+
+### v0.8.3 출시 범위 요약
+
+| 작업 | 수정 파일 | 작업량 |
+|------|----------|--------|
+| F-E2E-1 (Fallback Chain) | `mpl-run-finalize.md` | Step 5.0 프로토콜 수정 |
+| F-E2E-1b (Rule 12 강화) | `mpl-decomposer.md` | few-shot 예시 + validation 추가 |
+| F-E2E-1c (Step 3-B 조건) | 오케스트레이터 프로토콜 | 조건 분기 1개 추가 |
+
+**총 3파일 수정, 신규 파일 0개. 스키마 변경 없음.**
+
+---
+
+### F-E2E-2: 2-Axis E2E Architecture (test_topology + tool_hint)
+
+| ID | Feature | Status | Target | Priority | 도입 조건 |
+|----|---------|--------|--------|----------|----------|
+| F-E2E-2 | primary_topology 4종 분류 + feature_e2e.tool_hint | ⏸️ Deferred | **v0.9.0** | 🟡 Conditional | 2+ 프로젝트에서 동일 문제 재현 시 |
+
+> **팀 토론 합의**: Round 1에서 8개 platform_type + tool_registry + 4-Step Algorithm이 제안되었으나,
+> Round 2에서 "한 건의 버그를 아키텍처 혁명으로 둔갑시킨 것"이라는 비판에 따라 조건부 연기.
+> Architect가 제안한 축소안(primary_topology + tool_hint)을 v0.9.0 후보로 유지.
+
+**도입 시 변경 범위 (축소안):**
+
+1. `architecture_anchor`에 `primary_topology` 필드 추가
+   - 4종: `gui-app` | `server` | `headless` | `library`
+   - "unknown"이 거의 불가능 (소프트웨어 본질에 의한 분류)
+
+2. `feature_e2e` 스키마에 `tool_hint` optional 필드 추가
+   - 하위 호환 완벽 (additive change, migration 불필요)
+   - cluster_topology 대신 시나리오별로 도구를 명시하는 가벼운 접근
+
+3. E2E 도구 기본값을 프롬프트 내장으로 처리 (정적 레지스트리 파일 불필요)
+   - "기존 deps 우선, 없으면 playwright(gui-app) / supertest(server) / vitest(unit) 기본"
+
+```yaml
+# 변경된 스키마 (v0.9.0 도입 시)
+architecture_anchor:
+  tech_stack: [string]
+  primary_topology: "gui-app" | "server" | "headless" | "library"  # NEW
+
+clusters:
+  - feature_e2e:
+      - id: string
+        scenario: string
+        type: "integration" | "smoke" | "contract"
+        tool_hint: string    # NEW, optional (e.g., "playwright", "pytest")
+        commands: [string]
+```
+
+**도입 조건**: v0.8.3 출시 후, 2개 이상의 프로젝트에서 다음 문제가 재현될 때:
+- E2E commands 품질 문제 (build만 나옴)가 프롬프트 강화로도 해결되지 않는 경우
+- Step 3-B mandatory 조건이 `src-tauri/`/`electron/` 외에도 필요한 경우
+
+---
+
+### 폐기된 설계 (팀 토론에서 Kill 판정)
+
+| 항목 | 폐기 사유 | 결정 라운드 |
+|------|----------|------------|
+| F-E2E-3 (cluster-level topology) | `tool_hint`로 대체. 추상화 레이어 추가 불필요 | Round 2 Architect |
+| F-E2E-4 (WebSearch Discovery) | 핵심 경로에서 비결정적 요소 주입. 재현성/Standalone/보안 위반 | Round 1 만장일치 |
+| tool_registry 정적 파일 | LLM이 이미 도구를 알고 있음. 프롬프트 기본값으로 충분 | Round 2 Evaluator |
+| 4-Step Tool Selection Algorithm | Decomposer는 Bash 실행 불가. 역할 초과, 과잉 설계 | Round 2 Architect |
+| 3-Tier Trust Model (T1-T4) | 관리 비용 > 문제 비용. "보안 극장" 위험 | Round 1 Contrarian |
+| 8개 platform_type 하드코딩 | 4종 topology가 더 본질적이고 확장 가능 (v0.9.0에서 도입 시) | Round 2 Architect |
+
+### 팀 토론 교훈 (설계 원칙으로 기록)
+
+> **"실제 사용자가 실제로 겪은 문제만 해결하라. 미래에 겪을 수도 있는 문제를 미리 해결하려다가 현재의 단순함을 파괴하지 마라."** — Contrarian
+>
+> **"새로운 추상화 레이어를 추가하기 전에, 기존 스키마에 optional 필드 하나를 추가하는 것으로 충분한지 확인하라."** — Architect
+>
+> **"이것은 버그 수정이다. 아키텍처 리디자인이 아니다. 3파일 수정으로 95% 해결되는 문제에 4-feature 아키텍처를 설계하는 것은 비례적이지 않다."** — Evaluator
 
 ---
 

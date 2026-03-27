@@ -101,6 +101,105 @@ If tool_mode is "standalone" or "partial", use the fallbacks defined in `docs/st
 
 ---
 
+## Step 0.0.5: Artifact Freshness Check + Field Classification (F-FC-1/2/3, v0.8.5)
+
+Before Triage, check if `.mpl/` artifacts exist from a previous MPL run and classify the project field.
+This enables Field 4 (AI-Built Maintenance) support in future versions.
+
+**v0.8.5**: `field_classification` is recorded in state.json for observability only. All fields follow the existing full pipeline. Phase 0 branching (Delta PP, cache shortcuts) is planned for v0.9.0.
+
+### 0.0.5a: .mpl/ Existence Check
+
+```pseudocode
+mpl_exists = Glob(".mpl/").length > 0
+manifest_path = ".mpl/manifest.json"
+manifest_exists = mpl_exists AND file_exists(manifest_path)
+```
+
+### 0.0.5b: Artifact Freshness Check (when manifest exists)
+
+```pseudocode
+if manifest_exists:
+  manifest = JSON.parse(Read(manifest_path))
+
+  fresh_count = 0
+  stale_files = []
+  fresh_files = []
+
+  // Compare each tracked artifact's hash against current file
+  for each artifact in manifest.artifacts:
+    if not file_exists(artifact.path):
+      stale_files.push({ path: artifact.path, reason: "missing" })
+      continue
+
+    current_hash = Bash("shasum -a 256 " + artifact.path).split(" ")[0]
+    if current_hash != artifact.hash:
+      stale_files.push({ path: artifact.path, reason: "modified" })
+    else:
+      fresh_count += 1
+      fresh_files.push(artifact.path)
+
+  freshness_ratio = fresh_count / Math.max(manifest.artifacts.length, 1)
+
+  writeState(cwd, {
+    freshness_ratio: freshness_ratio,
+    stale_artifact_count: stale_files.length,
+    fresh_artifact_count: fresh_files.length
+  })
+
+  Announce: "[MPL] Artifact Freshness: {(freshness_ratio * 100).toFixed(0)}% ({fresh_count}/{manifest.artifacts.length} fresh). Stale: {stale_files.length} files."
+else:
+  freshness_ratio = null
+```
+
+### 0.0.5c: Field Classification
+
+```pseudocode
+if not mpl_exists:
+  // No .mpl/ directory → classify by source code presence
+  source_files = Glob("**/*.{ts,tsx,js,jsx,py,go,rs,java}")
+  test_files = Glob("**/*.{test,spec}.*", "**/*_test.*", "**/test_*.*")
+
+  if source_files.length == 0:
+    field = "field-1"  // Greenfield: no source files
+  else:
+    test_ratio = test_files.length / Math.max(source_files.length, 1)
+    if test_ratio > 0.3:
+      field = "field-2"  // Well-Documented Existing: source + tests
+    else:
+      field = "field-3"  // Legacy: source + minimal tests
+      Announce: "[MPL] WARNING: Legacy project detected (minimal test coverage). Proceeding as greenfield. Consider adding tests first."
+
+elif not manifest_exists:
+  // .mpl/ exists but no manifest.json → pre-v0.8.5 MPL run, treat as greenfield
+  field = "field-1"
+
+else:
+  // .mpl/ + manifest.json → classify by freshness
+  if freshness_ratio >= 0.8:
+    field = "field-4-fresh"
+  elif freshness_ratio >= 0.4:
+    field = "field-4-stale"
+  else:
+    field = "field-4-degraded"
+    Announce: "[MPL] WARNING: .mpl/ artifacts severely degraded (freshness {(freshness_ratio * 100).toFixed(0)}%). Full Phase 0 re-execution recommended."
+
+writeState(cwd, { field_classification: field })
+Announce: "[MPL] Field Classification: {field}."
+```
+
+**Field values:**
+| Value | Condition | MPL Scope |
+|-------|-----------|-----------|
+| `field-1` | No source or no manifest | ✅ Greenfield |
+| `field-2` | Source + tests (>30%), no .mpl/ | ✅ Well-Documented |
+| `field-3` | Source + minimal tests, no .mpl/ | ⚠️ WARNING, proceed as field-1 |
+| `field-4-fresh` | .mpl/ + freshness ≥ 0.8 | ✅ AI-Built (Phase 0 shortcut in v0.9.0) |
+| `field-4-stale` | .mpl/ + freshness 0.4~0.8 | ✅ AI-Built (partial re-exec in v0.9.0) |
+| `field-4-degraded` | .mpl/ + freshness < 0.4 | ⚠️ WARNING, full re-execution |
+
+---
+
 ## Step 0: Triage
 
 Triage determines two things: **pipeline_tier** (which pipeline depth to use) and **interview_depth** (how deep the PP interview goes). Pipeline tier is determined by Quick Scope Scan (F-20), replacing the previous keyword-based mode detection.

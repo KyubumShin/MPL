@@ -43,7 +43,7 @@ but Task tool is the SSOT for TODO state during execution.
 
 ### 4.2.4: Background Execution for Independent TODOs (F-13)
 
-When Phase Runner identifies independent TODOs (no file overlap), dispatch workers in parallel:
+When Phase Runner identifies independent TODOs (no file overlap), implement them in parallel batches:
 
 ```
 // File conflict detection (v3.1):
@@ -54,7 +54,7 @@ for each pair of pending TODOs:
     -> mark as independent, eligible for parallel dispatch
 
 // Parallel dispatch with HARD LIMIT (F-36):
-MAX_CONCURRENT_WORKERS = 3  // Hard limit for UI stability
+MAX_CONCURRENT_TODOS = 3  // Hard limit for UI stability
 
 independent_todos = todos.filter(independent)
 batches = chunk(independent_todos, MAX_CONCURRENT_WORKERS)  // batches of 3

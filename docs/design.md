@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.8.2 Design Document
+# MPL (Micro-Phase Loop) v0.8.5 Design Document
 
 ## 1. Overview
 
@@ -65,18 +65,21 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 | Step | Name | Core Agent | Artifact |
 |------|------|-------------|--------|
 | -1 | LSP Warm-up | (orchestrator, non-blocking) | lsp_servers list, cold start elimination |
-| 0 | Triage | (orchestrator) | interview_depth (light/full) |
+| 0.0.5 | Artifact Freshness + Field Classification (v0.8.5) | (orchestrator) | field_classification, freshness_ratio, `.mpl/manifest.json` (read) |
+| 0 | Triage | (orchestrator) | interview_depth (light/light+scan/full) |
 | 0.5 | Maturity Mode Detection | (orchestrator) | maturity_mode (explore/standard/strict) |
-| 1 | PP Interview | mpl-interviewer | `.mpl/pivot-points.md` |
-| 1-B | Pre-Execution Analysis | mpl-pre-execution-analyzer | Missing requirements, AI pitfalls, Must NOT Do, risk level, execution order recommendation |
-| 1-D | PP Confirmation | (orchestrator) | PP final confirmation |
+| 1 | PP Interview (2-Stage) | mpl-interviewer → mpl-ambiguity-resolver | `.mpl/pivot-points.md` |
+| 1-B | Pre-Execution Analysis | mpl-pre-execution-analyzer | Missing requirements, AI pitfalls, Must NOT Do, risk level |
+| 1-D | PP Confirmation | (orchestrator) | PP final confirmation with user |
+| 1-E | Interview Snapshot Save | (orchestrator) | `.mpl/mpl/interview-snapshot.md` |
 | 2 | Codebase Analysis | (orchestrator) | `.mpl/mpl/codebase-analysis.json` |
+| 2.4 | Architecture Decision Checklist | (orchestrator) | Key architecture decisions documented |
 | 2.5 | Phase 0 Enhanced | (orchestrator) | `.mpl/mpl/phase0/*.md` |
-| 3 | Phase Decomposition | mpl-decomposer | `.mpl/mpl/decomposition.yaml` |
-| 3-B | Verification Planning | mpl-verification-planner | A/S/H item classification |
-| 3-C | ~~Critic Simulation~~ | ~~mpl-critic~~ | Absorbed into Decomposer risk_assessment (v3.1) |
-| 4 | Phase Execution Loop | mpl-phase-runner, mpl-worker, mpl-test-agent, mpl-code-reviewer | Per-phase artifacts |
-| 5 | E2E & Finalization | mpl-compound, mpl-git-master | Learnings, commits, metrics |
+| 3 | Phase Decomposition | mpl-decomposer | `.mpl/mpl/decomposition.yaml` (+ Cluster Ralph V-01, F-28 domain, F-39 fields) |
+| 3-F | Pre-Execution Feedback Loop (F-46) | (orchestrator) | AI pitfalls → phase patches, missing reqs → phase mapping |
+| 3-B | Verification Planning | mpl-verification-planner | A/S/H items (6 sections), S-items executable format (F-41). **Mandatory for GUI apps** (F-E2E-1c, v0.8.3) |
+| 4 | Phase Execution Loop | mpl-phase-runner (direct impl), mpl-test-agent, mpl-code-reviewer | Per-phase artifacts |
+| 5 | E2E & Finalization | mpl-compound, mpl-git-master | E2E (3-tier fallback v0.8.3), learnings, commits, metrics, **manifest.json (v0.8.5)** |
 | 6 | Resume Protocol | (orchestrator) | Resume from interrupted phase |
 
 ### 3.3 Step-by-Step Description
@@ -87,8 +90,9 @@ Analyzes the **information density** of the user prompt to determine interview d
 
 | interview_depth | Condition | Interview Behavior |
 |-----------------|------|-----------|
-| `light` | Density 4+ & some constraints present | Round 1 (What) + Round 2 (What NOT) only |
-| `full` | Density below 4 (ambiguous/broad) | Full 4-round interview |
+| `light` | Density 4-7 | Round 1 (What) + Round 2 (What NOT) only |
+| `light` + scan | Density 8+ | What + What NOT + Uncertainty Scan |
+| `full` | Density below 4 (ambiguous/broad) | Full 4-round PP interview |
 
 #### Step 0.5: Maturity Mode Detection
 
@@ -455,9 +459,10 @@ The following options are supported in `.mpl/config.json`:
 | `cluster_ralph.enabled` | `true` | Enable Cluster Ralph feature-scoped verify-fix loop (v0.8.0) |
 | `cluster_ralph.max_fix_attempts` | `2` | Max fix attempts per cluster E2E failure (v0.8.0) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |
-| `convergence.stagnation_window` | (per config) | Stagnation detection window size |
-| `convergence.min_improvement` | (per config) | Minimum improvement rate |
-| `convergence.regression_threshold` | (per config) | Regression detection threshold |
+| `convergence.stagnation_window` | `3` | Fix attempts to evaluate for stagnation (see `config-schema.md`) |
+| `convergence.min_improvement` | `5` | Minimum pass_rate improvement % per window |
+| `convergence.regression_threshold` | `10` | pass_rate drop % triggering circuit break |
+| `e2e_timeout` | `60000` | Timeout per E2E scenario in ms (v0.8.3) |
 
 ---
 
@@ -557,6 +562,75 @@ Full spec: `docs/roadmap/v0.6.7-cluster-ralph.md`
 - `commands/mpl-run-execute-gates.md` — Gate 1 (regression suite execution)
 
 **Breaking changes: NONE.** All features are additive with graceful fallbacks.
+
+### v0.8.3 — E2E Execution Fix (2026-03-26)
+
+3 fixes addressing E2E tests never executing, discovered via Yggdrasil (Tauri app) post-mortem.
+Design validated through 2 rounds of Architect/Contrarian/Evaluator team debate.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Step 5.0 E2E Fallback (F-E2E-1) | S-items only | S-items → Cluster E2E → smoke fallback chain | Protocol | Step 3-B skip left 0 E2E scenarios |
+| Rule 6 Few-Shot (F-E2E-1b) | "must be executable" text only | + few-shot examples + "build-only" rejection | Prompt | Commands defaulted to `npm run build` |
+| GUI App Step 3-B (F-E2E-1c) | Always optional | Mandatory when `src-tauri/` or `electron/` detected | Protocol | Desktop apps need verification planning |
+
+**Affected files:**
+- `commands/mpl-run-finalize.md` — Step 5.0 fallback chain
+- `agents/mpl-decomposer.md` — Rule 6 few-shot strengthening
+- `commands/mpl-run-decompose.md` — Step 3-B GUI app mandatory check
+
+**Breaking changes: NONE.** All changes are additive. No schema changes. Existing decompositions work unchanged.
+
+Analysis: `analysis/yggdrasil-e2e-gap-analysis.md`
+Roadmap: `docs/roadmap/pending-features.md` → "E2E Execution Fix" section
+
+### v0.8.4 — Internal Consistency Fix (2026-03-26)
+
+24 contradictions identified through cross-validation audit (Architect/Contrarian/Evaluator team review).
+22 fixed, 2 deferred (LOW severity, no behavioral impact).
+
+| Change | Type | Items Fixed |
+|--------|------|-------------|
+| Phase Runner self-contradiction fix | Prompt | C-1: removed "workers implement" vs "direct implementation" conflict |
+| Phase Runner worker references cleanup | Prompt | H-5~7: "worker output" → "implementation output", "dispatching" → "implementing", "concurrent worker limit" → "concurrent implementation limit" |
+| Gate 1 pass_rate policy unification | Protocol | H-11: 80-94% range = fix then re-evaluate, final Gate still requires 95% |
+| Step 5 renumbering | Protocol | C-3: 5.5 duplicate → 5.1.8 (Post-Execution Review), H-12: 5.4b → 5.3b (PR after Commits, before Metrics) |
+| design.md sync | Documentation | 14 items: Step 1-D/1-E/2.4/3-F added, interview depth 3-way, F-39 fields, convergence defaults, Step 3-B mandatory |
+| Parallel execution clarification | Documentation | M-7: "dispatch workers" → "implement in parallel batches" |
+| e2e_timeout config field | Config | M-9: added to config-schema.md |
+
+**Affected files:**
+- `agents/mpl-phase-runner.md` — self-contradiction fix, worker references cleanup
+- `commands/mpl-run-finalize.md` — Step 5 renumbering (5.5→5.1.8, 5.4b→5.3b)
+- `commands/mpl-run-execute-parallel.md` — worker → TODO terminology
+- `docs/design.md` — Full flow table sync, interview depth, convergence defaults
+- `docs/config-schema.md` — e2e_timeout field added
+
+**Breaking changes: NONE.** All changes are documentation/prompt corrections. No schema changes.
+
+Audit report: `analysis/mpl-internal-consistency-audit.md`
+
+### v0.8.5 — Artifact Freshness Check + Field Classification (2026-03-27)
+
+Foundation for Field 4 (AI-Built Maintenance) support. Detects .mpl/ artifact existence and freshness, classifies projects into 6 field types.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| manifest.json generation | F-FC-1 | Step 5.4.5: track all .mpl/ artifacts (path, hash, timestamp, source, category) | Finalize extension |
+| Artifact Freshness Check | F-FC-2 | Step 0.0.5: read manifest.json, compare hashes, calculate freshness_ratio | Triage extension |
+| Field Classification | F-FC-3 | 6-way classification: field-1/2/3/4-fresh/4-stale/4-degraded | Triage extension |
+
+**v0.8.5 is observability-only**: field_classification is recorded in state.json but does NOT change Phase 0 behavior. All fields follow the full pipeline. Phase 0 branching (Delta PP, cache shortcuts for field-4-fresh) is planned for v0.9.0.
+
+**Affected files:**
+- `commands/mpl-run-phase0.md` — Step 0.0.5 (Freshness Check + Field Classification)
+- `commands/mpl-run-finalize.md` — Step 5.4.5 (manifest.json generation)
+- `docs/design.md` — Flow table + version history
+- `docs/config-schema.md` — manifest.json schema + field_classification table
+
+**Breaking changes: NONE.** manifest.json absence = field-1 (greenfield). Backward compatible.
+
+Analysis: `analysis/mpl-3field-classification.md` → renamed to 4-Field classification
 
 ---
 

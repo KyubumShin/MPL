@@ -15,11 +15,31 @@ Load this when `current_phase` is `mpl-finalize` or when resuming a session.
 
 ### 5.0: E2E Test (Final)
 
-After 5-Gate Quality passes, run final E2E validation:
-- Execute Verification Planner's S-items designated as E2E scenarios
-- If Docker available: run in container. Otherwise: local E2E.
-- MED/LOW H-items are NOT re-asked here — they are aggregated in Step 5.5 (T-10, v3.9)
-- Report: `[MPL] E2E Test: {passed}/{total} scenarios passed.`
+After 5-Gate Quality passes, run final E2E validation using a **3-tier fallback chain** (F-E2E-1, v0.8.3):
+
+```
+1. Collect E2E sources (fallback chain):
+   a. S-items: Read `.mpl/mpl/verification-plan.md` for S-items with domain "e2e"
+   b. Cluster E2E: Read `decomposition.yaml` → clusters[].feature_e2e + final_e2e
+   c. Default smoke: `npm test` (or `cargo test` / `pytest` based on tech_stack)
+
+   Resolution:
+     if (a) has E2E scenarios → use (a), merge with (b) if both exist (deduplicate)
+     elif (b) has feature_e2e → use (b)
+     else → use (c) as minimal smoke
+
+   If using fallback (b) or (c):
+     announce: "[MPL] WARNING: Using Cluster E2E fallback (Verification Planner was skipped)"
+
+2. Execute collected scenarios sequentially:
+   - Each scenario: run commands[], check exit code
+   - Timeout: 60s per scenario (configurable via .mpl/config.json → e2e_timeout)
+   - On failure: log but continue (non-blocking by default)
+
+3. Report: "[MPL] E2E Test: {passed}/{total} scenarios passed. (source: S-items|cluster|smoke)"
+```
+
+- MED/LOW H-items are NOT re-asked here — they are aggregated in Step 5.1.8 (T-10, v3.9)
 
 ### 5.0.5: AD Final Verification
 
@@ -74,7 +94,10 @@ announce: "[MPL] Scope Drift: {(drift_ratio * 100).toFixed(0)}% ({added_files.le
 // No blocking — data collection for future Gate integration
 ```
 
-### 5.5: Post-Execution Review Report (T-10, v3.9)
+### 5.1.8: Post-Execution Review Report (T-10, v3.9)
+
+> **Note**: This step was previously numbered 5.5. Renumbered to 5.1.8 in v0.8.3 to fix ordering
+> (must run after verification but before learning extraction).
 
 Aggregate all deferred items accumulated during execution into a structured review report.
 This step is **informational only** — it does NOT block pipeline completion.
@@ -272,7 +295,7 @@ Task(subagent_type="mpl-git-master", model="sonnet",
      prompt="Create atomic commits for all changes. Detect project commit style. 3+ files -> 2+ commits.")
 ```
 
-### 5.4b: PR Creation (T-04, v4.0)
+### 5.3b: PR Creation (T-04, v4.0)
 
 Optional — activated when `.mpl/config.json` → `auto_pr.enabled: true` OR
 user's original prompt contains "PR", "pull request", or "ship".
@@ -303,7 +326,7 @@ if config.auto_pr?.enabled or task_prompt_mentions_pr:
   else:
     announce: "[MPL] PR creation skipped or failed. See git-master output for details."
 else:
-  announce: "[MPL] Step 5.4b: PR creation skipped (not enabled in config or prompt)"
+  announce: "[MPL] Step 5.3b: PR creation skipped (not enabled in config or prompt)"
 ```
 
 Config example (`.mpl/config.json`):
@@ -374,7 +397,61 @@ Profile data enables:
 2. **Optimize Phase 0 step combinations**: statistics on which step combinations are most efficient
 3. **Detect abnormal runs**: warn on excessive token usage (2x+ the average), excessive micro-fixes (5+)
 
+### 5.4.5: Manifest Generation (F-FC-1, v0.8.5)
+
+Generate `.mpl/manifest.json` to track all `.mpl/` artifacts for freshness checking in future runs.
+This file is consumed by Step 0.0.5 (Artifact Freshness Check) in the next MPL execution.
+
+**NOTE**: This is separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
+
+```pseudocode
+commit_hash = Bash("git rev-parse HEAD").trim()
+
+tracked_artifacts = []
+
+// 1. Phase 0 Enhanced artifacts
+phase0_files = ["phase0/api-contracts.md", "phase0/examples.md",
+                "phase0/type-policy.md", "phase0/error-spec.md",
+                "phase0/summary.md", "phase0/complexity-report.json"]
+for each file in phase0_files:
+  path = ".mpl/mpl/" + file
+  if file_exists(path):
+    hash = Bash("shasum -a 256 {path}").split(" ")[0]
+    tracked_artifacts.push({ path, hash, timestamp: file_mtime(path), source: "mpl", category: "phase0" })
+
+// 2. Core artifacts
+core_files = [
+  { path: ".mpl/mpl/decomposition.yaml", category: "decomposition" },
+  { path: ".mpl/pivot-points.md", category: "interview" },
+  { path: ".mpl/mpl/phase-decisions.md", category: "decisions" },
+  { path: ".mpl/mpl/RUNBOOK.md", category: "runbook" },
+  { path: ".mpl/mpl/codebase-analysis.json", category: "analysis" },
+  { path: ".mpl/mpl/interview-snapshot.md", category: "interview" },
+  { path: ".mpl/mpl/verification-plan.md", category: "verification" }
+]
+for each entry in core_files:
+  if file_exists(entry.path):
+    hash = Bash("shasum -a 256 {entry.path}").split(" ")[0]
+    tracked_artifacts.push({ path: entry.path, hash, timestamp: file_mtime(entry.path), source: "mpl", category: entry.category })
+
+// 3. Write manifest (memory files excluded — append-only files cause false staleness)
+manifest = {
+  version: "0.8.5",
+  generated_at: new Date().toISOString(),
+  commit_hash: commit_hash,
+  pipeline_tier: state.pipeline_tier,
+  field_classification: state.field_classification || "field-1",
+  artifact_count: tracked_artifacts.length,
+  artifacts: tracked_artifacts
+}
+
+Write(".mpl/manifest.json", JSON.stringify(manifest, null, 2))
+Announce: "[MPL] Manifest generated: {tracked_artifacts.length} artifacts tracked at commit {commit_hash.slice(0,7)}."
+```
+
 ### 5.5: Completion Report
+
+> **Note**: Previously duplicated as 5.5. Now unique after Post-Execution Review was renumbered to 5.1.8.
 
 Summarize: phases completed/failed, retries, redecompositions, key discoveries/PD overrides, verification status, key learnings.
 

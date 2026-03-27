@@ -64,6 +64,52 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 |-------|------|---------|-------------|--------|
 | `context_rotation.backend` | `"kitty"` \| `"tmux"` \| `"osascript"` | auto-detect | Terminal backend for session rotation | `hooks/lib/mpl-rotator.mjs` |
 
+## Manifest & Field Classification (v0.8.5)
+
+### `.mpl/manifest.json` Schema
+
+Generated at Step 5.4.5 (Finalize), consumed at Step 0.0.5 (Triage).
+Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | string | Manifest schema version (e.g., `"0.8.5"`) |
+| `generated_at` | string (ISO 8601) | When manifest was generated |
+| `commit_hash` | string | Git HEAD at generation time |
+| `pipeline_tier` | `"frugal"` \| `"standard"` \| `"frontier"` | Last run's pipeline tier |
+| `field_classification` | string | Last run's field classification |
+| `artifact_count` | number | Number of tracked artifacts |
+| `artifacts` | ArtifactEntry[] | Artifact metadata list |
+
+### ArtifactEntry
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | File path relative to project root |
+| `hash` | string | SHA-256 content hash |
+| `timestamp` | string (ISO 8601) | File last modified time |
+| `source` | `"mpl"` \| `"cep"` | Generator (mpl = MPL pipeline, cep = Context Extraction Pipeline) |
+| `category` | string | `"phase0"` \| `"decomposition"` \| `"interview"` \| `"decisions"` \| `"runbook"` \| `"analysis"` \| `"verification"` |
+
+### Field Classification (`state.json → field_classification`)
+
+| Value | Condition | MPL Scope | Phase 0 (v0.8.5) | Phase 0 (v0.9.0 planned) |
+|-------|-----------|-----------|-------------------|--------------------------|
+| `field-1` | No source or no manifest | ✅ Greenfield | full | full |
+| `field-2` | Source + tests (>30%), no .mpl/ | ✅ Well-Documented | full | full + Gate 0.8 baseline |
+| `field-3` | Source + minimal tests, no .mpl/ | ⚠️ WARNING | full | full + WARNING |
+| `field-4-fresh` | .mpl/ + freshness ≥ 0.8 | ✅ AI-Built | full | cache hit + Delta PP |
+| `field-4-stale` | .mpl/ + freshness 0.4~0.8 | ✅ AI-Built | full | partial re-execution |
+| `field-4-degraded` | .mpl/ + freshness < 0.4 | ⚠️ WARNING | full | full + WARNING |
+
+**Note**: Memory files (`.mpl/memory/*`) are excluded from freshness calculation — append-only files would cause false staleness.
+
+## E2E Testing (v0.8.3)
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
+
 ## Cluster Ralph (V-01, v0.8.0)
 
 | Field | Type | Default | Description | Source |

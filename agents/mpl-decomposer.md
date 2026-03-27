@@ -109,6 +109,27 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         Rule 6: Generate 3-5 E2E scenarios per cluster.
           At least 1 integration + 1 smoke scenario per cluster.
           E2E scenarios must be executable (commands field, not descriptions).
+          Commands MUST verify actual functionality — "npm run build" alone is NOT acceptable.
+
+          ❌ BAD (build-only, no actual verification):
+            scenario: "Chapter CRUD works"
+            commands: ["npm run build"]
+
+          ✅ GOOD (runs relevant tests):
+            scenario: "Chapter CRUD works"
+            commands: ["npm test -- --grep 'chapter'"]
+
+          ✅ GOOD (GUI app — verifies build artifacts):
+            scenario: "App builds and binary is produced"
+            commands: ["npm run build", "ls src-tauri/target/debug/ | grep -q yggdrasil"]
+
+          ✅ GOOD (API server — verifies endpoint):
+            scenario: "Health endpoint responds"
+            commands: ["npm start & sleep 3 && curl -sf http://localhost:3000/health"]
+
+          For GUI app projects (src-tauri/, electron/):
+            - At least 1 scenario must verify build artifact existence (binary/dist)
+            - Prefer running related test files over bare build commands
 
         Rule 7: Generate final_e2e for cross-feature interactions.
           At least 1 full-journey scenario + 1 full-build smoke.
