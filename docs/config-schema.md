@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.8.0
-> **Last updated**: 2026-03-25
+> **Version**: v0.9.0
+> **Last updated**: 2026-03-29
 
 ---
 
@@ -73,7 +73,7 @@ Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `version` | string | Manifest schema version (e.g., `"0.8.5"`) |
+| `version` | string | Manifest schema version (e.g., `"0.9.0"`) |
 | `generated_at` | string (ISO 8601) | When manifest was generated |
 | `commit_hash` | string | Git HEAD at generation time |
 | `pipeline_tier` | `"frugal"` \| `"standard"` \| `"frontier"` | Last run's pipeline tier |

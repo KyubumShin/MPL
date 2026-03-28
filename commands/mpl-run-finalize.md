@@ -492,7 +492,7 @@ for each entry in core_files:
 
 // 3. Write manifest (memory files excluded — append-only files cause false staleness)
 manifest = {
-  version: "0.8.5",
+  version: "0.9.0",
   generated_at: new Date().toISOString(),
   commit_hash: commit_hash,
   pipeline_tier: state.pipeline_tier,
