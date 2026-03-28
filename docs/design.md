@@ -690,6 +690,26 @@ Dependency-based compression for state summaries. Instead of loading all depende
 
 **Breaking changes: NONE.** Old state-summary.md files without the new section structure are loaded as L2 (full detail) by default. New structure is backward compatible.
 
+### v0.9.0 — Prompt Reinforcement: Yggdrasil-Validated Patterns (2026-03-29)
+
+5 prompt-only enhancements that concretize abstract review categories with grep-verifiable patterns. All derived from Yggdrasil 27-phase test post-mortem. Total additional token cost: ~300 (grep calls in PR-02/PR-03 only).
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Transaction Boundary | PR-01 | db.md: 2+ DB mutations in one function must be transaction-wrapped | Domain prompt + Verification planner |
+| Security Grep Patterns | PR-02 | Code reviewer Security category: 4 concrete grep patterns (weak random, CSP, secrets, SQLi) | Agent prompt |
+| UI Hardcoding Detection | PR-03 | Code reviewer Design System category: hex color grep + dark mode gap detection | Agent prompt |
+| Resource Lifecycle Pairs | PR-04 | Code reviewer Correctness category: open/close, create/destroy lifecycle pair verification | Agent prompt |
+| Strict Mode + unwrap Audit | PR-05 | Phase 0 Error Spec Step 4: tsconfig strict check + Rust unwrap count + Go error ignore scan | Phase 0 extension |
+
+**Affected files:**
+- `prompts/domains/db.md` — transaction wrapping rule (PR-01)
+- `agents/mpl-code-reviewer.md` — Security, Correctness, Design System categories (PR-02, PR-03, PR-04)
+- `agents/mpl-phase0-analyzer.md` — Step 4 Error Spec strict/unwrap checks (PR-05)
+- `agents/mpl-verification-planner.md` — A-TX auto-insert for DB phases (PR-01)
+
+**Breaking changes: NONE.** All changes are prompt text additions. No schema, protocol, or config changes.
+
 ---
 
 ## 10. Known Issues and Remaining Work

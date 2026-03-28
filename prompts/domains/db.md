@@ -11,6 +11,7 @@
 - Changing NULL → NOT NULL requires migrating existing data first
 - Verify existing data integrity before adding foreign key constraints
 - Minimize transaction scope and review for deadlock potential
+- **(PR-01, v0.9.0)** A function with 2+ DB mutation operations (INSERT/UPDATE/DELETE) MUST wrap them in a transaction (BEGIN/COMMIT, .transaction(), or ORM equivalent). Partial failures without transaction wrapping cause data integrity corruption.
 
 ## Verification Points
 - Do both migration up and down succeed?

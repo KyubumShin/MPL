@@ -171,6 +171,13 @@ disallowedTools: Edit, Task
     3. Error message patterns:
        Grep(pattern="match=|message=|msg=", path="tests/")
     4. Validation order from source
+    5. (PR-05, v0.9.0) Strict mode & unwrap audit:
+       - TypeScript: Read tsconfig.json → check "strict": true or "strictNullChecks": true.
+         If not set: add advisory to error-spec.md + record as Phase Decision.
+       - Rust: Grep(pattern=".unwrap()", path="src/") → count occurrences.
+         If 10+ unwrap calls in production code: add "unwrap audit needed" advisory.
+       - Go: Grep(pattern="_ = |_ :=", path="**/*.go") for ignored error returns.
+         If found: add advisory about explicit error handling.
     ```
 
     Save to `{output_dir}/error-spec.md`

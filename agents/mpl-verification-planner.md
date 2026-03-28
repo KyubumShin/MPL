@@ -63,6 +63,9 @@ disallowedTools: Write, Edit, Task
     - [A-2] Phase {N}: `{command}` -- Expected: {pattern} -- Verifies: {what}
     - ...
 
+    **(PR-01, v0.9.0)** For phases with phase_domain == "db": auto-insert this A-item:
+    `[A-TX] Phase {N}: Grep for functions with 2+ DB mutations (INSERT/UPDATE/DELETE) missing transaction wrapping -- Expected: 0 matches -- Verifies: transaction boundary compliance`
+
     ## 3. S-items (Sandbox Agent Testing) — Executable Format (F-41)
     BDD/Gherkin scenarios with mandatory test execution metadata:
 

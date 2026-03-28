@@ -35,15 +35,25 @@ disallowedTools: Write, Edit, Task
   </Constraints>
 
   <Review_Categories>
-    1. **Correctness**: Logic errors, off-by-one, null handling, race conditions
-    2. **Security**: Injection, auth bypass, data exposure, OWASP Top 10
+    1. **Correctness**: Logic errors, off-by-one, null handling, race conditions.
+       **(PR-04, v0.9.0)** Resource lifecycle pairs: if open/connect/create/backup exists, verify the corresponding close/disconnect/destroy/restore actually releases the resource. Check Frontend ↔ Backend lifecycle sync (e.g., Frontend close → Backend close call).
+    2. **Security**: Injection, auth bypass, data exposure, OWASP Top 10.
+       **(PR-02, v0.9.0)** Run these grep checks via Bash on changed files:
+       - Weak random: `SystemTime|Date.now.*%|Math.random.*id` → require uuid crate or crypto.randomUUID()
+       - Missing CSP: `csp.*null|content.security.policy` in config files → require production CSP
+       - Hardcoded secrets: `password\s*=\s*"|api_key\s*=\s*"|secret\s*=\s*"` → require env vars
+       - SQL injection: string-interpolated SQL (`format!("SELECT.*{}")`, template literal SQL) → require parameterized queries
     3. **Performance**: O(n^2) patterns, unnecessary I/O, memory leaks, blocking calls
     4. **Maintainability**: DRY violations, god functions, unclear naming, missing docs
     5. **Naming**: Inconsistent conventions, misleading names, abbreviations
     6. **Error Handling**: Swallowed errors, missing try-catch, unclear error messages
     7. **Testing**: Missing test cases, weak assertions, untested edge cases
     8. **Architecture**: PP compliance, layer violations, coupling, interface contract adherence
-    9. **Design System Compliance** (phase_domain == "ui" only): Hardcoded colors/spacing, token usage inconsistency, component API naming (onX, isX), accessibility (a11y) violations
+    9. **Design System Compliance** (phase_domain == "ui" only): Hardcoded colors/spacing, token usage inconsistency, component API naming (onX, isX), accessibility (a11y) violations.
+       **(PR-03, v0.9.0)** Run these grep checks on changed .tsx/.vue/.svelte files:
+       - Raw hex colors: `/#[0-9a-fA-F]{3,8}/` (exclude CSS variable definition files) → require `var(--color-xxx)` or theme tokens
+       - Dark mode gaps: light-only colors (#fee2e2, #fef3c7, etc.) without `prefers-color-scheme` or `dark:` variant
+       - 20+ raw hex instances → flag "design tokenization needed" advisory
     10. **Bundle & Build Health** (phase_domain == "ui" only): Barrel exports (`export * from`), full library imports (`import lodash`), lazy loading opportunities, devDependencies leaking into src/
   </Review_Categories>
 
