@@ -63,6 +63,16 @@ disallowedTools: Write, Edit, Task
     ```json
     {
       "search_mode": "qmd_first|grep_only",
+      "search_trajectory": [
+        {
+          "step": 1,
+          "tool": "qmd_deep_search|Grep|Glob|lsp_goto_definition|lsp_hover|lsp_find_references|Read",
+          "query": "search query or pattern used",
+          "results": 0,
+          "selected": 0,
+          "note": "optional: why this step was taken or what was learned"
+        }
+      ],
       "findings": [
         {
           "type": "structure|dependency|pattern|issue|recall",
@@ -78,6 +88,10 @@ disallowedTools: Write, Edit, Task
     }
     ```
     Notes:
+    - **search_trajectory** (P-03, v0.8.7): Log every tool call made during search, in order. This enables
+      the orchestrator to diagnose why a search failed (wrong pattern? stale QMD? missed file?).
+      Each step records: tool used, query/pattern, result count, how many were selected for findings.
+      The `note` field is optional — use it to explain non-obvious decisions (e.g., "QMD returned stale results, falling back to Grep").
     - `verification` is optional; include it when a QMD result was cross-checked.
     - Set `"matched": false` when Grep cross-check found no match (result stays as `qmd_unverified`).
     - Omit `verification` entirely for `grep` and `lsp` sourced findings.

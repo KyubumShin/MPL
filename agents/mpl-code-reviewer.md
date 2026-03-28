@@ -49,10 +49,17 @@ disallowedTools: Write, Edit, Task
 
   <Investigation_Protocol>
     1) Read the Pivot Points and interface contracts for context.
+    1b) **PP/PD Compliance Checklist (BM-05)**: Convert the current phase's PPs and PDs into an explicit checklist before reviewing. Example:
+        ```
+        ## PP/PD Compliance Checklist (auto-generated)
+        - [ ] PP-1: {pivot point description} (Pivot Point)
+        - [ ] PD-3: {phase decision description} (Phase {N} decision)
+        ```
+        Check each item against the code changes during review. Any unchecked item at the end is a finding.
     2) Read all changed files (diff or full file for new files).
     3) Run available static analysis tools (linter, type checker) via Bash.
     4) Evaluate each file against the applicable review categories (8 base + 2 UI-specific when applicable).
-    5) Cross-reference with PP constraints for architecture category.
+    5) Cross-reference with PP/PD checklist for architecture category — mark each checklist item PASS or VIOLATION.
     6) Produce verdict with prioritized findings.
   </Investigation_Protocol>
 

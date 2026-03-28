@@ -145,23 +145,74 @@ load_phase0_artifacts():
   return artifacts
 ```
 
-#### Dependency-Based Summary Loading
+#### Dependency-Based Summary Loading (P-01 L0/L1/L2 Tiering, v0.8.8)
+
+State summaries are loaded at 3 resolution levels to reduce token consumption (~50-60% savings):
+
+| Tier | Content | ~Tokens | Load condition |
+|------|---------|---------|----------------|
+| L0 | 1-line: "Phase N: {name} — {what was done and result}" | ~20 | All completed phases not covered by L1/L2 |
+| L1 | L0 + created/modified file list + interface changes summary | ~200 | Phases with impact_files intersection with current phase |
+| L2 | Full state-summary.md (all sections) | ~800 | Direct dependency phases (interface_contract.requires) |
 
 ```
 load_dependency_summaries(current_phase):
-  deps = current_phase.interface_contract.requires || []
-  summaries = {}
-  for each dep in deps:
-    from_phase = dep.from_phase
-    if from_phase != previous_phase:  // previous phase already loaded via prev_summary
-      summary_path = ".mpl/mpl/phases/{from_phase}/state-summary.md"
-      if exists(summary_path):
-        summaries[from_phase] = Read(summary_path)
+  all_completed_phases = list all phases with state-summary.md
+  direct_deps = Set(current_phase.interface_contract.requires[].from_phase || [])
+  current_impact = Set(current_phase.impact.create + current_phase.impact.modify)
 
-  // Token budget: max 30% of model context for all injected summaries
-  // If over budget: trim summaries to first 100 lines each
+  summaries = { L0: [], L1: {}, L2: {} }
+
+  for each phase in all_completed_phases:
+    if phase.id == previous_phase:
+      continue  // already loaded via prev_summary (L2 equivalent)
+
+    summary_path = ".mpl/mpl/phases/{phase.id}/state-summary.md"
+    if not exists(summary_path):
+      continue
+
+    if phase.id in direct_deps:
+      // L2: full detail for direct dependencies
+      summaries.L2[phase.id] = Read(summary_path)
+
+    elif intersection(phase.impact_files, current_impact) is not empty:
+      // L1: file list + interface changes for overlapping phases
+      full = Read(summary_path)
+      summaries.L1[phase.id] = extract_L1(full)
+      // extract_L1: keep "## What was implemented" + "## Files Changed" + "## Interface Changes"
+      // drop "## Phase Decisions rationale", "## Verification results detail"
+
+    else:
+      // L0: 1-line compressed summary
+      full = Read(summary_path)
+      first_line = full.split("\n").find(l => l.trim() && !l.startsWith("#"))
+      summaries.L0.push("- Phase {phase.id}: {phase.name} — {first_line.slice(0, 120)}")
+
   return summaries
 ```
+
+**Phase Runner state-summary.md output format** (updated for L0/L1/L2 extraction):
+
+Phase Runner MUST structure state-summary.md with these sections in order:
+```markdown
+## Summary
+{1-line summary: what was done and the result — this line becomes L0}
+
+## Files Changed
+- Created: {file1}, {file2}
+- Modified: {file3}, {file4}
+
+## Interface Changes
+{new exports, changed function signatures, API contract changes — this becomes part of L1}
+
+## Phase Decisions
+{PD rationale and context — L2 only}
+
+## Verification Results
+{pass/fail details — L2 only}
+```
+
+This structure enables mechanical L0/L1 extraction without LLM re-summarization.
 
 #### PD 2-Tier Classification
 

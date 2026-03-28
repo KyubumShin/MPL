@@ -136,6 +136,7 @@ export const EXPECTED_SECTIONS = {
   ],
   'mpl-scout': [
     'findings',
+    'search_trajectory',  // P-03, v0.8.7 — Search path observability
   ],
   'mpl-phase-seed-generator': [
     'phase_seed',

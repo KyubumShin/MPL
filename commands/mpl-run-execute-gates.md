@@ -243,12 +243,20 @@ Task(subagent_type="mpl-code-reviewer", model="sonnet",
      All files changed during pipeline execution.
      ### Pivot Points
      {pivot_points}
+     ### Phase Decisions
+     {all PDs from completed phases}
+     ### PP/PD Compliance Checklist (BM-05, v0.8.6)
+     {auto-generated checklist from PPs and PDs:
+       - [ ] PP-N: {description}
+       - [ ] PD-N: {description} (Phase {N})
+     }
      ### Interface Contracts
      {all phase interface_contracts}
      ### Changed Files
      {list all created/modified files across all phases}
 
      Review all changes for the Quality Gate.
+     Check every PP/PD checklist item against the code.
      """)
 ```
 
@@ -299,6 +307,11 @@ When any gate fails, enter the fix loop:
         prompt="Trace failure: {failure_description}. Find root cause in: {affected_files}")
    ```
    Use scout findings to inform fix strategy before dispatching worker.
+   **(P-03, v0.8.7)**: Save scout's `search_trajectory` to `.mpl/mpl/phases/{current_phase}/search-trajectory.json` for observability.
+   If scout search failed (0 useful findings), analyze trajectory to determine cause:
+   - Wrong pattern → retry with different query
+   - QMD stale → fallback to Grep-Only
+   - File not in scope → expand search scope
 3. Dispatch targeted fixes via mpl-worker
 3. Re-run the failed gate + all subsequent gates
 4. Track pass_rate in convergence history

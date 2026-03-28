@@ -228,8 +228,13 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      ### Code Changes (diff)
      {previous phase's changes.diff if available, or "N/A"}
 
-     ## Dependency Phase Summaries
-     {dep_summaries — summaries from non-adjacent dependency phases, or "N/A"}
+     ## Dependency Phase Summaries (P-01 L0/L1/L2, v0.8.8)
+     ### L2 (Direct Dependencies — full detail)
+     {dep_summaries.L2 — full state-summary.md for interface_contract.requires phases, or "N/A"}
+     ### L1 (Overlapping Phases — file list + interface changes)
+     {dep_summaries.L1 — Summary + Files Changed + Interface Changes sections, or "N/A"}
+     ### L0 (All Other Phases — 1-line each)
+     {dep_summaries.L0 — bullet list of 1-line summaries, or "N/A"}
 
      ## Phase 0 Enhanced Artifacts
      ### Complexity: {grade} (score: {score})

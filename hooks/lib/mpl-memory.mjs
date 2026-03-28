@@ -209,6 +209,16 @@ export async function promoteToSemantic(cwd, pattern, category) {
 }
 
 /**
+ * Add a Phase Hint to semantic.md (BM-02, v0.8.6)
+ * One-line lesson learned from pipeline completion — constraints for future decomposition.
+ * @param {string} cwd
+ * @param {string} hint - One-line phase hint (e.g. "DB migration: separate schema change and data migration into distinct phases")
+ */
+export async function addPhaseHint(cwd, hint) {
+  await promoteToSemantic(cwd, hint, 'Phase Hints');
+}
+
+/**
  * Detect patterns repeated 3+ times from episodic memory
  * @param {string} cwd
  * @param {number} threshold - Repetition count threshold (default 3)

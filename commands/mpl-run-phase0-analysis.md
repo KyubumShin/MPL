@@ -66,8 +66,10 @@ Use the existing Scout call protocol as-is.
 ### After Receiving Output
 
 1. Review subagent's summary (full JSON is already saved to file)
-2. Report: `[MPL] Codebase Analysis: {files} files, {modules} modules, {deps} deps. Tool mode: {tool_mode}.`
-3. Proceed to Step 2.5
+2. **(P-03, v0.8.7)**: If scout was dispatched, save `search_trajectory` to `.mpl/mpl/phase0/search-trajectory.json`.
+   This enables post-mortem analysis of Phase 0 exploration quality.
+3. Report: `[MPL] Codebase Analysis: {files} files, {modules} modules, {deps} deps. Tool mode: {tool_mode}.`
+4. Proceed to Step 2.5
 
 > **Fallback**: If mpl-codebase-analyzer agent fails, orchestrator performs analysis directly (existing behavior).
 > In that case, 6 module tool calls accumulate in orchestrator context, increasing compaction risk.

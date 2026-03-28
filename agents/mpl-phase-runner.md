@@ -199,7 +199,16 @@ disallowedTools: []
            3. PASS if grep matches found, FAIL otherwise
            4. Fallback: if QMD unavailable, use grep_pattern alone (equivalent to grep type)
     3. Cumulative regression: run ALL tests from ALL completed phases (not just inherited_criteria)
-       - If project has a test runner, run the full test suite: `pytest`, `npm test`, etc.
+       - If project has a test runner, run the full test suite with parallelization flags (LT-02, v0.8.6):
+         | Framework | Command | Parallel Flag |
+         |-----------|---------|---------------|
+         | vitest | `npx vitest run` | `--pool=threads` |
+         | jest | `npx jest` | `--maxWorkers=auto` |
+         | pytest | `pytest` | `-n auto` (requires pytest-xdist) |
+         | cargo test | `cargo test` | `--jobs` (default parallel) |
+         | go test | `go test ./...` | `-parallel $(nproc)` |
+         Auto-detect framework from project files (package.json scripts, pyproject.toml, Cargo.toml, go.mod).
+         If parallel plugin not installed (e.g., pytest-xdist), run without the flag (graceful fallback).
        - Record pass_rate = (passed_tests / total_tests) as percentage
        - This catches regressions that inherited_criteria alone might miss
     4. PP violation check: confirm implementation does not violate any CONFIRMED PP
@@ -510,16 +519,44 @@ disallowedTools: []
   </Discovery_Handling>
 
   <State_Summary_Required_Sections>
+    State summary MUST use the following section structure for L0/L1/L2 extraction (P-01, v0.8.8):
+
+    ```markdown
+    ## Summary
+    {1-line: what was done and the result — this becomes L0 for other phases}
+
+    ## Files Changed
+    - Created: {file1}, {file2}
+    - Modified: {file3}, {file4}
+
+    ## Interface Changes
+    {new exports, changed function signatures, API contract changes — L1 boundary}
+
+    ## Phase Decisions
+    {PD-N: title, reason, affected files, related PP — L2 only}
+
+    ## Verification Results
+    {each criterion with PASS/FAIL and evidence — L2 only}
+
+    ## Notes for Next Phase
+    {environment variables, import paths, interface specs, deferred discoveries — L2 only}
+    ```
+
+    **Tier extraction rules** (orchestrator uses these to build L0/L1/L2):
+    - **L0** (~20 tok): first non-header line from "## Summary"
+    - **L1** (~200 tok): L0 + "## Files Changed" + "## Interface Changes"
+    - **L2** (~800 tok): full state-summary.md
+
     Required (must always be present):
-    - "What Was Built": list all new files created with brief descriptions
-    - "Phase Decisions": each decision as PD-N with title, reason, affected files, and related PP if any
-    - "Verification Results": each criterion with PASS/FAIL and evidence
+    - "## Summary": 1-line summary (critical for L0)
+    - "## Files Changed": created/modified file list (critical for L1)
+    - "## Phase Decisions": PD-N entries with rationale
+    - "## Verification Results": PASS/FAIL with evidence
 
     Recommended (include when applicable):
-    - "What Was Modified": existing files changed and what changed
-    - "Discovery Results": each discovery's disposition
-    - "Notes for Next Phase": environment variables added, import paths, interface specs, deferred discoveries
-    - "Profile": estimated token usage (context size, output size), micro-fix count, duration
+    - "## Interface Changes": new/changed exports, signatures, contracts
+    - "## Notes for Next Phase": environment variables, import paths, deferred discoveries
+    - "## Profile": estimated token usage, micro-fix count, duration
   </State_Summary_Required_Sections>
 
   <Output_Schema>

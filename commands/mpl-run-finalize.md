@@ -143,6 +143,22 @@ else:
 
   Review at your discretion. None of these blocked execution.
   """
+
+  # LT-05 (v0.8.6): H-Item Severity Feedback Loop
+  # Track if user reclassifies severity during review (e.g., "this MED should have been HIGH")
+  # If user provides severity corrections, update h_item_metrics in state.json:
+  h_item_metrics = readState(cwd).h_item_metrics
+  h_item_metrics.h_item_total = count(all H-items from verification-plan.md)
+  h_item_metrics.h_item_side_interviews = count(HIGH H-items that triggered AskUserQuestion)
+  h_item_metrics.h_item_review_rate = count(items user explicitly reviewed) / max(total_deferred, 1)
+
+  # If user says "this should be HIGH" for a MED item:
+  #   h_item_metrics.severity_overrides.med_to_high += 1
+  # If user says "this is not important" for a HIGH item:
+  #   h_item_metrics.severity_overrides.high_to_low += 1
+
+  writeState(cwd, { h_item_metrics })
+  announce: "[MPL] H-Item metrics: {h_item_total} total, {h_item_side_interviews} interviews, {severity_overrides} reclassifications."
 ```
 
 ### 5.2: Extract Learnings
@@ -235,6 +251,46 @@ Task(subagent_type="mpl-compound", model="sonnet",
      Follow Steps M-1 through M-5 from the mpl-compound protocol.")
 
 Report: "[MPL] 4-Tier Memory updated: episodic={N} entries, semantic={N} rules, procedural={N} entries."
+```
+
+### 5.2.65: Phase Hint Extraction (BM-02, v0.8.6)
+
+Extract one-line phase lessons from the completed pipeline for future decomposition guidance:
+
+```
+Task(subagent_type="mpl-compound", model="sonnet",
+     prompt="""
+     Review the completed pipeline and extract 1-3 Phase Hints — one-line constraints
+     that should guide FUTURE decomposition. Focus on lessons about phase ordering,
+     separation of concerns, and dependency management.
+
+     ## Phase Summaries
+     {all state-summary.md contents}
+
+     ## Phase Decisions
+     {all PDs}
+
+     ## Discoveries
+     {all discoveries}
+
+     ## Output Format
+     Return a JSON array of hint strings. Examples:
+     - "DB migration: always separate schema changes and data migration into distinct phases"
+     - "API endpoint: define types in a dedicated phase before implementation phases to reduce downstream errors"
+     - "Auth middleware: place cross-cutting concerns in early phases as other phases depend on them"
+
+     Rules:
+     1. Only output hints from actual lessons learned in THIS pipeline
+     2. Each hint must be a single actionable sentence
+     3. No generic advice — be specific to the patterns observed
+     4. Skip if pipeline was straightforward with no notable phase-ordering lessons
+     """)
+
+// Save each hint via addPhaseHint() to semantic.md
+for each hint in output:
+  addPhaseHint(cwd, hint)
+
+Report: "[MPL] Phase hints: {count} lessons extracted to semantic memory."
 ```
 
 ### 5.2.7: Clear working.md

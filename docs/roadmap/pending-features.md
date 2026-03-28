@@ -302,12 +302,15 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | Version | Features | Type |
 |---------|----------|------|
-| **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
+| **0.8.x** | **BM-05** Gate 2 PP/PD 체크리스트 주입 + **BM-02** semantic memory Phase Hint + **LT-05** severity 피드백 루프 메트릭 + **LT-02** 테스트 병렬화 플래그 자동 감지 | Quick-win: Beads/장기 토론 즉시 항목 |
+| **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync + **LT-01** Contract Changes 필수 섹션 + **LT-03a** Contract Verification Gate + **LT-04** Multi-Resolution Summary L1/L2/L3 + **BM-04** Discovery 2축 매트릭스 + **P-01** State Summary Tiering + **CB-01/02/03/04** Cross-Boundary Verification + **PR-01~05** Prompt Reinforcement (TX/Security/UI/Lifecycle/ErrorHandling) | Feature: test infra + UI workflow + 장기 안정성 + cross-boundary + prompt reinforcement |
 | ~~**Brownfield**~~ | ~~#4 Do-Not-Touch + #2 IRA + #3 Regression Shield~~ | **4-Field Rescoped (2026-03-27)**: #4/#2 Field 3 전용→CEP 이관. #3 범위 복원(Field 2+4). See `analysis/mpl-3field-classification.md` |
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
-| **0.10.0** (TBD) | **P-03** Scout Observability (최소 로깅) + **P-01** State Summary L0 (의존성 기반 압축) | Feature: observability + context intelligence |
+| **0.9.x** | **LT-03b** Blame Analysis fallback + **BM-03** interface_contract weight 필드 + **LT-04b** Phase 분해 결합도 검증 게이트 | Feature: cross-phase resilience |
+| **0.10.0** (TBD) | **P-03** Scout Observability (최소 로깅) | Feature: observability |
 | **0.11.0** (TBD) | **P-04** Skill Audit CLI (P-03 데이터 기반, auto-dream 패턴 채택) | Feature: lifecycle management |
 | **Dropped** | **P-02** Phase 0 L0 (P-01에 흡수), **P-05** Context Assembly YAML (시기상조) | Debate consensus 2026-03-24 |
+| **Dropped (Beads)** | Async Gates (MPL 범위 밖, 외부 오케스트레이터+Resume로 대체), Phase Library/Reuse (anchoring bias 위험, fresh decomposition 우선), Success Criteria 분리 (기존 3중 검증으로 충분) | Beads 토론 합의 2026-03-28 |
 | **Deferred** | T-08 Trend Retro, T-09 Performance Gate, F-06 Multi-Project, F-269 RUNBOOK format, #6 (already implemented), #7 Hashline, #8 Cross-Project Learning | Pending data/need |
 | **Absorbed** | T-07 Premise Challenge → Stage 2 PP Conformance | Already covered |
 | **Skipped** | #5 Incremental Merge | Out of MPL scope |
@@ -325,7 +328,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority |
 |----|---------|--------|----------|
-| P-01 | State Summary L0 (의존성 기반 압축) | ❌ Not implemented | 🟠 Medium-High (debate revised) |
+| P-01 | State Summary L0/L1/L2 (의존성 기반 압축) | ✅ **v0.8.8 done** | 🟠 Medium-High (debate revised) |
 
 **Inspiration**: OpenViking L0/L1/L2 tiered context loading — 83% token reduction, 49% retrieval accuracy improvement on LoCoMo10 benchmark.
 
@@ -405,7 +408,7 @@ Phase Runner context assembly 시:
 
 | ID | Feature | Status | Priority |
 |----|---------|--------|----------|
-| P-03 | Scout search path observability | ❌ Not implemented | 🔴 High (debate revised — P-01 선행 조건) |
+| P-03 | Scout search path observability | ✅ **v0.8.7 done** | 🔴 High (debate revised — P-01 선행 조건) |
 
 **Inspiration**: OpenViking "visualized retrieval trajectory" — 검색 궤적을 시각화하여 잘못된 검색 결과의 원인을 디버깅.
 
@@ -839,6 +842,549 @@ When confirming each candidate, review the following:
 5. **Actual usage frequency** — Does this feature provide value in the majority of MPL executions?
 6. **Greenfield safety** — Does it NOT break existing greenfield code generation? (added v0.6.6)
 7. **Migration impact** — Does it include backward-compatible fallback? (added v0.6.0)
+
+---
+
+---
+
+## Beads Comparison & Long-Term Stability Features (from steveyegge/beads analysis, 2026-03-28)
+
+> **Source**: [steveyegge/beads](https://github.com/steveyegge/beads) v0.62.0 아키텍처 비교 분석 + 장기 실행 이슈 팀 토론
+> Analysis: `analysis/beads-mpl-comparison-research.md`, `analysis/beads-mpl-long-term-issues-debate.md`
+
+### BM (Beads-MPL) Features — Beads 비교에서 도출
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| BM-02 | Semantic Memory Phase Hint (1줄 힌트) | ✅ **v0.8.6 done** | 🟢 Low (비용 ~0) | 0.8.6 |
+| BM-03 | interface_contract weight 필드 (hard/soft/info) | ❌ Not implemented | 🟠 Medium | 0.9.x |
+| BM-04 | Discovery 2축 매트릭스 (Validity × Urgency) | ❌ Not implemented | 🟠 Medium-High | 0.9.0 |
+| BM-05 | Gate 2 PP/PD 체크리스트 주입 | ✅ **v0.8.6 done** | 🟢 Low (비용 ~0) | 0.8.6 |
+
+**Dropped (Beads 토론 기각)**:
+- BM-01 Async Gates → MPL 범위 밖 (외부 오케스트레이터 + Resume Protocol로 대체)
+- BM-06 Phase Library/Reuse → anchoring bias 위험, "잊는 것이 기능" 철학 충돌
+- BM-07 Success Criteria 분리 → 기존 3중 검증(PP+PD+Gate 2)으로 충분
+
+#### BM-02: Semantic Memory Phase Hint
+
+mpl-compound가 파이프라인 완료 시 semantic.md에 **한 줄짜리 Phase 힌트** 추가:
+```markdown
+## Phase Hints
+- DB migration: 스키마 변경과 데이터 마이그레이션을 반드시 별도 Phase로 분리
+- API endpoint: 타입 정의를 먼저 별도 Phase로 처리하면 후속 Phase 에러 감소
+```
+템플릿이 아니라 제약 조건. Decomposer anchoring 없이 교훈만 전달. 구현 비용 ~0.
+
+#### BM-03: interface_contract weight 필드
+
+```yaml
+requires:
+  - type: "DB Model"
+    from_phase: "phase-2"
+    weight: "hard"      # 기본값, 차단
+  - type: "API Schema Reference"
+    from_phase: "phase-3"
+    weight: "soft"      # 있으면 로드, 없어도 진행
+  - type: "Error Handling Pattern"
+    from_phase: "phase-1"
+    weight: "info"      # 토큰 여유 시에만 로드
+```
+전제: P-01 State Summary Tiering 도입 후 구현. soft dependency의 summary 해상도를 선택 가능.
+
+#### BM-04: Discovery 2축 매트릭스
+
+기존 PP/PD 충돌 모델(Validity 축) 보존 + Urgency 축 추가:
+
+|  | immediate | deferred |
+|--|-----------|----------|
+| **PP conflict** | HALT + HITL | FLAG + Phase 후 HITL |
+| **PD diverge** | HITL or auto-adapt | LOG + batch review |
+
+maturity_mode는 분류가 아닌 정책 레이어 (explore: PD+immediate도 auto-adapt, strict: PD+deferred도 HITL).
+
+#### BM-05: Gate 2 PP/PD 체크리스트 주입
+
+Code Reviewer 프롬프트에 현재 Phase 관련 PP/PD를 명시적 체크리스트로 변환 주입:
+```markdown
+## PP/PD Compliance Checklist (auto-generated)
+- [ ] PP-2: JWT 기반 인증 사용 (Pivot Point)
+- [ ] PD-3: PostgreSQL transaction wrapping 적용 (Phase 3 결정)
+- [ ] PD-7: Error response 형식 RFC 7807 준수 (Phase 5 결정)
+```
+design_criteria 분리 없이 동일 효과 달성. 구현 비용 ~0.
+
+---
+
+### LT (Long-Term) Features — 장기 실행 이슈 토론에서 도출
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| LT-01 | State Summary Contract Changes 필수 섹션 | ❌ Not implemented | 🔴 High | 0.9.0 |
+| LT-02 | 테스트 병렬화 플래그 자동 감지 | ✅ **v0.8.6 done** | 🟢 Low (비용 ~0) | 0.8.6 |
+| LT-03a | Contract Verification Gate (예방적) | ❌ Not implemented | 🔴 High | 0.9.0 |
+| LT-03b | Blame Analysis fallback (반응적) | ❌ Not implemented | 🟠 Medium | 0.9.x |
+| LT-04 | Multi-Resolution Summary L1/L2/L3 | ❌ Not implemented | 🔴 High | 0.9.0 |
+| LT-04b | Phase 분해 결합도 검증 게이트 | ❌ Not implemented | 🟠 Medium | 0.9.x |
+| LT-05 | H-Item severity 피드백 루프 메트릭 | ✅ **v0.8.6 done** | 🟢 Low | 0.8.6 |
+
+**Dropped (장기 토론 기각)**:
+- 회귀 테스트 선택적 실행 (Option A/B/C) → O(n²)는 오류(실제 O(n)), 실측 데이터 필요, 병렬화가 정답
+- H-Item 배칭/자동분류/S-Item전환 → T-10이 이미 80% 해결 (실제 Side Interview 2-5회)
+
+#### LT-01: State Summary Contract Changes
+
+State Summary 템플릿에 mandatory 섹션 추가:
+```markdown
+## Contract Changes
+- API: POST /users response에 avatar 필드 추가 (optional, string|null)
+- Types: UserProfile.avatar 추가
+- Errors: E_AVATAR_TOO_LARGE 추가
+```
+변경 없으면 `None` 기록. Context Assembly에서 Phase 0 + 누적 Contract Changes를 overlay 병합하여 "Current Contract State" 생성. Phase 0 자체는 수정하지 않음. 비용: Phase당 ~300-800 토큰.
+
+#### LT-02: 테스트 병렬화 플래그 자동 감지
+
+Phase Runner의 Bash 호출에서 테스트 프레임워크별 병렬 플래그 자동 추가:
+- `vitest` → `--pool=threads`
+- `pytest` → `-n auto`
+- `cargo test` → `--jobs`
+- `go test` → `-parallel`
+
+프로토콜 복잡도 0 증가, 회귀 감지율 100% 유지.
+
+#### LT-03a: Contract Verification Gate
+
+Phase N 완료 후, Phase N+1 시작 전 경량 검증:
+```
+for each completed_phase in [1..N]:
+  for each produce in completed_phase.interface_contract.produces:
+    verify_exists(produce.path)
+    if produce.type == "export": verify_grep(produce.path, produce.symbol)
+
+if violations_found:
+  re-execute violated_phase (NOT full redecompose)
+```
+비용: Phase당 ~5-15K 토큰. 예상 재분해율: 15-30% → 2-5%.
+
+#### LT-03b: Blame Analysis Fallback
+
+Contract Gate 통과 후에도 circuit_break 발생 시:
+```
+blame_result = analyze_blame(failure_info, changed_files, phase_history)
+if blame_result.confidence > 0.7: re_execute(origin_phase)
+else: redecompose()  # 기존 경로
+```
+LT-03a와 결합 시 예상 재분해율: 1-3%.
+
+#### LT-04: Multi-Resolution Summary L1/L2/L3
+
+P-01 (State Summary Tiering)의 확장된 구현:
+- **L1 (Full)**: 전체 State Summary + 코드 diff (~800 토큰) — 최근 3 Phase
+- **L2 (Medium)**: 결정 + 인터페이스 변경 + 검증 요약 (~300 토큰) — 의존 Phase
+- **L3 (Compact)**: 1줄 요약 (~50 토큰) — 나머지
+- **On-Demand**: L3에서 정보 부족 시 L2/L1로 동적 로딩
+
+핵심 발견: 윈도우의 목적이 "용량 관리" → "복원력 관리"로 전환. Compaction 대비 보존 대상 명시적 선언.
+
+#### LT-04b: Phase 분해 결합도 검증 게이트
+
+Decomposer 출력 검증: 7개 이상 Phase를 참조하는 Phase가 있으면 분해 재설계 경고. Phase 간 결합도가 과다하면 윈도우를 최적화해도 해결 불가 (근본 원인 차단).
+
+#### LT-05: H-Item Severity 피드백 루프
+
+metrics.json에 추가:
+```json
+{
+  "h_item_severity_overrides": { "high_to_med": 0, "med_to_high": 0 },
+  "h_item_review_rate": 0.0,
+  "h_item_total": 0,
+  "h_item_side_interviews": 0
+}
+```
+Step 5.5에서 사용자가 severity를 재분류하는 경우를 추적. verification planner 정확도 피드백 루프.
+
+---
+
+---
+
+## Cross-Boundary Verification Features (from Yggdrasil Invoke Audit, 2026-03-28)
+
+> **Source**: Yggdrasil MPL 파이프라인 완료 후 수동 감사에서 26건의 프론트-백엔드 컨트랙트 불일치 발견.
+> 5-Gate Quality System 전량 통과 후 사후 발견. 근본 원인: MPL 검증이 단일 언어 경계 내에서만 작동.
+> Analysis: `analysis/mpl-cross-boundary-verification-gap.md`
+> Team debate: Architect/Contrarian/Hacker/Ontologist/Evaluator 2회 수행, 수렴안 도출.
+
+### CB-01: Boundary Pair Scan (Codebase Analysis Module 2b)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-01 | Cross-Boundary Pair Scan | ❌ Not implemented | 🔴 High | 0.9.0 |
+
+**Problem**: Step 2 Codebase Analysis의 Module 2 (Dependency Graph)가 단일 언어 내 import 의존성만 추적. 언어 간 경계(TS invoke → Rust command, fetch → API handler)가 매핑되지 않아 Decomposer가 cross-boundary 의존성을 인식 못함.
+
+**Proposal**: Module 2b "Boundary Pair Scan" 추가.
+
+Brownfield:
+```
+# Tauri invoke pairs
+Grep("invoke\\(['\"]([^'\"]+)['\"]", "src/", glob="*.{ts,tsx}")  → caller
+Grep("#\\[tauri::command\\].*fn\\s+(\\w+)", "src-tauri/", glob="*.rs")  → callee
+
+# REST API pairs
+Grep("(fetch|axios)\\.(get|post|put|delete)\\(['\"]([^'\"]+)['\"]", "src/")  → caller
+Grep("@(Get|Post|Put|Delete)\\(['\"]([^'\"]+)['\"]", "app/")  → callee
+```
+
+Greenfield:
+- PP Interview + user request에서 tech stack 키워드로 프로토콜 감지
+- 개별 pair는 `projected` 상태로 마킹, 코드 생성 후 `confirmed` 전환
+
+Output: `codebase-analysis.json`에 `boundary_pairs` 배열 추가.
+
+```yaml
+boundary_pairs:
+  - id: "BP-1"
+    status: "confirmed"   # confirmed (brownfield) | projected (greenfield)
+    caller: { lang: "ts", file: "src/stores/characterStore.ts", symbol: "invoke('save_character')" }
+    callee: { lang: "rust", file: "src-tauri/src/commands/character.rs", symbol: "fn save_character()" }
+    protocol: "tauri-invoke"
+    framework_rules:
+      - "top-level params: camelCase (Tauri v2 default)"
+      - "struct fields: snake_case (serde default)"
+```
+
+**Token cost**: ~500 (brownfield), ~200 (greenfield). Module 2 실행 시 함께 처리.
+
+**Evaluator verdict**: ADOPT. MPL 호환성 높음, 외부 의존성 없음, 기존 Module 구조의 자연스러운 확장.
+
+### CB-02: Decomposer Rule 9b (Boundary-Aware Decomposition)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-02 | Boundary Pair Phase Grouping Rule | ❌ Not implemented | 🔴 High | 0.9.0 |
+
+**Problem**: Decomposer가 cross-boundary 의존성을 모르기 때문에 TS 타입 정의와 Rust 구조체가 서로 다른 phase에 배치됨. Worker가 한쪽만 보고 구현하여 불일치 발생.
+
+**Proposal**: Decomposer에 Rule 9b 추가.
+
+```
+Rule 9b: Boundary pair awareness
+- boundary_pair로 연결된 두 파일의 변경은 반드시 같은 phase에 배치
+- 같은 phase에 넣으면 L 복잡도를 초과하는 경우:
+  callee phase → caller phase 순으로 2-phase 분할
+  caller phase의 requires에 callee의 produces 참조 필수
+  Gate 0.7이 분할 경계의 contract 정합성 검증
+- 기존 Rule 9 (Cluster awareness)의 자연스러운 확장
+```
+
+**Token cost**: ~100 (decomposer 프롬프트에 규칙 한 줄 추가).
+
+**Evaluator conditions**:
+- ⚠️ **필수 조건**: phase 크기 제한(S/M/L)과 Rule 9b 충돌 시 해소 규칙 정의 필요. 위 분할 전략으로 해소.
+
+### CB-03: Gate 0.7 Cross-Boundary Advisory (Static Verification)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-03 | Gate 0.7 Cross-Boundary Advisory | ❌ Not implemented | 🔴 High | 0.9.0 |
+
+**Problem**: Gate 0.5(tsc/cargo check)는 각 언어 내부만 검증. Gate 1(Tests)은 mock 기반이라 실제 직렬화 경로 미검증. 두 언어 사이의 컨트랙트를 정적으로 대조하는 게이트가 없음.
+
+**Proposal**: Gate 0.5와 Gate 1 사이에 Gate 0.7 삽입 (advisory, non-blocking).
+
+```
+Gate 0.7: Cross-Boundary Advisory
+  Input: boundary_pairs (from CB-01) + 실제 코드
+  Method:
+    for each boundary_pair:
+      1. caller 측 invoke 파라미터명/타입을 grep 추출
+      2. callee 측 command 파라미터명/타입을 grep 추출
+      3. framework_rules 적용하여 이름 변환 후 대조
+      4. 불일치 → advisory warning 생성
+
+  Output: `.mpl/mpl/gate-0.7-report.md`
+  Mode: advisory (non-blocking)
+  Warning routing:
+    - 경고를 mpl-code-reviewer (Gate 2)에 전달 → 리뷰 컨텍스트로 활용
+    - Step 5.5 (Post-Execution Review) Completion Report에 별도 섹션으로 표시
+    - 경고 5건 이상 → orchestrator에 "cross-boundary 집중 검토 권고" 알림
+```
+
+**Token cost**: 프로젝트 규모에 비례 (50 invoke 기준 ~3-5K).
+
+**Evaluator conditions**:
+- ⚠️ **필수 조건**: advisory 경고 라우팅 경로 명시 (위 routing 섹션으로 충족)
+- grep 기반이므로 제네릭, serde 속성, 타입 별칭 등에서 false negative 발생 가능 → advisory 모드로 수용
+
+**LT-03a와의 관계**: LT-03a는 **phase 간** interface_contract 검증 (같은 언어 내 produces/requires 존재 확인). CB-03은 **언어 간** cross-boundary contract 검증. 서로 다른 차원의 검증이며 상호 보완적.
+
+### CB-04: Mock Boundary Gap Identification (Verification Planner Extension)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-04 | Mock Boundary Gap Flagging | ❌ Not implemented | 🟠 Medium | 0.9.0 |
+
+**Problem**: 프론트엔드 테스트가 invoke를 mock하면 실제 serde 직렬화/역직렬화 경로가 검증되지 않음. 이 "검증 갭"이 Verification Planner 산출물에 명시되지 않아 26건의 직렬화 불일치가 테스트를 통과함.
+
+**Proposal**: mpl-verification-planner 프롬프트에 mock gap 식별 규칙 추가.
+
+```yaml
+# Verification Planner 산출물에 자동 추가
+verification_gaps:
+  - gap: "invoke() calls mocked in frontend tests"
+    risk: "serde serialization mismatches undetectable"
+    mitigation: "CB-03 Gate 0.7 static verification"
+    severity: HIGH
+    affected_pairs: ["BP-1", "BP-2", ...]
+```
+
+**Token cost**: ~50 (프롬프트 확장). 산출물에 verification_gaps 섹션 ~200 추가.
+
+### Summary Table
+
+| ID | Feature | Evaluator Verdict | Priority | Version | Token Cost |
+|----|---------|:-----------------:|----------|---------|------------|
+| CB-01 | Boundary Pair Scan | ✅ ADOPT | 🔴 High | 0.9.0 | ~500 |
+| CB-02 | Decomposer Rule 9b | ✅ ADOPT (with condition) | 🔴 High | 0.9.0 | ~100 |
+| CB-03 | Gate 0.7 Advisory | ✅ ADOPT (with condition) | 🔴 High | 0.9.0 | ~3-5K |
+| CB-04 | Mock Gap Flagging | ✅ ADOPT (recommended) | 🟠 Medium | 0.9.0 | ~250 |
+
+### Rejected Alternatives
+
+| Alternative | Rejection Reason |
+|-------------|-----------------|
+| **Full Dependency Graph (CBDG)** | 10K+ 토큰, boundary pairs 대비 추가 가치 불명확. YAGNI. |
+| **contracts.yaml SSOT** | 3번째 진실 소스 생성 → 3-way drift 위험. Phase 중 갱신 소유권 충돌. |
+| **Codegen (tauri-specta)** | 외부 의존성 금지 원칙 위배. Tauri 전용, 범용성 없음. 프로젝트에 이미 존재 시 기회주의적 활용은 허용. |
+| **E2E Integration Tests** | Tauri 백엔드 실행 필요 → 에이전트 환경에서 불가. yggdrasil-e2e-gap-analysis.md에서 이미 확인된 제약. |
+
+### Expected Coverage (combined CB-01 + CB-02 + CB-03 + CB-04)
+
+| Pattern | Issues | Prevention (CB-01+02) | Detection (CB-03) | Combined |
+|---------|--------|----------------------|-------------------|----------|
+| Spec vs Impl field mismatch | 14 | ~8 (same phase) | ~11 (grep) | ~12/14 |
+| Tauri v2 camelCase | 5 | ~4 (framework rules) | ~4 (rule check) | ~5/5 |
+| Missing required fields | 3 | ~2 (same phase) | ~2 (field count) | ~2/3 |
+| JSON serialization boundary | 4 | ~1 (data_contract) | ~1 (type mismatch) | ~1-2/4 |
+| **Total** | **26** | | | **~20-23/26 (77-88%)** |
+
+0% → 77-88% 는 극적 개선. 나머지 ~12-23%는 JSON 직렬화 경계 등 정적 분석 한계이며, v0.9.x에서 추가 대응 검토.
+
+### Version Mapping Update
+
+v0.9.0에 CB-01~CB-04 + PR-01~05를 기존 LT-03a와 함께 배치:
+
+```
+0.9.0: TS-01/02 + T-05 + T-06 + LT-01 + LT-03a + LT-04 + BM-04 + P-01
+       + CB-01 + CB-02 + CB-03 + CB-04  ← cross-boundary verification
+       + PR-01 + PR-02 + PR-03 + PR-04 + PR-05  ← prompt reinforcement (from codebase-issue-scan)
+```
+
+CB-01~03은 🔴 High, CB-04는 🟠 Medium. PR-01~02는 🔴 High, PR-03~04는 🟠 Medium, PR-05는 🟢 Low.
+
+---
+
+## Prompt Reinforcement Features (from Yggdrasil Codebase Issue Scan, 2026-03-28)
+
+> **Source**: Yggdrasil codebase-issue-scan에서 33건 이슈 발견. CB-01~04로 커버되는 ~15건 외 나머지 ~18건 분석.
+> 3-Agent 토론(Architect/Contrarian/Evaluator) 수행. 합의: 신규 Gate/Module 없이 기존 프롬프트 강화로 대응.
+> Analysis: `analysis/mpl-cross-boundary-verification-gap.md`, Yggdrasil `.mpl/mpl/codebase-issue-scan.md`
+
+### 설계 원칙
+
+Contrarian/Evaluator 합의에 따라, 나머지 18건은 **신규 인프라(Gate 0.8, Module 7) 없이** 기존 파이프라인 프롬프트 강화만으로 대응한다.
+
+근거:
+1. 카테고리당 2~4건으로 전용 시스템 정당화 불가 (CB-01~04의 15건과 대비)
+2. 대부분 Gate 2 Code Review의 기존 10개 카테고리에 자연스럽게 매핑
+3. 프롬프트 1~5줄 추가로 추가 토큰 비용 거의 0
+4. 신규 Gate 증식은 micro-phase 철학과 충돌 (이미 7개 Gate 존재/계획)
+
+Module 7(Pattern Scan) + Gate 0.8(Pattern Advisory)는 **동일 패턴 이슈 5건 이상 재발 시** v0.9.x에서 재평가한다.
+
+### PR-01: Transaction Boundary Check (db.md Domain Prompt)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| PR-01 | Transaction Boundary Verification | ❌ Not implemented | 🔴 High | 0.9.0 |
+
+**Problem**: 다중 DB 변경 연산(INSERT/UPDATE/DELETE)이 트랜잭션 래핑 없이 실행되어 partial failure 시 데이터 무결성 훼손. Yggdrasil에서 2건 발견 (import_world 70+ INSERTs, reorder_chapters loop UPDATEs).
+
+**Proposal**: `MPL/prompts/domains/db.md`에 트랜잭션 래핑 규칙 추가.
+
+```markdown
+# db.md 추가 규칙
+- 단일 함수 내 2개 이상의 DB 변경 연산(INSERT/UPDATE/DELETE)은 반드시 트랜잭션으로 래핑
+- Step 3-B에서 DB 도메인 페이즈에 A-item 자동 삽입:
+  "[A-TX] 다중 DB 변경 함수에 BEGIN/COMMIT 또는 .transaction() 래핑 확인"
+```
+
+**Token cost**: +0 (프롬프트 2줄 추가)
+
+**Evaluator verdict**: ✅ ADOPT. Value Score 9.0 (최고). grep 탐지 신뢰도 HIGH, 구현 비용 극히 낮음.
+
+**Covers**: Issue 1.9 (import_world), 1.14 (reorder_chapters)
+
+### PR-02: Security Pattern Concretization (Gate 2 Security Category)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| PR-02 | Security Pattern Grep Patterns | ❌ Not implemented | 🔴 High | 0.9.0 |
+
+**Problem**: Gate 2 Code Reviewer의 Category 2(Security)가 추상적 지시만 포함. LLM이 매번 다른 보안 항목을 검사하여 일관성 없음. Yggdrasil에서 weak UUID(SystemTime nanos만 사용)와 CSP null이 통과.
+
+**Proposal**: Gate 2 Security 카테고리에 구체적 grep 패턴 목록 추가.
+
+```markdown
+# code-reviewer 프롬프트 Security 카테고리 확장
+Security 검사 시 다음 패턴을 Bash grep으로 반드시 확인:
+- Weak random: `SystemTime|Date.now.*%|Math.random.*id` → uuid crate 또는 crypto.randomUUID() 권고
+- Missing CSP: `csp.*null|content.security.policy` in config files → production CSP 설정 권고
+- Hardcoded secrets: `password\s*=\s*"|api_key\s*=\s*"|secret\s*=\s*"` → 환경변수 권고
+- SQL injection: 문자열 보간 SQL (`format!("SELECT.*{}")`, template literal SQL) → parameterized query 권고
+```
+
+**Token cost**: +0 (프롬프트 5줄 추가). Gate 2 실행 시 grep 호출 ~200 토큰 추가.
+
+**Evaluator verdict**: ✅ ADOPT. Value Score 6.5. 기존 카테고리 구체화일 뿐, 신규 메커니즘 아님.
+
+**Covers**: Issue 1.6 (weak UUID), 6.1 (CSP null)
+
+**Alternative considered**: `/security-audit` 스킬 연동 — v0.9.1에서 검토. 현재는 프롬프트 강화가 최소 비용.
+
+### PR-03: UI Hardcoding Detection (Gate 2 Design System Category)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| PR-03 | UI Hardcoding Grep Patterns | ❌ Not implemented | 🟠 Medium | 0.9.0 |
+
+**Problem**: Gate 2 Category 9(Design System Compliance)가 `phase_domain == "ui"` 조건에서만 활성화되나, 구체적 grep 패턴이 없어 하드코딩 색상을 체계적으로 잡지 못함. Yggdrasil에서 3개 컴포넌트의 light-mode 전용 hex 색상, 27개 파일의 82개 raw hex 인스턴스 발견.
+
+**Proposal**: Gate 2 Design System 카테고리에 하드코딩 탐지 지시 추가.
+
+```markdown
+# code-reviewer 프롬프트 Design System 카테고리 확장 (phase_domain == "ui" 시)
+다음 패턴을 Bash grep으로 확인:
+- Raw hex colors: `/#[0-9a-fA-F]{3,8}/` in .tsx/.vue/.svelte (CSS 변수 정의 파일 제외)
+  → `var(--color-xxx)` 또는 theme 토큰 사용 권고
+- Dark mode 미대응: 배경/텍스트에 light-only 색상 (#fee2e2, #fef3c7 등) 사용
+  → prefers-color-scheme 또는 dark: variant 필요
+- 20건 이상 raw hex → "디자인 토큰화 필요" advisory
+```
+
+**Token cost**: +0 (프롬프트 3줄 추가). Gate 2 실행 시 grep 호출 ~100 토큰 추가.
+
+**Evaluator verdict**: ✅ ADOPT. Value Score 8.5. 기존 카테고리에 패턴만 명시.
+
+**Covers**: Issue 4.1 (ConflictCard), 4.2 (ConflictPanel), 4.3 (ReviewPanel), 4.4 (widespread hardcoded colors)
+
+### PR-04: Resource Lifecycle Pair Check (Gate 2 Correctness Category)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| PR-04 | Resource Lifecycle Pair Checklist | ❌ Not implemented | 🟠 Medium | 0.9.0 |
+
+**Problem**: open/close, backup/restore, create/destroy 같은 lifecycle 쌍에서 리소스 정리가 누락. Yggdrasil에서 close_project()가 DB 연결 미해제, restore_backup()이 DB 재연결 미수행, Frontend closeProject()가 Backend 미호출.
+
+**Proposal**: Gate 2 Correctness(Category 1) 체크리스트에 lifecycle pair 항목 추가.
+
+```markdown
+# code-reviewer 프롬프트 Correctness 카테고리 확장
+- Resource lifecycle pair: open/connect/create/backup 함수가 있으면,
+  대응하는 close/disconnect/destroy/restore 함수에서 해당 리소스를 실제로 정리하는지 확인.
+  Frontend ↔ Backend 양쪽에서 lifecycle이 동기화되는지 확인 (예: Frontend close → Backend close 호출).
+```
+
+**Token cost**: +0 (프롬프트 2줄 추가)
+
+**Evaluator verdict**: ✅ ADOPT. Value Score 7.0. grep 기반 자동 탐지(Gap 1의 RL-01)는 제어 흐름 분석 한계로 보류. Code Reviewer의 의미론적 판단에 위임이 현실적.
+
+**Covers**: Issue 1.7 (close_project DB), 1.8 (restore_backup DB), 3.4 (Frontend closeProject)
+
+**Escalation trigger**: Lifecycle 이슈 5건 이상 재발 시 → Module 7 (RL Pair Scan) + Gate 0.8 정식 도입 검토.
+
+### PR-05: Error Handling Strictness (Phase 0 Error Spec)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| PR-05 | Strict Mode + unwrap Audit | ❌ Not implemented | 🟢 Low | 0.9.0 |
+
+**Problem**: TypeScript의 `strictNullChecks` 미설정으로 null 관련 런타임 오류 미탐지. Rust에서 `unwrap()` 남용으로 패닉 위험. Yggdrasil에서 `invoke<Chapter>` 반환값이 실제로는 `Option<Chapter>`인데 null check 없이 접근.
+
+**Proposal**: Phase 0 Enhanced Step 4(Error Spec)에서 strict 설정 확인 추가.
+
+```markdown
+# Phase 0 Error Spec 확장
+- TypeScript: `tsconfig.json`에서 `strict: true` 또는 `strictNullChecks: true` 확인.
+  미설정 시 advisory 경고 + Phase Decision에 기록.
+- Rust: 프로덕션 코드에서 `.unwrap()` 사용 개수 확인.
+  10건 이상 시 "unwrap 감사 필요" advisory.
+```
+
+**Token cost**: +0 (프롬프트 2줄 추가)
+
+**Evaluator verdict**: ✅ ADOPT. Value Score 8.0. 컴파일러가 대부분 처리하므로 프롬프트 추가만으로 충분.
+
+**Covers**: Issue 3.8 (missing try/catch), 3.10 (null check 부재)
+
+### PR Summary Table
+
+| ID | Feature | Evaluator Verdict | Priority | Version | Token Cost | Covers |
+|----|---------|:-----------------:|----------|---------|------------|--------|
+| PR-01 | Transaction Boundary Check | ✅ ADOPT | 🔴 High | 0.9.0 | +0 | 1.9, 1.14 |
+| PR-02 | Security Pattern Grep | ✅ ADOPT | 🔴 High | 0.9.0 | ~200 | 1.6, 6.1 |
+| PR-03 | UI Hardcoding Detection | ✅ ADOPT | 🟠 Medium | 0.9.0 | ~100 | 4.1~4.4 |
+| PR-04 | Lifecycle Pair Check | ✅ ADOPT | 🟠 Medium | 0.9.0 | +0 | 1.7, 1.8, 3.4 |
+| PR-05 | Error Handling Strictness | ✅ ADOPT | 🟢 Low | 0.9.0 | +0 | 3.8, 3.10 |
+
+**총 추가 토큰 비용**: ~300 (PR-02, PR-03의 grep 호출만)
+
+### Expected Coverage (CB-01~04 + PR-01~05 combined)
+
+| Source | Issues | CB-01~04 | PR-01~05 | Combined | Uncovered |
+|--------|--------|----------|----------|----------|-----------|
+| Cross-boundary contracts | 15 | ~15 | — | ~15 | 0 |
+| Transaction boundaries | 2 | — | 2 | 2 | 0 |
+| Security patterns | 2 | — | 2 | 2 | 0 |
+| UI consistency | 4 | — | 4 | 4 | 0 |
+| Resource lifecycle | 3 | — | ~2 | ~2 | ~1 |
+| Error handling | 2 | — | ~2 | ~2 | 0 |
+| Code quality (DRY) | 3 | — | — | 0 | 3 (Gate 1.5+2 기존 커버) |
+| Feature completeness | 2 | — | — | 0 | 2 (S-item+E2E 기존 커버) |
+| **Total** | **33** | **~15** | **~12** | **~27** | **~6** |
+
+**0% → 82% 커버리지** (CB-01~04의 77-88%에서 추가 12건 확보). 잔여 6건은 기존 Gate 1.5/Gate 2/S-item/E2E로 이미 담당하는 영역이므로 추가 메커니즘 불필요.
+
+### Deferred: Module 7 + Gate 0.8 (Architect Proposal)
+
+| Feature | Status | Escalation Trigger |
+|---------|--------|-------------------|
+| Module 7 (Pattern Discovery) | ⏸️ Deferred | 동일 패턴 카테고리 이슈 5건 이상 재발 |
+| Gate 0.8 (Pattern Advisory) | ⏸️ Deferred | PR-01~05 프롬프트 강화로 커버 불가 확인 시 |
+
+Architect의 Module 7(lifecycle_pairs, transaction_candidates, security_findings, design_system_info를 codebase-analysis.json에 추가) + Gate 0.8(패턴별 정적 검증) 설계는 보존하되, 프롬프트 강화 효과 검증 후 필요성 재평가.
+
+### Out of Scope
+
+| Category | Issues | Reason |
+|----------|--------|--------|
+| Code Quality (DRY) | 1.4, 1.5, 1.13 | Gate 1.5(F-50 code duplication) + Gate 2 Category 4(Maintainability) 이미 담당 |
+| Feature Completeness | 3.5, 7.6 | S-item + E2E + Browser QA(Gate 1.7) 이미 담당. 근본 원인은 스펙 불완전성 → Phase 0 강화가 정답 |
+
+### Debate Transcript Summary
+
+**3-Agent 토론 (2026-03-28)**:
+
+| Agent | Position | Key Argument |
+|-------|----------|--------------|
+| **Architect** | Module 7 + Gate 0.8 신설 | 5개 gap을 "Verification Pattern" 추상화로 통합. pluggable scanner 구조. ~4.3K 토큰 |
+| **Contrarian** | 기존 구조 강화만 | Gate 증식은 micro-phase 철학 위배. 보안/UI는 린터 영역. Feature Completeness는 스펙 갭. "체계화는 데이터 축적 후" |
+| **Evaluator** | 프롬프트 강화 우선 | Value Score 기반 우선순위. 상위 4개 모두 "프롬프트 1줄" 수준. CB+PR = 79-82% 커버리지 |
+
+**합의점**: CB-01~04 + PR-01~05(프롬프트 강화) → v0.9.0. Module 7/Gate 0.8 → deferred. DRY/FC → out of scope.
+
+**분기점 해소**: Gate 0.8 신설 불필요 (Contrarian 승). 단, Architect의 Module 7 + Gate 0.8 설계는 escalation trigger 조건부로 보존.
 
 ---
 

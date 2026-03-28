@@ -632,6 +632,64 @@ Foundation for Field 4 (AI-Built Maintenance) support. Detects .mpl/ artifact ex
 
 Analysis: `analysis/mpl-3field-classification.md` → renamed to 4-Field classification
 
+### v0.8.6 — Low-Cost Quality Improvements (2026-03-29)
+
+4 low-cost features: semantic phase hints, PP/PD checklist injection into code review, test parallelization flags, and H-item severity feedback loop. Total additional token cost: ~0.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Semantic Phase Hints | BM-02 | Pipeline completion extracts 1-3 one-line decomposition lessons to semantic.md "Phase Hints" category | Memory extension |
+| Gate 2 PP/PD Checklist | BM-05 | Auto-generated PP/PD compliance checklist injected into code reviewer prompt and Gate 2 dispatch | Gate 2 extension |
+| Test Parallelization Flags | LT-02 | Phase Runner auto-detects test framework and adds parallel execution flags (vitest, jest, pytest, cargo, go) | Phase Runner extension |
+| H-Item Severity Feedback | LT-05 | Track severity reclassifications in Step 5.1.8 → h_item_metrics in state.json for planner accuracy feedback | Finalize + State extension |
+
+**Affected files:**
+- `hooks/lib/mpl-memory.mjs` — `addPhaseHint()` function (BM-02)
+- `agents/mpl-code-reviewer.md` — Investigation Protocol Step 1b PP/PD checklist (BM-05)
+- `commands/mpl-run-execute-gates.md` — Gate 2 prompt with PP/PD checklist (BM-05)
+- `agents/mpl-phase-runner.md` — Step 4 cumulative regression parallel flags table (LT-02)
+- `hooks/lib/mpl-state.mjs` — `h_item_metrics` field in DEFAULT_STATE (LT-05)
+- `commands/mpl-run-finalize.md` — Step 5.1.8 metrics tracking + Step 5.2.65 phase hint extraction (BM-02, LT-05)
+
+**Breaking changes: NONE.** All features are additive. `h_item_metrics` defaults to zeroes. Phase hints append to existing semantic.md.
+
+### v0.8.7 — Scout Search Path Observability (2026-03-29)
+
+Scout agent now logs its full search trajectory, enabling post-mortem analysis of search quality and failure diagnosis.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Search Trajectory Logging | P-03 | Scout output includes `search_trajectory` array logging every tool call (tool, query, results, selected, note) | Agent output extension |
+| Trajectory Persistence | P-03 | Orchestrator saves trajectory to `.mpl/mpl/phases/{phase}/search-trajectory.json` for both Phase 0 and fix loop scouts | Protocol extension |
+| Trajectory-Based Retry | P-03 | Fix loop analyzes trajectory on 0-finding scout results to determine retry strategy (wrong pattern, stale QMD, scope too narrow) | Protocol extension |
+| Validation | P-03 | `search_trajectory` added to mpl-scout expected sections in validate-output hook | Hook extension |
+
+**Affected files:**
+- `agents/mpl-scout.md` — Output_Format extended with `search_trajectory` array + documentation
+- `commands/mpl-run-execute-gates.md` — Fix loop scout trajectory save + failure analysis
+- `commands/mpl-run-phase0-analysis.md` — Phase 0 scout trajectory save
+- `hooks/mpl-validate-output.mjs` — `search_trajectory` added to mpl-scout expected sections
+
+**Breaking changes: NONE.** `search_trajectory` is additive. Existing scout outputs without it still validate (findings is the primary required field).
+
+### v0.8.8 — State Summary L0/L1/L2 Tiering (2026-03-29)
+
+Dependency-based compression for state summaries. Instead of loading all dependency phase summaries at full resolution, loads at 3 tiers based on relationship to current phase. Expected ~50-60% token reduction for 10+ phase projects.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| L0/L1/L2 Summary Tiering | P-01 | 3-tier loading: L0 (~20tok, 1-line) for distant phases, L1 (~200tok, files+interfaces) for overlapping phases, L2 (~800tok, full) for direct dependencies | Protocol extension |
+| State Summary Structure | P-01 | Phase Runner output restructured with ordered sections (Summary → Files Changed → Interface Changes → Phase Decisions → Verification Results) for mechanical L0/L1 extraction | Agent prompt extension |
+| Context Assembly Update | P-01 | `load_dependency_summaries()` rewritten with 3-tier classification logic | Protocol extension |
+| Phase Runner Prompt Update | P-01 | Dependency summaries injected as L0/L1/L2 grouped sections | Prompt extension |
+
+**Affected files:**
+- `commands/mpl-run-execute-context.md` — `load_dependency_summaries()` rewritten with L0/L1/L2 classification
+- `agents/mpl-phase-runner.md` — `State_Summary_Required_Sections` restructured for mechanical extraction
+- `commands/mpl-run-execute.md` — Phase Runner prompt template uses L0/L1/L2 grouped sections
+
+**Breaking changes: NONE.** Old state-summary.md files without the new section structure are loaded as L2 (full detail) by default. New structure is backward compatible.
+
 ---
 
 ## 10. Known Issues and Remaining Work
