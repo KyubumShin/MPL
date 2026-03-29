@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.9.0 Design Document
+# MPL (Micro-Phase Loop) v0.9.2 Design Document
 
 ## 1. Overview
 
@@ -710,6 +710,46 @@ Dependency-based compression for state summaries. Instead of loading all depende
 - `agents/mpl-verification-planner.md` — A-TX auto-insert for DB phases (PR-01)
 
 **Breaking changes: NONE.** All changes are prompt text additions. No schema, protocol, or config changes.
+
+### v0.9.1 — Cross-Boundary Detection (2026-03-29)
+
+4 features for detecting cross-language boundary contract mismatches. Source: yggdrasil-exp2 experiment (200 tests pass, 9 CRITICAL cross-boundary bugs found).
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Boundary Pair Scan | CB-01 | Phase 0 Step 1b: grep-based detection of caller↔callee pairs across languages (Tauri invoke, REST, JSON-RPC) | Phase 0 extension |
+| Decomposer Rule 8 | CB-02 | Boundary-pair awareness: paired files should share a phase, 2-phase split if size exceeds L | Decomposer rule |
+| Gate 0.7 Advisory | CB-03 | Static verification of parameter name/type matching across boundaries (non-blocking advisory) | New gate |
+| Mock Gap Flagging | CB-04 | Auto-flag verification gaps where mocked IPC prevents serde validation | Verification planner extension |
+
+**Affected files:**
+- `agents/mpl-phase0-analyzer.md` — Step 1b Boundary Pair Scan (CB-01)
+- `agents/mpl-decomposer.md` — Rule 8 boundary-pair awareness (CB-02)
+- `commands/mpl-run-execute-gates.md` — Gate 0.7 section (CB-03)
+- `docs/design.md` — Gate table updated with Gate 0.7 (CB-03)
+- `agents/mpl-code-reviewer.md` — Step 4.5 gate-0.7 integration (CB-03)
+- `commands/mpl-run-finalize.md` — Gate 0.7 warning aggregation (CB-03)
+- `agents/mpl-verification-planner.md` — Section 5.5 mock boundary gaps (CB-04)
+
+**Breaking changes: NONE.**
+
+### v0.9.2 — Cross-Boundary Enforcement (2026-03-29)
+
+3 features converting cross-boundary verification from behavioral instruction to structural enforcement. Design principle: "Instruct less, structure more" — instruction→schema transition.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| boundary_check Required Output | CB-05 | Worker output schema: mandatory `boundary_check` field for multi-layer phases. PostToolUse hook rejects empty. `match: false` triggers fix loop. | Worker schema + Phase Runner validation |
+| Contract Snippet Injection | CB-06 | Decomposer extracts 3-5 line targeted contract excerpts per phase (reduces context competition vs full 2000-token contract) | Decomposer extension |
+| Post-Join Reconciliation | CB-07 | After parallel phase merge: cross-validate boundary_check assertions between phases, dispatch fix on conflict | Orchestrator protocol |
+
+**Affected files:**
+- `agents/mpl-worker.md` — boundary_check output field (CB-05)
+- `agents/mpl-phase-runner.md` — Step 4.57 boundary check validation (CB-05)
+- `agents/mpl-decomposer.md` — contract_snippet field + Step 6.5 extraction (CB-06)
+- `commands/mpl-run-execute.md` — Step 4.0.6 post-join reconciliation (CB-07)
+
+**Breaking changes: NONE.** Worker output schema is additive (boundary_check only required for multi-layer phases).
 
 ---
 

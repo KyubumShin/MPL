@@ -588,11 +588,14 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 |---------|----------|------|
 | ~~**0.8.0**~~ | ~~V-01 Cluster Ralph + V-02 Lint Gate + V-03 TSConfig Strict + V-04 Config Schema + V-05 Scope Drift Report~~ | ✅ **Implemented** |
 | ~~**0.8.1**~~ | ~~#1 alt Ref files + TS-03 Regression + Round 1-T Test Strategy + Step 8.6 E2E framework~~ | ✅ **Implemented** |
-| **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync | Feature: test infra + UI workflow |
-| **Brownfield** | #4 Do-Not-Touch + #2 IRA + #3 Regression Shield | Feature: brownfield mode |
+| ~~**0.9.0**~~ | ~~PR-01~05 Prompt Reinforcement + F-E2E-1/1b/1c E2E Fallback~~ | ✅ **Implemented** |
+| ~~**0.9.1**~~ | ~~CB-01~04 Cross-Boundary Detection (Boundary Pair Scan + Rule 8 + Gate 0.7 + Mock Gap)~~ | ✅ **Implemented** |
+| ~~**0.9.2**~~ | ~~CB-05~07 Cross-Boundary Enforcement (boundary_check output + Contract Snippet + Post-Join Reconciliation)~~ | ✅ **Implemented** |
+| **0.9.3** | LT-01 Contract Changes + LT-03a Contract Verification Gate + LT-04 Multi-Resolution Summary | Feature: contract & summary |
+| **0.9.4** | TS-01/02 MCP Assertion tools + BM-04 Discovery Matrix | Feature: test infra |
+| **0.9.5** | T-05 Design Contract + T-06 Doc Sync | Feature: design & docs |
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
-| **0.10.0** (TBD) | **P-03** Scout Observability + **P-01** State Summary L0 | Feature: observability + context intelligence |
-| **0.11.0** (TBD) | **P-04** Skill Audit CLI (auto-dream 패턴 채택) | Feature: lifecycle management |
+| **0.10.0** (TBD) | **P-04** Skill Audit CLI | Feature: lifecycle management |
 | **Deferred** | T-08, T-09, F-06, F-269, #7, #8 | Pending data/need |
 
 ---
