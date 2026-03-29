@@ -44,7 +44,7 @@ disallowedTools: Write, Edit, Task
       mpl-compound, mpl-decomposer, mpl-doctor, mpl-git-master,
       mpl-interviewer, mpl-phase-runner, mpl-phase-seed-generator,
       mpl-phase0-analyzer, mpl-pre-execution-analyzer, mpl-qa-agent,
-      mpl-scout, mpl-test-agent, mpl-verification-planner, mpl-worker
+      mpl-scout, mpl-test-agent, mpl-verification-planner
     - FAIL if any agent has invalid frontmatter
     - WARN if count != 17
 

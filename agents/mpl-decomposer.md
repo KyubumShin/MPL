@@ -264,6 +264,16 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       ```
     - Purpose: snippet for Worker context, contract_files for L1/L2 mechanical verification
 
+    **Adjacent Contract References (v0.10.0)**: For each Phase that has boundary contracts, add `adjacent_contracts` to `interface_contract`:
+    ```yaml
+    interface_contract:
+      contract_files: [".mpl/contracts/rust-python-rpc.json"]
+      adjacent_contracts:
+        inbound: ".mpl/contracts/{N-1-boundary}.json"   # null if Phase 0 or no inbound boundary
+        outbound: ".mpl/contracts/{N+1-boundary}.json"  # null if last Phase or no outbound boundary
+    ```
+    This enables Seed Generator (SEED-01) to load adjacent contracts for `contract_snippet` generation.
+
     Step 7: Identify shared resources
       - Detect files touched by multiple phases
       - Assign strategy (sequential vs append-only vs merge)

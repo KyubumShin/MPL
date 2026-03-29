@@ -31,7 +31,6 @@ const { readStdin } = await import(
 export const VALIDATE_AGENTS = new Set([
   'mpl-pre-execution-analyzer',
   'mpl-verification-planner',
-  'mpl-worker',
   'mpl-phase-runner',
   'mpl-interviewer',
   'mpl-ambiguity-resolver',
@@ -67,12 +66,6 @@ export const EXPECTED_SECTIONS = {
     '4. H-items',
     '5. Verification Gaps',
     '6. External Dependencies',
-  ],
-  'mpl-worker': [
-    'todo_id',
-    'status',
-    'outputs',
-    'acceptance_criteria',
   ],
   'mpl-phase-runner': [
     'status',

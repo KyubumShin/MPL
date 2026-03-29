@@ -1239,9 +1239,9 @@ Analysis: `analysis/mpl-cross-boundary-root-cause-analysis.md`, `analysis/mpl-cr
 - CB-05가 먼저 작동(생성 시점), CB-03이 나중에 작동(Gate 시점) → 이중 방어
 
 **Implementation location**:
-- `MPL/agents/mpl-worker.md` — Output Schema 확장
-- `MPL/agents/mpl-phase-runner.md` — Step 3 (Worker dispatch) 시 boundary_check 필수화
-- `MPL/hooks/validate-output` — boundary_check 비어있으면 reject
+- ~~`MPL/agents/mpl-worker.md` — Output Schema 확장~~ (v0.9.4: Worker 삭제, CB-05 deprecated by CB-08)
+- `MPL/agents/mpl-phase-runner.md` — Step 4.57 L1 Diff Guard (CB-08, replaces CB-05)
+- `MPL/hooks/validate-output` — boundary_check 검증 제거 (CB-08 기계적 검증으로 대체)
 
 **Token cost**: ~100 (Worker output 증가분). 검증 자체는 문자열 비교라 추가 LLM 호출 0.
 

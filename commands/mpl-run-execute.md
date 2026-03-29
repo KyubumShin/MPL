@@ -164,6 +164,17 @@ if config.phase_seed?.enabled != false AND pipeline_tier == "frontier":
   prior_summaries = all completed phase state-summary.md files
   phase0_relevant = extract_relevant_phase0(phase_definition, phase0_artifacts)
 
+  // v0.10.0: Load boundary contracts for Seed Generator (SEED-01)
+  contract_files = null
+  if phase_definition.interface_contract?.contract_files:
+    contract_files = {}
+    for each cf in phase_definition.interface_contract.contract_files:
+      contract_files[cf] = Read(cf)
+    if phase_definition.interface_contract.adjacent_contracts?.inbound:
+      contract_files["inbound"] = Read(phase_definition.interface_contract.adjacent_contracts.inbound)
+    if phase_definition.interface_contract.adjacent_contracts?.outbound:
+      contract_files["outbound"] = Read(phase_definition.interface_contract.adjacent_contracts.outbound)
+
   seed_result = Task(subagent_type="mpl-phase-seed-generator", model="sonnet",
     prompt="Generate Phase Seed for {phase.id}.
     Phase definition: {phase_definition}
@@ -172,6 +183,7 @@ if config.phase_seed?.enabled != false AND pipeline_tier == "frontier":
     Prior State Summaries: {prior_summaries}
     Verification Plan: {verification_plan}
     Codebase hints: {impact_file_paths}
+    Contract files (v0.10.0): {contract_files}
     Generate phase-seed.yaml output.")
 
   save seed_result to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
@@ -180,6 +192,22 @@ if config.phase_seed?.enabled != false AND pipeline_tier == "frontier":
 else:
   context.phase_seed = null  // Legacy mode — Phase Runner generates mini-plan
 ```
+
+### 4.0.5.1: Seed Validation (SEED-03 + SNT-S0, v0.10.0)
+
+If Phase Seed was generated:
+1. **SEED-03**: `mpl-validate-seed` hook validates required fields (goal, acceptance_criteria, todo_structure, exit_conditions, contract_snippet if boundary)
+2. **SNT-S0**: `mpl-sentinel-s0` hook verifies contract_snippet keys ⊆ contracts/*.json keys
+3. If either fails: re-invoke Seed Generator with validation feedback
+4. Max 2 Seed regeneration attempts before fallback to Legacy mode
+
+After Phase Runner completes:
+5. **SNT-S1**: `mpl-sentinel-s1` hook validates export-manifest.json symbols exist in generated files
+6. If S1 fails: re-invoke Phase Runner with feedback ("manifest references non-existent symbol X")
+
+After Test Agent completes:
+7. **SNT-S3**: `mpl-sentinel-s3` hook validates test import paths resolve to actual files
+8. If S3 fails: re-invoke Test Agent with feedback ("import path X does not exist")
 
 
 ### 4.1: Context Assembly
@@ -232,7 +260,7 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      ## Rules
      1. Scope discipline: Only work within this phase's scope.
      2. Impact awareness: Impact section lists files to touch. Out-of-scope -> create Discovery.
-     3. Direct implementation: Implement code changes DIRECTLY using Edit/Write/Bash. Do NOT attempt to spawn mpl-worker subagents — nested agent dispatch is not supported. You are the implementer.
+     3. Direct implementation: Implement code changes DIRECTLY using Edit/Write/Bash. You are the implementer — all code changes happen directly in Phase Runner.
      4. Incremental testing: After each TODO, immediately test the affected module. Fix failures before moving to the next TODO. Do NOT batch all implementation before testing.
      5. Cumulative verification: Run ALL tests (current + prior phases) at phase end. Record pass_rate.
      6. Discovery reporting: Unexpected findings -> Discovery with PP conflict assessment.

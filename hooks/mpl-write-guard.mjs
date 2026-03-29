@@ -4,7 +4,7 @@
  *
  * Two responsibilities:
  * 1. Blocks orchestrator from directly editing source files when MPL is active.
- *    Source file edits must be delegated to mpl-worker agents.
+ *    Source file edits must be delegated to mpl-phase-runner agents.
  * 2. Warns on dangerous Bash commands (rm -rf, DROP TABLE, git push --force, etc.)
  *    that could cause irreversible damage. (T-01)
  * 3. Phase-scoped file lock — warns on writes outside current phase's scope. (T-01 P2)
@@ -176,10 +176,10 @@ ensure you have the correct target path. The command will proceed, but please ve
     // SOFT BLOCK: warn and recommend delegation (OMC-style)
     const message = `[MPL DELEGATION NOTICE] Direct ${toolName} on source file: ${filePath}
 
-Source files should be edited by mpl-worker agents, not the orchestrator.
-Delegate via: Agent(subagent_type="mpl-worker", prompt="Edit ${filePath} to ...")
+Source files should be edited by mpl-phase-runner agents, not the orchestrator.
+Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} to ...")
 
-Next time, delegate to mpl-worker instead of editing directly.`;
+Next time, delegate to mpl-phase-runner instead of editing directly.`;
 
     console.log(JSON.stringify({
       continue: true,

@@ -56,9 +56,9 @@ describe('validateSections', () => {
 
 describe('formatValidationMessage', () => {
   it('should produce PASSED message when passed=true', () => {
-    const msg = formatValidationMessage('mpl-worker', ['a', 'b'], true, [], '');
+    const msg = formatValidationMessage('mpl-phase-runner', ['a', 'b'], true, [], '');
     assert.ok(msg.startsWith('[MPL VALIDATION PASSED]'));
-    assert.ok(msg.includes('mpl-worker'));
+    assert.ok(msg.includes('mpl-phase-runner'));
     assert.ok(msg.includes('2 required sections'));
   });
 
@@ -88,7 +88,7 @@ describe('VALIDATE_AGENTS', () => {
   it('should contain all expected agents', () => {
     const expected = [
       'mpl-pre-execution-analyzer', 'mpl-verification-planner',
-      'mpl-worker', 'mpl-phase-runner', 'mpl-interviewer',
+      'mpl-phase-runner', 'mpl-interviewer',
       'mpl-ambiguity-resolver', 'mpl-codebase-analyzer', 'mpl-phase0-analyzer',
       'mpl-test-agent', 'mpl-code-reviewer', 'mpl-decomposer', 'mpl-git-master', 'mpl-compound',
       'mpl-doctor', 'mpl-qa-agent', 'mpl-scout', 'mpl-phase-seed-generator',
@@ -123,11 +123,10 @@ describe('EXPECTED_SECTIONS', () => {
     assert.strictEqual(EXPECTED_SECTIONS['mpl-critic'], undefined);
   });
 
-  it('worker should require todo_id, status, outputs, acceptance_criteria', () => {
-    const s = EXPECTED_SECTIONS['mpl-worker'];
-    assert.ok(s.includes('todo_id'));
+  it('phase-runner should require status, state_summary, verification', () => {
+    const s = EXPECTED_SECTIONS['mpl-phase-runner'];
     assert.ok(s.includes('status'));
-    assert.ok(s.includes('outputs'));
-    assert.ok(s.includes('acceptance_criteria'));
+    assert.ok(s.includes('state_summary'));
+    assert.ok(s.includes('verification'));
   });
 });

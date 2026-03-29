@@ -32,7 +32,7 @@ description: "[DEPRECATED] 3-Phase lightweight pipeline — use /mpl:mpl instead
 ### Phase B: Execute (Single Phase)
 
 1. Create a mini-plan with TODOs from user request
-2. Delegate each TODO to `mpl-worker` via Task tool
+2. Phase Runner implements each TODO directly
 3. Apply Build-Test-Fix micro-cycle per TODO:
    - Implement TODO
    - Run affected module tests immediately
@@ -54,7 +54,7 @@ description: "[DEPRECATED] 3-Phase lightweight pipeline — use /mpl:mpl instead
 - No Pre-Execution Analysis (gap/tradeoff/critic skipped)
 - No decomposition into multiple phases (single execution phase)
 - Gate 1 only (no code review or Agent-as-User gates)
-- Orchestrator MUST NOT edit source files directly (delegate to mpl-worker)
+- Orchestrator MUST NOT edit source files directly (delegate to mpl-phase-runner)
 - Max 1 redecomposition attempt on circuit break
 
 ## Related

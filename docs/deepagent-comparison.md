@@ -121,7 +121,7 @@ TaskCreate({
   title: "Implement User model",
   description: "Create User schema with email/password",
   status: "pending",
-  assignee: "mpl-worker-1",
+  assignee: "mpl-phase-runner-1",
   files: ["models/User.ts"]
 })
 
@@ -129,7 +129,7 @@ TaskCreate({
   title: "Add auth routes",
   description: "POST /auth/signup, /login, /logout",
   status: "pending",
-  assignee: "mpl-worker-2",
+  assignee: "mpl-phase-runner-2",
   files: ["routes/auth.ts"],
   depends_on: ["task-1"] // Dependency!
 })

@@ -42,6 +42,7 @@ disallowedTools: Write, Edit, Task
     | `prior_summaries` | State Summaries from all completed prior phases (may be empty for Phase 1) |
     | `verification_plan` | A/S/H items for this phase from mpl-verification-planner |
     | `codebase_hints` | Key file paths and patterns from codebase analysis |
+    | `contract_files` | (v0.10.0) `.mpl/contracts/*.json` — boundary contracts for this phase and adjacent phases. Loaded from `interface_contract.contract_files` + `interface_contract.adjacent_contracts.{inbound,outbound}`. null if single-layer phase. |
   </Input>
 
   <Reasoning_Steps>
@@ -83,6 +84,15 @@ disallowedTools: Write, Edit, Task
         ```
       - Phase Runner uses these as convention templates (not copy targets)
       - If no suitable references found: omit field (not an error)
+
+    Step 2.9: Extract contract_snippet (SEED-01/SEED-02, v0.10.0)
+      - If `contract_files` is provided (boundary phase):
+        1. Read each contract JSON from `.mpl/contracts/`
+        2. Extract inbound keys (params from adjacent_contracts.inbound)
+        3. Extract outbound keys (returns from adjacent_contracts.outbound or own contract)
+        4. Build `contract_snippet` with exact key-type pairs
+        5. Phase Runner uses these keys as ground truth for implementation
+      - If no contract_files: set contract_snippet to null (single-layer phase)
 
     Step 3: Read Phase 0 artifacts
       - From api-contracts: extract function signatures relevant to this phase's impact files
@@ -156,6 +166,13 @@ disallowedTools: Write, Edit, Task
           type: "command" | "test" | "file_exists" | "grep" | "description"
           verification_detail: string # exact command, pattern, or description
           touches_todos: [string]    # which TODOs satisfy this criterion
+
+      contract_snippet:              # v0.10.0: boundary key-type pairs from contracts/*.json
+        inbound:                     # keys expected FROM previous phase (null if none)
+          key_name: "type_string"    # e.g., content: "string", api_key: "string"
+        outbound:                    # keys this phase PRODUCES for next phase (null if none)
+          key_name: "type_string"
+        contract_ref: string | null  # path to source contract file
 
       interface_contract:
         requires:

@@ -35,10 +35,10 @@ Apply Phase 0 Step 4 (Error Specification) only:
 
 ### Step 3: Fix Execution
 
-Delegate to `mpl-worker` via Task tool:
+Delegate to `mpl-phase-runner` via Task tool:
 
 ```
-Task(subagent_type="mpl-worker", prompt="""
+Task(subagent_type="mpl-phase-runner", prompt="""
 Bug: {bug description}
 Failing test: {test file and function}
 Error output: {captured error}
@@ -67,7 +67,7 @@ Fix the bug. Run the failing test after fix to confirm.
 - No Triage, no PP interview, no decomposition
 - Single-phase execution only
 - Max 3 total fix attempts before circuit break
-- Orchestrator MUST NOT edit source files directly (delegate to mpl-worker)
+- Orchestrator MUST NOT edit source files directly (delegate to mpl-phase-runner)
 
 ## Related
 

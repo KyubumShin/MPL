@@ -1,12 +1,14 @@
-# MPL (Micro-Phase Loop) v0.9.3 Design Document
+# MPL (Micro-Phase Loop) v0.10.0 Design Document
 
 ## 1. Overview
 
 MPL is an autonomous coding pipeline that decomposes user requests into ordered **micro-phases**. Each phase runs in an isolated session with only structured context, preventing context pollution that occurs during long-running executions.
 
-v3.0 evolved from v1.0's 5-step·5-agent structure to a **9+ step·15 agent** structure. Key changes are as follows:
+> **Version notation**: Early roadmap documents used a separate major-version series (v1.0, v3.0, v4.0) for design milestones. The actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.0 ≈ v0.3.0, v4.0 ≈ v0.4.0. This document uses v0.x.y exclusively; legacy v3.x/v4.x references remain in historical roadmap files.
 
-| Area | v1.0 | v3.0 |
+The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent structure to a **9+ step pipeline**. Key changes:
+
+| Area | Initial (v1.0) | Current |
 |------|------|------|
 | Pipeline Steps | 5 steps (Step 0~5) | 9+ steps (Step 0~6 + sub-steps) |
 | Agents | 5 | 15 |
@@ -21,9 +23,9 @@ v3.0 evolved from v1.0's 5-step·5-agent structure to a **9+ step·15 agent** st
 
 ## 2. Design Principles
 
-### Principle 1: Orchestrator-Worker Separation
+### Principle 1: Orchestrator–Phase Runner Separation
 
-The orchestrator **never writes source code directly.** All code changes are delegated to the `mpl-worker` agent via the Task tool. The `mpl-write-guard` PreToolUse hook provides advisory warnings for this.
+The orchestrator **never writes source code directly.** All code changes are executed by `mpl-phase-runner` agents dispatched via the Task tool. The `mpl-write-guard` PreToolUse hook provides advisory warnings for this.
 
 ### Principle 2: Plan First
 
@@ -39,9 +41,23 @@ Each phase has machine-verifiable success criteria. Subjective "done" declaratio
 
 Phase Runner retries internally up to 3 times. The orchestrator re-decomposes up to 2 times. When limits are exceeded, circuit break activates, preventing infinite loops.
 
-### Principle 5: Knowledge Accumulation
+### Principle 5: Knowledge Accumulation via Channel Registry
 
-**State Summary** is the primary means of knowledge transfer between phases. Additionally, the **immediately preceding phase's verification results and code diff** are selectively forwarded when the next phase directly depends on that work. Phase Decisions are managed with a 2-Tier classification system (Active/Summary) to preserve decision context across all phases.
+Knowledge transfer between phases occurs through **registered channels only**. Unregistered channels are prohibited.
+
+| # | Channel | Format | Creator | Consumer | SSOT |
+|---|---------|--------|---------|----------|------|
+| 1 | `decomposition.yaml` | YAML | Decomposer | Orchestrator, Seed Gen | ✓ |
+| 2 | `phase-decisions.md` | Markdown | Phase Runner | All subsequent phases | |
+| 3 | `.mpl/contracts/*.json` | JSON | Decomposer (L0) | Seed Gen, Phase Runner, Sentinels | ✓ |
+| 4 | `phase-seed.yaml` | YAML | Seed Generator | Phase Runner | |
+| 5 | `pivot-points.md` | Markdown | Interviewer | All phases (immutable) | ✓ |
+| 6 | `state-summary.md` | Markdown | Phase Runner | Next phase (L0/L1/L2) | |
+| 7 | `regression-suite.json` | JSON | Test Agent | Phase Runner (cumulative) | |
+| 8 | `.mpl/mpl/phase0/*.md` | Markdown | Phase 0 Analyzer | Phase Runner, Seed Gen | |
+| 9 | `export-manifest.json` | JSON | Phase Runner | Test Agent, Sentinels | |
+
+**State Summary** remains the primary channel. Additionally, the **immediately preceding phase's verification results and code diff** are selectively forwarded when the next phase directly depends on that work. Phase Decisions are managed with a 2-Tier classification system (Active/Summary) to preserve decision context across all phases.
 
 ---
 
@@ -185,7 +201,7 @@ Artifact: `.mpl/mpl/decomposition.yaml`
 
 The verification plan is attached to each phase and serves as the verification criteria for Phase Runner and Test Agent.
 
-**Step 3-C: ~~Critic Simulation~~** — Absorbed into Decomposer's `risk_assessment` output section in v3.1. Decomposer performs pre-mortem analysis during decomposition reasoning (Step 9) and outputs go/no-go judgment. Achieves the same effect without a separate opus agent call, saving ~3-5K tokens.
+**Step 3-C: ~~Critic Simulation~~** — Absorbed into Decomposer's `risk_assessment` output section (v0.3.1). Decomposer performs pre-mortem analysis during decomposition reasoning (Step 9) and outputs go/no-go judgment. Achieves the same effect without a separate opus agent call, saving ~3-5K tokens.
 
 #### Step 4: Phase Execution Loop
 
@@ -201,7 +217,7 @@ The core execution unit of the pipeline. Executes each phase in order.
 - Dependency phase Summary (based on interface_contract.requires)
 - Verification plan (A/S/H items for the relevant phase)
 
-**4.2 Phase Runner Execution** — `mpl-phase-runner` (sonnet) runs in an isolated session. Phase Runner writes a mini-plan, delegates TODOs to `mpl-worker`, verifies with Build-Test-Fix micro-cycles, and produces a State Summary. Rules:
+**4.2 Phase Runner Execution** — `mpl-phase-runner` (sonnet) runs in an isolated session. Phase Runner writes a mini-plan, implements TODOs directly via Build-Test-Fix micro-cycles, verifies with Build-Test-Fix micro-cycles, and produces a State Summary. Rules:
 - Immediate testing per TODO (no batching)
 - On failure, reference Phase 0 artifacts before fixing
 - Circuit break after maximum 3 retries
@@ -251,7 +267,7 @@ MPL supports natural resume through per-phase state persistence. When a session 
 
 ## 4. Agent Catalog
 
-MPL v3.7 uses 15 specialized agents (critic absorbed + gap/tradeoff consolidated + doctor added). Each agent has clear role boundaries and tool restrictions.
+MPL uses 14 specialized agents (critic absorbed + gap/tradeoff consolidated + doctor added, worker removed in v0.9.4). Each agent has clear role boundaries and tool restrictions.
 
 ### Pre-Execution Agents (Analysis/Planning)
 
@@ -264,14 +280,13 @@ MPL v3.7 uses 15 specialized agents (critic absorbed + gap/tradeoff consolidated
 | `mpl-pre-execution-analyzer` | Pre-Execution analysis — Gap (missing requirements, AI pitfalls, Must NOT Do) + Tradeoff (risk level, reversibility, execution order) consolidated | sonnet | Write, Edit, Bash, Task |
 | `mpl-decomposer` | Phase decomposition — decomposes request into ordered micro-phases (Read/Glob/Grep allowed) | opus | Write, Edit, Bash, Task, WebFetch, WebSearch, NotebookEdit |
 | `mpl-verification-planner` | Verification planning — A/S/H item classification, per-phase verification strategy | sonnet | Write, Edit, Task |
-| ~~`mpl-critic`~~ | ~~Critic~~ — Absorbed into Decomposer risk_assessment (v3.1) | ~~opus~~ | - |
+| ~~`mpl-critic`~~ | ~~Critic~~ — Absorbed into Decomposer risk_assessment (v0.3.1) | ~~opus~~ | - |
 
 ### Execution Agents (Execution/Verification)
 
 | Agent | Role | Model | Disallowed Tools |
 |---------|------|------|-----------|
 | `mpl-phase-runner` | Phase execution — mini-plan, worker delegation, verification, State Summary | sonnet | None (full tool access) |
-| `mpl-worker` | TODO implementation — implements a single TODO item and returns JSON output | sonnet | Task |
 | `mpl-test-agent` | Independent testing — test writing/execution separated from code author | sonnet | Task |
 | `mpl-code-reviewer` | Code review — 10-category review (8 basic + 2 UI-specific), handles Gate 2 | sonnet | Write, Edit, Task |
 
@@ -296,13 +311,12 @@ Default models are specified in agent definitions but may escalate based on cont
 |---------|------|---------------------|
 | mpl-decomposer | opus | Always opus (complex reasoning) |
 | mpl-phase-runner | sonnet | L complexity or architecture change |
-| mpl-worker | sonnet | Architecture change or 3+ retry failures |
 
 ---
 
 ## 5. Quality System
 
-MPL v3.0 ensures code quality through a multi-layer quality system.
+MPL ensures code quality through a multi-layer quality system.
 
 ### 5.1 Build-Test-Fix Micro-Cycle
 
@@ -326,7 +340,7 @@ After all phase executions complete, must pass through 5-stage quality gates seq
 | Gate | Name | Owner | Pass Criteria | On Failure |
 |------|------|------|----------|--------|
 | Gate 0.5 | Type Check | (orchestrator) | 0 type errors | Enter Fix Loop then Gate 1 |
-| Gate 0.7 | Cross-Boundary Advisory | (orchestrator) | advisory (non-blocking) | Warnings route to Gate 2 + Step 5.1.8 |
+| Gate 0.7 | Cross-Boundary Advisory → **L1 Hard Gate (v0.10.0)** | (orchestrator) | advisory → **blocking (v0.10.0)** | Warnings route to Gate 2 + Step 5.1.8; **v0.10.0: boundary mismatches block Phase completion (see Phase Runner Step 4.57)** |
 | Gate 1 | Automated Testing | (orchestrator) | pass_rate ≥ 95% | Enter Fix Loop |
 | Gate 1.5 | Metrics (F-50) | (orchestrator) | coverage ≥ 60% (MVP) / 80% (strict) | Re-invoke Test Agent (max 2 times) |
 | Gate 2 | Code Review | mpl-code-reviewer | PASS verdict | NEEDS_FIXES → Fix Loop, REJECT → mpl-failed |
@@ -775,11 +789,71 @@ Replaces CB-05/CB-07's LLM-dependent verification with shell-based mechanical ve
 
 **Evidence:** `analysis/mpl-exp3-report.md`, `analysis/mpl-cross-boundary-final-consensus.md`
 
+### v0.9.4 — Pre-v2 Cleanup (2026-03-29)
+
+Documentation-only release. No code changes. Prepares the codebase for v2 structural changes (v0.10.0+).
+
+| Change | Description | Type |
+|--------|-------------|------|
+| Worker agent removal | `mpl-worker.md` deleted. All references updated to `mpl-phase-runner` direct implementation. Worker was unused since v0.6.0 due to nested agent limitation. | Agent deletion |
+| Principle 1 rename | "Orchestrator-Worker Separation" → "Orchestrator–Phase Runner Separation". Reflects actual architecture. | Design principle |
+| Principle 5 update | "Knowledge Accumulation" → "Knowledge Accumulation via Channel Registry". Introduces Channel Registry concept for v0.10.0 preparation. | Design principle |
+| Version notation disambiguation | Added version mapping note (v3.x ≈ v0.3.x). design.md uses v0.x.y exclusively; legacy notation preserved in historical roadmap files. | Documentation |
+| `boundary_check` cleanup | Deprecated field references removed from worker schema (file deleted), pending-features.md annotated. | Schema cleanup |
+
+**Affected files:**
+- `agents/mpl-worker.md` — **Deleted**
+- `docs/design.md` — Principles 1 & 5, Agent Catalog, version notation
+- `agents/mpl-phase-runner.md` — Removed nested agent limitation notes
+- `agents/mpl-test-agent.md`, `agents/mpl-doctor.md` — Worker references removed
+- `commands/mpl-run.md`, `mpl-run-execute.md`, `mpl-run-execute-gates.md`, `mpl-run-execute-parallel.md` — Worker → Phase Runner
+- `skills/mpl/SKILL.md`, `skills/mpl-small/SKILL.md`, `skills/mpl-bugfix/SKILL.md` — Worker → Phase Runner
+- `hooks/mpl-write-guard.mjs`, `hooks/mpl-validate-output.mjs` — Worker references removed
+- `hooks/__tests__/mpl-validate-output.test.mjs` — Test cases updated
+- `README.md`, `README_ko.md` — Worker → Phase Runner
+- `docs/roadmap/overview.md`, `docs/roadmap/phase2-incremental.md`, `docs/roadmap/pending-features.md` — Worker references updated
+- `docs/deepagent-comparison.md` — Example agent names updated
+
+**Breaking changes:** `mpl-worker` agent no longer exists. Pipelines referencing `subagent_type="mpl-worker"` must use `subagent_type="mpl-phase-runner"`.
+
+### v0.10.0 — Mechanical Boundary Foundation (v2 Phase 1) (2026-03-29)
+
+7 features establishing the mechanical enforcement layer for cross-boundary safety.
+
+| Feature | ID | Description | Type |
+|---------|-----|-------------|------|
+| Channel Registry | KT-01 | 9 registered knowledge channels in Principle 5. Unregistered channels prohibited. | Protocol |
+| Contract Registry Enhancement | CB-L0 | `adjacent_contracts` field in Decomposer interface_contract. Enables Seed Generator to load N-1/N+1 contracts. | Decomposer extension |
+| Seed Input Extension | SEED-01 | Seed Generator receives `.mpl/contracts/*.json` for current + adjacent phases. | Agent input |
+| Seed Output Extension | SEED-02 | `contract_snippet` field in phase-seed.yaml with inbound/outbound key-type pairs. | Agent output |
+| Seed Schema Validation | SEED-03 | `mpl-validate-seed.mjs` hook validates required fields + contract_snippet structure. | Hook (new) |
+| Seed Fact-Check | SNT-S0 | `mpl-sentinel-s0.mjs` hook verifies contract_snippet keys ⊆ contracts/*.json keys. Catches LLM hallucination. | Hook (new) |
+| Runner Manifest Validation | SNT-S1 | `mpl-sentinel-s1.mjs` hook validates export-manifest.json symbols exist in generated files. | Hook (new) |
+| Test Import Validation | SNT-S3 | `mpl-sentinel-s3.mjs` hook validates Test Agent import paths resolve to actual files. | Hook (new) |
+| L1 Hard Gate | CB-L1 | L1 Diff Guard upgraded from advisory to Hard Gate. Boundary mismatches block Phase completion. | Gate change |
+
+**New files:**
+- `hooks/mpl-validate-seed.mjs` — SEED-03
+- `hooks/mpl-sentinel-s0.mjs` — SNT-S0
+- `hooks/mpl-sentinel-s1.mjs` — SNT-S1
+- `hooks/mpl-sentinel-s3.mjs` — SNT-S3
+
+**Modified files:**
+- `docs/design.md` — Channel Registry, Gate table, changelog
+- `agents/mpl-decomposer.md` — adjacent_contracts (CB-L0)
+- `agents/mpl-phase-seed-generator.md` — contract_files input, contract_snippet output (SEED-01/02)
+- `agents/mpl-phase-runner.md` — export-manifest generation, L1 Hard Gate (CB-L1)
+- `agents/mpl-test-agent.md` — S3 validation note
+- `commands/mpl-run-execute.md` — Seed validation + Sentinel steps
+- `commands/mpl-run-execute-gates.md` — L1 Hard Gate documentation
+
+**Breaking changes:** L1 Diff Guard is now a Hard Gate. Boundary-crossing phases that fail L1 cannot complete (previously advisory warning only).
+
 ---
 
 ## 10. Known Issues and Remaining Work
 
-> Last audit date: 2026-03-05. Items below were identified through cross-validation between v3.0 codebase and documentation.
+> Last audit date: 2026-03-05. Items below were identified through cross-validation between codebase and documentation.
 
 ### CRITICAL — Affects Pipeline Integrity
 

@@ -81,11 +81,11 @@ Phase 0 Artifacts       Phase Context           Phase Runner Execution
 
 > This feature was not in the original Phase 2 design but was added in v3.0.
 
-`mpl-test-agent` (sonnet) independently writes and runs tests after Phase Runner completion. By separating the code author (mpl-worker) from the test author (mpl-test-agent), it catches assumption mismatches, interface contract violations, and edge cases.
+`mpl-test-agent` (sonnet) independently writes and runs tests after Phase Runner completion. By separating the code author (Phase Runner) from the test author (mpl-test-agent), it catches assumption mismatches, interface contract violations, and edge cases.
 
 ```
 Phase Runner complete ──→ Test Agent runs ──→ Results merged
-     (mpl-worker              (mpl-test-agent       (compare pass_rates,
+     (mpl-phase-runner        (mpl-test-agent       (compare pass_rates,
       writes code)             writes independent     flag mismatches)
                                tests)
 ```

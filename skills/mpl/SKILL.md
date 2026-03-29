@@ -19,7 +19,7 @@ MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh 
 ## Core Rules (HARD ENFORCEMENT)
 
 ```
-RULE 1: You NEVER write source code directly. All code changes -> mpl-worker via Task tool.
+RULE 1: You NEVER write source code directly. All code changes -> mpl-phase-runner via Task tool.
 RULE 2: Phase Runner manages per-phase mini-plans (not a single PLAN.md). State Summary is the ONLY knowledge transfer between phases.
 RULE 3: Validate agent output. Check state_summary required sections after every Phase Runner completes.
 RULE 4: Respect phase gates and circuit breaker limits (max 3 retries per phase, max 2 redecompositions).

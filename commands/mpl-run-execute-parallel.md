@@ -63,7 +63,7 @@ for each batch in batches:
   // Parallel dispatch workers within the batch
   for each todo in batch:
     worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
-    Task(subagent_type="mpl-worker", model=worker_model,
+    Task(subagent_type="mpl-phase-runner", model=worker_model,
          prompt="...", run_in_background=true)
 
   // Wait for all workers in current batch to complete
@@ -75,7 +75,7 @@ for each batch in batches:
 // Sequential fallback (TODOs with file conflicts):
 for each TODO with file conflicts:
   worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
-  Task(subagent_type="mpl-worker", model=worker_model,
+  Task(subagent_type="mpl-phase-runner", model=worker_model,
        prompt="...", run_in_background=false)
 ```
 

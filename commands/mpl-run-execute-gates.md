@@ -76,6 +76,8 @@ This catches lint and type errors before test execution, reducing fix loop itera
 
 #### Gate 0.7: Cross-Boundary Advisory (CB-03, v0.9.1)
 
+**v0.10.0**: Gate 0.7 upgraded to L1 Hard Gate. Boundary mismatches now block Phase completion. See Phase Runner Step 4.57.
+
 **Precondition**: `api-contracts.md` contains `## Boundary Pairs` section (from CB-01).
 **Mode**: advisory (non-blocking — does NOT enter fix loop on warnings).
 
@@ -361,7 +363,7 @@ When any gate fails, enter the fix loop:
    - Wrong pattern → retry with different query
    - QMD stale → fallback to Grep-Only
    - File not in scope → expand search scope
-3. Dispatch targeted fixes via mpl-worker
+3. Dispatch targeted fixes via Phase Runner
 3. Re-run the failed gate + all subsequent gates
 4. Track pass_rate in convergence history
 

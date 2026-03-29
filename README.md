@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.9.3
+# MPL (Micro-Phase Loop) v0.10.0
 
 **Prevention over cure. Specification over debugging.**
 
@@ -56,7 +56,7 @@ No Phase 0            38% → debugging hell
 
 **Law 2: The orchestrator must never write code.**
 
-The moment the orchestrator touches source files, it becomes invested in its own implementation. It defends its code instead of objectively verifying it. MPL enforces separation with a PreToolUse hook that warns the orchestrator when it attempts to edit source files directly. All code flows through `mpl-worker` agents via Task delegation.
+The moment the orchestrator touches source files, it becomes invested in its own implementation. It defends its code instead of objectively verifying it. MPL enforces separation with a PreToolUse hook that warns the orchestrator when it attempts to edit source files directly. All code flows through `mpl-phase-runner` agents via Task delegation.
 
 ---
 
