@@ -4,7 +4,7 @@
 
 A Claude Code plugin that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-seventeen-minds) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-fourteen-minds) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -120,7 +120,7 @@ Tier Selection    → Frontier (full pipeline)
 PP Interview      → 6 Pivot Points extracted (3 CONFIRMED, 3 PROVISIONAL)
 Phase 0 Enhanced  → API contracts + type policy + error spec generated
 Decomposition     → 4 micro-phases with interface contracts
-Phase Execution   → 4 phases × (plan → worker → test → verify)
+Phase Execution   → 4 phases × (plan → execute → test → verify)
 5-Gate Quality    → Gate 0.5: types, Gate 1: tests, Gate 1.5: coverage, Gate 2: review, Gate 3: PP
 RUNBOOK           → Full execution log for session continuity
 ```
@@ -149,7 +149,7 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
                                │
               ┌────────────────▼────────────────┐
               │  For each phase (fresh session): │
-              │    Plan → Worker → Test → Verify │
+              │    Plan → Phase Runner → Test → Verify │
               │    Output: State Summary only     │
               └────────────────┬────────────────┘
                                │
@@ -168,7 +168,7 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
 | **Pivot Points** | Socratic interview extracts immutable constraints | Prevent scope drift |
 | **Phase 0** | Pre-specification: contracts, types, errors | Eliminate debugging |
 | **Decompose** | Break into ordered phases with interface contracts | Each phase is independently verifiable |
-| **Execute** | Fresh session per phase, worker delegation, micro-test cycles | No context pollution |
+| **Execute** | Fresh session per phase, Phase Runner delegation, micro-test cycles | No context pollution |
 | **5-Gate** | Type check → Tests → Coverage → Code review → PP compliance | Evidence-based completion |
 | **RUNBOOK** | Continuous audit log for human/agent session continuity | Pick up where you left off |
 
@@ -184,7 +184,7 @@ Inside each phase, every TODO gets immediate verification:
 
 ```
 For each TODO:
-  Build  → Worker implements the change
+  Build  → Phase Runner implements the change directly
   Test   → Run affected tests immediately (not at the end)
   Fix    → Fix on failure (max 2 retries per TODO)
 
@@ -264,9 +264,9 @@ Keyword hints still work as manual overrides: `"mpl bugfix"` → frugal, `"mpl s
 
 ---
 
-## The Seventeen Minds
+## The Fourteen Minds
 
-Seventeen agents, each with a single purpose. Loaded on-demand, never preloaded:
+Fourteen agents, each with a single purpose. Loaded on-demand, never preloaded:
 
 | Agent | Role | Core Principle |
 |-------|------|---------------|
@@ -277,8 +277,7 @@ Seventeen agents, each with a single purpose. Loaded on-demand, never preloaded:
 | **Pre-Execution Analyzer** | Gap + Tradeoff unified analysis | "What's missing? What's risky?" |
 | **Decomposer** | Break into ordered micro-phases | "What depends on what?" |
 | **Verification Planner** | A/S/H-items classification | "What can machines verify vs. what needs humans?" |
-| **Phase Runner** | Execute a single phase end-to-end | "Plan, delegate, verify, summarize" |
-| **Worker** | Implement a single TODO | "Write the code, run the test" |
+| **Phase Runner** | Execute a single phase end-to-end | "Plan, implement, verify, summarize" |
 | **Test Agent** | Independent test writing | "I didn't write the code, so I'll test what it claims" |
 | **Code Reviewer** | 10-category quality gate (8 base + 2 UI) | "Would I approve this PR?" |
 | **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
@@ -290,7 +289,7 @@ Seventeen agents, each with a single purpose. Loaded on-demand, never preloaded:
 
 ### Agent Separation Principle
 
-The Worker who writes code is never the Test Agent who verifies it. The Decomposer who plans is never the Phase Runner who executes. The Orchestrator who assembles context never touches source files. Each separation eliminates a class of bias.
+The Phase Runner who implements code is never the Test Agent who verifies it. The Decomposer who plans is never the Phase Runner who executes. The Orchestrator who assembles context never touches source files. Each separation eliminates a class of bias.
 
 ---
 
@@ -333,11 +332,11 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>15 agents · 8 hooks · 11 skills · 5 protocol files</strong></summary>
+<summary><strong>14 agents · 8 hooks · 11 skills · 5 protocol files</strong></summary>
 
 ```
 MPL/
-├── agents/                 # 15 agent definitions (YAML frontmatter)
+├── agents/                 # 14 agent definitions (YAML frontmatter)
 │   └── mpl-scout.md        # Haiku-based read-only exploration (F-16)
 ├── commands/               # Orchestration protocols (split for token efficiency)
 │   ├── mpl-run.md          # Router: which protocol file to load

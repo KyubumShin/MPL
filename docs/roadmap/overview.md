@@ -260,6 +260,33 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.10.0 — Mechanical Boundary Foundation (2026-03-29)
+
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| KT-01 | **Channel Registry** | ✅ **v0.10.0 complete** | 9 registered knowledge channels in Principle 5. Unregistered channels prohibited. decomposition.yaml, phase-decisions.md, contracts/*.json, phase-seed.yaml, pivot-points.md, state-summary.md, regression-suite.json, phase0/*.md, export-manifest.json |
+| CB-L0 | **Adjacent Contracts** | ✅ **v0.10.0 complete** | Decomposer interface_contract includes adjacent_contracts field (inbound/outbound references to N-1/N+1 phase contracts) |
+| SEED-01 | **Seed Input Extension** | ✅ **v0.10.0 complete** | Seed Generator receives .mpl/contracts/*.json for current + adjacent phases |
+| SEED-02 | **Seed Output Extension** | ✅ **v0.10.0 complete** | contract_snippet field in phase-seed.yaml with inbound/outbound key-type pairs |
+| SEED-03 | **Seed Schema Validation** | ✅ **v0.10.0 complete** | mpl-validate-seed.mjs hook validates required fields + contract_snippet structure |
+| SNT-S0 | **Seed Fact-Check** | ✅ **v0.10.0 complete** | mpl-sentinel-s0.mjs verifies contract_snippet keys ⊆ contracts/*.json. Catches LLM hallucination |
+| SNT-S1 | **Runner Manifest Validation** | ✅ **v0.10.0 complete** | mpl-sentinel-s1.mjs validates export-manifest.json symbols exist in generated files |
+| SNT-S3 | **Test Import Validation** | ✅ **v0.10.0 complete** | mpl-sentinel-s3.mjs validates Test Agent import paths resolve to actual files |
+| CB-L1 | **L1 Hard Gate** | ✅ **v0.10.0 complete** | L1 Diff Guard upgraded from advisory to Hard Gate. Boundary mismatches block Phase completion |
+
+---
+
+## v0.9.4 — Pre-v2 Cleanup (2026-03-29)
+
+| ID | Item | Status | Description |
+|----|------|--------|-------------|
+| - | **Worker Agent Removal** | ✅ **v0.9.4 complete** | mpl-worker.md deleted. All references updated to mpl-phase-runner. Worker unused since v0.6.0 |
+| - | **Principle 1 Rename** | ✅ **v0.9.4 complete** | "Orchestrator-Worker Separation" → "Orchestrator–Phase Runner Separation" |
+| - | **Principle 5 Update** | ✅ **v0.9.4 complete** | "Knowledge Accumulation" → "Knowledge Accumulation via Channel Registry" |
+| - | **Version Notation** | ✅ **v0.9.4 complete** | Added v3.x ≈ v0.3.x mapping note. design.md uses v0.x.y exclusively |
+
+---
+
 ## v0.6.6 — Integration Checkpoints + Agent Model Optimization (2026-03-23)
 
 ### Summary
@@ -582,7 +609,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 
 ---
 
-## Planned Versions (revised 2026-03-25)
+## Planned Versions (revised 2026-03-29)
 
 > **Note**: v0.6.7/v0.7.0은 1M context adaptation으로 구현 완료. 원래 해당 버전에 계획되었던 미구현 기능들은 v0.8.0 이후로 재배정.
 
@@ -594,10 +621,10 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**0.9.1**~~ | ~~CB-01~04 Cross-Boundary Detection (Boundary Pair Scan + Rule 8 + Gate 0.7 + Mock Gap)~~ | ✅ **Implemented** |
 | ~~**0.9.2**~~ | ~~CB-05~07 Cross-Boundary Enforcement (boundary_check output + Contract Snippet + Post-Join Reconciliation)~~ | ✅ **Implemented** |
 | **0.9.3** | LT-01 Contract Changes + LT-03a Contract Verification Gate + LT-04 Multi-Resolution Summary | Feature: contract & summary |
-| **0.9.4** | TS-01/02 MCP Assertion tools + BM-04 Discovery Matrix | Feature: test infra |
+| ~~**0.9.4**~~ | ~~Pre-v2 Cleanup: Worker Agent Removal + Principle 1/5 Rename + Version Notation~~ | ✅ **Implemented** |
 | **0.9.5** | T-05 Design Contract + T-06 Doc Sync | Feature: design & docs |
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
-| **0.10.0** (TBD) | **P-04** Skill Audit CLI | Feature: lifecycle management |
+| ~~**0.10.0**~~ | ~~Mechanical Boundary Foundation: Channel Registry + Adjacent Contracts + Seed Extension + Sentinels + L1 Hard Gate~~ | ✅ **Implemented** |
 | **Deferred** | T-08, T-09, F-06, F-269, #7, #8 | Pending data/need |
 
 ---
