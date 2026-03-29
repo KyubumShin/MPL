@@ -118,6 +118,12 @@ for each completed phase:
 # 3. Gate 2 auto-resolved NEEDS_FIXES (if any were auto-fixed)
 # (tracked in RUNBOOK quality results section)
 
+  # 4. Gate 0.7 Cross-Boundary Advisory warnings (CB-03, v0.9.1)
+  if exists(".mpl/mpl/gate-0.7-report.md"):
+    gate07_warnings = parse(".mpl/mpl/gate-0.7-report.md")
+    for each w in gate07_warnings:
+      sources += { severity: "MED", item: w.description, phase: "Gate 0.7", reason: "cross-boundary advisory" }
+
 if sources is empty:
   announce: "[MPL] Post-Execution Review: No deferred items. Clean execution."
 else:

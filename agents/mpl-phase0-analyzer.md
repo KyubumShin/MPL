@@ -110,6 +110,52 @@ disallowedTools: Edit, Task
 
     Save to `{output_dir}/api-contracts.md`
 
+    #### Step 1b — Boundary Pair Scan (CB-01, v0.9.1)
+
+    Detect cross-language boundary pairs. Brownfield: grep actual code. Greenfield: infer from PP tech stack.
+
+    ```
+    boundary_pairs = []
+
+    // Brownfield: Tauri invoke pairs
+    callers = Grep("invoke[(<].*['\"]([a-z_]+)['\"]", "src/", glob="*.{ts,tsx}")
+    callees = Grep("#\\[tauri::command\\]", "src-tauri/", glob="*.rs")
+    // Match caller↔callee by function name
+    for each caller:
+      match = callees.find(c => c.name == caller.name)
+      if match: boundary_pairs.push({ id: "BP-{n}", status: "confirmed", caller, callee: match, protocol: "tauri-invoke", framework_rules: ["camelCase params (Tauri v2 auto-convert)", "snake_case struct fields (serde default)"] })
+
+    // Brownfield: REST API pairs
+    callers = Grep("(fetch|axios)\\.(get|post|put|delete)\\(['\"]([^'\"]+)", "src/")
+    callees = Grep("@(Get|Post|Put|Delete|Patch)\\(['\"]([^'\"]+)", glob="*.{ts,py,java}")
+    // Match by URL path
+
+    // Brownfield: JSON-RPC pairs (Python/Node sidecar)
+    callers = Grep("send_rpc|call_rpc|rpc_request", glob="*.rs")
+    callees = Grep("def handle_|async def handle_|HANDLERS\\[", glob="*.py")
+    // Match by method name
+
+    // Greenfield: infer from PP tech stack keywords
+    if no boundary_pairs AND field == "greenfield":
+      if tech_stack contains "tauri": add projected pairs for tauri-invoke protocol
+      if tech_stack contains "next" or "express": add projected pairs for rest-api protocol
+      if tech_stack contains "sidecar" or "json-rpc": add projected pairs for json-rpc protocol
+    ```
+
+    Append `## Boundary Pairs` section to `{output_dir}/api-contracts.md`:
+    ```yaml
+    ## Boundary Pairs
+    boundary_pairs:
+      - id: "BP-1"
+        status: "confirmed"    # confirmed (brownfield) | projected (greenfield)
+        caller: { lang: "ts", file: "src/stores/characterStore.ts", symbol: "invoke('save_character')" }
+        callee: { lang: "rust", file: "src-tauri/src/commands/character.rs", symbol: "fn save_character()" }
+        protocol: "tauri-invoke"
+        framework_rules:
+          - "top-level params: camelCase (Tauri v2 default)"
+          - "struct fields: snake_case (serde default)"
+    ```
+
     #### Step 2 — Example Pattern Analysis (Medium+)
 
     ```

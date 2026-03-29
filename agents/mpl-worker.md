@@ -59,6 +59,22 @@ disallowedTools: Task
         "files_changed": ["src/file1.ts", "src/file2.ts"],
         "summary": "Brief description of what was implemented"
       },
+      "boundary_check": {                    // CB-05, v0.9.2 — REQUIRED when phase touches 2+ layers
+        "layers_touched": ["rust", "typescript"],  // which project layers this phase modified
+        "assertions": [                      // explicit contract-vs-actual comparison
+          {
+            "interface": "tauri_command",    // what kind of boundary
+            "name": "save_character",        // specific symbol
+            "contract_value": "save_character (camelCase params)", // from Phase 0 api-contracts
+            "actual_value": "save_character (camelCase params)",   // what was actually implemented
+            "match": true                    // simple string comparison
+          }
+        ],
+        "boundary_files_read": [             // proof that other-side files were opened
+          "src-tauri/src/commands/character.rs",
+          "src/stores/entityStore.ts"
+        ]
+      },
       "acceptance_criteria": [
         {
           "id": "AC-1",
@@ -94,6 +110,10 @@ disallowedTools: Task
     ```
 
     Note: `discoveries` is optional. Only include if you find a genuinely better approach during implementation. Do not fabricate discoveries.
+
+    NOTE: `boundary_check` is REQUIRED when the phase touches 2+ project layers (e.g., both Rust and TypeScript).
+    If `layers_touched.length >= 2` and `boundary_check` is missing or empty, the output will be rejected.
+    `assertions[].match: false` triggers automatic Fix Loop re-entry.
   </Output_Schema>
 
   <Failure_Modes_To_Avoid>

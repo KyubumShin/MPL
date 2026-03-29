@@ -74,6 +74,55 @@ Report: "[MPL] Gate 0.5: Lint + Type check clean. Proceeding to Gate 1."
 
 This catches lint and type errors before test execution, reducing fix loop iterations.
 
+#### Gate 0.7: Cross-Boundary Advisory (CB-03, v0.9.1)
+
+**Precondition**: `api-contracts.md` contains `## Boundary Pairs` section (from CB-01).
+**Mode**: advisory (non-blocking — does NOT enter fix loop on warnings).
+
+```
+if exists("{mpl_dir}/phase0/api-contracts.md"):
+  boundary_section = extract_section("api-contracts.md", "## Boundary Pairs")
+  if boundary_section is empty:
+    announce: "[MPL] Gate 0.7: No boundary pairs detected. Skipping."
+    → proceed to Gate 1
+
+  warnings = []
+  for each boundary_pair in boundary_section:
+    // 1. Extract caller-side parameter names
+    caller_params = Grep(pair.caller.symbol + ".*\\{([^}]+)\\}", pair.caller.file)
+
+    // 2. Extract callee-side parameter names
+    callee_params = Grep("fn " + pair.callee.symbol.split("(")[0] + "\\(([^)]+)\\)", pair.callee.file)
+
+    // 3. Apply framework_rules (camelCase↔snake_case conversion)
+    normalized_caller = apply_naming_rules(caller_params, pair.framework_rules)
+    normalized_callee = apply_naming_rules(callee_params, pair.framework_rules)
+
+    // 4. Compare
+    mismatches = diff(normalized_caller, normalized_callee)
+    for each mismatch:
+      warnings.push({
+        pair_id: pair.id,
+        type: mismatch.type,  // "missing_param", "name_mismatch", "type_mismatch"
+        caller: mismatch.caller_value,
+        callee: mismatch.callee_value,
+        severity: "MED"
+      })
+
+  // Write report
+  Write(".mpl/mpl/gate-0.7-report.md", format_warnings(warnings))
+
+  if warnings.length == 0:
+    announce: "[MPL] Gate 0.7: All {pair_count} boundary pairs consistent. ✓"
+  elif warnings.length < 5:
+    announce: "[MPL] Gate 0.7: {warnings.length} advisory warnings. Report: .mpl/mpl/gate-0.7-report.md"
+  else:
+    announce: "[MPL] Gate 0.7: {warnings.length} advisory warnings (≥5). Cross-boundary concentrated review recommended."
+    announce: "[MPL] Report: .mpl/mpl/gate-0.7-report.md"
+
+  // Route warnings to Gate 2 context (non-blocking, advisory only)
+```
+
 **Step 3: Multi-Stack Build Verification (B-02, v0.6.3)**
 
 Gate 0.5 must verify ALL build tools in the project, not just TypeScript:

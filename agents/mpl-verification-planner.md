@@ -113,6 +113,19 @@ disallowedTools: Write, Edit, Task
     - [VG-1] {gap} -- Alternative: {workaround}
     - [VG-2] ...
 
+    ## 5.5 Mock Boundary Gaps (CB-04, v0.9.1)
+    For phases with cross-boundary calls (boundary_pairs from CB-01) where tests mock the IPC layer:
+    - Identify: which invoke/fetch/RPC calls are mocked in test files
+    - Flag: serde serialization path is NOT validated by these tests
+    - Link: affected boundary_pair IDs
+    - Mitigation: Gate 0.7 provides static verification as compensating control
+
+    Format:
+    - [VG-M1] Mock boundary gap: invoke("{command}") mocked in {test_file}
+      Risk: serde serialization mismatch undetectable by tests
+      Affected: BP-{N}
+      Mitigation: Gate 0.7 static check
+
     ## 6. External Dependencies
     External services and their verification strategy:
     - [ED-1] {dependency} -- Strategy: {mock/stub/skip}

@@ -133,13 +133,21 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
         Rule 7: Generate final_e2e for cross-feature interactions.
           At least 1 full-journey scenario + 1 full-build smoke.
+
+        Rule 8: Boundary-pair awareness (CB-02, v0.9.1).
+          If api-contracts.md contains boundary_pairs:
+          a. Files in the same boundary_pair SHOULD be in the same phase.
+          b. If combined size exceeds L: split into callee-phase → caller-phase sequence.
+             caller-phase requires: { type: "boundary contract", name: "{pair.id}", from_phase: "{callee-phase}" }
+             callee-phase produces: { type: "boundary contract", name: "{pair.id}", spec: "{command signature}" }
+          c. Gate 0.7 validates contract consistency at phase boundary.
         ```
 
         **B-04 backward compatibility:** If old `checkpoint: true` format is detected,
         orchestrator treats it as a single-phase cluster with the checkpoint's
         `integration_tests` as `feature_e2e`.
 
-    10. **Centrality awareness**: High-centrality files (imported by many) should be modified in early phases. Late modification of central files causes cascade rework in already-completed phases.
+    11. **Centrality awareness**: High-centrality files (imported by many) should be modified in early phases. Late modification of central files causes cascade rework in already-completed phases.
   </Rules>
 
   <Maturity_Mode_Effects>
@@ -214,6 +222,23 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - Specify requires/produces for each phase
       - A phase with no produces is likely unnecessary (delete or merge)
       - A phase whose requires are not satisfied by prior phases has an ordering error
+
+    Step 6.5: Contract Snippet Extraction (CB-06, v0.9.2)
+
+    For each phase that touches cross-boundary interfaces (has boundary_pairs or multi-layer files):
+    - Read Phase 0 `api-contracts.md` and `type-policy.md`
+    - Extract ONLY the 3-5 lines relevant to this phase's boundary interfaces
+    - Set `interface_contract.contract_snippet` to the extracted text
+    - Example:
+      ```
+      contract_snippet: |
+        ## From api-contracts.md
+        create_glossary_term(term: GlossaryTerm) → GlossaryRecord
+        ## From type-policy.md
+        GlossaryRecord: #[serde(rename_all = "camelCase")]
+      ```
+    - Purpose: reduces context competition (full contract is ~2000 tokens, snippet is ~50 tokens)
+    - Worker reads this snippet directly instead of searching full Phase 0 documents
 
     Step 7: Identify shared resources
       - Detect files touched by multiple phases
@@ -383,6 +408,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
             - type: string
               name: string
               spec: string     # brief signature/schema
+          contract_snippet: string | null  # CB-06, v0.9.2 — targeted excerpt from Phase 0 contracts (3-5 lines)
 
         success_criteria:
           - type: "command" | "test" | "file_exists" | "grep" | "description" | "qmd_verified"

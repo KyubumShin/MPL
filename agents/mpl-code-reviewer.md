@@ -69,6 +69,7 @@ disallowedTools: Write, Edit, Task
     2) Read all changed files (diff or full file for new files).
     3) Run available static analysis tools (linter, type checker) via Bash.
     4) Evaluate each file against the applicable review categories (8 base + 2 UI-specific when applicable).
+    4.5) If `.mpl/mpl/gate-0.7-report.md` exists, read cross-boundary advisory warnings and incorporate into Architecture category findings. Severity: MED (advisory, not blocking).
     5) Cross-reference with PP/PD checklist for architecture category — mark each checklist item PASS or VIOLATION.
     6) Produce verdict with prioritized findings.
   </Investigation_Protocol>

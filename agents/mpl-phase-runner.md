@@ -305,6 +305,28 @@ disallowedTools: []
         // Report any mismatches found
     ```
 
+    ### Step 4.57: Boundary Check Validation (CB-05, v0.9.2)
+
+    After worker/inline implementation completes, validate boundary_check:
+
+    ```
+    phase_layers = detect_layers(phase.created_files + phase.modified_files)
+    // Layer detection: "rust" if *.rs, "typescript" if *.ts/*.tsx, "python" if *.py, etc.
+
+    if phase_layers.length >= 2:
+      if NOT output.boundary_check OR output.boundary_check.assertions is empty:
+        announce: "[MPL] CB-05: boundary_check missing for multi-layer phase {phase.id}. Re-running with explicit boundary verification."
+        → Re-dispatch worker with additional instruction:
+          "This phase touches {phase_layers}. You MUST fill boundary_check with assertions comparing contract values to actual values for every cross-boundary interface."
+
+      mismatches = output.boundary_check.assertions.filter(a => a.match == false)
+      if mismatches.length > 0:
+        announce: "[MPL] CB-05: {mismatches.length} boundary mismatches in phase {phase.id}:"
+        for each m in mismatches:
+          announce: "  - {m.name}: contract='{m.contract_value}' actual='{m.actual_value}'"
+        → Enter targeted fix loop for mismatched boundaries only
+    ```
+
     ### Step 4.6: Anti-Stub Verification (B-02, v0.6.3)
 
     Verify implementations are real, not stubs:

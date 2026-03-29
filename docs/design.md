@@ -326,6 +326,7 @@ After all phase executions complete, must pass through 5-stage quality gates seq
 | Gate | Name | Owner | Pass Criteria | On Failure |
 |------|------|------|----------|--------|
 | Gate 0.5 | Type Check | (orchestrator) | 0 type errors | Enter Fix Loop then Gate 1 |
+| Gate 0.7 | Cross-Boundary Advisory | (orchestrator) | advisory (non-blocking) | Warnings route to Gate 2 + Step 5.1.8 |
 | Gate 1 | Automated Testing | (orchestrator) | pass_rate ≥ 95% | Enter Fix Loop |
 | Gate 1.5 | Metrics (F-50) | (orchestrator) | coverage ≥ 60% (MVP) / 80% (strict) | Re-invoke Test Agent (max 2 times) |
 | Gate 2 | Code Review | mpl-code-reviewer | PASS verdict | NEEDS_FIXES → Fix Loop, REJECT → mpl-failed |

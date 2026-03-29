@@ -37,6 +37,38 @@ for each tier in execution_tiers:
       merge_worktree(result)
       save_state_summary(result)
 
+    // Step 4.0.6: Post-Join Boundary Reconciliation (CB-07, v0.9.2)
+    if tier_phases.length > 1:
+      // Collect boundary_check outputs from all phases in this tier
+      all_assertions = {}
+      for each phase in tier_phases:
+        if phase.boundary_check AND phase.boundary_check.assertions:
+          for each assertion in phase.boundary_check.assertions:
+            all_assertions[assertion.name] = all_assertions[assertion.name] || []
+            all_assertions[assertion.name].push({ phase: phase.id, ...assertion })
+
+      // Cross-validate: if phase A produces command "list_volumes" and phase B calls it,
+      // both must agree on the name and contract
+      reconciliation_issues = []
+      for each [name, entries] in all_assertions:
+        actual_values = entries.map(e => e.actual_value).unique()
+        if actual_values.length > 1:
+          reconciliation_issues.push({
+            interface: name,
+            conflict: actual_values,
+            phases: entries.map(e => e.phase)
+          })
+
+      if reconciliation_issues.length > 0:
+        announce: "[MPL] CB-07: {reconciliation_issues.length} cross-phase boundary conflicts detected after parallel join:"
+        for each issue in reconciliation_issues:
+          announce: "  - '{issue.interface}': {issue.conflict.join(' vs ')} (phases {issue.phases.join(', ')})"
+        announce: "[MPL] Inserting targeted reconciliation fix before proceeding."
+        → Dispatch targeted fix task: "Resolve boundary conflicts: {reconciliation_issues}"
+      else:
+        if any phase had boundary_check:
+          announce: "[MPL] CB-07: Post-join reconciliation clean. ✓"
+
     // Cumulative test run for entire tier
     run_cumulative_tests(tier.phases)
   else:

@@ -298,20 +298,38 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | 0.8.0 | V-01 Cluster Ralph + V-02 Lint Gate + V-03 TSConfig Strict + V-04 Config Schema + V-05 Scope Drift Report | ✅ |
 | 0.8.1 | #1 alt Reference file auto-selection + TS-03 Regression Accumulator + Round 1-T Test Strategy Interview + Step 8.6 E2E framework auto-insertion | ✅ |
 
-### Planned
+### Recently Completed (v0.8.6~0.9.0)
 
-| Version | Features | Type |
-|---------|----------|------|
-| **0.8.x** | **BM-05** Gate 2 PP/PD 체크리스트 주입 + **BM-02** semantic memory Phase Hint + **LT-05** severity 피드백 루프 메트릭 + **LT-02** 테스트 병렬화 플래그 자동 감지 | Quick-win: Beads/장기 토론 즉시 항목 |
-| **0.9.0** | **TS-01/02** MCP Assertion tools + T-05 Design Contract + T-06 Doc Sync + **LT-01** Contract Changes 필수 섹션 + **LT-03a** Contract Verification Gate + **LT-04** Multi-Resolution Summary L1/L2/L3 + **BM-04** Discovery 2축 매트릭스 + **P-01** State Summary Tiering + **CB-01/02/03/04** Cross-Boundary Verification + **PR-01~05** Prompt Reinforcement (TX/Security/UI/Lifecycle/ErrorHandling) | Feature: test infra + UI workflow + 장기 안정성 + cross-boundary + prompt reinforcement |
-| ~~**Brownfield**~~ | ~~#4 Do-Not-Touch + #2 IRA + #3 Regression Shield~~ | **4-Field Rescoped (2026-03-27)**: #4/#2 Field 3 전용→CEP 이관. #3 범위 복원(Field 2+4). See `analysis/mpl-3field-classification.md` |
-| **Experiment** | T-02 Same-model dual review | Validate effectiveness |
-| **0.9.x** | **LT-03b** Blame Analysis fallback + **BM-03** interface_contract weight 필드 + **LT-04b** Phase 분해 결합도 검증 게이트 | Feature: cross-phase resilience |
-| **0.10.0** (TBD) | **P-03** Scout Observability (최소 로깅) | Feature: observability |
-| **0.11.0** (TBD) | **P-04** Skill Audit CLI (P-03 데이터 기반, auto-dream 패턴 채택) | Feature: lifecycle management |
-| **Dropped** | **P-02** Phase 0 L0 (P-01에 흡수), **P-05** Context Assembly YAML (시기상조) | Debate consensus 2026-03-24 |
-| **Dropped (Beads)** | Async Gates (MPL 범위 밖, 외부 오케스트레이터+Resume로 대체), Phase Library/Reuse (anchoring bias 위험, fresh decomposition 우선), Success Criteria 분리 (기존 3중 검증으로 충분) | Beads 토론 합의 2026-03-28 |
-| **Deferred** | T-08 Trend Retro, T-09 Performance Gate, F-06 Multi-Project, F-269 RUNBOOK format, #6 (already implemented), #7 Hashline, #8 Cross-Project Learning | Pending data/need |
+| Version | Features | Status |
+|---------|----------|:------:|
+| 0.8.6 | BM-05 Gate 2 PP/PD 체크리스트 + BM-02 Phase Hint + LT-05 severity 메트릭 + LT-02 테스트 병렬화 | ✅ |
+| 0.9.0 | PR-01~05 Prompt Reinforcement + F-E2E-1/1b/1c E2E Fallback Chain | ✅ |
+| 0.9.1 | CB-01~04 Cross-Boundary Detection (Boundary Pair Scan + Rule 8 + Gate 0.7 + Mock Gap) | ✅ |
+| 0.9.2 | CB-05~07 Cross-Boundary Enforcement (boundary_check output + Contract Snippet + Post-Join Reconciliation) | ✅ |
+
+> **v0.9.0 코드베이스 스캔 결과 (2026-03-29)**: PR-01~05 전부 구현 확인. F-E2E-1(3-tier fallback), F-E2E-1b(Rule 12 few-shot), F-E2E-1c(GUI app mandatory Step 3-B) 모두 구현 확인. B-03(Step 4.55 Cross-Layer) 존재하지만 의사코드 수준 → CB-05로 대체 예정.
+
+### Planned (revised 2026-03-29, codebase-verified)
+
+| Version | Theme | Features | Priority |
+|---------|-------|----------|----------|
+| **0.9.3** | **Contract & Summary** | **LT-01** Contract Changes 필수 섹션 + **LT-03a** Contract Verification Gate + **LT-04** Multi-Resolution Summary L1/L2/L3 | 🔴 High |
+| **0.9.4** | **Test Infra & Tools** | **TS-01/02** MCP Assertion tools + **BM-04** Discovery 2축 매트릭스 | 🟠 Medium |
+| **0.9.5** | **Design & Docs** | **T-05** Design Contract + **T-06** Doc Sync | 🟠 Medium |
+| **0.9.x** | **Cross-Phase Resilience** | **LT-03b** Blame Analysis fallback + **BM-03** interface_contract weight + **LT-04b** 분해 결합도 게이트 | 🟡 Low |
+| **0.10.0** | **Observability** | **P-04** Skill Audit CLI | 🟡 Low |
+| **Experiment** | **Validation** | T-02 Same-model dual review | 🟢 Optional |
+
+**v0.9.1~0.9.2 설계 원칙**: "LLM에게 지시(instruction)하지 말고 출력(schema)을 구조화하라." CB-01~04는 감지(detection), CB-05~07은 강제(enforcement). Source: yggdrasil-exp2 3-Phase Debate (2026-03-29).
+
+### Non-Active
+
+| Status | Features | Reason |
+|--------|----------|--------|
+| ~~**Brownfield**~~ | ~~#4 Do-Not-Touch + #2 IRA + #3 Regression Shield~~ | 4-Field Rescoped (2026-03-27): CEP 이관. See `analysis/mpl-3field-classification.md` |
+| **Dropped** | P-02 Phase 0 L0 (P-01 흡수), P-05 Context Assembly YAML (시기상조) | Debate consensus 2026-03-24 |
+| **Dropped (Beads)** | Async Gates, Phase Library/Reuse, Success Criteria 분리 | Beads 토론 합의 2026-03-28 |
+| **Deferred** | T-08 Trend Retro, T-09 Performance Gate, F-06 Multi-Project, F-269 RUNBOOK, #7 Hashline, #8 Cross-Project Learning, F-E2E-2 2-Axis Architecture | Pending data/need |
 | **Absorbed** | T-07 Premise Challenge → Stage 2 PP Conformance | Already covered |
 | **Skipped** | #5 Incremental Merge | Out of MPL scope |
 
@@ -1019,7 +1037,7 @@ Step 5.5에서 사용자가 severity를 재분류하는 경우를 추적. verifi
 
 | ID | Feature | Status | Priority | Version |
 |----|---------|--------|----------|---------|
-| CB-01 | Cross-Boundary Pair Scan | ❌ Not implemented | 🔴 High | 0.9.1 |
+| CB-01 | Cross-Boundary Pair Scan | ✅ **v0.9.1 done** | 🔴 High | 0.9.1 |
 
 **Problem**: Step 2 Codebase Analysis의 Module 2 (Dependency Graph)가 단일 언어 내 import 의존성만 추적. 언어 간 경계(TS invoke → Rust command, fetch → API handler)가 매핑되지 않아 Decomposer가 cross-boundary 의존성을 인식 못함.
 
@@ -1062,7 +1080,7 @@ boundary_pairs:
 
 | ID | Feature | Status | Priority | Version |
 |----|---------|--------|----------|---------|
-| CB-02 | Boundary Pair Phase Grouping Rule | ❌ Not implemented | 🔴 High | 0.9.1 |
+| CB-02 | Boundary Pair Phase Grouping Rule | ✅ **v0.9.1 done** | 🔴 High | 0.9.1 |
 
 **Problem**: Decomposer가 cross-boundary 의존성을 모르기 때문에 TS 타입 정의와 Rust 구조체가 서로 다른 phase에 배치됨. Worker가 한쪽만 보고 구현하여 불일치 발생.
 
@@ -1087,7 +1105,7 @@ Rule 9b: Boundary pair awareness
 
 | ID | Feature | Status | Priority | Version |
 |----|---------|--------|----------|---------|
-| CB-03 | Gate 0.7 Cross-Boundary Advisory | ❌ Not implemented | 🔴 High | 0.9.1 |
+| CB-03 | Gate 0.7 Cross-Boundary Advisory | ✅ **v0.9.1 done** | 🔴 High | 0.9.1 |
 
 **Problem**: Gate 0.5(tsc/cargo check)는 각 언어 내부만 검증. Gate 1(Tests)은 mock 기반이라 실제 직렬화 경로 미검증. 두 언어 사이의 컨트랙트를 정적으로 대조하는 게이트가 없음.
 
@@ -1123,7 +1141,7 @@ Gate 0.7: Cross-Boundary Advisory
 
 | ID | Feature | Status | Priority | Version |
 |----|---------|--------|----------|---------|
-| CB-04 | Mock Boundary Gap Flagging | ❌ Not implemented | 🟠 Medium | 0.9.1 |
+| CB-04 | Mock Boundary Gap Flagging | ✅ **v0.9.1 done** | 🟠 Medium | 0.9.1 |
 
 **Problem**: 프론트엔드 테스트가 invoke를 mock하면 실제 serde 직렬화/역직렬화 경로가 검증되지 않음. 이 "검증 갭"이 Verification Planner 산출물에 명시되지 않아 26건의 직렬화 불일치가 테스트를 통과함.
 
@@ -1171,17 +1189,139 @@ verification_gaps:
 
 0% → 77-88% 는 극적 개선. 나머지 ~12-23%는 JSON 직렬화 경계 등 정적 분석 한계이며, v0.9.x에서 추가 대응 검토.
 
-### Version Mapping Update
+### CB-05: Boundary Check Required Output Field (Worker Schema Enforcement)
 
-v0.9.0에 CB-01~CB-04 + PR-01~05를 기존 LT-03a와 함께 배치:
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-05 | boundary_check 필수 출력 필드 | ✅ **v0.9.2 done** | 🔴 High | 0.9.2 |
+
+**Source**: yggdrasil-exp2 (자연어 인터뷰 기반 MPL 테스트, 2026-03-29). 200 테스트 전부 통과했으나 9개 CRITICAL cross-boundary 버그 발견. 기존 CB-01~04는 "감지(detection)" 측 강화이고, CB-05는 "생성(production)" 측 강제.
+Analysis: `analysis/mpl-cross-boundary-root-cause-analysis.md`, `analysis/mpl-cross-boundary-consensus-proposal.md`
+
+**Problem**: CB-03(Gate 0.7)은 사후 감지. Step 4.55는 의사코드라 실행 보장 불가. Phase 0 type-policy를 참조한 Phase도 잘못 구현(Phase 2: VisibilityLevel 오정의). 12/18 Phase가 Phase 0 계약 미참조. 근본 원인: **검증이 LLM "판단"에 의존하며, 결정론적 도구로 강제되지 않음.**
+
+**Root Cause (3-Agent Debate 합의)**: "instruction은 무시 가능하지만 output schema는 무시 불가능하다." 기존 접근(Step 4.55 의사코드, type-policy Markdown)은 모두 행동 지시(behavioral instruction). Worker가 따를지는 확률론적. output field를 필수로 만들면 구조적 강제(structural enforcement)가 됨.
+
+**Proposal**: Worker/Phase Runner Output Schema에 `boundary_check` 필수 필드 추가.
+
+```json
+{
+  "boundary_check": {
+    "layers_touched": ["rust", "typescript"],
+    "contract_source": ".mpl/mpl/phase0/api-contracts.md#section",
+    "assertions": [
+      {
+        "field": "command_name",
+        "contract_value": "create_glossary_term",
+        "actual_value": "create_glossary_term",
+        "match": true
+      },
+      {
+        "field": "serde_rule:ExtractionResult",
+        "contract_value": "snake_case (python direction)",
+        "actual_value": "camelCase",
+        "match": false
+      }
+    ],
+    "boundary_files_read": [
+      "src-tauri/src/commands/glossary.rs",
+      "src/stores/entityStore.ts"
+    ]
+  }
+}
+```
+
+**Enforcement mechanism**: `validate-output` PostToolUse 훅이 `layers_touched.length >= 2`인 Phase에서 `boundary_check` 미작성 시 출력 거부. Orchestrator가 `match: false` 발견 시 자동 Fix Loop 진입. 단순 문자열 비교 — LLM 판단 불필요.
+
+**CB-01~04와의 관계**:
+- CB-01~03은 **감지 측(detection)**: 코드 생성 후 정적 분석으로 불일치 발견
+- CB-05는 **생성 측(production)**: 코드 생성 시점에 Worker가 경계 대비 자기 검증을 구조적으로 강제
+- CB-05가 먼저 작동(생성 시점), CB-03이 나중에 작동(Gate 시점) → 이중 방어
+
+**Implementation location**:
+- `MPL/agents/mpl-worker.md` — Output Schema 확장
+- `MPL/agents/mpl-phase-runner.md` — Step 3 (Worker dispatch) 시 boundary_check 필수화
+- `MPL/hooks/validate-output` — boundary_check 비어있으면 reject
+
+**Token cost**: ~100 (Worker output 증가분). 검증 자체는 문자열 비교라 추가 LLM 호출 0.
+
+**3-Agent Debate 합의 결론**: Change 1(CB-05) 단독으로 9개 CRITICAL 중 7개 예방 가능. grep/bash 접근(검증 극장)보다 효과적이고, Gate 0.7(사후 감지)보다 시점이 빠름.
+
+**Rejected alternatives (from debate)**:
+- grep/bash 기반 Step 4.55 구체화 → "검증 극장". 이름만 잡고 타입/serde 못 잡음. LLM이 grep 실행해도 결과 해석에 또 LLM 의존.
+- 컴파일러 기반 (ts-rs, specta) → 외부 의존성 금지 원칙 위배. Python 측은 컴파일러 부재.
+- contract.json SSOT → 3번째 진실 소스 생성 위험. CB-05의 assertion이 이를 대체.
+
+### CB-06: Phase별 Contract Snippet 주입 (Decomposer Extension)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-06 | Targeted Contract Snippet Injection | ✅ **v0.9.2 done** | 🟠 Medium | 0.9.2 |
+
+**Problem**: Phase 0 계약 전체(~2000 tok)를 주입하면 컨텍스트 경합으로 Worker가 무시하거나 오해석. Phase 2가 type-policy를 참조하고도 VisibilityLevel을 잘못 정의한 사례.
+
+**Proposal**: Decomposer가 Phase 분해 시, 해당 Phase의 `interface_contract`에 Phase 0 계약의 관련 부분만 발췌(3-5줄):
+
+```yaml
+phase_5:
+  interface_contract:
+    contract_snippet: |
+      ## From type-policy.md
+      ChapterStatus: draft | reviewed | locked
+      Tauri param serialization: camelCase
+      ## From api-contracts.md
+      save_chapter(chapter: SaveChapterInput) → ChapterRecord
+```
+
+**CB-05와의 관계**: CB-06은 확률론적 보조(Worker가 snippet을 읽고 올바르게 구현할 확률 향상). CB-05는 구조적 강제(결과를 검증). 순서: CB-06(생성 시 참고) → CB-05(생성 후 검증) → CB-03(Gate에서 감지).
+
+### CB-07: Post-Join Reconciliation Step (Parallel Phase Fix)
+
+| ID | Feature | Status | Priority | Version |
+|----|---------|--------|----------|---------|
+| CB-07 | Post-Join Boundary Reconciliation | ✅ **v0.9.2 done** | 🟠 Medium | 0.9.2 |
+
+**Problem**: 병렬 Phase(16, 17)가 동시 실행 시 서로의 코드를 읽을 수 없어 커맨드 이름 불일치 발생. Phase 16은 `list_volumes` 호출, Phase 9는 해당 커맨드 미구현. State summary도 없어 추적 불가.
+
+**Proposal**: 병렬 Phase fan-out 후 합류(join) 시점에 reconciliation micro-step:
 
 ```
-0.9.0: TS-01/02 + T-05 + T-06 + LT-01 + LT-03a + LT-04 + BM-04 + P-01
-       + CB-01 + CB-02 + CB-03 + CB-04  ← cross-boundary verification
-       + PR-01 + PR-02 + PR-03 + PR-04 + PR-05  ← prompt reinforcement (from codebase-issue-scan)
+After parallel phases [N, N+1, ...] complete:
+  1. Collect boundary_check.assertions from each phase (CB-05 산출물)
+  2. Cross-check: Phase N의 actual_value가 Phase N+1의 contract_value와 일치하는가
+  3. 불일치 시: targeted fix phase 삽입 (다음 Phase 진행 전)
 ```
 
-CB-01~03은 🔴 High, CB-04는 🟠 Medium. PR-01~02는 🔴 High, PR-03~04는 🟠 Medium, PR-05는 🟢 Low.
+**CB-05 필수**: CB-07은 CB-05의 boundary_check 출력을 입력으로 사용. CB-05 없이 단독 동작 불가.
+
+### Updated Summary Table
+
+| ID | Feature | Evaluator Verdict | Priority | Version | Token Cost | Type |
+|----|---------|:-----------------:|----------|---------|------------|------|
+| CB-01 | Boundary Pair Scan | ✅ **v0.9.1 done** | 🔴 High | 0.9.1 | ~500 | Detection |
+| CB-02 | Decomposer Rule 9b | ✅ **v0.9.1 done** | 🔴 High | 0.9.1 | ~100 | Prevention |
+| CB-03 | Gate 0.7 Advisory | ✅ **v0.9.1 done** | 🔴 High | 0.9.1 | ~3-5K | Detection |
+| CB-04 | Mock Gap Flagging | ✅ **v0.9.1 done** | 🟠 Medium | 0.9.1 | ~250 | Detection |
+| **CB-05** | **boundary_check Required Output** | **✅ v0.9.2 done** | **🔴 High** | **0.9.2** | **~100** | **Enforcement** |
+| **CB-06** | **Contract Snippet Injection** | **✅ v0.9.2 done** | **🟠 Medium** | **0.9.2** | **~50** | **Prevention** |
+| **CB-07** | **Post-Join Reconciliation** | **✅ v0.9.2 done** | **🟠 Medium** | **0.9.2** | **~200** | **Enforcement** |
+
+CB-05~07의 설계 원칙: **"LLM에게 지시하지 말고, LLM의 출력을 구조화하라."** (instruction → schema 전환)
+
+### Version Mapping Update (revised 2026-03-29)
+
+기존 v0.9.0 묶음을 테마별로 분리. PR-01~04는 이미 완료.
+
+```
+0.9.0: PR-01~05 + F-E2E-1/1b/1c                ← prompt reinforcement + E2E fallback (DONE)
+0.9.1: CB-01 + CB-02 + CB-03 + CB-04           ← cross-boundary detection
+0.9.2: CB-05 + CB-06 + CB-07                    ← cross-boundary enforcement
+0.9.3: LT-01 + LT-03a + LT-04                   ← contract & summary
+0.9.4: TS-01/02 + BM-04                          ← test infra & tools
+0.9.5: T-05 + T-06                                ← design & docs
+```
+
+Source: yggdrasil-exp2 3-Phase Debate (2026-03-29). See analysis/mpl-cross-boundary-consensus-proposal.md.
 
 ---
 
