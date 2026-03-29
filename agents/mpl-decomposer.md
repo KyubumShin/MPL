@@ -223,22 +223,46 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - A phase with no produces is likely unnecessary (delete or merge)
       - A phase whose requires are not satisfied by prior phases has an ordering error
 
-    Step 6.5: Contract Snippet Extraction (CB-06, v0.9.2)
+    Step 6.5: Contract Registry Generation (CB-08 L0, v0.9.3)
 
-    For each phase that touches cross-boundary interfaces (has boundary_pairs or multi-layer files):
-    - Read Phase 0 `api-contracts.md` and `type-policy.md`
-    - Extract ONLY the 3-5 lines relevant to this phase's boundary interfaces
-    - Set `interface_contract.contract_snippet` to the extracted text
+    Generate `.mpl/contracts/*.json` for each cross-boundary interface detected in Phase 0.
+    These are the SSOT for mechanical verification — L1/L2 hooks validate against them.
+
+    For each boundary_pair (or multi-layer interface) from api-contracts.md:
+    - Create `.mpl/contracts/{boundary-name}.json` with minimal key-type registry:
+      ```json
+      {
+        "boundary": "rust -> python",
+        "protocol": "json-rpc",
+        "method": "extraction.run",
+        "params": {
+          "content": { "type": "string", "required": true },
+          "api_key": { "type": "string", "required": true }
+        },
+        "returns": {
+          "entities": { "type": "array" },
+          "events": { "type": "array" }
+        }
+      }
+      ```
+    - One file per boundary method/command. NOT full JSON Schema — only key names, types, required.
+    - For Tauri IPC boundaries: one file per `#[tauri::command]` that has TS callers.
+    - For JSON-RPC boundaries: one file per RPC method.
+    - For DB↔Model boundaries: one file per model that maps to a DB table.
+
+    Also extract contract_snippet (CB-06) into each phase's interface_contract as before:
+    - Set `interface_contract.contract_snippet` to 3-5 lines from Phase 0 documents
+    - Set `interface_contract.contract_files` to the relevant `.mpl/contracts/*.json` paths
     - Example:
+      ```yaml
+      interface_contract:
+        contract_snippet: |
+          ## From api-contracts.md
+          extraction.run(content, api_key, world_id) → ExtractionResult
+        contract_files:
+          - .mpl/contracts/rust-python-extraction-run.json
       ```
-      contract_snippet: |
-        ## From api-contracts.md
-        create_glossary_term(term: GlossaryTerm) → GlossaryRecord
-        ## From type-policy.md
-        GlossaryRecord: #[serde(rename_all = "camelCase")]
-      ```
-    - Purpose: reduces context competition (full contract is ~2000 tokens, snippet is ~50 tokens)
-    - Worker reads this snippet directly instead of searching full Phase 0 documents
+    - Purpose: snippet for Worker context, contract_files for L1/L2 mechanical verification
 
     Step 7: Identify shared resources
       - Detect files touched by multiple phases

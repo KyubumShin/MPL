@@ -37,37 +37,56 @@ for each tier in execution_tiers:
       merge_worktree(result)
       save_state_summary(result)
 
-    // Step 4.0.6: Post-Join Boundary Reconciliation (CB-07, v0.9.2)
+    // Step 4.0.6: Post-Join Semantic Boundary Verification — L2 (CB-08, v0.9.3)
+    // Replaces CB-07's LLM-dependent boundary_check collection with mechanical key extraction.
     if tier_phases.length > 1:
-      // Collect boundary_check outputs from all phases in this tier
-      all_assertions = {}
+      // Collect all contract files referenced by phases in this tier
+      all_contracts = []
       for each phase in tier_phases:
-        if phase.boundary_check AND phase.boundary_check.assertions:
-          for each assertion in phase.boundary_check.assertions:
-            all_assertions[assertion.name] = all_assertions[assertion.name] || []
-            all_assertions[assertion.name].push({ phase: phase.id, ...assertion })
+        if phase.interface_contract.contract_files:
+          all_contracts.push(...phase.interface_contract.contract_files)
+      all_contracts = unique(all_contracts)
 
-      // Cross-validate: if phase A produces command "list_volumes" and phase B calls it,
-      // both must agree on the name and contract
-      reconciliation_issues = []
-      for each [name, entries] in all_assertions:
-        actual_values = entries.map(e => e.actual_value).unique()
-        if actual_values.length > 1:
-          reconciliation_issues.push({
-            interface: name,
-            conflict: actual_values,
-            phases: entries.map(e => e.phase)
-          })
+      if all_contracts.length > 0:
+        reconciliation_issues = []
 
-      if reconciliation_issues.length > 0:
-        announce: "[MPL] CB-07: {reconciliation_issues.length} cross-phase boundary conflicts detected after parallel join:"
-        for each issue in reconciliation_issues:
-          announce: "  - '{issue.interface}': {issue.conflict.join(' vs ')} (phases {issue.phases.join(', ')})"
-        announce: "[MPL] Inserting targeted reconciliation fix before proceeding."
-        → Dispatch targeted fix task: "Resolve boundary conflicts: {reconciliation_issues}"
-      else:
-        if any phase had boundary_check:
-          announce: "[MPL] CB-07: Post-join reconciliation clean. ✓"
+        for each contract_path in all_contracts:
+          contract = Read(contract_path)
+
+          // Extract actual keys from BOTH sides of the boundary using grep
+          // Example: Rust caller sends json!({ "content": ... }), Python handler reads params.get("text")
+          if contract.boundary == "rust -> python":
+            rust_keys = Bash("grep -oP '\"[a-z_]+\"\\s*:' {find_rust_file(contract)} | tr -d '\"' | tr -d ':' | tr -d ' ' | sort -u")
+            python_keys = Bash("grep -oP 'params\\.get\\(\"\K[a-z_]+' {find_python_file(contract)} | sort -u")
+            diff_result = Bash("diff <(echo '{rust_keys}') <(echo '{python_keys}')")
+
+          elif contract.boundary == "typescript -> rust":
+            ts_keys = Bash("grep -oP '[a-z_A-Z]+\\s*:' {find_ts_file(contract)} | tr -d ':' | tr -d ' ' | sort -u")
+            rust_keys = Bash("grep -oP '[a-z_]+\\s*:' {find_rust_file(contract)} | tr -d ':' | tr -d ' ' | sort -u")
+            // Note: Tauri auto-converts camelCase→snake_case, so normalize before diff
+            diff_result = Bash("diff <(echo '{ts_keys}' | sed 's/[A-Z]/_\\l&/g') <(echo '{rust_keys}')")
+
+          elif contract.boundary == "python -> db":
+            python_fields = Bash("grep -oP '\\b[a-z_]+\\s*[:=]' {find_python_model(contract)} | tr -d ':=' | tr -d ' ' | sort -u")
+            db_columns = Bash("grep -oP '[a-z_]+ (TEXT|INTEGER|REAL|BLOB)' {find_schema_file()} | awk '{print $1}' | sort -u")
+            diff_result = Bash("comm -23 <(echo '{db_columns}') <(echo '{python_fields}')")
+
+          if diff_result is not empty:
+            reconciliation_issues.push({
+              contract: contract_path,
+              boundary: contract.boundary,
+              diff: diff_result
+            })
+
+        if reconciliation_issues.length > 0:
+          announce: "[MPL] CB-08 L2: {reconciliation_issues.length} semantic boundary conflicts after parallel join:"
+          for each issue in reconciliation_issues:
+            announce: "  - {issue.contract} ({issue.boundary}):"
+            announce: "    {issue.diff}"
+          announce: "[MPL] Inserting targeted boundary fix before proceeding."
+          → Dispatch targeted fix task: "Resolve boundary key mismatches: {reconciliation_issues}"
+        else:
+          announce: "[MPL] CB-08 L2: Post-join semantic verification clean. ✓"
 
     // Cumulative test run for entire tier
     run_cumulative_tests(tier.phases)

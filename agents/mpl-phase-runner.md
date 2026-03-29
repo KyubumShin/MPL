@@ -305,27 +305,52 @@ disallowedTools: []
         // Report any mismatches found
     ```
 
-    ### Step 4.57: Boundary Check Validation (CB-05, v0.9.2)
+    ### Step 4.57: Mechanical Boundary Verification — L1 Diff Guard (CB-08, v0.9.3)
 
-    After worker/inline implementation completes, validate boundary_check:
+    After worker/inline implementation completes, run mechanical (shell-based) boundary verification.
+    **No LLM calls. No self-report. Pure key-set comparison against contract registry.**
 
     ```
-    phase_layers = detect_layers(phase.created_files + phase.modified_files)
-    // Layer detection: "rust" if *.rs, "typescript" if *.ts/*.tsx, "python" if *.py, etc.
+    contract_files = phase.interface_contract.contract_files  // from decomposition (CB-08 L0)
+    if NOT contract_files OR contract_files.length == 0:
+      skip  // single-layer phase or no boundary contracts
 
-    if phase_layers.length >= 2:
-      if NOT output.boundary_check OR output.boundary_check.assertions is empty:
-        announce: "[MPL] CB-05: boundary_check missing for multi-layer phase {phase.id}. Re-running with explicit boundary verification."
-        → Re-dispatch worker with additional instruction:
-          "This phase touches {phase_layers}. You MUST fill boundary_check with assertions comparing contract values to actual values for every cross-boundary interface."
+    for each contract_path in contract_files:
+      contract = Read(contract_path)  // .mpl/contracts/*.json
 
-      mismatches = output.boundary_check.assertions.filter(a => a.match == false)
-      if mismatches.length > 0:
-        announce: "[MPL] CB-05: {mismatches.length} boundary mismatches in phase {phase.id}:"
-        for each m in mismatches:
-          announce: "  - {m.name}: contract='{m.contract_value}' actual='{m.actual_value}'"
-        → Enter targeted fix loop for mismatched boundaries only
+      // Extract expected keys from contract
+      expected_keys = Bash("jq -r '.params | keys[]' {contract_path} | sort")
+
+      // Extract actual keys from implementation files (language-specific patterns)
+      if contract.boundary contains "python":
+        // Python: params.get("key") or params["key"]
+        impl_file = find_python_handler(contract.method)
+        actual_keys = Bash("grep -oP 'params\\.get\\(\"|params\\[\"' {impl_file} | grep -oP '[a-z_]+' | sort -u")
+      elif contract.boundary contains "rust":
+        // Rust: json!({ "key": ... }) or struct field names
+        impl_file = find_rust_caller(contract.method)
+        actual_keys = Bash("grep -oP '\"[a-z_]+\"\\s*:' {impl_file} | tr -d '\"' | tr -d ':' | tr -d ' ' | sort -u")
+      elif contract.boundary contains "typescript":
+        // TypeScript: invoke("cmd", { key: ... })
+        impl_file = find_ts_caller(contract.method)
+        actual_keys = Bash("grep -oP '[a-z_]+\\s*:' {impl_file} | tr -d ':' | tr -d ' ' | sort -u")
+
+      // Set difference via comm
+      missing = Bash("comm -23 <(echo '{expected_keys}') <(echo '{actual_keys}')")
+      extra = Bash("comm -13 <(echo '{expected_keys}') <(echo '{actual_keys}')")
+
+      if missing OR extra:
+        announce: "[MPL] CB-08 L1: Boundary mismatch in {contract_path}:"
+        if missing: announce: "  Missing keys: {missing}"
+        if extra: announce: "  Unexpected keys: {extra}"
+        → Enter targeted fix loop for boundary mismatch
+      else:
+        announce: "[MPL] CB-08 L1: Boundary check passed for {contract.method} ✓"
     ```
+
+    **Design principle**: "LLM generates contracts, machines enforce them."
+    CB-05's boundary_check LLM output field is **replaced** by this mechanical verification.
+    The verification cost is $0 (shell commands only).
 
     ### Step 4.6: Anti-Stub Verification (B-02, v0.6.3)
 

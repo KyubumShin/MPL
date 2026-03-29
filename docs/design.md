@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.9.2 Design Document
+# MPL (Micro-Phase Loop) v0.9.3 Design Document
 
 ## 1. Overview
 
@@ -739,17 +739,41 @@ Dependency-based compression for state summaries. Instead of loading all depende
 
 | Feature | ID | Description | Type |
 |---------|-----|-------------|------|
-| boundary_check Required Output | CB-05 | Worker output schema: mandatory `boundary_check` field for multi-layer phases. PostToolUse hook rejects empty. `match: false` triggers fix loop. | Worker schema + Phase Runner validation |
+| ~~boundary_check Required Output~~ | ~~CB-05~~ | ~~Worker output schema: mandatory `boundary_check` field.~~ **Replaced by CB-08 L1 in v0.9.3.** LLM self-report was unreliable (exp3 showed 3 CB bugs despite CB-05 being "done"). | ~~Worker schema~~ → Deprecated |
 | Contract Snippet Injection | CB-06 | Decomposer extracts 3-5 line targeted contract excerpts per phase (reduces context competition vs full 2000-token contract) | Decomposer extension |
-| Post-Join Reconciliation | CB-07 | After parallel phase merge: cross-validate boundary_check assertions between phases, dispatch fix on conflict | Orchestrator protocol |
+| ~~Post-Join Reconciliation~~ | ~~CB-07~~ | ~~Cross-validate boundary_check assertions between phases.~~ **Replaced by CB-08 L2 in v0.9.3.** Now uses shell-based key extraction instead of LLM boundary_check output. | ~~Orchestrator~~ → Deprecated |
+| **Contract Registry (L0)** | **CB-08** | **Phase 0 generates `.mpl/contracts/*.json` per boundary. Minimal key-type registries (NOT JSON Schema). SSOT for L1/L2 verification.** | **Decomposer + Phase 0** |
+| **Diff Guard (L1)** | **CB-08** | **PostPhase hook: `jq keys + comm` compares contract vs implementation keys. $0 cost. Catches parameter name mismatches (`content` vs `text`).** | **Phase Runner Step 4.57** |
+| **Semantic Verify (L2)** | **CB-08** | **Post-Join: extracts keys from both sides of boundary via grep, diffs them. Catches Python↔DB field gaps (`real_order` missing).** | **Orchestrator protocol** |
+
+**Design principle (CB-08):** "LLM generates contracts, machines enforce them." All verification is shell-based ($0, no LLM calls).
 
 **Affected files:**
-- `agents/mpl-worker.md` — boundary_check output field (CB-05)
-- `agents/mpl-phase-runner.md` — Step 4.57 boundary check validation (CB-05)
-- `agents/mpl-decomposer.md` — contract_snippet field + Step 6.5 extraction (CB-06)
-- `commands/mpl-run-execute.md` — Step 4.0.6 post-join reconciliation (CB-07)
+- `agents/mpl-decomposer.md` — Step 6.5: Contract Registry generation (CB-08 L0) + contract_snippet (CB-06)
+- `agents/mpl-phase-runner.md` — Step 4.57: Mechanical L1 Diff Guard (CB-08, replaces CB-05)
+- `commands/mpl-run-execute.md` — Step 4.0.6: Semantic L2 verification (CB-08, replaces CB-07)
 
-**Breaking changes: NONE.** Worker output schema is additive (boundary_check only required for multi-layer phases).
+**Breaking changes:** CB-05 `boundary_check` Worker output field is **deprecated**. Multi-layer phases no longer require this field. Verification is now external (shell-based) rather than internal (LLM self-report).
+
+### v0.9.3 — Mechanical Boundary Verification (CB-08) (2026-03-29)
+
+Replaces CB-05/CB-07's LLM-dependent verification with shell-based mechanical verification. Motivated by exp3 (Yggdrasil v2) where 210 tests passed but 3 cross-boundary bugs were found — CB-05 `boundary_check` was filled correctly by LLM but the actual code was wrong.
+
+| Change | Before (v0.9.2) | After (v0.9.3) | Type | Rationale |
+|--------|-----------------|----------------|------|-----------|
+| L0: Contract Registry | api-contracts.md (prose) | `.mpl/contracts/*.json` (key-type pairs) | Decomposer | Machine-parseable SSOT for verification |
+| L1: PostPhase Diff Guard | CB-05 boundary_check (LLM self-report) | `jq keys + comm` shell verification | Phase Runner | LLM self-report unreliable (exp3 evidence) |
+| L2: Post-Join Semantic | CB-07 boundary_check cross-validation | Shell-based key extraction + diff | Orchestrator | No LLM dependency, $0 cost |
+| CB-05 boundary_check | Required output field | **Deprecated** | Worker schema | Replaced by mechanical L1 |
+
+**Affected files:**
+- `agents/mpl-decomposer.md` — Step 6.5 rewritten for Contract Registry generation
+- `agents/mpl-phase-runner.md` — Step 4.57 rewritten for L1 Diff Guard
+- `commands/mpl-run-execute.md` — Step 4.0.6 rewritten for L2 Semantic Verify
+
+**Breaking changes:** `boundary_check` Worker output field deprecated. Phases no longer need to produce this field.
+
+**Evidence:** `analysis/mpl-exp3-report.md`, `analysis/mpl-cross-boundary-final-consensus.md`
 
 ---
 
