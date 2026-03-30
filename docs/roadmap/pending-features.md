@@ -298,7 +298,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | 0.8.0 | V-01 Cluster Ralph + V-02 Lint Gate + V-03 TSConfig Strict + V-04 Config Schema + V-05 Scope Drift Report | ✅ |
 | 0.8.1 | #1 alt Reference file auto-selection + TS-03 Regression Accumulator + Round 1-T Test Strategy Interview + Step 8.6 E2E framework auto-insertion | ✅ |
 
-### Recently Completed (v0.8.6~0.10.0)
+### Recently Completed (v0.8.6~0.10.1)
 
 | Version | Features | Status |
 |---------|----------|:------:|
@@ -309,6 +309,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | 0.9.3 | CB-08 Mechanical Boundary Verification (L0/L1/L2) | ✅ |
 | 0.9.4 | **Pre-v2 Cleanup** — Worker removal + Principle 1/5 update + version notation | ✅ |
 | 0.10.0 | **Mechanical Boundary Foundation** — **KT-01** Channel Registry + **CB-L0** Adjacent Contracts + **SEED-01/02/03** Contract Snippet + **SNT-S0/S1/S3** Sentinel Hooks + **CB-L1** L1 Hard Gate | ✅ |
+| 0.10.1 | **MCP Path Fix** — .mcp.json args에 `${CLAUDE_PLUGIN_ROOT}` prefix 추가 (플러그인 MCP 서버 경로 해결) | ✅ |
 
 > **v0.9.0 코드베이스 스캔 결과 (2026-03-29)**: PR-01~05 전부 구현 확인. F-E2E-1(3-tier fallback), F-E2E-1b(Rule 12 few-shot), F-E2E-1c(GUI app mandatory Step 3-B) 모두 구현 확인. B-03(Step 4.55 Cross-Layer) 존재하지만 의사코드 수준 → CB-05로 대체 예정.
 
@@ -1358,6 +1359,7 @@ CB-08의 설계 원칙: **"LLM이 계약을 생성하고, 기계가 계약을 �
 0.9.3: CB-08 (L0/L1/L2 Mechanical Verification) ← cross-boundary mechanical enforcement (DONE)
 0.9.4: Worker removal + Principle 1/5 update + version notation (Pre-v2 Cleanup) (DONE)
 0.10.0: KT-01 + CB-L0 + SEED-01/02/03 + SNT-S0/S1/S3 + CB-L1 (Mechanical Boundary Foundation) (DONE)
+0.10.1: MCP path fix (.mcp.json ${CLAUDE_PLUGIN_ROOT} prefix) (DONE)
 0.9.5: LT-01 + LT-03a + LT-04                   ← contract & summary
 0.9.6: TS-01/02 + BM-04                          ← test infra & tools
 0.9.7: T-05 + T-06                                ← design & docs
