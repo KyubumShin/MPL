@@ -622,12 +622,16 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**0.9.2**~~ | ~~CB-05~07 Cross-Boundary Enforcement (boundary_check output + Contract Snippet + Post-Join Reconciliation)~~ | ✅ **Implemented** |
 | **0.9.3** | LT-01 Contract Changes + LT-03a Contract Verification Gate + LT-04 Multi-Resolution Summary | Feature: contract & summary |
 | ~~**0.9.4**~~ | ~~Pre-v2 Cleanup: Worker Agent Removal + Principle 1/5 Rename + Version Notation~~ | ✅ **Implemented** |
-| **0.9.5** | T-05 Design Contract + T-06 Doc Sync | Feature: design & docs |
-| **Experiment** | T-02 Same-model dual review | Validate effectiveness |
+| ~~**0.9.5**~~ | ~~T-05 Design Contract + T-06 Doc Sync~~ | T-05 Dropped (Seed 대체), T-06 → v1.0.1 |
+| ~~**Experiment**~~ | ~~T-02 Same-model dual review~~ | Dropped (MCP Judge 흡수) |
 | ~~**0.10.0**~~ | ~~Mechanical Boundary Foundation: Channel Registry + Adjacent Contracts + Seed Extension + Sentinels + L1 Hard Gate~~ | ✅ **Implemented** |
 | ~~**0.10.1**~~ | ~~MCP Path Fix: .mcp.json args `${CLAUDE_PLUGIN_ROOT}` prefix~~ | ✅ **Implemented** |
 | ~~**0.10.2**~~ | ~~T-11 Skill Quality Polish: Description trigger hints (3-tier) + deprecated stub + setup split~~ | ✅ **Implemented** |
-| **Deferred** | T-08, T-09, F-06, F-269, #7, #8 | Pending data/need |
+| **v0.11.0** | v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8 | 🔴 Next |
+| **v1.0.0** | v2 Phase 3: MCP Judge + Runner/Test 분리 + L2 | 🟠 Planned |
+| **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
+| **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |
+| **Dropped** | T-05, TS-01/02, BM-04, F-269, T-09, F-06 | v2 대체 또는 수요 부재 |
 
 ---
 
