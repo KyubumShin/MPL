@@ -1,5 +1,5 @@
 ---
-description: MPL Pivot Point discovery through structured interview - define immutable constraints before planning
+description: "Pivot Point discovery through structured interview — define immutable constraints before planning. Usually called internally by /mpl:mpl before Phase 1. May also trigger when the user explicitly asks to define constraints: 'pivot point', 'PP 정리', '제약조건 잡아줘'."
 ---
 
 # MPL Pivot Points Interview

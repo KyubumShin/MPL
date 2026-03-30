@@ -1,5 +1,5 @@
 ---
-description: MPL Micro-Phase Loop (MPL) Pipeline - Decomposes tasks into small phases, each with independent plan-execute-verify mini-loops.
+description: "MPL Micro-Phase Loop pipeline — decomposes tasks into small phases, each with independent plan-execute-verify mini-loops. Use this skill when the user wants to implement a feature, build something, or work on any non-trivial coding task using MPL. Triggers on: 'mpl', 'mpl로 해줘', 'mpl 파이프라인', 'mpl 실행', or any implementation request in an MPL-enabled project. This is the main entry point for all MPL pipeline work."
 ---
 
 # MPL (Micro-Phase Loop)

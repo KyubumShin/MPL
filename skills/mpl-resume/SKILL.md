@@ -1,5 +1,5 @@
 ---
-description: Resume cancelled or interrupted MPL pipeline from last checkpoint
+description: "Resume cancelled or interrupted MPL pipeline from last checkpoint. Use this skill when the user wants to continue a previously stopped or interrupted MPL pipeline. Triggers on: '이어서', '재개', '다시 시작', 'resume', 'continue pipeline', 'mpl 이어서 해줘', '아까 하던 거 계속', or any request to pick up where a cancelled/paused pipeline left off."
 ---
 
 # MPL Resume

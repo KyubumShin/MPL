@@ -1,5 +1,5 @@
 ---
-description: Setup and configure MPL plugin - install, verify, detect tool availability, and configure standalone mode + MCP server
+description: "Setup and configure MPL plugin — install, verify, detect tool availability, and configure standalone mode + MCP server. Command-only: invoke via /mpl:mpl-setup. Do not auto-trigger from natural language."
 ---
 
 # MPL Setup

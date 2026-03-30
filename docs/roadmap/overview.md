@@ -626,6 +626,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | **Experiment** | T-02 Same-model dual review | Validate effectiveness |
 | ~~**0.10.0**~~ | ~~Mechanical Boundary Foundation: Channel Registry + Adjacent Contracts + Seed Extension + Sentinels + L1 Hard Gate~~ | ✅ **Implemented** |
 | ~~**0.10.1**~~ | ~~MCP Path Fix: .mcp.json args `${CLAUDE_PLUGIN_ROOT}` prefix~~ | ✅ **Implemented** |
+| ~~**0.10.2**~~ | ~~T-11 Skill Quality Polish: Description trigger hints (3-tier) + deprecated stub + setup split~~ | ✅ **Implemented** |
 | **Deferred** | T-08, T-09, F-06, F-269, #7, #8 | Pending data/need |
 
 ---

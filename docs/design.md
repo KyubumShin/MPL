@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.10.1 Design Document
+# MPL (Micro-Phase Loop) v0.10.2 Design Document
 
 ## 1. Overview
 
@@ -858,6 +858,19 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | .mcp.json args path | `mcp-server/dist/index.js` (relative) | `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` (absolute via env var) | bugfix | Plugin MCP server failed to start because relative path resolved against CWD, not plugin root. `${CLAUDE_PLUGIN_ROOT}` is expanded by Claude Code at runtime to the correct plugin installation directory. |
 
 **Affected files:** `.mcp.json`
+**Breaking changes:** NONE
+
+### v0.10.2 — Skill Quality Polish (2026-03-30)
+
+T-11: Skill description/structure consistency improvement across all 12 built-in skills.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Description trigger hints | Generic functional descriptions only | 3-tier trigger classification: strong (4), weak (3), command-only (3) | feature | Improve skill triggering accuracy — skills now declare when they should/shouldn't auto-trigger |
+| Deprecated skill stub | mpl-bugfix (76 lines), mpl-small (64 lines) with full protocol | 7-line redirect stubs | cleanup | Reduce unnecessary context consumption for deprecated skills |
+| mpl-setup references/ split | 612-line monolithic SKILL.md | 392 lines + 3 reference files (qmd-setup, rotation-setup, mcp-setup) | refactor | Keep SKILL.md under 500-line recommendation for progressive disclosure |
+
+**Affected files:** `skills/*/SKILL.md` (all 12 skills), `skills/mpl-setup/references/` (3 new files)
 **Breaking changes:** NONE
 
 ---

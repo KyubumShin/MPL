@@ -1,5 +1,5 @@
 ---
-description: Learning extraction and knowledge distillation - standalone or post-pipeline
+description: "Learning extraction and knowledge distillation — standalone or post-pipeline. Usually called internally after pipeline completion. May also trigger when the user explicitly asks to extract learnings or review decisions: '배운 점 정리', 'compound', '회고해줘'."
 ---
 
 # MPL Compound

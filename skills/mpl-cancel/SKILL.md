@@ -1,5 +1,5 @@
 ---
-description: Cancel active MPL pipeline - clean state preservation for safe resume
+description: "Cancel active MPL pipeline with clean state preservation for safe resume. Use this skill when the user wants to stop, cancel, or abort a running MPL pipeline. Triggers on: '중단', '멈춰', '취소', '그만', 'cancel', 'stop mpl', 'abort pipeline', or any request to halt the current MPL execution."
 ---
 
 # MPL Cancel

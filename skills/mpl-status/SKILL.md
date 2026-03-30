@@ -1,5 +1,5 @@
 ---
-description: MPL pipeline status dashboard - phase progress, TODO completion, gate results, convergence metrics
+description: "MPL pipeline status dashboard — phase progress, TODO completion, gate results, convergence metrics. Use this skill when the user asks about pipeline progress or current state. Triggers on: '진행 상황', '어디까지 했어', 'status', 'mpl 상태', '몇 페이즈야', 'how far along', 'show progress', or any question about the current MPL pipeline execution state."
 ---
 
 # MPL Status
