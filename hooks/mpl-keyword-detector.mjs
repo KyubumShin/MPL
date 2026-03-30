@@ -171,21 +171,21 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
       return;
     }
 
-    // F-20: Extract tier hint from keywords (bugfix→frugal, small→standard, null→auto)
-    let tierHint = null;
-    if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(cleanPrompt)) tierHint = 'frugal';
-    else if (/\bmpl[\s-]*(small|quick|light)\b/i.test(cleanPrompt)) tierHint = 'standard';
+    // Hat model: Extract PP-proximity hint from keywords (bugfix→near, small→mid, null→auto)
+    let ppHint = null;
+    if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(cleanPrompt)) ppHint = 'near';
+    else if (/\bmpl[\s-]*(small|quick|light)\b/i.test(cleanPrompt)) ppHint = 'mid';
 
     // Initialize MPL state — always single entry point
     const featureName = extractFeatureName(prompt);
-    initState(cwd, featureName, 'auto', tierHint);
+    initState(cwd, featureName, 'auto', ppHint);
 
-    // F-20: Always use single 'mpl' skill — Triage determines tier
-    const hintDesc = tierHint ? ` (hint: ${tierHint})` : '';
+    // Always use single 'mpl' skill — Triage determines pp_proximity
+    const hintDesc = ppHint ? ` (hint: ${ppHint})` : '';
     const message = `[MAGIC KEYWORD: MPL]
 
 MPL Pipeline activated${hintDesc}. State initialized at .mpl/state.json (run_mode: "auto").
-Triage will determine pipeline_tier (frugal/standard/frontier) via Quick Scope Scan.
+Triage will determine pp_proximity (near/mid/far) via Quick Scope Scan.
 
 You MUST invoke the skill using the Skill tool:
 

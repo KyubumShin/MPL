@@ -78,7 +78,7 @@ export function getPhaseScope(cwd, phaseId) {
 }
 
 /**
- * Clear the cached decomposition (for testing or re-decomposition).
+ * Clear the cached decomposition (for testing).
  */
 export function clearCache() {
   _cache = null;

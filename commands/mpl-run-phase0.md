@@ -202,11 +202,11 @@ Announce: "[MPL] Field Classification: {field}."
 
 ## Step 0: Triage
 
-Triage determines two things: **pipeline_tier** (which pipeline depth to use) and **interview_depth** (how deep the PP interview goes). Pipeline tier is determined by Quick Scope Scan (F-20), replacing the previous keyword-based mode detection.
+Triage determines two things: **pp_proximity** (how deep to analyze based on task scope) and **interview_depth** (how deep the PP interview goes). PP-proximity is determined by Quick Scope Scan (F-20), replacing the previous keyword-based mode detection.
 
-### 0.1: Quick Scope Scan + Pipeline Tier (F-20)
+### 0.1: Quick Scope Scan + PP-Proximity (F-20)
 
-Perform a lightweight codebase scan (~1-2K tokens) to calculate `pipeline_score` and determine `pipeline_tier`:
+Perform a lightweight codebase scan (~1-2K tokens) to calculate `pipeline_score` and determine `pp_proximity`:
 
 ```
 Quick Scope Scan:
@@ -237,7 +237,7 @@ pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
 
 #### 0.1.5a: Routing Pattern Matching (F-22)
 
-Before finalizing tier, check past execution patterns for a similar task:
+Before finalizing proximity, check past execution patterns for a similar task:
 
 ```
 if exists(".mpl/memory/routing-patterns.jsonl"):
@@ -245,48 +245,47 @@ if exists(".mpl/memory/routing-patterns.jsonl"):
   // Uses hooks/lib/mpl-routing-patterns.mjs (Jaccard similarity, threshold 0.8)
 
   if recommendation:
-    // Pattern match found — use as tier hint (but score can override if 2+ tiers apart)
-    if |tier_from_score - recommendation| <= 1 tier:
-      tier = recommendation
+    // Pattern match found — use as proximity hint (but score can override if 2+ levels apart)
+    if |proximity_from_score - recommendation| <= 1 level:
+      proximity = recommendation
       source = "pattern_match"
-      Announce: "[MPL] Routing pattern match: similarity={similarity}, recommending tier={recommendation}."
+      Announce: "[MPL] Routing pattern match: similarity={similarity}, recommending proximity={recommendation}."
     else:
       // Score and pattern disagree significantly — trust score
-      Announce: "[MPL] Routing pattern found (similarity={similarity}) but score disagrees. Using score-based tier."
+      Announce: "[MPL] Routing pattern found (similarity={similarity}) but score disagrees. Using score-based proximity."
 ```
 
 
 > **Steps 0.1.5b (F-11 Learnings), 0.1.5c (F-25 4-Tier Memory), and semantic.md-assisted shortcuts have been moved to `mpl-run-phase0-memory.md`.**
 > Load when loading memory in Step 0 or Step 2.5.
 
-Classify tier from score (or override with user hint):
+Classify pp_proximity from score (or override with user hint):
 
-| pipeline_tier | Score | Tier Hint | Pipeline Depth |
-|---------------|-------|-----------|---------------|
-| `"frugal"` | < 0.3 | `"mpl bugfix"` | Error Spec → Fix Cycle → Gate 1 → Commit |
-| `"standard"` | 0.3~0.65 | `"mpl small"` | PP(light) → Error Spec → Single Phase → Gate 1 → Commit |
-| `"frontier"` | > 0.65 | (none) | Full 9+ step pipeline (Steps 0~6) |
+| pp_proximity | Score | Hint | Pipeline Depth |
+|--------------|-------|------|---------------|
+| `"near"` | < 0.3 | `"mpl bugfix"` | Error Spec → Fix Cycle → Gate 1 → Commit |
+| `"mid"` | 0.3~0.65 | `"mpl small"` | PP(light) → Error Spec → Single Phase → Gate 1 → Commit |
+| `"far"` | > 0.65 | (none) | Full 9+ step pipeline (Steps 0~6) |
 
 ```
-tier_hint = state.tier_hint  // from keyword-detector (may be null)
+proximity_hint = state.proximity_hint  // from keyword-detector (may be null)
 { score, breakdown } = calculatePipelineScore(scan_results)
-{ tier, source } = classifyTier(score, tier_hint)
+{ proximity, source } = classifyProximity(score, proximity_hint)
 
-Write pipeline_tier to state:
-  writeState(cwd, { pipeline_tier: tier })
+Write pp_proximity to state:
+  writeState(cwd, { pp_proximity: proximity })
 
-Announce: "[MPL] Triage: pipeline_tier={tier} (source={source}, score={score}).
+Announce: "[MPL] Triage: pp_proximity={proximity} (source={source}, score={score}).
            Scan: files={affected_files}, tests={test_scenarios}, depth={import_depth}, risk={risk_signal}."
 ```
 
-#### Tier-Based Step Selection
+#### Proximity-Based Step Selection
 
-After tier is determined, subsequent steps are selected per tier:
+After pp_proximity is determined, subsequent steps are selected per proximity:
 
-| Step | Frugal | Standard | Frontier |
-|------|--------|----------|----------|
+| Step | Near | Mid | Far |
+|------|------|-----|-----|
 | Step 0.2 Interview Depth | light (+ Uncertainty Scan) | light | full detection |
-| Step 0.5 Maturity | skip | read config | read config |
 | Step 1 PP + Requirements Interview (v2) | light (Round 1+2 + Uncertainty Scan) | light (Round 1+2 + lightweight requirements) | full (4 rounds + Socratic + JUSF) |
 | Step 1-B Pre-Execution | skip | skip | full |
 | Step 2 Codebase Analysis | skip (use scan) | structure + tests only | full (6 modules) |
@@ -295,30 +294,29 @@ After tier is determined, subsequent steps are selected per tier:
 | Gates | Gate 1 only | Gate 1 only | Gate 1 + 2 + 3 |
 
 ```
-if pipeline_tier == "frugal":
+if pp_proximity == "near":
   -> Continue to Step 0.2 (interview_depth = "light" + Uncertainty Scan)
   -> Then Step 1 (light interview) → Step 2.5.5 (Error Spec only)
   -> Then proceed directly to Phase Execution (single fix cycle)
 
-if pipeline_tier == "standard":
+if pp_proximity == "mid":
   -> Continue to Step 0.2 (interview_depth forced to "light")
   -> Then Steps 1 → 2.5.5 → Phase Execution (single phase)
 
-if pipeline_tier == "frontier":
+if pp_proximity == "far":
   -> Continue to Step 0.2 (full interview depth detection)
-  -> Then full pipeline (Steps 0.5 → 1 → 1-B → 2 → 2.5 → 3 → 4 → 5)
+  -> Then full pipeline (Steps 1 → 1-B → 2 → 2.5 → 3 → 4 → 5)
 ```
 
 ### 0.1.5: RUNBOOK Initialization (F-10)
 
-After Triage determines pipeline_tier, create the RUNBOOK:
+After Triage determines pp_proximity, create the RUNBOOK:
 
 ```
 Write(".mpl/mpl/RUNBOOK.md"):
   # RUNBOOK — {user_request (first 100 chars)}
   Started: {ISO timestamp}
-  Pipeline Tier: {pipeline_tier} (source: {source}, score: {score})
-  Maturity: (pending detection)
+  PP-Proximity: {pp_proximity} (source: {source}, score: {score})
 
   ## Current Status
   - Phase: 0/? (triage complete, pre-execution)
@@ -375,18 +373,6 @@ Announce: `[MPL] Triage: interview_depth={depth}. Prompt density: {score}.`
 
 ---
 
-## Step 0.5: Maturity Mode Detection
-
-Read `.mpl/config.json` for `maturity_mode` (default: `"standard"`).
-
-| Mode | Phase Size | PP | Discovery Handling |
-|------|-----------|-----|--------------------|
-| `explore` | S (1-3 TODOs) | Optional | Auto-approved |
-| `standard` | M (3-5 TODOs) | Required | HITL on PP conflict |
-| `strict` | L (5-7 TODOs) | Required + enforced | All changes HITL |
-
-Announce: `[MPL] Maturity mode: {mode}. Phase sizing: {S/M/L}`
-
 ---
 
 ## Step 1: PP + Requirements Integrated Interview (mpl-interviewer v2) [F-26]
@@ -404,7 +390,7 @@ Phase 1 (mpl-interviewer):
   Round 1 (What) + Round 2 (What NOT) + [high-density only: Uncertainty Scan]
   → Output: pivot-points.md + user_responses_summary
 
-Stage 2 (mpl-ambiguity-resolver):
+Stage 2 (Ambiguity Resolution):
   Spec Reading → Ambiguity Scoring Loop → Requirements Structuring
   → Output: ambiguity score + requirements-light.md
 ```
@@ -425,7 +411,7 @@ Stage 2 (mpl-ambiguity-resolver):
    - elif HIGH >= 1: Hypothesis-as-Options questions for HIGH items (max 3)
 4. PP confirmation: save pivot-points.md + generate user_responses_summary
 
-**Stage 2 Details** (mpl-ambiguity-resolver):
+**Stage 2 Details** (Ambiguity Resolution):
 
 1. **Spec Reading**: identify gap/conflict/hidden constraint by comparing provided spec/docs against PPs
 2. **Ambiguity Scoring**: score via 4 PP-orthogonal dimensions (Spec Completeness 35%/Edge Case 25%/Technical Decision 25%/Acceptance Testability 15%)
@@ -443,7 +429,7 @@ Phase 1 (mpl-interviewer):
   Full Round 1-4
   → Output: pivot-points.md + user_responses_summary
 
-Stage 2 (mpl-ambiguity-resolver):
+Stage 2 (Ambiguity Resolution):
   Spec Reading → Ambiguity Scoring Loop → Solution Options → JUSF
   → Output: ambiguity score + requirements-{hash}.md
 ```
@@ -453,7 +439,7 @@ Stage 2 (mpl-ambiguity-resolver):
 1. **Round 1-4**: Full existing PP interview
 2. PP confirmation: save pivot-points.md + generate user_responses_summary
 
-**Stage 2 Details** (mpl-ambiguity-resolver):
+**Stage 2 Details** (Ambiguity Resolution):
 
 1. **Spec Reading**: identify gap/conflict/hidden constraint by comparing provided spec/docs against PPs
 2. **Ambiguity Scoring**: score via 4 PP-orthogonal dimensions
@@ -485,13 +471,11 @@ else:
   // NOTE: "skip" branch removed. Interview always runs at minimum "light" level.
   // Even high-density prompts go through Round 1+2 interview before Uncertainty Scan.
 
-if maturity_mode == "explore" -> PP is optional, skip if user declines
-
 // Two-phase interview execution:
 Task(subagent_type="mpl-interviewer", ...)  // Phase 1: PP Discovery
 → save pivot-points.md + user_responses_summary
 
-Task(subagent_type="mpl-ambiguity-resolver", ...)  // Stage 2: Ambiguity Resolution + Requirements
+// Stage 2: Ambiguity Resolution + Requirements (performed by mpl-interviewer)
 → save requirements-light.md or requirements-{hash}.md + ambiguity score
 ```
 
@@ -506,7 +490,7 @@ elif interview_depth == "light":
 elif interview_depth == "full":
     model = "opus"              # Full PP 4 Rounds
 
-// Stage 2 (mpl-ambiguity-resolver):
+// Stage 2 (Ambiguity Resolution):
 if interview_depth == "light":
     model = "sonnet"            # Ambiguity Resolution Loop + lightweight requirements structuring
 elif interview_depth == "full":
@@ -537,20 +521,17 @@ After PPs are confirmed, run unified pre-execution analysis to identify gaps AND
 This replaces the previous separate gap-analyzer (haiku) and tradeoff-analyzer (sonnet) calls.
 
 ```
-Task(subagent_type="mpl-pre-execution-analyzer", model="sonnet",
-     prompt="""
-     ## Input
-     ### User Request
-     {user_request}
-     ### Pivot Points
-     {pivot_points from .mpl/pivot-points.md}
-     ### Codebase Analysis
-     {codebase_analysis from .mpl/mpl/codebase-analysis.json}
-     <!-- Note: codebase-analysis.json may not exist at this point (produced in Step 2). If absent, Pre-Execution Analyzer proceeds with pivot-points and project structure only. This analysis is refined after Step 2 completes. -->
-
-     Analyze gaps, pitfalls, and constraints (Part 1).
-     Then assess risk levels and recommend execution order (Part 2).
-     """)
+// Pre-execution analysis performed inline by the orchestrator:
+// Analyze gaps, pitfalls, and constraints (Part 1),
+// then assess risk levels and recommend execution order (Part 2).
+//
+// Input:
+//   - user_request
+//   - pivot_points from .mpl/pivot-points.md
+//   - codebase_analysis from .mpl/mpl/codebase-analysis.json (if available)
+//
+// Part 1 (Gap Analysis): Missing requirements, AI pitfalls, Must NOT Do, Recommended Questions
+// Part 2 (Tradeoff Analysis): Risk ratings, reversibility, blast radius, execution ordering
 ```
 
 ### After Receiving Output

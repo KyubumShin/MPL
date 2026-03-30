@@ -1,5 +1,5 @@
 ---
-description: MPL Execution Protocol - Phase Execution Loop, Context Assembly, 5-Gate Quality, Fix Loop
+description: MPL Execution Protocol - Phase Execution Loop, Context Assembly, Gate System, Fix Loop
 ---
 
 # MPL Execution: Step 4 (Phase Execution Loop)
@@ -7,164 +7,64 @@ description: MPL Execution Protocol - Phase Execution Loop, Context Assembly, 5-
 This file contains Step 4 of the MPL orchestration protocol — the core execution engine.
 Load this when `current_phase` is `mpl-phase-running`.
 
-> **See also:** `mpl-run-execute-context.md` (Context Assembly details), `mpl-run-execute-gates.md` (5-Gate Quality system), `mpl-run-execute-parallel.md` (TODO parallel dispatch).
+> **See also:** `mpl-run-execute-context.md` (Context Assembly details), `mpl-run-execute-gates.md` (Gate System), `mpl-run-execute-parallel.md` (TODO parallel dispatch).
 
 ---
 
 ## Step 4: Phase Execution Loop (CORE)
 
-### 4.0: Execution Tier Dispatch (D-01, v0.6.0)
+### 4.0: Phase Execution Dispatch
 
-If `execution_tiers` exists in decomposition.yaml AND pipeline_tier == "frontier":
+For each phase in decomposition order:
 
-```
-for each tier in execution_tiers:
-  if tier.parallel AND tier.phases.length > 1:
-    // Phase-level parallel execution (EXTENSION/SUPPORT only, never CORE)
-    announce: "[MPL] Tier {tier.tier}: executing {tier.phases.length} phases in parallel"
+If phase has `parallel_with` field AND parallel phases have no file overlap:
+  ```
+  // Parallel execution for independent phases
+  announce: "[MPL] Executing {parallel_phases.length} phases in parallel"
 
-    results = parallel_map(tier.phases, fn(phase_id):
-      // 4.0.5: Generate Seed (JIT)
-      seed = generate_phase_seed(phase_id, all_prior_summaries)
-      // 4.1: Context Assembly (with seed)
-      context = assemble_context(phase_id, seed)
-      // 4.2: Phase Runner (worktree isolated for parallel phases)
-      return execute_phase(context, isolation: "worktree")
-    , max_concurrent: 3)
+  results = parallel_map(parallel_phases, fn(phase_id):
+    seed = generate_phase_seed(phase_id, all_prior_summaries)
+    context = assemble_context(phase_id, seed)
+    return execute_phase(context, isolation: "worktree")
+  , max_concurrent: 3)
 
-    // Merge worktree results sequentially
-    for each result in results:
-      merge_worktree(result)
-      save_state_summary(result)
+  // Merge worktree results sequentially
+  for each result in results:
+    merge_worktree(result)
+    save_state_summary(result)
 
-    // Step 4.0.6: Post-Join Semantic Boundary Verification — L2 (CB-08, v0.9.3)
-    // Replaces CB-07's LLM-dependent boundary_check collection with mechanical key extraction.
-    if tier_phases.length > 1:
-      // Collect all contract files referenced by phases in this tier
-      all_contracts = []
-      for each phase in tier_phases:
-        if phase.interface_contract.contract_files:
-          all_contracts.push(...phase.interface_contract.contract_files)
-      all_contracts = unique(all_contracts)
+  // Post-Join Semantic Boundary Verification — L2 (CB-08)
+  // Mechanical key extraction for boundary conflicts
+  if parallel_phases.length > 1:
+    all_contracts = collect_contract_files(parallel_phases)
+    if all_contracts.length > 0:
+      reconciliation_issues = verify_boundary_keys(all_contracts)
+      if reconciliation_issues.length > 0:
+        announce: "[MPL] CB-08 L2: {reconciliation_issues.length} boundary conflicts after parallel join"
+        → Dispatch targeted boundary fix
+      else:
+        announce: "[MPL] CB-08 L2: Post-join verification clean."
 
-      if all_contracts.length > 0:
-        reconciliation_issues = []
-
-        for each contract_path in all_contracts:
-          contract = Read(contract_path)
-
-          // Extract actual keys from BOTH sides of the boundary using grep
-          // Example: Rust caller sends json!({ "content": ... }), Python handler reads params.get("text")
-          if contract.boundary == "rust -> python":
-            rust_keys = Bash("grep -oP '\"[a-z_]+\"\\s*:' {find_rust_file(contract)} | tr -d '\"' | tr -d ':' | tr -d ' ' | sort -u")
-            python_keys = Bash("grep -oP 'params\\.get\\(\"\K[a-z_]+' {find_python_file(contract)} | sort -u")
-            diff_result = Bash("diff <(echo '{rust_keys}') <(echo '{python_keys}')")
-
-          elif contract.boundary == "typescript -> rust":
-            ts_keys = Bash("grep -oP '[a-z_A-Z]+\\s*:' {find_ts_file(contract)} | tr -d ':' | tr -d ' ' | sort -u")
-            rust_keys = Bash("grep -oP '[a-z_]+\\s*:' {find_rust_file(contract)} | tr -d ':' | tr -d ' ' | sort -u")
-            // Note: Tauri auto-converts camelCase→snake_case, so normalize before diff
-            diff_result = Bash("diff <(echo '{ts_keys}' | sed 's/[A-Z]/_\\l&/g') <(echo '{rust_keys}')")
-
-          elif contract.boundary == "python -> db":
-            python_fields = Bash("grep -oP '\\b[a-z_]+\\s*[:=]' {find_python_model(contract)} | tr -d ':=' | tr -d ' ' | sort -u")
-            db_columns = Bash("grep -oP '[a-z_]+ (TEXT|INTEGER|REAL|BLOB)' {find_schema_file()} | awk '{print $1}' | sort -u")
-            diff_result = Bash("comm -23 <(echo '{db_columns}') <(echo '{python_fields}')")
-
-          if diff_result is not empty:
-            reconciliation_issues.push({
-              contract: contract_path,
-              boundary: contract.boundary,
-              diff: diff_result
-            })
-
-        if reconciliation_issues.length > 0:
-          announce: "[MPL] CB-08 L2: {reconciliation_issues.length} semantic boundary conflicts after parallel join:"
-          for each issue in reconciliation_issues:
-            announce: "  - {issue.contract} ({issue.boundary}):"
-            announce: "    {issue.diff}"
-          announce: "[MPL] Inserting targeted boundary fix before proceeding."
-          → Dispatch targeted fix task: "Resolve boundary key mismatches: {reconciliation_issues}"
-        else:
-          announce: "[MPL] CB-08 L2: Post-join semantic verification clean. ✓"
-
-    // Cumulative test run for entire tier
-    run_cumulative_tests(tier.phases)
-  else:
-    // Sequential execution (CORE phases or single-phase tier)
-    for each phase_id in tier.phases:
-      // Normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
-```
-
-If `execution_tiers` NOT in decomposition.yaml (legacy 0.5.x):
-  Fall back to sequential "For each phase in order:" loop below.
-
----
-
-### 4.0.1: Cluster Ralph Initialization (V-01, v0.8.0)
-
-Parse clusters from decomposition.yaml. If `clusters` field exists AND `config.cluster_ralph.enabled != false`:
-
-```
-clusters = decomposition.clusters
-final_e2e = decomposition.final_e2e
-
-if clusters:
-  // Cluster Ralph mode — iterate by cluster
-  for each cluster in clusters:
-    // Step 4.0.1a: Announce cluster start
-    announce: "[MPL] Starting Cluster '{cluster.name}' ({cluster.phases.length} phases, PP: {cluster.pp_link})"
-
-    // Execute all phases within this cluster (Steps 4.0.5 → 4.1 → 4.2 → 4.3)
-    for each phase_id in cluster.phases:
-      // Normal phase flow below (4.0.5 → 4.1 → 4.2 → 4.3 → 4.3.6 → budget check)
-
-    // Step 4.4: Cluster E2E Verification (after all cluster phases complete)
-    → See Step 4.4 below
-
-  // Step 4.5a: Final Cross-Feature E2E
-  → See Step 4.5a below
-
-  // Step 4.5: 5-Gate Quality (existing, unchanged)
+  // Cumulative test run
+  run_cumulative_tests(parallel_phases)
 
 else:
-  // Legacy mode (no clusters) — sequential phase loop
-```
-
-### 4.0.2: B-04 Checkpoint Backward Compatibility (V-01, v0.8.0)
-
-If a phase has `checkpoint: true` (B-04 legacy format), map it to a single-phase cluster:
-
-```
-if phase_definition.checkpoint == true AND clusters not present:
-  // Convert B-04 checkpoint to Cluster Ralph format
-  legacy_cluster = {
-    id: "legacy-checkpoint-{phase.id}",
-    name: phase.name,
-    pp_link: [],
-    phases: phase.verifies_phases,
-    feature_e2e: phase.integration_tests.map(t => ({
-      id: t.scenario.substring(0, 20),
-      scenario: t.scenario,
-      type: t.type,
-      commands: t.steps
-    }))
-  }
-  // Execute as Cluster Ralph (Step 4.4)
-```
+  // Sequential execution (default)
+  // Normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
+  ```
 
 For each phase in order:
 
-### 4.0.5: Phase Seed Generation (D-01, v0.6.0)
+### 4.0.5: Phase Seed Generation
 
 Generate Phase Seed just-in-time, immediately before context assembly:
 
 ```
-if config.phase_seed?.enabled != false AND pipeline_tier == "frontier":
+if config.phase_seed?.enabled != false:
   prior_summaries = all completed phase state-summary.md files
   phase0_relevant = extract_relevant_phase0(phase_definition, phase0_artifacts)
 
-  // v0.10.0: Load boundary contracts for Seed Generator (SEED-01)
+  // Load boundary contracts (SEED-01)
   contract_files = null
   if phase_definition.interface_contract?.contract_files:
     contract_files = {}
@@ -175,22 +75,21 @@ if config.phase_seed?.enabled != false AND pipeline_tier == "frontier":
     if phase_definition.interface_contract.adjacent_contracts?.outbound:
       contract_files["outbound"] = Read(phase_definition.interface_contract.adjacent_contracts.outbound)
 
-  seed_result = Task(subagent_type="mpl-phase-seed-generator", model="sonnet",
-    prompt="Generate Phase Seed for {phase.id}.
-    Phase definition: {phase_definition}
-    Pivot Points: {pivot_points}
-    Phase 0 context (relevant sections): {phase0_relevant}
-    Prior State Summaries: {prior_summaries}
-    Verification Plan: {verification_plan}
-    Codebase hints: {impact_file_paths}
-    Contract files (v0.10.0): {contract_files}
-    Generate phase-seed.yaml output.")
+  // Inline seed generation (orchestrator generates directly)
+  seed = {
+    goal: phase_definition.goal,
+    acceptance_criteria: phase_definition.acceptance_criteria,
+    todo_structure: derive_todos_from_phase_definition(phase_definition),
+    exit_conditions: phase_definition.success_criteria,
+    contract_snippet: extract_contract_keys(contract_files),
+    phase0_context: phase0_relevant
+  }
 
-  save seed_result to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
-  context.phase_seed = seed_result
-  announce: "[MPL] Phase Seed generated for {phase.id}: {seed.mini_plan_seed.todo_structure.length} TODOs"
+  save seed to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
+  context.phase_seed = seed
+  announce: "[MPL] Phase Seed generated for {phase.id}: {seed.todo_structure.length} TODOs"
 else:
-  context.phase_seed = null  // Legacy mode — Phase Runner generates mini-plan
+  context.phase_seed = null  // Legacy mode
 ```
 
 ### 4.0.5.1: Seed Validation (SEED-03 + SNT-S0, v0.10.0)
@@ -198,7 +97,7 @@ else:
 If Phase Seed was generated:
 1. **SEED-03**: `mpl-validate-seed` hook validates required fields (goal, acceptance_criteria, todo_structure, exit_conditions, contract_snippet if boundary)
 2. **SNT-S0**: `mpl-sentinel-s0` hook verifies contract_snippet keys ⊆ contracts/*.json keys
-3. If either fails: re-invoke Seed Generator with validation feedback
+3. If either fails: re-generate seed with validation feedback
 4. Max 2 Seed regeneration attempts before fallback to Legacy mode
 
 After Phase Runner completes:
@@ -221,7 +120,7 @@ Context structure reference:
 ```
 context = {
   phase0_artifacts, pivot_points, phase_decisions, phase_definition,
-  phase_seed, impact_files, maturity_mode, prev_summary, dep_summaries,
+  phase_seed, impact_files, pp_proximity, prev_summary, dep_summaries,
   verification_plan, learnings, error_files, regression_suite
 }
 ```
@@ -295,9 +194,6 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
 
      ## Impact Files
      {impact_files content}
-
-     ## Maturity Mode
-     {maturity_mode}
 
      ## Previous Phase Context (N-1 only)
      ### State Summary
@@ -729,7 +625,7 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
 
 12. More phases -> current_phase = "mpl-phase-running", continue 4.1
     → **Budget Check (F-33)**: See Step 4.3 extension — check session budget before starting next Phase.
-13. All done -> proceed to Step 4.5 (5-Gate Quality)
+13. All done -> proceed to Step 4.5 (Gate System)
 
 #### Step 4.3 Extension: Budget Check (F-33)
 
@@ -762,17 +658,9 @@ else:
    - **Attempted Fixes**: {attempted_fixes list}
    - **Retries Exhausted**: 3/3
    - **Timestamp**: {ISO timestamp}
-4. **Dynamic Escalation (F-21)**: Check pipeline_tier before redecomposition:
-   - If pipeline_tier < "frontier":
-     escalation = escalateTier(cwd, "circuit_break", { completed_phases, failed_phase })
-     If escalation succeeded:
-       Report: "[MPL] Escalating: {from} → {to}. Preserving completed work."
-       RUNBOOK: Append "## Tier Escalation: {from} → {to}"
-       Re-run Triage with new tier (reload skipped steps)
-       Continue from failed phase with expanded pipeline
-   - If pipeline_tier == "frontier" or escalation returns null:
-     Proceed to Redecomposition (4.4b)
-5. Proceed to Redecomposition (4.4b) if no escalation
+4. Phase retry budget exhausted → circuit break → pipeline failure
+   pipeline = "mpl-failed"
+   Report: "[MPL] Circuit break on Phase {N}. Pipeline failed. Preserving completed work."
 ```
 
 ### 4.3.5: Side Interview (Conditional — CRITICAL Only)
@@ -832,7 +720,7 @@ After each phase completes, persist critical state to survive context compressio
 [MPL Session State]
 - Pipeline: {pipeline_id}
 - Phase: {completed_phase}/{total_phases} complete
-- Tier: {pipeline_tier}
+- PP-proximity: {current_phase.pp_proximity}
 - PP Summary: {top 3 PP names and status}
 - Last Phase: {phase_name} — {pass/fail}, pass_rate={pass_rate}%
 - Last Failure: {failure_reason or "none"}
@@ -900,180 +788,9 @@ if budget.recommendation == "pause_now":
 
 **Note**: `predictBudget()` requires `.mpl/context-usage.json` to be fresh (<30s). This file is written by the HUD statusline on each render cycle. If HUD is not active, predictBudget returns fail-open (recommendation: "continue").
 
-### 4.4: Cluster E2E Verification (V-01, v0.8.0)
 
-After all phases in a cluster complete, run the cluster's feature E2E scenarios:
-
-```
-// Called after each cluster's phases complete (within Step 4.0.1 cluster loop)
-announce: "[MPL] Cluster '{cluster.name}' — running feature E2E ({cluster.feature_e2e.length} scenarios)"
-
-cluster_results = []
-for each scenario in cluster.feature_e2e:
-  result = execute_scenario(scenario)
-  cluster_results.append(result)
-
-if all_pass(cluster_results):
-  announce: "[MPL] Cluster '{cluster.name}' E2E PASSED ✓"
-  // RUNBOOK update
-  append to RUNBOOK.md:
-    ## Cluster: {cluster.name} ({cluster.id})
-    - Phases: {cluster.phases}
-    - PP Link: {cluster.pp_link}
-    - E2E Scenarios: {cluster.feature_e2e.length} total
-    - Result: PASS
-  continue to next cluster
-
-else:
-  // Cluster Ralph: Fix Loop (max 2 attempts)
-  announce: "[MPL] Cluster '{cluster.name}' E2E FAILED — entering Cluster Fix Loop"
-
-  max_attempts = config.cluster_ralph?.max_fix_attempts || 2
-
-  for attempt in 1..max_attempts:
-    failed_scenarios = [s for s in cluster_results if s.status == FAIL]
-
-    // Step 4.4.1: Scout Dispatch (root cause analysis)
-    scout_result = Task(subagent_type="mpl:mpl-scout", model="haiku",
-      prompt="Analyze cluster E2E failures: {failed_scenarios}.
-              Identify which phase and which files caused each failure.
-              Cluster phases: {cluster.phases}.
-              Check the actual code, not just descriptions.")
-
-    // Step 4.4.2: Targeted Fix
-    for each identified_issue in scout_result.issues:
-      Task(subagent_type="mpl:mpl-phase-runner", model="sonnet",
-        prompt="Fix the following issue in {identified_issue.phase}:
-                Problem: {identified_issue.description}
-                Files: {identified_issue.files}
-                Expected: {identified_issue.expected}
-                Scope: ONLY modify files within this cluster's phases.")
-
-    // Step 4.4.3: Re-verify
-    cluster_results = []
-    for each scenario in cluster.feature_e2e:
-      result = execute_scenario(scenario)
-      cluster_results.append(result)
-
-    if all_pass(cluster_results):
-      announce: "[MPL] Cluster '{cluster.name}' E2E PASSED after fix attempt {attempt} ✓"
-      append to RUNBOOK.md:
-        ## Cluster: {cluster.name} ({cluster.id})
-        - Result: PASS (fixed, attempt {attempt})
-        - Fix History: {fix_details}
-      break
-
-    announce: "[MPL] Cluster '{cluster.name}' fix attempt {attempt} — still failing"
-
-  if not all_pass(cluster_results):
-    announce: "[MPL] Cluster '{cluster.name}' E2E deferred after {max_attempts} fix attempts"
-    append to RUNBOOK.md:
-      ## Cluster: {cluster.name} ({cluster.id})
-      - Result: DEFERRED
-      - Failed Scenarios: {failed_scenarios}
-    continue to next cluster
-```
-
-#### execute_scenario Helper
-
-```
-function execute_scenario(scenario):
-  results = []
-  for each command in scenario.commands:
-    result = Bash(command, timeout=30000)
-    results.append({
-      command: command,
-      exit_code: result.exit_code,
-      stdout: result.stdout[:500],
-      stderr: result.stderr[:500]
-    })
-
-  return {
-    scenario_id: scenario.id,
-    scenario_name: scenario.scenario,
-    status: all(r.exit_code == 0 for r in results) ? PASS : FAIL,
-    details: results
-  }
-```
-
-#### Tier Applicability
-
-| Tier | Cluster Behavior |
-|------|-----------------|
-| **Frugal** | Single cluster (1 phase) — Cluster E2E = existing Gate 1 behavior |
-| **Standard** | Single cluster (1-3 phases) — Cluster E2E adds feature scenarios |
-| **Frontier** | Multiple clusters — Full Cluster Ralph with fix loops |
-
-### 4.5a: Final Cross-Feature E2E (V-01, v0.8.0)
-
-After all clusters complete, run cross-feature E2E scenarios:
-
-```
-if final_e2e:
-  announce: "[MPL] Running Final Cross-Feature E2E ({final_e2e.length} scenarios)"
-  for each scenario in final_e2e:
-    result = execute_scenario(scenario)
-    if result.status == FAIL:
-      announce: "[MPL] Final E2E FAILED: {scenario.scenario}"
-      → enter existing 5-Gate Fix Loop (Step 4.6)
-
-  announce: "[MPL] Final Cross-Feature E2E PASSED ✓"
-  append to RUNBOOK.md:
-    ## Final Cross-Feature E2E
-    - Scenarios: {final_e2e.length}
-    - Result: PASS
-```
-
----
-
-### 4.4b: Redecomposition (on circuit break)
-
-```
-redecompose_count = mpl_state.redecompose_count + 1
-
-if redecompose_count > 2 (max_redecompose):
-  -> pipeline: "mpl-failed", MPL: status = "failed"
-  -> Report failure (preserve completed results), EXIT
-
-else:
-  mpl_state.redecompose_count = redecompose_count
-
-  Task(subagent_type="mpl-decomposer", model="opus",
-       prompt="""
-       ## Redecomposition Request
-       A phase failed after exhausting retries. Redecompose REMAINING work only.
-
-       ### Completed Phases (preserve, do NOT regenerate)
-       {for each completed phase: id, name, state-summary snippet}
-
-       ### Failed Phase
-       ID: {id}, Name: {name}
-       Failure: {result.failure_summary}
-       Attempts: {result.attempted_fixes}
-
-       ### Original Remaining Phases (unconsumed)
-       {phases not yet started}
-
-       ### Existing Phase Decisions
-       {all PDs from .mpl/mpl/phase-decisions.md}
-
-       ### Codebase Analysis
-       {codebase-analysis.json}
-
-       Break failed phase differently or use new strategy. Output YAML only.
-       """)
-
-  After receiving new phases:
-  1. Replace remaining phases (keep completed intact)
-  2. Create new .mpl/mpl/phases/phase-N/ directories
-  3. Update MPL state with new phase_details
-  4. pipeline: current_phase = "mpl-phase-running"
-  5. Resume from first new phase (back to 4.1)
-```
-
-
-> **Steps 4.5 (5-Gate Quality) through 4.7 (Partial Rollback) and Step 4.8 Graceful Pause Protocol have been moved to `mpl-run-execute-gates.md`.**
-> This includes: Gate 0.5 (Type Check), Gate 1 (Tests), Gate 1.5 (Metrics), Gate 1.7 (Browser QA), Gate 2 (Code Review), Gate 3 (PP Compliance), Fix Loop with Convergence Detection, Reflexion, Partial Rollback, and Graceful Pause.
+> **Steps 4.5 (Gate System) through 4.7 (Partial Rollback) and Step 4.8 Graceful Pause Protocol have been moved to `mpl-run-execute-gates.md`.**
+> This includes: Hard 1-3 Gates, Advisory Gate, Fix Loop with Convergence Detection, Reflexion, Partial Rollback, and Graceful Pause.
 >
 > Load `mpl-run-execute-gates.md` when entering Step 4.5 or when any gate fails.
 

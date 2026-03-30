@@ -13,9 +13,6 @@ export interface MplState {
   pipeline_id: string | null;
   run_mode: string;
   tool_mode: string;
-  pipeline_tier: string | null;
-  pipeline_score: number | null;
-  tier_hint: string | null;
   escalation_history: string[];
   interview_depth: string | null;
   current_phase: string;
@@ -28,9 +25,10 @@ export interface MplState {
     failed_todos: number;
   };
   gate_results: {
-    gate1_passed: boolean | null;
-    gate2_passed: boolean | null;
-    gate3_passed: boolean | null;
+    hard1_passed: boolean | null;
+    hard2_passed: boolean | null;
+    hard3_passed: boolean | null;
+    advisory_result: string | null;
   };
   fix_loop_count: number;
   max_fix_loops: number;
@@ -59,9 +57,6 @@ const DEFAULT_STATE: MplState = {
   pipeline_id: null,
   run_mode: 'full',
   tool_mode: 'full',
-  pipeline_tier: null,
-  pipeline_score: null,
-  tier_hint: null,
   escalation_history: [],
   interview_depth: null,
   current_phase: 'phase1-plan',
@@ -74,9 +69,10 @@ const DEFAULT_STATE: MplState = {
     failed_todos: 0,
   },
   gate_results: {
-    gate1_passed: null,
-    gate2_passed: null,
-    gate3_passed: null,
+    hard1_passed: null,
+    hard2_passed: null,
+    hard3_passed: null,
+    advisory_result: null,
   },
   fix_loop_count: 0,
   max_fix_loops: 10,

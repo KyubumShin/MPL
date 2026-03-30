@@ -1,10 +1,10 @@
-# MPL (Micro-Phase Loop) v0.10.2
+# MPL (Micro-Phase Loop) v0.11.0
 
 **Prevention over cure. Specification over debugging.**
 
 A Claude Code plugin that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-fourteen-minds) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-eight-minds) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -116,12 +116,12 @@ mpl add user authentication with OAuth and role-based access
 
 ```
 Quick Scope Scan  → 8 affected files, 4 test scenarios → pipeline_score 0.72
-Tier Selection    → Frontier (full pipeline)
+Hat Selection     → PP-proximity scoring → appropriate pipeline depth
 PP Interview      → 6 Pivot Points extracted (3 CONFIRMED, 3 PROVISIONAL)
 Phase 0 Enhanced  → API contracts + type policy + error spec generated
 Decomposition     → 4 micro-phases with interface contracts
 Phase Execution   → 4 phases × (plan → execute → test → verify)
-5-Gate Quality    → Gate 0.5: types, Gate 1: tests, Gate 1.5: coverage, Gate 2: review, Gate 3: PP
+3H+1A Gate        → Gate 1: tests (Hard), Gate 2: review (Hard), Gate 3: PP (Hard), Gate 0.5: types (Advisory)
 RUNBOOK           → Full execution log for session continuity
 ```
 
@@ -154,9 +154,11 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
               └────────────────┬────────────────┘
                                │
                     ┌──────────▼──────────────┐
-                    │  5-Gate Quality Check    │
-                    │  Types → Tests →        │
-                    │  Coverage → Review → PP │
+                    │  3 Hard + 1 Advisory    │
+                    │  Gate 1: Tests (Hard)   │
+                    │  Gate 2: Review (Hard)  │
+                    │  Gate 3: PP (Hard)      │
+                    │  Gate 0.5: Types (Adv.) │
                     └──────────┬──────────────┘
                                │
                            Complete
@@ -169,7 +171,7 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
 | **Phase 0** | Pre-specification: contracts, types, errors | Eliminate debugging |
 | **Decompose** | Break into ordered phases with interface contracts | Each phase is independently verifiable |
 | **Execute** | Fresh session per phase, Phase Runner delegation, micro-test cycles | No context pollution |
-| **5-Gate** | Type check → Tests → Coverage → Code review → PP compliance | Evidence-based completion |
+| **3H+1A Gate** | Tests (Hard) → Review (Hard) → PP (Hard) + Types (Advisory) | Evidence-based completion |
 | **RUNBOOK** | Continuous audit log for human/agent session continuity | Pick up where you left off |
 
 ### State Summary: The Only Bridge
@@ -201,10 +203,10 @@ When a phase fails after 3 retries, it doesn't crash — it **circuit breaks**:
 
 1. Preserve PASS TODOs (verified work is never discarded)
 2. Rollback FAIL TODO files to pre-phase state
-3. Save recovery context for redecomposition
-4. Attempt tier escalation before giving up (see [The Router](#the-router))
+3. Attempt tier escalation before giving up (see [The Router](#the-router))
+4. If all tiers exhausted, transition to `mpl-failed`
 
-Max 2 redecompositions. After that, MPL reports what succeeded and what failed — partial progress is always preserved.
+Circuit break leads directly to pipeline failure. MPL reports what succeeded and what failed — partial progress is always preserved.
 
 ---
 
@@ -213,79 +215,69 @@ Max 2 redecompositions. After that, MPL reports what succeeded and what failed �
 > The user should never have to judge "is this a small task or a big one?"
 > The system should figure it out — and adapt when it's wrong.
 
-### The Problem
+### The Hat Model (PP-Proximity)
 
-As MPL grew more powerful, it became harder to use for simple tasks. Three separate entry points (`mpl` / `mpl-small` / `mpl-bugfix`) forced users to pre-judge task complexity. Get it wrong, and you either waste tokens on a full pipeline for a typo fix, or circuit-break a complex task trapped in a lightweight pipeline with no escalation path.
-
-### The Solution: Adaptive Pipeline Router
+MPL uses **PP-proximity** (Pivot Point proximity) to determine pipeline depth. Each task is scored by how close it touches the project's immutable constraints (Pivot Points). Higher proximity means more pipeline rigor.
 
 One entry point. Auto-scoring. Dynamic escalation.
 
 ```
-"mpl fix the login bug"              → Triage → Frugal  (~8K tokens)
-"mpl add email validation"           → Triage → Standard (~30K tokens)
-"mpl refactor the auth system"       → Triage → Frontier (~80K tokens)
+"mpl fix the login bug"              → Triage → Hat scores PP-proximity → lightweight pipeline
+"mpl add email validation"           → Triage → Hat scores PP-proximity → standard pipeline
+"mpl refactor the auth system"       → Triage → Hat scores PP-proximity → full pipeline
 ```
 
-#### Pipeline Score
+#### PP-Proximity Score
 
-Triage runs a Quick Scope Scan (~1-2K tokens) and computes:
+Triage runs a Quick Scope Scan and computes PP-proximity — how much the task touches core constraints:
 
 ```
-pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
-               + (dependency_depth × 0.25) + (risk_signal × 0.15)
+pp_proximity = (pp_impact × 0.40) + (file_scope × 0.25)
+             + (contract_change × 0.20) + (risk_signal × 0.15)
 
+pp_impact:        How many PPs are directly affected (0.0 ~ 1.0)
 file_scope:       min(affected_files / 10, 1.0)
-test_complexity:  min(test_scenarios / 8, 1.0)
-dependency_depth: min(import_chain_depth / 5, 1.0)
+contract_change:  Whether interface contracts change (0.0 or 1.0)
 risk_signal:      prompt keyword analysis (0.0 ~ 1.0)
 ```
 
-#### Three Tiers
+#### Hat + Floor
 
-| Tier | Score | What Runs | What's Skipped | ~Tokens |
-|------|-------|-----------|---------------|---------|
-| **Frugal** | < 0.3 | Error Spec → Fix → Gate 1 → Commit | PP, Phase 0, Decomposition, Gate 2/3 | ~5-15K |
-| **Standard** | 0.3~0.65 | PP(light) → Error Spec → Single Phase → Gate 1 | Full PP, Phase 0 Steps 1-3, Multi-phase, Gate 2/3 | ~20-40K |
-| **Frontier** | > 0.65 | Full 9+ step pipeline | Nothing | ~50-100K+ |
+| Hat | PP-Proximity | What Runs | Floor (minimum guarantee) | ~Tokens |
+|-----|-------------|-----------|--------------------------|---------|
+| **Light** | Low | Error Spec → Fix → Gate 1 → Commit | Gate 1 always runs | ~5-15K |
+| **Standard** | Medium | PP(light) → Error Spec → Single Phase → Gate 1+2 | Gate 1+2 always run | ~20-40K |
+| **Full** | High | Full pipeline with all gates | All 3 Hard Gates run | ~50-100K+ |
 
 #### Dynamic Escalation
 
-When a tier fails, it doesn't give up — it grows:
+When a Hat level fails, it doesn't give up — it grows:
 
 ```
-[Frugal] ──circuit break──→ [Standard] ──circuit break──→ [Frontier]
+[Light] ──circuit break──→ [Standard] ──circuit break──→ [Full]
                                 │                              │
                                 ├─ Completed TODOs preserved   ├─ Completed phases preserved
-                                └─ Failed TODO → single phase  └─ Failed phase → redecompose
+                                └─ Failed TODO → single phase  └─ Failed phase → mpl-failed
 ```
 
-Keyword hints still work as manual overrides: `"mpl bugfix"` → frugal, `"mpl small"` → standard.
+Keyword hints still work as manual overrides: `"mpl bugfix"` → light, `"mpl small"` → standard.
 
 ---
 
-## The Fourteen Minds
+## The Eight Minds
 
-Fourteen agents, each with a single purpose. Loaded on-demand, never preloaded:
+Eight agents, each with a single purpose. Loaded on-demand, never preloaded:
 
 | Agent | Role | Core Principle |
 |-------|------|---------------|
-| **Interviewer** | Socratic questioning for Pivot Points | "What are you NOT willing to compromise on?" |
-| **Ambiguity Resolver** | PP-Aligned Spec Resolution — 5D metric-based Socratic loop with PP Conformance | "Can we derive a spec that conforms to these PPs?" |
+| **Interviewer** | Socratic questioning for Pivot Points + Ambiguity Resolution | "What are you NOT willing to compromise on?" |
 | **Codebase Analyzer** | Project structure analysis (haiku) | "What exists before we plan?" |
-| **Phase 0 Analyzer** | Pre-execution deep analysis | "Type policy, error spec, build constraints" |
-| **Pre-Execution Analyzer** | Gap + Tradeoff unified analysis | "What's missing? What's risky?" |
-| **Decomposer** | Break into ordered micro-phases | "What depends on what?" |
-| **Verification Planner** | A/S/H-items classification | "What can machines verify vs. what needs humans?" |
-| **Phase Runner** | Execute a single phase end-to-end | "Plan, implement, verify, summarize" |
-| **Test Agent** | Independent test writing | "I didn't write the code, so I'll test what it claims" |
-| **Code Reviewer** | 10-category quality gate (8 base + 2 UI) | "Would I approve this PR?" |
+| **Decomposer** | Break into ordered micro-phases + Phase Seed generation | "What depends on what?" |
+| **Phase Runner** | Execute a single phase end-to-end + test writing | "Plan, implement, verify, summarize" |
+| **Code Reviewer** | Quality gate + PP compliance | "Would I approve this PR?" |
 | **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
 | **Compound** | Learning extraction and distillation | "What did we learn that future runs should know?" |
-| **Git Master** | Atomic commits | "Each commit tells one story" |
-| **QA Agent** | Browser QA via Claude in Chrome MCP (Gate 1.7) | "Does the UI actually render?" |
-| **Phase Seed Generator** | Per-phase immutable spec with TODO structure | "What exactly should this phase build?" |
-| **Doctor** | Installation diagnostics (11 categories) | "Is everything wired correctly?" |
+| **Doctor** | Installation diagnostics | "Is everything wired correctly?" |
 
 ### Agent Separation Principle
 
@@ -305,17 +297,16 @@ Not all verification is equal. MPL classifies every criterion:
 | **S-item** | Sandbox Testing | BDD scenarios, Given/When/Then | Integration test passes |
 | **H-item** | Human-Required | Side Interview with user | UX judgment, visual review |
 
-### 5-Gate Quality System
+### 3 Hard Gates + 1 Advisory
 
-Five gates ensuring evidence-based completion:
+Three hard gates that block completion, plus one advisory gate:
 
-| Gate | Method | Pass Criteria |
-|------|--------|---------------|
-| **Gate 0.5** | Project-wide type check (`lsp_diagnostics_directory`) | Zero type errors (F-17) |
-| **Gate 1** | Automated tests (A + S items) | pass_rate ≥ 95% |
-| **Gate 1.5** | Coverage + metrics (F-50) | coverage ≥ 60% (MVP) / 80% (strict) |
-| **Gate 2** | Code review (10 categories) | PASS verdict |
-| **Gate 3** | PP compliance + H-item resolution | No violations + all H-items resolved |
+| Gate | Type | Method | Pass Criteria |
+|------|------|--------|---------------|
+| **Gate 0.5** | Advisory | Project-wide type check (`lsp_diagnostics_directory`) | Zero type errors (warns, does not block) |
+| **Gate 1** | **Hard** | Automated tests (A + S items) | pass_rate >= 95% |
+| **Gate 2** | **Hard** | Code review | PASS verdict |
+| **Gate 3** | **Hard** | PP compliance + H-item resolution | No violations + all H-items resolved |
 
 ### Convergence Detection
 
@@ -332,17 +323,17 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>14 agents · 8 hooks · 11 skills · 5 protocol files</strong></summary>
+<summary><strong>8 agents · 8 hooks · 11 skills · 5 protocol files</strong></summary>
 
 ```
 MPL/
-├── agents/                 # 14 agent definitions (YAML frontmatter)
+├── agents/                 # 8 agent definitions (YAML frontmatter)
 │   └── mpl-scout.md        # Haiku-based read-only exploration (F-16)
 ├── commands/               # Orchestration protocols (split for token efficiency)
 │   ├── mpl-run.md          # Router: which protocol file to load
 │   ├── mpl-run-phase0.md   # Steps -1 ~ 2.5: Triage, PP, Phase 0
 │   ├── mpl-run-decompose.md # Steps 3 ~ 3-F: Decomposition + feedback loop
-│   ├── mpl-run-execute.md  # Step 4: Execution loop, 5-Gate, Fix loop
+│   ├── mpl-run-execute.md  # Step 4: Execution loop, 3H+1A Gate, Fix loop
 │   └── mpl-run-finalize.md # Steps 5 ~ 6: Finalize, Resume
 ├── prompts/                # 4-Layer template system (F-39)
 │   ├── domains/            # 8 domain templates (base layer)
@@ -380,8 +371,8 @@ MPL/
 
 **Key internals:**
 
-- **Adaptive Router (F-20)** — Quick Scope Scan + 4-factor pipeline score → 3-tier auto-classification
-- **Dynamic Escalation (F-21)** — frugal → standard → frontier on circuit break, preserving completed work
+- **Hat Model (PP-proximity)** — Quick Scope Scan + PP-proximity score → Hat-based pipeline depth selection
+- **Dynamic Escalation (F-21)** — light → standard → full on circuit break, preserving completed work
 - **RUNBOOK (F-10)** — Integrated execution log, auto-updated at 9 pipeline points, enables session resume
 - **Session Persistence (F-12)** — `<remember priority>` tags at phase transitions + RUNBOOK dual safety net
 - **Run-to-Run Learning (F-11)** — mpl-compound distills RUNBOOK → `.mpl/memory/learnings.md`
@@ -415,7 +406,7 @@ MPL/
 
 | Path | Purpose |
 |------|---------|
-| `.mpl/state.json` | Pipeline state (run_mode, current_phase, pipeline_tier, tool_mode) |
+| `.mpl/state.json` | Pipeline state (run_mode, current_phase, hat_level, tool_mode) |
 | `.mpl/pivot-points.md` | Immutable constraints (Pivot Points) |
 | `.mpl/config.json` | User configuration overrides |
 | `.mpl/mpl/state.json` | MPL execution state (phases, statistics) |
@@ -437,14 +428,14 @@ MPL provides a real-time statusline that shows pipeline progress at a glance:
 
 ```
 harness_lab | 5h:45%(3h42m) | wk:12%(2d5h) | ctx:67% | 12m
-MPL Frontier | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
+MPL Full | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
 ```
 
 **Line 1 — Project & Usage:**
 - Project folder, API rate limits (5-hour / 7-day from Anthropic OAuth API), context window %, session duration
 
 **Line 2 — Pipeline Status (MPL active only):**
-- Pipeline tier (Frugal/Standard/Frontier), current phase
+- Hat level (Light/Standard/Full), current phase
 - TODO progress, Gate results (✓/✗/-), Fix loop count
 - Token usage vs budget, tool mode
 
@@ -465,12 +456,12 @@ MPL Frontier | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
 
 ```bash
 # Just say what you want — the system figures out the rest
-mpl add user authentication with OAuth        # → Frontier (~80K tokens)
+mpl add user authentication with OAuth        # → Full (~80K tokens)
 mpl add input validation to signup form       # → Standard (~30K tokens)
-mpl fix null check in handleSubmit            # → Frugal (~8K tokens)
+mpl fix null check in handleSubmit            # → Light (~8K tokens)
 
 # Keyword hints for manual override
-mpl bugfix missing error handler              # → forces Frugal
+mpl bugfix missing error handler              # → forces Light
 mpl small add retry logic                     # → forces Standard
 
 # Direct skill invocation

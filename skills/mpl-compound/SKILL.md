@@ -25,23 +25,18 @@ Read available sources:
 - `git log --oneline -20` (recent commits)
 - `git diff HEAD~N` (recent changes if no pipeline state)
 
-### Step 2: Delegate to mpl-compound
+### Step 2: Extract Learnings (Inline)
 
-```
-Task(subagent_type="mpl-compound", prompt="""
-Extract learnings from the following context:
+The orchestrator performs learning extraction directly (no agent delegation).
 
-{gathered context from Step 1}
+Analyze the gathered context and generate 4 learning files under `docs/learnings/{feature}/`:
 
-Feature/task name: {feature name from user or inferred}
+1. **learnings.md** — Patterns, conventions, effective approaches, anti-patterns discovered
+2. **decisions.md** — Design choices with rationale and alternatives considered
+3. **issues.md** — Unresolved problems, workarounds, known limitations
+4. **metrics.md** — Completion stats, quality gates, fix loop data, agent usage
 
-Generate the 4 learning files:
-- learnings.md (patterns, conventions, effective approaches, anti-patterns)
-- decisions.md (design choices with rationale and alternatives considered)
-- issues.md (unresolved problems, workarounds, known limitations)
-- metrics.md (completion stats, quality gates, fix loop data, agent usage)
-""")
-```
+For each file, structure content with clear headings and bullet points. Extract concrete, reusable knowledge — not just a summary of what happened.
 
 ### Step 3: Report
 
@@ -56,7 +51,7 @@ Output summary:
 
 ## Standalone Mode
 
-When no `.mpl/` state exists, the agent analyzes `git diff` and changed files directly to extract knowledge.
+When no `.mpl/` state exists, analyze `git diff` and changed files directly to extract knowledge.
 
 ## Related
 

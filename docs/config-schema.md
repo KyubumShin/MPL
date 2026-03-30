@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.9.0
-> **Last updated**: 2026-03-29
+> **Version**: v0.11.0
+> **Last updated**: 2026-03-31
 
 ---
 
@@ -11,7 +11,6 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
-| `maturity_mode` | `"explore"` \| `"standard"` \| `"strict"` | `"standard"` | Verification strictness — controls per-phase sizing and gate thresholds | `mpl-run-phase0.md`, `design.md` |
 | `max_fix_loops` | number | `10` | Maximum Fix Loop iterations before pipeline failure | `mpl-run-execute-gates.md` |
 | `max_total_tokens` | number | `900000` | Total token upper limit (v0.6.7: raised from 500K for 1M context) | `hooks/lib/mpl-state.mjs` |
 | `gate1_strategy` | `"auto"` \| `"docker"` \| `"native"` \| `"skip"` | `"auto"` | Gate 1 test execution strategy | `mpl-run-execute-gates.md` |
@@ -38,12 +37,15 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 |-------|------|---------|-------------|--------|
 | `phase_seed.enabled` | boolean | `true` (Frontier) | Enable Phase Seed generation for deterministic TODO structure | `mpl-run-execute.md` |
 
-## Coverage & Metrics (Gate 1.5)
+## Hat Model (PP-Proximity, v0.11.0)
 
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
-| `coverage_thresholds.lines` | number | `60` | Line coverage minimum % (strict mode: 80) | `mpl-run-execute-gates.md` |
-| `coverage_thresholds.branches` | number | `50` | Branch coverage minimum % (strict mode: 70) | `mpl-run-execute-gates.md` |
+| `hat.default_level` | `"light"` \| `"standard"` \| `"full"` | `"auto"` | Override Hat level (auto = PP-proximity scoring) | `mpl-run-phase0.md` |
+| `hat.pp_weight` | number | `0.40` | Weight for PP impact in pp_proximity formula | `mpl-run-phase0.md` |
+| `hat.scope_weight` | number | `0.25` | Weight for file scope in pp_proximity formula | `mpl-run-phase0.md` |
+| `hat.contract_weight` | number | `0.20` | Weight for contract change in pp_proximity formula | `mpl-run-phase0.md` |
+| `hat.risk_weight` | number | `0.15` | Weight for risk signal in pp_proximity formula | `mpl-run-phase0.md` |
 
 ## Browser QA (Gate 1.7, T-03)
 
@@ -110,34 +112,25 @@ Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
 
-## Cluster Ralph (V-01, v0.8.0)
-
-| Field | Type | Default | Description | Source |
-|-------|------|---------|-------------|--------|
-| `cluster_ralph.enabled` | boolean | `true` | Enable Cluster Ralph feature-scoped verify-fix loop | `mpl-run-execute.md` |
-| `cluster_ralph.max_fix_attempts` | number | `2` | Max fix attempts per cluster E2E failure | `mpl-run-execute.md` |
-
 ---
 
 ## Example Configuration
 
 ```json
 {
-  "maturity_mode": "standard",
   "max_fix_loops": 10,
   "max_total_tokens": 900000,
   "context_cleanup_window": 3,
-  "coverage_thresholds": {
-    "lines": 60,
-    "branches": 50
+  "hat": {
+    "default_level": "auto",
+    "pp_weight": 0.40,
+    "scope_weight": 0.25,
+    "contract_weight": 0.20,
+    "risk_weight": 0.15
   },
   "auto_pr": {
     "enabled": false,
     "base_branch": "auto"
-  },
-  "cluster_ralph": {
-    "enabled": true,
-    "max_fix_attempts": 2
   }
 }
 ```

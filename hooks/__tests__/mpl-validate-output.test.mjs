@@ -87,15 +87,26 @@ describe('VALIDATE_AGENTS', () => {
 
   it('should contain all expected agents', () => {
     const expected = [
-      'mpl-pre-execution-analyzer', 'mpl-verification-planner',
-      'mpl-phase-runner', 'mpl-interviewer',
-      'mpl-ambiguity-resolver', 'mpl-codebase-analyzer', 'mpl-phase0-analyzer',
-      'mpl-test-agent', 'mpl-code-reviewer', 'mpl-decomposer', 'mpl-git-master', 'mpl-compound',
-      'mpl-doctor', 'mpl-qa-agent', 'mpl-scout', 'mpl-phase-seed-generator',
+      'mpl-phase-runner', 'mpl-decomposer',
+      'mpl-interviewer', 'mpl-test-agent',
+      'mpl-codebase-analyzer', 'mpl-doctor',
+      'mpl-git-master', 'mpl-phase0-analyzer',
     ];
     assert.strictEqual(VALIDATE_AGENTS.size, expected.length);
     for (const agent of expected) {
       assert.ok(VALIDATE_AGENTS.has(agent), `missing: ${agent}`);
+    }
+  });
+
+  it('should not contain deleted agents', () => {
+    const deleted = [
+      'mpl-scout', 'mpl-code-reviewer', 'mpl-qa-agent',
+      'mpl-verification-planner', 'mpl-compound',
+      'mpl-ambiguity-resolver', 'mpl-pre-execution-analyzer',
+      'mpl-phase-seed-generator',
+    ];
+    for (const agent of deleted) {
+      assert.ok(!VALIDATE_AGENTS.has(agent), `should be removed: ${agent}`);
     }
   });
 
@@ -115,12 +126,15 @@ describe('EXPECTED_SECTIONS', () => {
     }
   });
 
-  it('pre-execution-analyzer should have 7 sections', () => {
-    assert.strictEqual(EXPECTED_SECTIONS['mpl-pre-execution-analyzer'].length, 7);
-  });
-
-  it('critic should be removed (absorbed into decomposer v3.1)', () => {
-    assert.strictEqual(EXPECTED_SECTIONS['mpl-critic'], undefined);
+  it('deleted agents should have no sections', () => {
+    const deleted = [
+      'mpl-pre-execution-analyzer', 'mpl-verification-planner',
+      'mpl-code-reviewer', 'mpl-compound', 'mpl-qa-agent',
+      'mpl-scout', 'mpl-phase-seed-generator', 'mpl-ambiguity-resolver',
+    ];
+    for (const agent of deleted) {
+      assert.strictEqual(EXPECTED_SECTIONS[agent], undefined, `sections should be removed for: ${agent}`);
+    }
   });
 
   it('phase-runner should require status, state_summary, verification', () => {

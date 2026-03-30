@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * MPL Scope Scan Utility (F-20: Adaptive Pipeline Router)
+ * MPL Scope Scan Utility (Hat Model: PP-Proximity)
  *
- * Calculates pipeline_score and classifies pipeline_tier.
- * Used by Triage (Step 0) to determine which pipeline variant to run.
+ * Calculates pp_score and classifies pp_proximity.
+ * Used by Triage (Step 0) to determine pipeline scope.
  *
  * Score formula:
- *   pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
- *                  + (dependency_depth × 0.25) + (risk_signal × 0.15)
+ *   pp_score = (file_scope × 0.35) + (test_complexity × 0.25)
+ *            + (dependency_depth × 0.25) + (risk_signal × 0.15)
  *
- * Tier thresholds:
- *   < 0.3   → frugal  (≈ mpl-bugfix: single fix cycle)
- *   0.3~0.65 → standard (≈ mpl-small extended: single phase)
- *   > 0.65  → frontier (full 9+ step pipeline)
+ * PP-Proximity thresholds:
+ *   < 0.3   → near  (close to pivot point: minimal pipeline)
+ *   0.3~0.65 → mid  (moderate distance: standard pipeline)
+ *   > 0.65  → far   (far from pivot point: full pipeline)
  *
  * Reference: Ouroboros PAL Router (src/ouroboros/routing/)
  */
@@ -50,19 +50,19 @@ export function calculatePipelineScore(scan) {
 }
 
 /**
- * Classify tier from score, with optional hint override
- * @param {number} score - Pipeline score (0.0~1.0)
- * @param {string|null} hint - User hint: "frugal", "standard", or null (auto)
- * @returns {{ tier: string, source: string }}
+ * Classify PP-proximity from score, with optional hint override
+ * @param {number} score - PP score (0.0~1.0)
+ * @param {string|null} hint - User hint: "near", "mid", or null (auto)
+ * @returns {{ proximity: string, source: string }}
  */
-export function classifyTier(score, hint = null) {
-  if (hint && ['frugal', 'standard', 'frontier'].includes(hint)) {
-    return { tier: hint, source: 'hint' };
+export function classifyProximity(score, hint = null) {
+  if (hint && ['near', 'mid', 'far'].includes(hint)) {
+    return { proximity: hint, source: 'hint' };
   }
 
-  if (score < 0.3) return { tier: 'frugal', source: 'auto' };
-  if (score <= 0.65) return { tier: 'standard', source: 'auto' };
-  return { tier: 'frontier', source: 'auto' };
+  if (score < 0.3) return { proximity: 'near', source: 'auto' };
+  if (score <= 0.65) return { proximity: 'mid', source: 'auto' };
+  return { proximity: 'far', source: 'auto' };
 }
 
 /**
@@ -73,13 +73,13 @@ export function classifyTier(score, hint = null) {
 export function extractRiskSignal(prompt) {
   const lower = prompt.toLowerCase();
 
-  // Low risk keywords → frugal direction
+  // Low risk keywords → near PP direction
   if (/\b(fix|bug|typo|수정|오류|rename|config)\b/.test(lower)) return 0.1;
-  // Medium-low → standard direction
+  // Medium-low → mid PP direction
   if (/\b(add|update|field|변경|추가|small|간단)\b/.test(lower)) return 0.3;
-  // Medium → standard/frontier boundary
+  // Medium → mid/far boundary
   if (/\b(feature|기능|implement|구현|create|생성)\b/.test(lower)) return 0.5;
-  // High → frontier direction
+  // High → far PP direction
   if (/\b(refactor|리팩토링|migrate|마이그레이션|architecture|아키텍처|redesign|재설계)\b/.test(lower)) return 0.8;
   // Very high
   if (/\b(overhaul|rewrite|전면)\b/.test(lower)) return 0.95;
@@ -88,29 +88,29 @@ export function extractRiskSignal(prompt) {
 }
 
 /**
- * Extract tier hint from user prompt keywords (used by keyword-detector)
+ * Extract PP-proximity hint from user prompt keywords (used by keyword-detector)
  * @param {string} prompt - User prompt text
- * @returns {string|null} "frugal", "standard", or null
+ * @returns {string|null} "near", "mid", or null
  */
-export function extractTierHint(prompt) {
+export function extractProximityHint(prompt) {
   const lower = prompt.toLowerCase();
-  if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(lower)) return 'frugal';
-  if (/\bmpl[\s-]*(small|quick|light)\b/i.test(lower)) return 'standard';
+  if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(lower)) return 'near';
+  if (/\bmpl[\s-]*(small|quick|light)\b/i.test(lower)) return 'mid';
   return null;
 }
 
 /**
  * Format scan evidence for logging
  * @param {object} scan - Scan results
- * @param {number} score - Pipeline score
- * @param {string} tier - Selected tier
- * @param {string} source - Tier source ("auto" or "hint")
+ * @param {number} score - PP score
+ * @param {string} proximity - Selected PP-proximity
+ * @param {string} source - Proximity source ("auto" or "hint")
  * @returns {string} Formatted evidence string
  */
-export function formatScanEvidence(scan, score, tier, source) {
+export function formatScanEvidence(scan, score, proximity, source) {
   const parts = [
-    `score=${score.toFixed(3)}`,
-    `tier=${tier}`,
+    `pp_score=${score.toFixed(3)}`,
+    `proximity=${proximity}`,
     `source=${source}`,
     `files=${scan.affected_files || 0}`,
     `tests=${scan.test_scenarios || 0}`,

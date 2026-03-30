@@ -11,10 +11,10 @@ MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh 
 
 1. Initialize `.mpl/state.json` with `run_mode: "auto"` (keyword hook has already done this with tier_hint)
 2. Initialize `.mpl/mpl/state.json` for MPL-specific tracking
-3. Read state to determine current phase and `pipeline_tier`
+3. Read state to determine current phase and `pp_proximity` distribution
 4. **Load the detailed orchestration protocol**: read `MPL/commands/mpl-run.md`
-5. **Triage (Step 0)** determines `pipeline_tier` via Quick Scope Scan (F-20)
-6. Execute tier-appropriate steps until completion
+5. **Triage (Step 0)** determines Hat level and pp_proximity via Quick Scope Scan (F-20)
+6. Execute steps appropriate to Hat level until completion
 
 ## Core Rules (HARD ENFORCEMENT)
 
@@ -22,7 +22,7 @@ MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh 
 RULE 1: You NEVER write source code directly. All code changes -> mpl-phase-runner via Task tool.
 RULE 2: Phase Runner manages per-phase mini-plans (not a single PLAN.md). State Summary is the ONLY knowledge transfer between phases.
 RULE 3: Validate agent output. Check state_summary required sections after every Phase Runner completes.
-RULE 4: Respect phase gates and circuit breaker limits (max 3 retries per phase, max 2 redecompositions).
+RULE 4: Respect phase gates and circuit breaker limits. Retry budget per phase is determined by PP-proximity. Circuit break leads directly to pipeline failure.
 RULE 5 (MPL): State Summary is the ONLY knowledge transfer between phases. No implicit context leakage.
 ```
 
@@ -30,10 +30,10 @@ RULE 5 (MPL): State Summary is the ONLY knowledge transfer between phases. No im
 
 ```
 mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
-                 ^                    |                      |
-                 +-- mpl-circuit-break               mpl-finalize -> completed
-                           |
-                       mpl-failed
+                                   |                      |
+                            mpl-circuit-break      mpl-finalize -> completed
+                                   |
+                               mpl-failed
 ```
 
 ## Key Files
@@ -69,7 +69,7 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 | 1.5 | Phase 0 Enhanced | Complexity-adaptive pre-analysis (API contracts, examples, types, errors) | (orchestrator via tools) |
 | 2 | Phase Decomposition | Break into micro-phases | mpl-decomposer (opus) |
 | 3 | Phase Execution Loop | plan->execute->verify per phase | mpl-phase-runner x N |
-| 4 | Finalize | Learnings + commit | mpl-git-master, mpl-compound |
+| 4 | Finalize | Learnings + commit | mpl-git-master, (inline learning extraction) |
 
 ## IMPORTANT: Load Detailed Protocol
 
@@ -101,10 +101,10 @@ Do NOT proceed with Phase execution without loading the corresponding protocol f
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes to frugal tier) |
-| `/mpl:mpl-compound` | Learning extraction and knowledge distillation |
+| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes via pp_proximity) |
+| `/mpl:mpl-compound` | Learning extraction and knowledge distillation (runs inline) |
 | `/mpl:mpl-doctor` | Installation diagnostics and health check |
 | `/mpl:mpl-setup` | Setup wizard - install, configure, repair |
 
-> **F-20 Note**: `mpl-small` and `mpl-bugfix` still work but redirect to `/mpl:mpl` with tier hints.
-> Use `"mpl bugfix ..."` or `"mpl small ..."` keywords for manual tier override.
+> **F-20 Note**: `mpl-small` and `mpl-bugfix` still work but redirect to `/mpl:mpl` with pp_proximity hints.
+> Use `"mpl bugfix ..."` or `"mpl small ..."` keywords for manual Hat override.

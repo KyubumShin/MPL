@@ -21,7 +21,7 @@ In AI coding agent pipelines, the cost of unclear requirements is extreme:
 | Problem | Cost |
 |---------|------|
 | Implementing the wrong feature | Wasted tokens for entire Phase (~15-30K) |
-| Missing edge cases | Fix Loop entry + re-decomposition (~20-40K) |
+| Missing edge cases | Fix Loop entry + circuit break (~20-40K) |
 | Scope Creep | Mid-execution halt + user re-request |
 | Assumption mismatch | Gate failure + full rework |
 
@@ -865,7 +865,7 @@ To continuously improve the interviewer's PM quality, evaluate the effectiveness
 | Metric | Good Example | Bad Example |
 |--------|-------------|------------|
 | Phase 0 iterations | 0-1 | 3+ |
-| Re-decomposition count | 0 | 1+ |
+| Circuit break count | 0 | 1+ |
 | Gate pass rate | 95%+ (1 attempt) | 2+ attempts |
 | User correction requests | 0 | 2+ |
 
@@ -884,12 +884,12 @@ The interviewer's PM learnings are integrated with F-25 (4-Tier Adaptive Memory)
 Quantitatively measure the ROI of the PM stage:
 
 ```jsonl
-{"timestamp":"2026-03-13T14:00:00Z","pm_enabled":true,"model":"opus","tokens_used":3500,"interview_depth":"full","stories_count":3,"ac_count":8,"phase0_iterations":1,"redecompose_count":0,"total_pipeline_tokens":45000}
+{"timestamp":"2026-03-13T14:00:00Z","pm_enabled":true,"model":"opus","tokens_used":3500,"interview_depth":"full","stories_count":3,"ac_count":8,"phase0_iterations":1,"circuit_break_count":0,"total_pipeline_tokens":45000}
 ```
 
 Profiles are recorded as PM stage in `.mpl/mpl/profile/phases.jsonl`, compared against control group (PM disabled) for:
 - Change in Phase 0 iteration count
-- Change in re-decomposition count
+- Change in circuit break count
 - Change in total token usage
 - Change in final Gate pass rate
 
@@ -904,8 +904,8 @@ Requirements change requests during execution are classified into 3 tiers:
 | Tier | Name | Condition | Response |
 |------|------|-----------|---------|
 | **Tier 1** | Cosmetic | No AC modification (typo, wording change) | Apply immediately to current phase. No version tag needed |
-| **Tier 2** | Scope Adjustment | AC addition/removal, Must→Should change, etc. | Apply after current phase completes. requirements-v{N}.md snapshot + affected phase identification + re-decomposition if needed |
-| **Tier 3** | Pivot | Core JTBD change, PP violation | Immediately halt execution + re-interview with interviewer + full re-decomposition |
+| **Tier 2** | Scope Adjustment | AC addition/removal, Must→Should change, etc. | Apply after current phase completes. requirements-v{N}.md snapshot + affected phase identification |
+| **Tier 3** | Pivot | Core JTBD change, PP violation | Immediately halt execution + re-interview with interviewer + full re-planning |
 
 ### 10.2 Change Detection Mechanism
 
@@ -924,7 +924,7 @@ changes:
     description: "Changed social login from Must to Out of Scope"
     affected_phases: [3, 4]
     affected_acs: [AC-7, AC-8]
-    action: "Re-decompose remainder after Phase 2 completes"
+    action: "Adjust remaining phases after Phase 2 completes"
     approved: true
 ```
 

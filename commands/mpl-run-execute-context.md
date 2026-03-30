@@ -21,7 +21,7 @@ context = {
   phase_definition: phases[current_index],
   phase_seed:       load_phase_seed(current_phase),   // D-01: JIT seed (null if not generated)
   impact_files:     load_impact_files(phase.impact),
-  maturity_mode:    config.maturity_mode,
+  pp_proximity:     state.pp_proximity,
   prev_summary:       Read previous phase's state-summary.md (if available),
   prev_verification:  Read previous phase's verification.md (if available),    // v0.7.0: failure context
   prev_changes_diff:  load_prev_phase_diff(prev_phase),                        // v0.7.0: code diff (N-1 only)
@@ -118,7 +118,7 @@ load_error_files(current_phase):
 
 If error files exist for the current phase, include them in the Phase Runner context so the runner has full error history without relying on compacted conversation memory.
 
-> **QMD Integration**: When entering the fix loop, if error files exist, pass their path to QMD for precise diagnosis. Example: `Task(subagent_type="mpl-scout", prompt="Diagnose error at {errors_dir}...")`.
+> **QMD Integration**: When entering the fix loop, if error files exist, pass their path to QMD for precise diagnosis.
 
 #### Phase 0 Artifacts Loading
 

@@ -195,14 +195,14 @@ function formatDuration(startedAt) {
   return `${mins}m`;
 }
 
-function formatTier(tier) {
-  if (!tier) return `${c.gray}--${c.reset}`;
+function formatProximity(proximity) {
+  if (!proximity) return `${c.gray}--${c.reset}`;
   const map = {
-    frugal: `${c.green}Frugal${c.reset}`,
-    standard: `${c.yellow}Standard${c.reset}`,
-    frontier: `${c.magenta}Frontier${c.reset}`,
+    near: `${c.green}Near${c.reset}`,
+    mid: `${c.yellow}Mid${c.reset}`,
+    far: `${c.magenta}Far${c.reset}`,
   };
-  return map[tier] || tier;
+  return map[proximity] || proximity;
 }
 
 function formatPhase(phase) {
@@ -223,13 +223,13 @@ function formatPhase(phase) {
   return map[phase] || phase;
 }
 
-function formatGate(gate1, gate2, gate3) {
+function formatGate(hard1, hard2, hard3) {
   const g = (val) => {
     if (val === true) return `${c.green}✓${c.reset}`;
     if (val === false) return `${c.red}✗${c.reset}`;
     return `${c.gray}-${c.reset}`;
   };
-  return `${g(gate1)}${g(gate2)}${g(gate3)}`;
+  return `${g(hard1)}${g(hard2)}${g(hard3)}`;
 }
 
 function formatContext(contextPercent) {
@@ -357,18 +357,18 @@ async function main() {
   if (state && state.current_phase !== 'completed' && state.current_phase !== 'cancelled') {
     const parts2 = [];
 
-    // Tier + Phase
-    parts2.push(`${c.bold}MPL${c.reset} ${formatTier(state.pipeline_tier)}`);
+    // PP-Proximity + Phase
+    parts2.push(`${c.bold}MPL${c.reset} ${formatProximity(state.pp_proximity)}`);
     parts2.push(formatPhase(state.current_phase));
 
     // TODOs
     const todos = formatTodos(state.sprint_status);
     if (todos) parts2.push(`${c.cyan}TODO:${c.reset}${todos}`);
 
-    // Gates
+    // Gates (Hard gates)
     const gr = state.gate_results;
-    if (gr && (gr.gate1_passed != null || gr.gate2_passed != null || gr.gate3_passed != null)) {
-      parts2.push(`${c.blue}Gate:${c.reset}${formatGate(gr.gate1_passed, gr.gate2_passed, gr.gate3_passed)}`);
+    if (gr && (gr.hard1_passed != null || gr.hard2_passed != null || gr.hard3_passed != null)) {
+      parts2.push(`${c.blue}Gate:${c.reset}${formatGate(gr.hard1_passed, gr.hard2_passed, gr.hard3_passed)}`);
     }
 
     // Fix loop
@@ -393,7 +393,7 @@ async function main() {
       ? `${c.green}${c.bold}✓ Complete${c.reset}`
       : `${c.yellow}Cancelled${c.reset}`;
     console.log(padLine(parts1.join(' | ')));
-    console.log(padLine(`${c.bold}MPL${c.reset} ${status} | ${formatTier(state.pipeline_tier)}`));
+    console.log(padLine(`${c.bold}MPL${c.reset} ${status} | ${formatProximity(state.pp_proximity)}`));
   } else {
     // No MPL state — show basic info only
     console.log(padLine(parts1.join(' | ')));

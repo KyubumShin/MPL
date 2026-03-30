@@ -260,6 +260,42 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.11.0 — Gate 3H+1A + Hat Model + Agent Consolidation (2026-03-31)
+
+### Summary
+
+v0.11.0 is the v2 Phase 2 release: restructures gates to 3 Hard + 1 Advisory, replaces the pipeline tier system (frugal/standard/frontier) with the Hat model (PP-proximity), removes Cluster Ralph, and consolidates agents from 17 to 8.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| GATE-01 | **3 Hard + 1 Advisory Gates** | Structural | Gate 0.5 (types) demoted to Advisory. Gate 1 (tests), Gate 2 (review), Gate 3 (PP) are Hard (blocking). Gate 1.5 (coverage) and Gate 1.7 (browser QA) removed. |
+| HAT-01 | **Hat Model (PP-proximity)** | Structural | Replaces frugal/standard/frontier tiers with Light/Standard/Full hats. Pipeline depth determined by PP-proximity score instead of file-count-based pipeline_score. |
+| HAT-02 | **PP Classification** | Enhancement | Pivot Points classified by proximity impact to determine hat level. |
+| HAT-03 | **Floor Guarantee** | Enhancement | Each Hat level has a minimum gate guarantee (Floor). Light: Gate 1, Standard: Gate 1+2, Full: all 3 Hard Gates. |
+| CLUST-01 | **Cluster Ralph Removal** | Removal | Cluster Ralph feature-scoped verify-fix loop removed. Config section deleted. |
+| AGT-02 | **Agent Deletion (8 agents)** | Removal | Removed: Ambiguity Resolver, Phase 0 Analyzer, Pre-Execution Analyzer, Verification Planner, Test Agent, Git Master, QA Agent, Phase Seed Generator. |
+| AGT-03 | **Phase Runner Consolidation** | Merge | Phase Runner absorbs Test Agent responsibilities (code author + test writer in single agent). |
+| AGT-04 | **Decomposer Consolidation** | Merge | Decomposer absorbs Phase Seed Generator responsibilities. |
+| AGT-05 | **Interviewer Consolidation** | Merge | Interviewer absorbs Ambiguity Resolver responsibilities. |
+| - | **Maturity Mode Removal** | Removal | `maturity_mode` config option removed. Gate thresholds are now fixed. |
+
+### Agent Count: 17 → 8
+
+| Remaining | Absorbed Into | Removed |
+|-----------|--------------|---------|
+| Interviewer (+ Ambiguity Resolver) | — | Ambiguity Resolver |
+| Codebase Analyzer | — | Phase 0 Analyzer |
+| Decomposer (+ Phase Seed Generator) | — | Pre-Execution Analyzer |
+| Phase Runner (+ Test Agent) | — | Verification Planner |
+| Code Reviewer | — | Test Agent |
+| Scout | — | Git Master |
+| Compound | — | QA Agent |
+| Doctor | — | Phase Seed Generator |
+
+---
+
 ## v0.10.0 — Mechanical Boundary Foundation (2026-03-29)
 
 | ID | Item | Status | Description |
@@ -627,7 +663,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**0.10.0**~~ | ~~Mechanical Boundary Foundation: Channel Registry + Adjacent Contracts + Seed Extension + Sentinels + L1 Hard Gate~~ | ✅ **Implemented** |
 | ~~**0.10.1**~~ | ~~MCP Path Fix: .mcp.json args `${CLAUDE_PLUGIN_ROOT}` prefix~~ | ✅ **Implemented** |
 | ~~**0.10.2**~~ | ~~T-11 Skill Quality Polish: Description trigger hints (3-tier) + deprecated stub + setup split~~ | ✅ **Implemented** |
-| **v0.11.0** | v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8 | 🔴 Next |
+| ~~**v0.11.0**~~ | ~~v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8~~ | ✅ **Implemented** |
 | **v1.0.0** | v2 Phase 3: MCP Judge + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
 | **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |
@@ -824,7 +860,7 @@ User hint override: `"mpl bugfix"` → force tier to frugal, `"mpl small"` → f
 [Frugal] ──circuit break──→ [Standard] ──circuit break──→ [Frontier]
                               │                              │
                               ├─ Preserve completed TODOs    ├─ Preserve completed phases
-                              ├─ Restructure failed TODOs    ├─ Re-decompose failed phases
+                              ├─ Restructure failed TODOs    ├─ Failed phase → mpl-failed
                               │  as single Phase             │
                               └─ PP extraction (light)       └─ Full PP + Phase 0
 ```

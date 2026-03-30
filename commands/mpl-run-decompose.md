@@ -22,8 +22,6 @@ Task(subagent_type="mpl-decomposer", model="opus",
      {user_request}
      ### Pivot Points
      {pivot_points content from .mpl/pivot-points.md}
-     ### Maturity Mode
-     {maturity_mode}
      ### Codebase Analysis
      {codebase_analysis JSON from .mpl/mpl/codebase-analysis.json}
 
@@ -47,6 +45,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
+     pp_proximity (pp_core|pp_adjacent|non_pp — see classification rules below),
      phase_subdomain (F-39, optional: tech-stack e.g. react, prisma, langchain),
      phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
      phase_lang (F-39, optional: rust|go|python|typescript|java),
@@ -54,6 +53,14 @@ Task(subagent_type="mpl-decomposer", model="opus",
      interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/qmd_verified/description),
      estimated_complexity (S/M/L).
      Also: architecture_anchor (tech_stack, directory_pattern, naming_convention), shared_resources.
+
+     ## PP-Proximity Classification Rules
+     Assign `pp_proximity` to each phase:
+     - **pp_core**: phase impact files overlap with files referenced in pivot-points.md
+     - **pp_adjacent**: phase impact files import/depend on pp_core files, OR phase handles security/data/auth
+     - **non_pp**: no PP relationship
+     Security/data escalation: phases touching auth, encryption, DB schema, or PII → pp_adjacent minimum.
+     User can override via `pp_proximity_override` per phase.
      """)
 ```
 
@@ -123,7 +130,7 @@ success_criteria:
 
 ### After Receiving Output
 
-1. Parse YAML, validate phase count vs maturity mode sizing
+1. Parse YAML, validate phase count and pp_proximity assignments
 2. Save to `.mpl/mpl/decomposition.yaml`
 3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
@@ -132,8 +139,7 @@ success_criteria:
 7. Process `risk_assessment` from decomposer output:
    - If `go_no_go == "NOT_READY"`:
      AskUserQuestion: "Decomposer assessed NOT_READY. HIGH risks: {risks}."
-     Options: "Redecompose (different strategy)" | "Proceed despite risk" | "Cancel"
-     - "Redecompose": return to Step 3 with risk feedback
+     Options: "Proceed despite risk" | "Cancel"
      - "Proceed": proceed with caveats logged
      - "Cancel": mpl-failed
    - If `go_no_go == "RE_INTERVIEW"` (T-11, v4.0):
@@ -142,7 +148,7 @@ success_criteria:
        AskUserQuestion: "{question.question}\nEvidence: {question.evidence}\nAffected PP: {question.pp_affected}"
        Options: "Relax PP" | "Change approach" | "Accept risk" | "Cancel"
        - "Relax PP": return to Step 1 Stage 2 with mode: "feasibility_resolution" + question context
-       - "Change approach": return to Step 3 (redecompose) with adjusted constraints
+       - "Change approach": return to Step 3 with adjusted constraints
        - "Accept risk": proceed, log caveat to risk-assessment.md
        - "Cancel": mpl-failed
    - If `go_no_go == "READY_WITH_CAVEATS"`:
@@ -155,7 +161,7 @@ success_criteria:
    - **Phases**: {N} phases generated
    - **Risk Assessment**: {go_no_go}
    - **Phase List**: {phase_id: phase_name for each phase}
-   - **Redecompose Count**: {redecompose_count}
+   - **Circuit Breaks**: {circuit_break_count}
    - **Timestamp**: {ISO timestamp}
    ```
 
@@ -255,11 +261,10 @@ if type_d is not empty AND state.step3f_count == 0:
   Report: "[MPL] Step 3-F: {type_d.length} unmapped requirements. Re-invoking Decomposer."
   // Re-run Step 3 with additional constraint:
   //   "The following requirements from Pre-Execution Analysis are NOT covered: {type_d}"
-  // This consumes 1 of the 2 redecompose budget
   -> return to Step 3 with feedback constraints
 
 elif type_d is not empty AND state.step3f_count >= 1:
-  Report: "[MPL] Step 3-F: Unmapped requirements remain but re-decompose budget exhausted. Logging as caveats."
+  Report: "[MPL] Step 3-F: Unmapped requirements remain but feedback loop exhausted. Logging as caveats."
   // Log as READY_WITH_CAVEATS
 
 Report: "[MPL] Step 3-F: Applied {feedback_conditions.length} feedback conditions ({type_a_or_c.length} patches, {type_b.length} splits, {type_d.length} re-invocations)."
@@ -290,22 +295,22 @@ if gui_app_detected:
 ```
 
 After decomposition, create per-phase verification plans with A/S/H-item classification.
+The Decomposer already outputs A/S/H classification as part of each phase's `success_criteria`, so the orchestrator performs verification planning inline.
 
 ```
-Task(subagent_type="mpl-verification-planner", model="sonnet",
-     prompt="""
-     ## Input
-     ### Phase Decomposition
-     {decomposition YAML from .mpl/mpl/decomposition.yaml}
-     ### Pivot Points
-     {pivot_points}
-     ### Codebase Analysis
-     {codebase_analysis}
-     ### Gap Analysis
-     {gap_analysis}
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+pivot_points = Read(".mpl/pivot-points.md")
+codebase_analysis = Read(".mpl/mpl/codebase-analysis.json")
+gap_analysis = Read(".mpl/mpl/pre-execution-analysis.md")
 
-     Classify all criteria into A/S/H items per phase.
-     """)
+// For each phase, classify success_criteria into A/S/H items:
+//   A (Automated): type is command, test, file_exists, grep, qmd_verified
+//   S (Semi-automated): type is description but has verifiable pattern
+//   H (Human): type is description with subjective/UX judgment needed
+//
+// Build verification_plan per phase from the decomposer's output.
+// No separate agent needed — the orchestrator reads the decomposition
+// and organizes the existing criteria into the A/S/H taxonomy.
 ```
 
 ### After Receiving Output

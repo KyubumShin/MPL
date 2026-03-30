@@ -20,10 +20,8 @@ const DEFAULT_STATE = {
   pipeline_id: null,
   run_mode: 'full',
   tool_mode: 'full',         // F-04: "full" | "partial" | "standalone"
-  pipeline_tier: null,       // F-20: "frugal" | "standard" | "frontier" (set by Triage)
-  pipeline_score: null,      // F-20: float 0.0~1.0 (set by Quick Scope Scan)
-  tier_hint: null,           // F-20: user keyword hint ("frugal" | "standard" | null)
-  escalation_history: [],    // F-21: [{from, to, reason, preserved_work, timestamp}]
+  pp_proximity: null,        // Hat model: "near" | "mid" | "far" (set by Triage)
+  pp_score: null,            // Hat model: float 0.0~1.0 (set by Quick Scope Scan)
   worktree_history: [],      // History of worktree switches
   interview_depth: null,     // "skip" | "light" | "full" (set by Triage Step 0.2)
   current_phase: 'phase1-plan',
@@ -36,9 +34,10 @@ const DEFAULT_STATE = {
     failed_todos: 0
   },
   gate_results: {
-    gate1_passed: null,
-    gate2_passed: null,
-    gate3_passed: null
+    hard1_passed: null,
+    hard2_passed: null,
+    hard3_passed: null,
+    advisory_passed: null
   },
   fix_loop_count: 0,
   max_fix_loops: 10,
@@ -164,46 +163,6 @@ export function isMplActive(cwd) {
  * @returns {object} Initial state
  */
 /**
- * Escalate pipeline tier to next level (F-21)
- * @param {string} cwd - Working directory
- * @param {string} reason - Reason for escalation (e.g. "circuit_break")
- * @param {object} preservedWork - Summary of preserved work
- * @returns {{ from: string, to: string } | null} Escalation result, or null if already at frontier
- */
-export function escalateTier(cwd, reason, preservedWork = {}) {
-  const state = readState(cwd);
-  if (!state) return null;
-
-  const current = state.pipeline_tier;
-  const next = getEscalationTarget(current);
-  if (!next) return null;
-
-  const entry = {
-    from: current,
-    to: next,
-    reason,
-    preserved_work: preservedWork,
-    timestamp: new Date().toISOString(),
-  };
-
-  const history = [...(state.escalation_history || []), entry];
-  writeState(cwd, { pipeline_tier: next, escalation_history: history });
-
-  return { from: current, to: next };
-}
-
-/**
- * Get next escalation tier
- * @param {string} currentTier
- * @returns {string|null} Next tier or null if at frontier
- */
-export function getEscalationTarget(currentTier) {
-  if (currentTier === 'frugal') return 'standard';
-  if (currentTier === 'standard') return 'frontier';
-  return null; // frontier → no further escalation
-}
-
-/**
  * Pipeline-scoped paths that must be RESET on new pipeline start.
  * These are relative to cwd.
  */
@@ -315,7 +274,7 @@ export function cleanPipelineScope(cwd) {
   }
 }
 
-export function initState(cwd, featureName, runMode = 'full', tierHint = null) {
+export function initState(cwd, featureName, runMode = 'full', ppHint = null) {
   // F-39: Clean pipeline-scoped artifacts before initializing new pipeline
   cleanPipelineScope(cwd);
 
@@ -335,22 +294,20 @@ export function initState(cwd, featureName, runMode = 'full', tierHint = null) {
     .replace(/^-|-$/g, '')
     .slice(0, 40);
 
-  const isSmall = runMode === 'small' || tierHint === 'standard';
-  const isFrugal = tierHint === 'frugal';
+  const isNear = ppHint === 'near';
+  const isMid = ppHint === 'mid';
 
-  const maxFixLoops = config.max_fix_loops ?? (isFrugal ? 3 : isSmall ? 5 : 10);
-  const maxTokens = config.max_total_tokens ?? (isFrugal ? 150000 : isSmall ? 300000 : 900000);
+  const maxFixLoops = config.max_fix_loops ?? (isNear ? 3 : isMid ? 5 : 10);
+  const maxTokens = config.max_total_tokens ?? (isNear ? 150000 : isMid ? 300000 : 900000);
   const convergenceConfig = config.convergence ?? {};
 
-  const tierPrefix = isFrugal ? 'frugal-' : isSmall ? 'small-' : '';
+  const ppPrefix = isNear ? 'near-' : isMid ? 'mid-' : '';
   return writeState(cwd, {
     ...DEFAULT_STATE,
-    pipeline_id: `mpl-${tierPrefix}${dateStr}-${slug}`,
+    pipeline_id: `mpl-${ppPrefix}${dateStr}-${slug}`,
     run_mode: runMode === 'auto' ? 'auto' : runMode,
-    pipeline_tier: null,           // Set by Triage after Quick Scope Scan
-    tier_hint: tierHint,
-    escalation_history: [],
-    current_phase: isFrugal ? 'phase1a-research' : isSmall ? 'small-plan' : 'phase1a-research',
+    pp_proximity: null,            // Set by Triage after Quick Scope Scan
+    current_phase: isNear ? 'phase1a-research' : isMid ? 'small-plan' : 'phase1a-research',
     max_fix_loops: maxFixLoops,
     cost: {
       ...DEFAULT_STATE.cost,
@@ -362,7 +319,7 @@ export function initState(cwd, featureName, runMode = 'full', tierHint = null) {
     },
     research: {
       ...DEFAULT_STATE.research,
-      mode: isSmall ? 'light' : 'full'
+      mode: isMid ? 'light' : 'full'
     },
     started_at: now
   });
@@ -407,7 +364,7 @@ export function checkConvergence(state) {
       return {
         status: 'stagnating',
         delta: improvement,
-        suggestion: 'Fix loop is not making progress. Try a different strategy: change implementation approach, consult Phase 0 artifacts, or escalate to redecomposition.'
+        suggestion: 'Fix loop is not making progress. Try a different strategy: change implementation approach or consult Phase 0 artifacts.'
       };
     }
 

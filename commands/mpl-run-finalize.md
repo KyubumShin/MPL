@@ -15,28 +15,23 @@ Load this when `current_phase` is `mpl-finalize` or when resuming a session.
 
 ### 5.0: E2E Test (Final)
 
-After 5-Gate Quality passes, run final E2E validation using a **3-tier fallback chain** (F-E2E-1, v0.8.3):
+After Gate System passes, run final E2E validation using a **2-tier fallback chain** (F-E2E-1, v0.8.3):
 
 ```
 1. Collect E2E sources (fallback chain):
    a. S-items: Read `.mpl/mpl/verification-plan.md` for S-items with domain "e2e"
-   b. Cluster E2E: Read `decomposition.yaml` → clusters[].feature_e2e + final_e2e
-   c. Default smoke: `npm test` (or `cargo test` / `pytest` based on tech_stack)
+   b. Default smoke: `npm test` (or `cargo test` / `pytest` based on tech_stack)
 
    Resolution:
-     if (a) has E2E scenarios → use (a), merge with (b) if both exist (deduplicate)
-     elif (b) has feature_e2e → use (b)
-     else → use (c) as minimal smoke
-
-   If using fallback (b) or (c):
-     announce: "[MPL] WARNING: Using Cluster E2E fallback (Verification Planner was skipped)"
+     if (a) has E2E scenarios → use (a)
+     else → use (b) as minimal smoke
 
 2. Execute collected scenarios sequentially:
    - Each scenario: run commands[], check exit code
    - Timeout: 60s per scenario (configurable via .mpl/config.json → e2e_timeout)
    - On failure: log but continue (non-blocking by default)
 
-3. Report: "[MPL] E2E Test: {passed}/{total} scenarios passed. (source: S-items|cluster|smoke)"
+3. Report: "[MPL] E2E Test: {passed}/{total} scenarios passed. (source: S-items|smoke)"
 ```
 
 - MED/LOW H-items are NOT re-asked here — they are aggregated in Step 5.1.8 (T-10, v3.9)
@@ -118,11 +113,11 @@ for each completed phase:
 # 3. Gate 2 auto-resolved NEEDS_FIXES (if any were auto-fixed)
 # (tracked in RUNBOOK quality results section)
 
-  # 4. Gate 0.7 Cross-Boundary Advisory warnings (CB-03, v0.9.1)
-  if exists(".mpl/mpl/gate-0.7-report.md"):
-    gate07_warnings = parse(".mpl/mpl/gate-0.7-report.md")
-    for each w in gate07_warnings:
-      sources += { severity: "MED", item: w.description, phase: "Gate 0.7", reason: "cross-boundary advisory" }
+  # 4. Hard 3 contract violations (if any were deferred)
+  if exists(".mpl/mpl/hard3-violations.md"):
+    hard3_warnings = parse(".mpl/mpl/hard3-violations.md")
+    for each w in hard3_warnings:
+      sources += { severity: "MED", item: w.description, phase: "Hard 3", reason: "contract diff advisory" }
 
 if sources is empty:
   announce: "[MPL] Post-Execution Review: No deferred items. Clean execution."
@@ -169,13 +164,12 @@ else:
 
 ### 5.2: Extract Learnings
 
-Reuse `mpl-compound` skill:
+Extract learnings directly from the MPL session:
 ```
-Task(subagent_type="mpl-compound", model="sonnet",
-     prompt="Extract learnings from MPL session.
-     Phase summaries: {all state-summary.md contents}
-     Phase decisions: {all PDs}
-     Discoveries: {all discoveries}")
+Analyze:
+  - Phase summaries: {all state-summary.md contents}
+  - Phase decisions: {all PDs}
+  - Discoveries: {all discoveries}
 ```
 Save to `docs/learnings/{feature}/`: learnings.md, decisions.md, issues.md, metrics.md
 
@@ -187,18 +181,12 @@ Distill RUNBOOK decisions/issues into persistent learnings for future runs:
 runbook = Read(".mpl/mpl/RUNBOOK.md")
 existing_learnings = Read(".mpl/memory/learnings.md") or ""
 
-Task(subagent_type="mpl-compound", model="sonnet",
-     prompt="""
-     Distill execution learnings into the persistent memory file.
+Distill execution learnings into the persistent memory file:
 
-     ## RUNBOOK (current run)
-     {runbook}
-
-     ## Phase Summaries
-     {all state-summary.md contents}
-
-     ## Existing Learnings (append, do not duplicate)
-     {existing_learnings}
+     ## Input
+     - RUNBOOK (current run): {runbook}
+     - Phase Summaries: {all state-summary.md contents}
+     - Existing Learnings (append, do not duplicate): {existing_learnings}
 
      ## Output Format
      Append NEW entries only to the existing file. Use this structure:
@@ -217,7 +205,6 @@ Task(subagent_type="mpl-compound", model="sonnet",
      2. Only record patterns that would help FUTURE runs
      3. Skip session-specific details (file paths, variable names)
      4. Focus on generalizable lessons (type mismatches, API patterns, test strategies)
-     """)
 
 Save output to `.mpl/memory/learnings.md`
 Ensure .mpl/memory/ directory exists.
@@ -226,7 +213,7 @@ Report: "[MPL] Learnings distilled: {new_entries} new patterns added to memory."
 
 ### 5.2.6: 4-Tier Memory Update (F-25)
 
-Execute mpl-compound's 4-Tier Memory protocol:
+Execute 4-Tier Memory protocol:
 
 1. **Update episodic.md**: Append summary of each completed Phase to episodic.md
    - Format: `### Phase {N}: {name} ({timestamp})\n{2-3 line summary: what was implemented, key decisions, results}`
@@ -243,18 +230,17 @@ Execute mpl-compound's 4-Tier Memory protocol:
    - Repeated conventions → formalize in "## Project Conventions" section
    - Corresponding entries in episodic are compressed to 1 line + semantic reference link
 
-4. **Clean up procedural.jsonl**: Save tool patterns extracted by mpl-compound
+4. **Clean up procedural.jsonl**: Save tool patterns extracted during learning distillation
    - Classification tags: type_mismatch, dependency_conflict, test_flake, api_contract_violation, etc.
    - If exceeding 100 entries, delete oldest entries first (FIFO)
 
 5. **Update state.json memory field**: Update memory statistics
 
 ```
-Task(subagent_type="mpl-compound", model="sonnet",
-     prompt="Execute 4-Tier Memory protocol (F-25).
-     Phase summaries: {all state-summary.md contents}
-     RUNBOOK: {runbook contents}
-     Follow Steps M-1 through M-5 from the mpl-compound protocol.")
+Execute 4-Tier Memory protocol (F-25) directly:
+  - Phase summaries: {all state-summary.md contents}
+  - RUNBOOK: {runbook contents}
+  - Follow Steps M-1 through M-5.
 
 Report: "[MPL] 4-Tier Memory updated: episodic={N} entries, semantic={N} rules, procedural={N} entries."
 ```
@@ -264,33 +250,26 @@ Report: "[MPL] 4-Tier Memory updated: episodic={N} entries, semantic={N} rules, 
 Extract one-line phase lessons from the completed pipeline for future decomposition guidance:
 
 ```
-Task(subagent_type="mpl-compound", model="sonnet",
-     prompt="""
-     Review the completed pipeline and extract 1-3 Phase Hints — one-line constraints
-     that should guide FUTURE decomposition. Focus on lessons about phase ordering,
-     separation of concerns, and dependency management.
+Review the completed pipeline and extract 1-3 Phase Hints — one-line constraints
+that should guide FUTURE decomposition. Focus on lessons about phase ordering,
+separation of concerns, and dependency management.
 
-     ## Phase Summaries
-     {all state-summary.md contents}
+Input:
+  - Phase Summaries: {all state-summary.md contents}
+  - Phase Decisions: {all PDs}
+  - Discoveries: {all discoveries}
 
-     ## Phase Decisions
-     {all PDs}
+Output Format:
+  Return a JSON array of hint strings. Examples:
+  - "DB migration: always separate schema changes and data migration into distinct phases"
+  - "API endpoint: define types in a dedicated phase before implementation phases to reduce downstream errors"
+  - "Auth middleware: place cross-cutting concerns in early phases as other phases depend on them"
 
-     ## Discoveries
-     {all discoveries}
-
-     ## Output Format
-     Return a JSON array of hint strings. Examples:
-     - "DB migration: always separate schema changes and data migration into distinct phases"
-     - "API endpoint: define types in a dedicated phase before implementation phases to reduce downstream errors"
-     - "Auth middleware: place cross-cutting concerns in early phases as other phases depend on them"
-
-     Rules:
-     1. Only output hints from actual lessons learned in THIS pipeline
-     2. Each hint must be a single actionable sentence
-     3. No generic advice — be specific to the patterns observed
-     4. Skip if pipeline was straightforward with no notable phase-ordering lessons
-     """)
+Rules:
+  1. Only output hints from actual lessons learned in THIS pipeline
+  2. Each hint must be a single actionable sentence
+  3. No generic advice — be specific to the patterns observed
+  4. Skip if pipeline was straightforward with no notable phase-ordering lessons
 
 // Save each hint via addPhaseHint() to semantic.md
 for each hint in output:
@@ -317,7 +296,7 @@ On pipeline completion, evaluate the effectiveness of requirements documents gen
 | Metric | Good Example | Bad Example |
 |--------|-------------|------------|
 | Phase 0 retry count | 0-1 | 3+ |
-| Redecomposition count | 0 | 1+ |
+| Circuit break count | 0 | 1+ |
 | Gate pass rate | 95%+ (1st attempt) | 2+ attempts |
 | User correction requests | 0 | 2+ |
 
@@ -327,12 +306,12 @@ On pipeline completion, evaluate the effectiveness of requirements documents gen
 if exists(".mpl/pm/requirements-*.md"):
   metrics = {
     phase0_iterations: state.phase0_retry_count or 0,
-    redecompose_count: state.redecompose_count or 0,
+    circuit_break_count: state.phases.circuit_breaks or 0,
     gate_attempts: count_gate_retries(state),
     user_corrections: count_side_interview_corrections(state)
   }
 
-  score = (metrics.phase0_iterations <= 1) + (metrics.redecompose_count == 0) + (metrics.gate_attempts <= 1) + (metrics.user_corrections == 0)
+  score = (metrics.phase0_iterations <= 1) + (metrics.circuit_break_count == 0) + (metrics.gate_attempts <= 1) + (metrics.user_corrections == 0)
 
   if score >= 3:
     copy requirements to ".mpl/pm/good-examples/{date}-{topic}.md"
@@ -407,7 +386,7 @@ Save to `.mpl/mpl/metrics.json`:
 ```json
 {
   "phases_completed": 4, "phases_failed": 0,
-  "total_retries": 2, "total_micro_fixes": 3, "redecompositions": 0,
+  "total_retries": 2, "total_micro_fixes": 3,
   "total_discoveries": 3, "total_pd_count": 8, "total_pd_overrides": 1,
   "final_pass_rate": 100, "phase5_skipped": true,
   "phase0_cache_hit": false,
@@ -501,7 +480,7 @@ manifest = {
   version: "0.9.2",
   generated_at: new Date().toISOString(),
   commit_hash: commit_hash,
-  pipeline_tier: state.pipeline_tier,
+  pp_proximity: state.pp_proximity,
   field_classification: state.field_classification || "field-1",
   artifact_count: tracked_artifacts.length,
   artifacts: tracked_artifacts
@@ -515,7 +494,7 @@ Announce: "[MPL] Manifest generated: {tracked_artifacts.length} artifacts tracke
 
 > **Note**: Previously duplicated as 5.5. Now unique after Post-Execution Review was renumbered to 5.1.8.
 
-Summarize: phases completed/failed, retries, redecompositions, key discoveries/PD overrides, verification status, key learnings.
+Summarize: phases completed/failed, retries, circuit breaks, key discoveries/PD overrides, verification status, key learnings.
 
 ### 5.6: RUNBOOK Finalize (F-10)
 
@@ -527,9 +506,9 @@ Append final section to `.mpl/mpl/RUNBOOK.md`:
 - **Final Pass Rate**: {pass_rate}%
 - **Total Retries**: {total_retries}
 - **Total Micro-fixes**: {total_micro_fixes}
-- **Redecompositions**: {redecompose_count}
+- **Circuit Breaks**: {circuit_break_count}
 - **Elapsed**: {elapsed_ms}ms
-- **Pipeline Tier**: {pipeline_tier}
+- **PP-Proximity**: {pp_proximity}
 - **Escalations**: {escalation_count}
 - **Completed At**: {ISO timestamp}
 ```
@@ -544,7 +523,7 @@ mpl_state = Read(".mpl/mpl/state.json")
 
 pattern = {
   description: state.task or user_request (first 100 chars, summarized),
-  tier: state.pipeline_tier,
+  proximity: state.pp_proximity,
   escalated_from: state.escalation_history.length > 0
     ? state.escalation_history[0].from
     : null,

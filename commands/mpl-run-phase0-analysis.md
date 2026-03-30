@@ -43,30 +43,28 @@ Task(subagent_type="mpl-codebase-analyzer", model="sonnet",
 
 #### Scout Call Branch (QMD Integration)
 
-Branch the Scout call prompt based on qmd_mode:
+Branch the codebase analysis prompt based on qmd_mode:
 
 **QMD-First Mode** (`qmd_mode == "qmd_first"`):
 ```
-Task(mpl-scout, haiku, prompt="""
-  Analyze the codebase in QMD-First mode.
-  1. qmd_deep_search("project entry points and main modules") → identify key files
-  2. qmd_deep_search("test infrastructure and framework") → understand test structure
-  3. qmd_vector_search("external dependencies and integrations") → understand dependencies
-  4. Cross-verify each QMD result with Grep (Search-then-Verify)
-  5. Glob("**/*.{ts,tsx,py,go,rs}") → full file structure (supplement what QMD may miss)
-  Output: JSON (search_mode: "qmd_first", each finding includes verification)
-""")
+// Orchestrator performs codebase analysis directly using available tools:
+// 1. qmd_deep_search("project entry points and main modules") → identify key files
+// 2. qmd_deep_search("test infrastructure and framework") → understand test structure
+// 3. qmd_vector_search("external dependencies and integrations") → understand dependencies
+// 4. Cross-verify each QMD result with Grep (Search-then-Verify)
+// 5. Glob("**/*.{ts,tsx,py,go,rs}") → full file structure
+// Output: JSON (search_mode: "qmd_first", each finding includes verification)
 ```
 
 **Grep-Only Mode** (`qmd_mode == "grep_only"`):
-Use the existing Scout call protocol as-is.
+Use Grep/Glob directly for codebase analysis.
 
-> **Fallback:** If Scout fails QMD tool calls in QMD-First mode (MCP server unresponsive, etc.), Scout automatically falls back to Grep-Only. This is defined in mpl-scout.md's Search_Strategy.
+> **Fallback:** If QMD tool calls fail (MCP server unresponsive, etc.), automatically fall back to Grep-Only mode.
 
 ### After Receiving Output
 
-1. Review subagent's summary (full JSON is already saved to file)
-2. **(P-03, v0.8.7)**: If scout was dispatched, save `search_trajectory` to `.mpl/mpl/phase0/search-trajectory.json`.
+1. Review analysis summary (full JSON is already saved to file)
+2. Save `search_trajectory` to `.mpl/mpl/phase0/search-trajectory.json` for observability.
    This enables post-mortem analysis of Phase 0 exploration quality.
 3. Report: `[MPL] Codebase Analysis: {files} files, {modules} modules, {deps} deps. Tool mode: {tool_mode}.`
 4. Proceed to Step 2.5

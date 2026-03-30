@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.10.2
+# MPL (Micro-Phase Loop) v0.11.0
 
 **예방이 치료보다 낫다. 명세가 디버깅보다 낫다.**
 
@@ -6,7 +6,7 @@ Claude Code 플러그인으로, 야심찬 태스크를 마이크로 페이즈로
 
 > **[English Documentation](./README.md)**
 
-[빠른 시작](#빠른-시작) · [철학](#혼돈에서-일관성으로) · [루프](#루프) · [라우터](#라우터) · [에이전트](#열네-개의-마음) · [내부 구조](#내부-구조)
+[빠른 시작](#빠른-시작) · [철학](#혼돈에서-일관성으로) · [루프](#루프) · [라우터](#라우터) · [에이전트](#여덟-개의-마음) · [내부 구조](#내부-구조)
 
 ---
 
@@ -83,13 +83,13 @@ mpl 사용자 인증에 OAuth와 역할 기반 접근 제어 추가
 <summary><strong>무슨 일이 일어났나?</strong></summary>
 
 ```
-Quick Scope Scan  → 8개 영향 파일, 4개 테스트 시나리오 → pipeline_score 0.72
-Tier 선택        → Frontier (전체 파이프라인)
+Quick Scope Scan  → 8개 영향 파일, 4개 테스트 시나리오 → pp_proximity 0.72
+Hat 선택         → PP-proximity 스코어링 → 적정 파이프라인 깊이
 PP 인터뷰        → 6개 Pivot Points 추출 (3 CONFIRMED, 3 PROVISIONAL)
 Phase 0 Enhanced → API 계약 + 타입 정책 + 에러 명세 생성
 분해              → 4개 마이크로 페이즈 + 인터페이스 계약
 페이즈 실행       → 4 페이즈 × (계획 → 페이즈 러너 → 테스트 → 검증)
-3-Gate 품질      → Gate 1: 100% 테스트, Gate 2: PASS, Gate 3: PP 위반 없음
+3H+1A Gate       → Gate 1: 테스트(Hard), Gate 2: 리뷰(Hard), Gate 3: PP(Hard), Gate 0.5: 타입(Advisory)
 RUNBOOK          → 전체 실행 로그 (세션 연속성 보장)
 ```
 
@@ -121,10 +121,13 @@ MPL의 핵심은 **분해-실행-검증** 루프이며, 각 반복은 새로운 
               │    출력: State Summary만                │
               └────────────────┬────────────────┘
                                │
-                    ┌──────────▼──────────┐
-                    │  3-Gate 품질 검사    │
-                    │  테스트 → 리뷰 → PP │
-                    └──────────┬──────────┘
+                    ┌──────────▼──────────────┐
+                    │  3 Hard + 1 Advisory    │
+                    │  Gate 1: 테스트 (Hard)  │
+                    │  Gate 2: 리뷰 (Hard)    │
+                    │  Gate 3: PP (Hard)      │
+                    │  Gate 0.5: 타입 (Adv.)  │
+                    └──────────┬──────────────┘
                                │
                            완료
 ```
@@ -136,7 +139,7 @@ MPL의 핵심은 **분해-실행-검증** 루프이며, 각 반복은 새로운 
 | **Phase 0** | 사전 명세: 계약, 타입, 에러 | 디버깅 제거 |
 | **분해** | 인터페이스 계약과 함께 순서화된 페이즈로 분할 | 각 페이즈 독립 검증 가능 |
 | **실행** | 페이즈별 새 세션, 페이즈 러너 위임, 마이크로 테스트 사이클 | 컨텍스트 오염 없음 |
-| **3-Gate** | 자동화 테스트 → 코드 리뷰 → PP 준수 | 증거 기반 완료 |
+| **3H+1A Gate** | 테스트(Hard) → 리뷰(Hard) → PP(Hard) + 타입(Advisory) | 증거 기반 완료 |
 | **RUNBOOK** | 연속 감사 로그 (사람/에이전트 세션 연속성) | 중단된 곳에서 재개 |
 
 ### State Summary: 유일한 다리
@@ -180,80 +183,68 @@ MPL의 핵심은 **분해-실행-검증** 루프이며, 각 반복은 새로운 
 > 사용자가 "이것이 작은 작업인가 큰 작업인가?"를 판단할 필요가 없어야 한다.
 > 시스템이 알아내야 한다 — 그리고 틀렸을 때 적응해야 한다.
 
-### 문제
+### Hat 모델 (PP-Proximity)
 
-MPL이 강력해질수록, 단순한 작업에는 사용하기 어려워졌다. 세 개의 별도 진입점(`mpl` / `mpl-small` / `mpl-bugfix`)이 사용자에게 태스크 복잡도를 미리 판단하도록 강제했다. 잘못 판단하면, 오탈자 수정에 전체 파이프라인의 토큰을 낭비하거나, 복잡한 태스크가 에스컬레이션 경로 없는 경량 파이프라인에 갇혀 서킷 브레이크된다.
-
-### 해결: Adaptive Pipeline Router
+MPL은 **PP-proximity** (Pivot Point 근접도)를 사용하여 파이프라인 깊이를 결정한다. 각 태스크는 프로젝트의 불변 제약조건(Pivot Points)에 얼마나 가까이 닿는지로 점수화된다. 근접도가 높을수록 더 엄격한 파이프라인이 적용된다.
 
 하나의 진입점. 자동 스코어링. 동적 에스컬레이션.
 
 ```
-"mpl 로그인 버그 수정"           → 트리아지 → Frugal  (~8K 토큰)
-"mpl 이메일 유효성 검증 추가"    → 트리아지 → Standard (~30K 토큰)
-"mpl 인증 시스템 리팩토링"       → 트리아지 → Frontier (~80K 토큰)
+"mpl 로그인 버그 수정"           → 트리아지 → Hat PP-proximity 스코어링 → 경량 파이프라인
+"mpl 이메일 유효성 검증 추가"    → 트리아지 → Hat PP-proximity 스코어링 → 표준 파이프라인
+"mpl 인증 시스템 리팩토링"       → 트리아지 → Hat PP-proximity 스코어링 → 전체 파이프라인
 ```
 
-#### Pipeline Score
+#### PP-Proximity 점수
 
-트리아지가 Quick Scope Scan (~1-2K 토큰)을 실행하고 계산한다:
+트리아지가 Quick Scope Scan을 실행하고 PP-proximity를 계산한다 — 태스크가 핵심 제약조건에 얼마나 닿는가:
 
 ```
-pipeline_score = (file_scope × 0.35) + (test_complexity × 0.25)
-               + (dependency_depth × 0.25) + (risk_signal × 0.15)
+pp_proximity = (pp_impact × 0.40) + (file_scope × 0.25)
+             + (contract_change × 0.20) + (risk_signal × 0.15)
 
+pp_impact:        직접 영향받는 PP 수 (0.0 ~ 1.0)
 file_scope:       min(affected_files / 10, 1.0)
-test_complexity:  min(test_scenarios / 8, 1.0)
-dependency_depth: min(import_chain_depth / 5, 1.0)
+contract_change:  인터페이스 계약 변경 여부 (0.0 또는 1.0)
 risk_signal:      프롬프트 키워드 분석 (0.0 ~ 1.0)
 ```
 
-#### 세 가지 티어
+#### Hat + Floor
 
-| 티어 | 점수 | 실행 단계 | 생략 | ~토큰 |
-|------|------|----------|------|-------|
-| **Frugal** | < 0.3 | Error Spec → 수정 → Gate 1 → 커밋 | PP, Phase 0, 분해, Gate 2/3 | ~5-15K |
-| **Standard** | 0.3~0.65 | PP(light) → Error Spec → 단일 페이즈 → Gate 1 | 전체 PP, Phase 0 Steps 1-3, 다중 페이즈, Gate 2/3 | ~20-40K |
-| **Frontier** | > 0.65 | 전체 9+ 단계 파이프라인 | 없음 | ~50-100K+ |
+| Hat | PP-Proximity | 실행 단계 | Floor (최소 보장) | ~토큰 |
+|-----|-------------|----------|------------------|-------|
+| **Light** | 낮음 | Error Spec → 수정 → Gate 1 → 커밋 | Gate 1 항상 실행 | ~5-15K |
+| **Standard** | 중간 | PP(light) → Error Spec → 단일 페이즈 → Gate 1+2 | Gate 1+2 항상 실행 | ~20-40K |
+| **Full** | 높음 | 전체 파이프라인 (모든 게이트 포함) | 3 Hard Gate 모두 실행 | ~50-100K+ |
 
 #### 동적 에스컬레이션
 
-티어가 실패하면, 포기하지 않고 성장한다:
+Hat 레벨이 실패하면, 포기하지 않고 성장한다:
 
 ```
-[Frugal] ──서킷 브레이크──→ [Standard] ──서킷 브레이크──→ [Frontier]
+[Light] ──서킷 브레이크──→ [Standard] ──서킷 브레이크──→ [Full]
                                 │                              │
                                 ├─ 완료된 TODO 보존             ├─ 완료된 페이즈 보존
                                 └─ 실패 TODO → 단일 페이즈      └─ 실패 페이즈 → 재분해
 ```
 
-키워드 힌트는 수동 오버라이드로 사용: `"mpl bugfix"` → frugal, `"mpl small"` → standard.
-
-#### 라우팅 패턴 학습 (F-22)
-
-실행 결과가 `.mpl/memory/routing-patterns.jsonl`에 자동 기록된다. 다음 실행 시 Jaccard 유사도로 과거 패턴을 매칭하여 최적 티어를 추천한다.
+키워드 힌트는 수동 오버라이드로 사용: `"mpl bugfix"` → light, `"mpl small"` → standard.
 
 ---
 
-## 열네 개의 마음
+## 여덟 개의 마음
 
-14개 에이전트, 각각 단일 목적. 온디맨드 로드, 사전 로드 없음:
+8개 에이전트, 각각 단일 목적. 온디맨드 로드, 사전 로드 없음:
 
 | 에이전트 | 역할 | 핵심 원칙 |
 |---------|------|----------|
-| **Interviewer** | Pivot Points 소크라테스식 질문 | "타협할 수 없는 것은?" |
-| **Ambiguity Resolver** | PP 정렬 명세 생성, 소크라테스식 루프 | "모호함을 미리 해소한다" |
+| **Interviewer** | Pivot Points 소크라테스식 질문 + 모호성 해소 | "타협할 수 없는 것은?" |
 | **Codebase Analyzer** | 코드베이스 구조 정적 분석 | "디렉토리, 의존성, 인터페이스를 파악한다" |
-| **Phase 0 Analyzer** | Phase 0 Enhanced 심층 분석 | "계약, 타입, 에러를 사전에 명세한다" |
-| **Pre-Execution Analyzer** | Gap + Tradeoff 통합 분석 | "무엇이 빠졌나? 무엇이 위험한가?" |
-| **Decomposer** | 순서화된 마이크로 페이즈로 분해 | "무엇이 무엇에 의존하나?" |
-| **Verification Planner** | A/S/H-items 분류 | "기계가 검증할 수 있는 것 vs. 사람이 필요한 것?" |
-| **Phase Runner** | 단일 페이즈 전체 실행 | "계획, 위임, 검증, 요약" |
-| **Test Agent** | 독립 테스트 작성 | "코드를 작성하지 않았으므로, 주장하는 것을 테스트한다" |
-| **Code Reviewer** | 8-카테고리 품질 게이트 | "이 PR을 승인하겠는가?" |
+| **Decomposer** | 순서화된 마이크로 페이즈로 분해 + Phase Seed 생성 | "무엇이 무엇에 의존하나?" |
+| **Phase Runner** | 단일 페이즈 전체 실행 + 테스트 작성 | "계획, 구현, 검증, 요약" |
+| **Code Reviewer** | 품질 게이트 + PP 준수 | "이 PR을 승인하겠는가?" |
 | **Scout** | 경량 코드베이스 탐색 (haiku) | "빠르게 찾고, 비용 없이" |
 | **Compound** | 학습 추출 및 증류 | "미래 실행이 알아야 할 것을 배웠는가?" |
-| **Git Master** | 원자적 커밋 | "각 커밋이 하나의 이야기를 전한다" |
 | **Doctor** | 설치 진단 | "모든 것이 올바르게 연결되었는가?" |
 
 ### 에이전트 분리 원칙
@@ -274,16 +265,16 @@ risk_signal:      프롬프트 키워드 분석 (0.0 ~ 1.0)
 | **S-item** | 샌드박스 테스팅 | BDD 시나리오, Given/When/Then | 통합 테스트 통과 |
 | **H-item** | 사람 필요 | 사용자와 사이드 인터뷰 | UX 판단, 시각적 리뷰 |
 
-### 3-Gate 품질 시스템
+### 3 Hard Gate + 1 Advisory
 
-세 개의 게이트 + 사전 타입 검사:
+세 개의 Hard Gate(차단) + 하나의 Advisory Gate(경고):
 
-| Gate | 방법 | 통과 기준 |
-|------|------|----------|
-| **Gate 0.5** | 프로젝트 전체 타입 검사 (`lsp_diagnostics_directory`) | 타입 에러 제로 (F-17) |
-| **Gate 1** | 자동화 테스트 (A + S items) | pass_rate >= 95% |
-| **Gate 2** | 코드 리뷰 (8 카테고리) | PASS 판정 |
-| **Gate 3** | PP 준수 + H-item 해결 | 위반 없음 + 모든 H-items 해결 |
+| Gate | 타입 | 방법 | 통과 기준 |
+|------|------|------|----------|
+| **Gate 0.5** | Advisory | 프로젝트 전체 타입 검사 (`lsp_diagnostics_directory`) | 타입 에러 제로 (경고, 차단하지 않음) |
+| **Gate 1** | **Hard** | 자동화 테스트 (A + S items) | pass_rate >= 95% |
+| **Gate 2** | **Hard** | 코드 리뷰 | PASS 판정 |
+| **Gate 3** | **Hard** | PP 준수 + H-item 해결 | 위반 없음 + 모든 H-items 해결 |
 
 ### 수렴 감지
 
@@ -300,11 +291,11 @@ Fix loop에서 pass rate 이력을 추적하여 자동 판단:
 ## 내부 구조
 
 <details>
-<summary><strong>14 에이전트 · 4 훅 · 7 스킬 · 4 프로토콜 파일</strong></summary>
+<summary><strong>8 에이전트 · 4 훅 · 7 스킬 · 4 프로토콜 파일</strong></summary>
 
 ```
 MPL/
-├── agents/                 # 14개 에이전트 정의 (YAML)
+├── agents/                 # 8개 에이전트 정의 (YAML)
 │   └── mpl-scout.md        # Haiku 기반 읽기 전용 탐색 (F-16)
 ├── commands/               # 오케스트레이션 프로토콜 (토큰 효율을 위해 분할)
 │   ├── mpl-run.md          # 라우터: 어떤 프로토콜 파일을 로드할지
@@ -339,8 +330,8 @@ MPL/
 
 **핵심 내부 구조:**
 
-- **Adaptive Router (F-20)** — Quick Scope Scan + 4-factor pipeline score → 3-tier 자동 분류
-- **Dynamic Escalation (F-21)** — frugal → standard → frontier 서킷 브레이크 시, 완료된 작업 보존
+- **Hat 모델 (PP-proximity)** — Quick Scope Scan + PP-proximity 스코어 → Hat 기반 파이프라인 깊이 선택
+- **Dynamic Escalation (F-21)** — light → standard → full 서킷 브레이크 시, 완료된 작업 보존
 - **RUNBOOK (F-10)** — 통합 실행 로그, 9개 파이프라인 지점에서 자동 업데이트, 세션 재개 가능
 - **Session Persistence (F-12)** — 페이즈 전환마다 `<remember priority>` 태그 + RUNBOOK 이중 안전망
 - **Run-to-Run Learning (F-11)** — mpl-compound가 RUNBOOK → `.mpl/memory/learnings.md` 증류
@@ -361,7 +352,7 @@ MPL/
 
 | 경로 | 용도 |
 |------|------|
-| `.mpl/state.json` | 파이프라인 상태 (run_mode, current_phase, pipeline_tier, tool_mode) |
+| `.mpl/state.json` | 파이프라인 상태 (run_mode, current_phase, hat_level, tool_mode) |
 | `.mpl/pivot-points.md` | 불변 제약조건 (Pivot Points) |
 | `.mpl/config.json` | 사용자 설정 오버라이드 |
 | `.mpl/mpl/state.json` | MPL 실행 상태 (페이즈, 통계) |
@@ -411,12 +402,12 @@ MPL은 Claude Code 플러그인 구조를 따르며, 별도 의존성 없이 단
 
 ```bash
 # 하고 싶은 것만 말하면 — 시스템이 나머지를 알아낸다
-mpl 사용자 인증에 OAuth 추가                    # → Frontier (~80K 토큰)
+mpl 사용자 인증에 OAuth 추가                    # → Full (~80K 토큰)
 mpl 회원가입 폼에 입력 유효성 검증 추가          # → Standard (~30K 토큰)
-mpl handleSubmit에서 null 체크 수정             # → Frugal (~8K 토큰)
+mpl handleSubmit에서 null 체크 수정             # → Light (~8K 토큰)
 
 # 키워드 힌트로 수동 오버라이드
-mpl bugfix 누락된 에러 핸들러                   # → frugal 강제
+mpl bugfix 누락된 에러 핸들러                   # → light 강제
 mpl small 재시도 로직 추가                      # → standard 강제
 
 # 스킬 직접 호출

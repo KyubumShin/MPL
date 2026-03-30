@@ -116,25 +116,18 @@ for each discovery in result.discoveries:
       -> Record in .mpl/discoveries.md with reason
 
     elif pp.status == "PROVISIONAL":
-      -> Handle by maturity_mode:
-         explore:  Auto-approve + record
-         standard: HITL:
-           AskUserQuestion: "Discovery D-{N} conflicts with PP-{M}."
-           Options: "Reject" | "Accept" | "Defer"
-           Timeout: 30s -> Auto-select "Defer"
-         strict: HITL (same options, no auto-timeout)
+      -> HITL:
+         AskUserQuestion: "Discovery D-{N} conflicts with PP-{M}."
+         Options: "Reject" | "Accept" | "Defer"
+         Timeout: 30s -> Auto-select "Defer"
 
   # 2. PD Override Check
   elif discovery.pd_override:
-    explore:  Auto-approve + record PD-override
-    standard: HITL judgment
-    strict:   HITL judgment + impact analysis
+    -> HITL judgment
 
   # 3. General Discovery (no conflict)
   else:
-    explore:  Immediately reflect in next phase context
-    standard: Review at phase transition
-    strict:   Backlog for next cycle
+    -> Review at phase transition
 
   # 4. Record
   Append to .mpl/discoveries.md:
@@ -153,12 +146,11 @@ for each discovery in result.discoveries:
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes to frugal tier) |
-| `/mpl:mpl-compound` | Learning extraction |
+| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes to near proximity) |
 | `/mpl:mpl-doctor` | Installation diagnostics |
 | `/mpl:mpl-setup` | Setup wizard |
 | `/mpl:mpl-gap-analysis` | Gap analysis for missing requirements |
 
 > **Note (F-20)**: `mpl-small` and `mpl-bugfix` are deprecated. The `/mpl:mpl` skill now auto-detects
-> pipeline tier (frugal/standard/frontier) via Quick Scope Scan. Use keyword hints for manual override:
-> `"mpl bugfix"` → frugal, `"mpl small"` → standard.
+> pp_proximity (near/mid/far) via Quick Scope Scan. Use keyword hints for manual override:
+> `"mpl bugfix"` → near, `"mpl small"` → mid.

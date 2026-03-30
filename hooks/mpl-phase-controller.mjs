@@ -22,7 +22,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Import shared MPL state utility
-const { readState, writeState, isMplActive, checkConvergence, escalateTier } = await import(
+const { readState, writeState, isMplActive, checkConvergence } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 
@@ -69,10 +69,10 @@ function checkPlanStatus(cwd) {
  */
 function checkGateResults(state) {
   const gates = state.gate_results || {};
-  const results = [gates.gate1_passed, gates.gate2_passed, gates.gate3_passed];
+  // Hard gates are mandatory; advisory is informational only
+  const hardResults = [gates.hard1_passed, gates.hard2_passed, gates.hard3_passed];
 
-  // gate3 is optional (only if S-items exist)
-  const required = results.filter(r => r !== null && r !== undefined);
+  const required = hardResults.filter(r => r !== null && r !== undefined);
   const passed = required.filter(r => r === true);
   const failed = required.filter(r => r === false);
 
@@ -80,9 +80,10 @@ function checkGateResults(state) {
     allPassed: failed.length === 0 && passed.length > 0,
     anyFailed: failed.length > 0,
     details: {
-      gate1: gates.gate1_passed,
-      gate2: gates.gate2_passed,
-      gate3: gates.gate3_passed,
+      hard1: gates.hard1_passed,
+      hard2: gates.hard2_passed,
+      hard3: gates.hard3_passed,
+      advisory: gates.advisory_passed,
     }
   };
 }
@@ -231,11 +232,11 @@ async function main() {
         writeState(cwd, {
           current_phase: 'phase4-fix',
           fix_loop_count: currentFixCount,
-          gate_results: { gate0_5_passed: null, gate1_passed: null, gate1_5_passed: null, gate2_passed: null, gate3_passed: null }
+          gate_results: { hard1_passed: null, hard2_passed: null, hard3_passed: null, advisory_passed: null }
         });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Quality Gate failed. Gate results: G1=${gateResults.details.gate1}, G2=${gateResults.details.gate2}, G3=${gateResults.details.gate3}. Transitioning to Phase 4: Fix Loop.`
+          stopReason: `[MPL] Quality Gate failed. Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}, Adv=${gateResults.details.advisory}. Transitioning to Phase 4: Fix Loop.`
         }));
       } else {
         // Gates not yet evaluated
@@ -252,21 +253,6 @@ async function main() {
       const maxFix = state.max_fix_loops || 10;
 
       if (fixCount >= maxFix) {
-        // F-21: Try escalation before giving up
-        const tier = state.pipeline_tier;
-        if (tier && tier !== 'frontier') {
-          const esc = escalateTier(cwd, 'fix_loop_exhausted', {
-            fix_count: fixCount,
-            max_fix: maxFix
-          });
-          if (esc) {
-            console.log(JSON.stringify({
-              continue: true,
-              stopReason: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Escalating tier: ${esc.from} → ${esc.to}. Re-running with expanded pipeline.`
-            }));
-            break;
-          }
-        }
         // Fix loop limit reached → Phase 5 (partial completion)
         writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
@@ -277,21 +263,6 @@ async function main() {
         // H1: Check convergence before continuing
         const convergenceResult = checkConvergence(state);
         if (convergenceResult.status === 'stagnating' || convergenceResult.status === 'regressing') {
-          // F-21: Try escalation on convergence failure
-          const tier = state.pipeline_tier;
-          if (tier && tier !== 'frontier') {
-            const esc = escalateTier(cwd, `convergence_${convergenceResult.status}`, {
-              delta: convergenceResult.delta,
-              fix_count: fixCount
-            });
-            if (esc) {
-              console.log(JSON.stringify({
-                continue: true,
-                stopReason: `[MPL] Convergence ${convergenceResult.status} (delta: ${convergenceResult.delta?.toFixed(3)}). Escalating tier: ${esc.from} → ${esc.to}.`
-              }));
-              break;
-            }
-          }
           writeState(cwd, { current_phase: 'phase5-finalize' });
           console.log(JSON.stringify({
             continue: true,
@@ -370,17 +341,17 @@ async function main() {
     }
 
     case 'small-verify': {
-      // Simplified verification: only gate2 (code review)
+      // Simplified verification: only hard2 (code review)
       const smallGate = state.gate_results || {};
 
-      if (smallGate.gate2_passed === true) {
+      if (smallGate.hard2_passed === true) {
         // Code review passed → completed
         writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
           stopReason: '[MPL-Small] Verification passed. Pipeline complete. Extract learnings and commit.'
         }));
-      } else if (smallGate.gate2_passed === false) {
+      } else if (smallGate.hard2_passed === false) {
         const smallFixCount = state.fix_loop_count || 0;
         const smallMaxFix = state.max_fix_loops || 3;
 

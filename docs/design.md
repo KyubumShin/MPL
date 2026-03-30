@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.10.2 Design Document
+# MPL (Micro-Phase Loop) v0.11.0 Design Document
 
 ## 1. Overview
 
@@ -11,9 +11,9 @@ The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent stru
 | Area | Initial (v1.0) | Current |
 |------|------|------|
 | Pipeline Steps | 5 steps (Step 0~5) | 9+ steps (Step 0~6 + sub-steps) |
-| Agents | 5 | 15 |
-| Pre-Analysis | None | Triage + Phase 0 Enhanced + Pre-Execution Analysis |
-| Quality System | Simple verification | Build-Test-Fix + 5-Gate + A/S/H classification + Convergence Detection |
+| Agents | 5 | 8 |
+| Pre-Analysis | None | Triage + Phase 0 Enhanced |
+| Quality System | Simple verification | Build-Test-Fix + 3 Hard Gates + 1 Advisory + A/S/H classification + Convergence Detection |
 | Caching | None | Phase 0 artifact caching |
 | Token Profiling | None | Per-phase token/time profiling |
 
@@ -39,7 +39,7 @@ Each phase has machine-verifiable success criteria. Subjective "done" declaratio
 
 ### Principle 4: Bounded Retries
 
-Phase Runner retries internally up to 3 times. The orchestrator re-decomposes up to 2 times. When limits are exceeded, circuit break activates, preventing infinite loops.
+Phase retry budget is determined by PP-proximity. Circuit break leads to pipeline failure, preventing infinite loops.
 
 ### Principle 5: Knowledge Accumulation via Channel Registry
 
@@ -47,15 +47,14 @@ Knowledge transfer between phases occurs through **registered channels only**. U
 
 | # | Channel | Format | Creator | Consumer | SSOT |
 |---|---------|--------|---------|----------|------|
-| 1 | `decomposition.yaml` | YAML | Decomposer | Orchestrator, Seed Gen | ✓ |
+| 1 | `decomposition.yaml` | YAML | Decomposer | Orchestrator | ✓ |
 | 2 | `phase-decisions.md` | Markdown | Phase Runner | All subsequent phases | |
-| 3 | `.mpl/contracts/*.json` | JSON | Decomposer (L0) | Seed Gen, Phase Runner, Sentinels | ✓ |
-| 4 | `phase-seed.yaml` | YAML | Seed Generator | Phase Runner | |
-| 5 | `pivot-points.md` | Markdown | Interviewer | All phases (immutable) | ✓ |
-| 6 | `state-summary.md` | Markdown | Phase Runner | Next phase (L0/L1/L2) | |
-| 7 | `regression-suite.json` | JSON | Test Agent | Phase Runner (cumulative) | |
-| 8 | `.mpl/mpl/phase0/*.md` | Markdown | Phase 0 Analyzer | Phase Runner, Seed Gen | |
-| 9 | `export-manifest.json` | JSON | Phase Runner | Test Agent, Sentinels | |
+| 3 | `.mpl/contracts/*.json` | JSON | Decomposer (L0) | Phase Runner, Sentinels | ✓ |
+| 4 | `pivot-points.md` | Markdown | Interviewer | All phases (immutable) | ✓ |
+| 5 | `state-summary.md` | Markdown | Phase Runner | Next phase (L0/L1/L2) | |
+| 6 | `regression-suite.json` | JSON | Phase Runner | Phase Runner (cumulative) | |
+| 7 | `.mpl/mpl/phase0/*.md` | Markdown | Phase 0 Analyzer | Phase Runner | |
+| 8 | `export-manifest.json` | JSON | Phase Runner | Sentinels | |
 
 **State Summary** remains the primary channel. Additionally, the **immediately preceding phase's verification results and code diff** are selectively forwarded when the next phase directly depends on that work. Phase Decisions are managed with a 2-Tier classification system (Active/Summary) to preserve decision context across all phases.
 
@@ -67,14 +66,14 @@ Knowledge transfer between phases occurs through **registered channels only**. U
 
 ```
 mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
-                 ^                    |                      |
-                 +-- mpl-circuit-break               mpl-finalize -> completed
-                           |
-                       mpl-failed
+                                   |                      |
+                            mpl-circuit-break      mpl-finalize -> completed
+                                   |
+                               mpl-failed
 ```
 
-- **Retry**: Phase Runner retries internally 3 times (D-1 Hybrid). The orchestrator receives only `"complete"` or `"circuit_break"`.
-- **Re-decompose**: `max_redecompose = 2`. When exceeded, transitions to `mpl-failed` state.
+- **Retry**: Phase Runner retries internally based on PP-proximity (PP-core 3, PP-adjacent 2, Non-PP 1). The orchestrator receives only `"complete"` or `"circuit_break"`.
+- **Circuit break**: Transitions directly to `mpl-failed` state. Completed phases are preserved.
 
 ### 3.2 Full Flow Summary Table
 
@@ -82,27 +81,23 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 |------|------|-------------|--------|
 | -1 | LSP Warm-up | (orchestrator, non-blocking) | lsp_servers list, cold start elimination |
 | 0.0.5 | Artifact Freshness + Field Classification (v0.8.5) | (orchestrator) | field_classification, freshness_ratio, `.mpl/manifest.json` (read) |
-| 0 | Triage | (orchestrator) | interview_depth (light/light+scan/full) |
-| 0.5 | Maturity Mode Detection | (orchestrator) | maturity_mode (explore/standard/strict) |
-| 1 | PP Interview (2-Stage) | mpl-interviewer → mpl-ambiguity-resolver | `.mpl/pivot-points.md` |
-| 1-B | Pre-Execution Analysis | mpl-pre-execution-analyzer | Missing requirements, AI pitfalls, Must NOT Do, risk level |
+| 0 | Triage | (orchestrator) | interview_depth (light/light+scan/full), pp_proximity |
+| 1 | PP Interview | mpl-interviewer | `.mpl/pivot-points.md` |
 | 1-D | PP Confirmation | (orchestrator) | PP final confirmation with user |
 | 1-E | Interview Snapshot Save | (orchestrator) | `.mpl/mpl/interview-snapshot.md` |
 | 2 | Codebase Analysis | (orchestrator) | `.mpl/mpl/codebase-analysis.json` |
 | 2.4 | Architecture Decision Checklist | (orchestrator) | Key architecture decisions documented |
 | 2.5 | Phase 0 Enhanced | (orchestrator) | `.mpl/mpl/phase0/*.md` |
-| 3 | Phase Decomposition | mpl-decomposer | `.mpl/mpl/decomposition.yaml` (+ Cluster Ralph V-01, F-28 domain, F-39 fields) |
-| 3-F | Pre-Execution Feedback Loop (F-46) | (orchestrator) | AI pitfalls → phase patches, missing reqs → phase mapping |
-| 3-B | Verification Planning | mpl-verification-planner | A/S/H items (6 sections), S-items executable format (F-41). **Mandatory for GUI apps** (F-E2E-1c, v0.8.3) |
-| 4 | Phase Execution Loop | mpl-phase-runner (direct impl), mpl-test-agent, mpl-code-reviewer | Per-phase artifacts |
-| 5 | E2E & Finalization | mpl-compound, mpl-git-master | E2E (3-tier fallback v0.8.3), learnings, commits, metrics, **manifest.json (v0.8.5)** |
+| 3 | Phase Decomposition | mpl-decomposer | `.mpl/mpl/decomposition.yaml` |
+| 4 | Phase Execution Loop | mpl-phase-runner (direct impl) | Per-phase artifacts |
+| 5 | E2E & Finalization | mpl-git-master | E2E (3-tier fallback v0.8.3), commits, metrics, **manifest.json (v0.8.5)** |
 | 6 | Resume Protocol | (orchestrator) | Resume from interrupted phase |
 
 ### 3.3 Step-by-Step Description
 
 #### Step 0: Triage
 
-Analyzes the **information density** of the user prompt to determine interview depth. Counts the number of explicit constraints, specific files, measurable criteria, and tradeoff choices.
+Analyzes the **information density** of the user prompt to determine interview depth and PP-proximity (Hat model). Counts the number of explicit constraints, specific files, measurable criteria, and tradeoff choices.
 
 | interview_depth | Condition | Interview Behavior |
 |-----------------|------|-----------|
@@ -110,28 +105,21 @@ Analyzes the **information density** of the user prompt to determine interview d
 | `light` + scan | Density 8+ | What + What NOT + Uncertainty Scan |
 | `full` | Density below 4 (ambiguous/broad) | Full 4-round PP interview |
 
-#### Step 0.5: Maturity Mode Detection
+**PP-Proximity Classification (Hat Model)** — Replaces the previous `pipeline_tier` (frugal/standard/frontier) and `maturity_mode` (explore/standard/strict) systems with a single dimension:
 
-Reads `maturity_mode` from `.mpl/config.json` (default: `"standard"`).
+| PP-Proximity | Condition | Pipeline Behavior |
+|-------------|-----------|-------------------|
+| `pp_core` | Task directly implements a Pivot Point | Full interview + all gates |
+| `pp_adjacent` | Task relates to PP but not a direct implementation | Abbreviated interview + hard gates only |
+| `non_pp` | Task is unrelated to any PP (refactoring, chores) | Minimal interview + advisory gates |
 
-| Mode | Phase Size | PP | Discovery Handling |
-|------|-----------|-----|---------------|
-| `explore` | S (1~3 TODO) | Optional | Auto-approve |
-| `standard` | M (3~5 TODO) | Required | HITL on PP conflict |
-| `strict` | L (5~7 TODO) | Required + enforced | HITL for all changes |
+#### Step 1: PP Interview + PP Confirmation
 
-#### Step 1: PP Interview + Pre-Execution Analysis + PP Confirmation
+This step consists of 2 sub-steps:
 
-This step consists of 4 sub-steps:
+**Step 1: PP Interview** — `mpl-interviewer` (opus) discovers Pivot Points through a structured 4-Round interview. Interview scope is adjusted based on Triage's `interview_depth` (light: Round 1~2 only, full: all 4 rounds). PP status is classified as CONFIRMED (hard constraint, auto-reject on conflict) or PROVISIONAL (soft, HITL on conflict). The interviewer also handles ambiguity resolution and pre-execution gap analysis inline, consolidating what was previously 3 separate agents (mpl-interviewer, mpl-ambiguity-resolver, mpl-pre-execution-analyzer) into a single opus call.
 
-**Step 1: PP Interview (2-Stage Design)** — The PP interview is divided into two stages:
-
-- **Stage 1 — Value PP Discovery** (`mpl-interviewer`, opus): Discovers Pivot Points through a structured 4-Round interview. Interview scope is adjusted based on Triage's `interview_depth` (light: Round 1~2 only, full: all 4 rounds). PP status is classified as CONFIRMED (hard constraint, auto-reject on conflict) or PROVISIONAL (soft, HITL on conflict).
-- **Stage 2 — PP-Aligned Spec Resolution** (`mpl-ambiguity-resolver`, opus): With PP fixed as immutable constraints, auto-resolves items that can be resolved from PP + existing context, and resolves remaining ambiguities through a Socratic loop based on 5-dimensional (4 orthogonal + PP Conformance) metrics. Choices that conflict with PP receive score penalties; PP itself is never modified.
-
-**Step 1-B: Pre-Execution Analysis** — `mpl-pre-execution-analyzer` (sonnet) analyzes PP, user request, and codebase to identify missing requirements, AI agent pitfalls, and "Must NOT Do" constraints (Part 1: Gap), and evaluates the risk (LOW/MED/HIGH) and reversibility (Reversible/Irreversible) of proposed changes to recommend optimal execution order (Part 2: Tradeoff). Consolidates the previous gap-analyzer(haiku) + tradeoff-analyzer(sonnet) 2-call approach into a single sonnet call, eliminating duplicate codebase exploration.
-
-**Step 1-D: PP Confirmation** — Finalizes PP incorporating Pre-Execution analysis results. Asks the user additional questions as needed.
+**Step 1-D: PP Confirmation** — Finalizes PP. Asks the user additional questions as needed.
 
 #### Step 2: Codebase Analysis
 
@@ -181,9 +169,7 @@ Each Step's artifact must pass a verification checklist. The final summary is st
 
 Token profiling also begins at this step. Phase 0 token usage is recorded in `.mpl/mpl/profile/phases.jsonl`.
 
-#### Step 3: Phase Decomposition + Verification Planning + Critic
-
-This step consists of 3 sub-steps:
+#### Step 3: Phase Decomposition
 
 **Step 3: Phase Decomposition** — `mpl-decomposer` (opus) decomposes the user request into ordered micro-phases. The decomposer performs pure reasoning without tool access, taking structured CodebaseAnalysis as input. Each phase declares:
 - Scope and rationale
@@ -191,17 +177,18 @@ This step consists of 3 sub-steps:
 - Interface contract (requires/produces)
 - Success criteria (typed: command/test/file_exists/grep/qmd_verified/description)
 - Estimated complexity (S/M/L)
+- A/S/H verification classification (inline, previously handled by separate mpl-verification-planner agent)
 
 Artifact: `.mpl/mpl/decomposition.yaml`
 
-**Step 3-B: Verification Planning** — `mpl-verification-planner` (sonnet) classifies acceptance criteria into A/S/H items:
+A/S/H classification is now performed inline by the decomposer:
 - **A-items** (Agent-Verifiable): Agent can automatically verify (command, exit code)
 - **S-items** (Sandbox Agent Testing): BDD/Gherkin scenario-based verification
 - **H-items** (Human-Required): Automation insufficient, requires human judgment
 
-The verification plan is attached to each phase and serves as the verification criteria for Phase Runner and Test Agent.
+The verification plan is attached to each phase and serves as the verification criteria for Phase Runner.
 
-**Step 3-C: ~~Critic Simulation~~** — Absorbed into Decomposer's `risk_assessment` output section (v0.3.1). Decomposer performs pre-mortem analysis during decomposition reasoning (Step 9) and outputs go/no-go judgment. Achieves the same effect without a separate opus agent call, saving ~3-5K tokens.
+**Step 3-C: ~~Critic Simulation~~** — Absorbed into Decomposer's `risk_assessment` output section (v0.3.1).
 
 #### Step 4: Phase Execution Loop
 
@@ -222,7 +209,7 @@ The core execution unit of the pipeline. Executes each phase in order.
 - On failure, reference Phase 0 artifacts before fixing
 - Circuit break after maximum 3 retries
 
-**4.2.1 Test Agent (F-40 Mandatory)** — After Phase Runner completes, `mpl-test-agent` (sonnet) independently writes and runs tests. By separating code author from test author, it catches assumption mismatches, interface contract violations, and edge cases. **From F-40, Test Agent invocation is mandatory for required domains (ui, api, algorithm, db, ai), and Phase is FAIL-processed if 0 tests are returned.** The orchestrator operates as a single enforcement gate; Phase Runner's previous Step 3d call has been removed.
+**4.2.1 Testing** — Phase Runner handles testing inline via Build-Test-Fix micro-cycles. The separate `mpl-test-agent` was removed in v0.11.0; test writing and execution are now performed directly by Phase Runner, reducing agent dispatch overhead while maintaining the per-TODO test requirement.
 
 **4.3 Result Processing** — Performs verification, state saving, Discovery processing, and profile recording.
 
@@ -230,22 +217,22 @@ The core execution unit of the pipeline. Executes each phase in order.
 
 **4.3.6 Context Cleanup (Sliding Window)** — After each phase completes, applies a sliding window retention policy: the most recent N phases (default: 3, configurable via `context_cleanup_window`) retain detailed data in orchestrator memory, while older phases are compressed to State Summary only. Token impact: ~60-90K for 3 retained phases (≈7-10% of 900K budget).
 
-**4.4 Re-decomposition** — When circuit break occurs, `mpl-decomposer` re-decomposes the failed phase with a different strategy. Allowed up to 2 times; completed phases are preserved.
+**4.4 Circuit Break** — When circuit break occurs, the pipeline transitions to `mpl-failed`. Completed phases are preserved; the failure report includes what succeeded and what failed.
 
-**4.5 5-Gate Quality** — After all phases complete, must pass 5-stage quality gates (Gate 0.5, 1, 1.5, 2, 3) to proceed to finalization (see §5 Quality System for details).
+**4.5 Gate System (3 Hard + 1 Advisory)** — After all phases complete, must pass 3 Hard Gates plus 1 Advisory gate to proceed to finalization (see §5 Quality System for details).
 
 **4.6 Fix Loop** — On gate failure, enters the fix loop. Monitors progress with Convergence Detection; changes strategy on stagnation, immediately circuit breaks on regression (see §5.4 for details).
 
 #### Step 5: E2E & Finalization
 
-After passing 5-Gate, performs the final steps:
+After passing all Hard Gates, performs the final steps:
 
 | Sub-step | Content |
 |----------|------|
 | 5.0 E2E Testing | Run E2E scenarios for S-items |
 | 5.0.5 AD Final Verification | Confirm interface definitions for After Decision markers |
 | 5.1 Final Verification | Re-run success criteria for all phases |
-| 5.2 Learning Extraction | `mpl-compound` extracts learnings/decisions/issues |
+| 5.2 Learning Extraction | Orchestrator extracts learnings/decisions/issues (previously mpl-compound, removed in v0.11.0) |
 | 5.3 Atomic Commit | `mpl-git-master` detects style and creates atomic commit |
 | 5.4 Metrics | `.mpl/mpl/metrics.json` + profile save |
 | 5.5 Completion Report | Summary of phase completion/failure, retries, key findings |
@@ -267,35 +254,43 @@ MPL supports natural resume through per-phase state persistence. When a session 
 
 ## 4. Agent Catalog
 
-MPL uses 14 specialized agents (critic absorbed + gap/tradeoff consolidated + doctor added, worker removed in v0.9.4). Each agent has clear role boundaries and tool restrictions.
+MPL uses 8 specialized agents (v0.11.0: consolidated from 15 — see v0.11.0 changelog for details). Each agent has clear role boundaries and tool restrictions.
 
 ### Pre-Execution Agents (Analysis/Planning)
 
 | Agent | Role | Model | Disallowed Tools |
 |---------|------|------|-----------|
-| `mpl-interviewer` | PP Interview — discovers Pivot Points through structured 4-round interview | opus | Write, Edit, Bash, Task |
-| `mpl-ambiguity-resolver` | PP-aligned spec generation — pre-resolve + 5-dimensional (including PP Conformance) metric-based Socratic loop + PP conflict detection under PP immutable constraints | opus | Write, Edit, Bash, Task |
+| `mpl-interviewer` | PP Interview + ambiguity resolution + gap analysis — discovers Pivot Points, resolves ambiguities, identifies gaps (consolidates previous mpl-interviewer + mpl-ambiguity-resolver + mpl-pre-execution-analyzer) | opus | Write, Edit, Bash, Task |
 | `mpl-codebase-analyzer` | Codebase structure analysis — static analysis of directory structure, dependencies, interfaces | haiku | Edit, Task |
 | `mpl-phase0-analyzer` | Pre-Execution deep analysis — in-depth Phase 0 Enhanced analysis before execution | sonnet | Edit, Task |
-| `mpl-pre-execution-analyzer` | Pre-Execution analysis — Gap (missing requirements, AI pitfalls, Must NOT Do) + Tradeoff (risk level, reversibility, execution order) consolidated | sonnet | Write, Edit, Bash, Task |
-| `mpl-decomposer` | Phase decomposition — decomposes request into ordered micro-phases (Read/Glob/Grep allowed) | opus | Write, Edit, Bash, Task, WebFetch, WebSearch, NotebookEdit |
-| `mpl-verification-planner` | Verification planning — A/S/H item classification, per-phase verification strategy | sonnet | Write, Edit, Task |
-| ~~`mpl-critic`~~ | ~~Critic~~ — Absorbed into Decomposer risk_assessment (v0.3.1) | ~~opus~~ | - |
+| `mpl-decomposer` | Phase decomposition + verification planning — decomposes request into ordered micro-phases with inline A/S/H classification (consolidates previous mpl-decomposer + mpl-verification-planner) | opus | Write, Edit, Bash, Task, WebFetch, WebSearch, NotebookEdit |
 
 ### Execution Agents (Execution/Verification)
 
 | Agent | Role | Model | Disallowed Tools |
 |---------|------|------|-----------|
-| `mpl-phase-runner` | Phase execution — mini-plan, worker delegation, verification, State Summary | sonnet | None (full tool access) |
-| `mpl-test-agent` | Independent testing — test writing/execution separated from code author | sonnet | Task |
-| `mpl-code-reviewer` | Code review — 10-category review (8 basic + 2 UI-specific), handles Gate 2 | sonnet | Write, Edit, Task |
+| `mpl-phase-runner` | Phase execution — mini-plan, direct implementation, testing, verification, State Summary (absorbs previous mpl-test-agent + mpl-code-reviewer responsibilities) | sonnet | None (full tool access) |
 
 ### Post-Execution Agents (Finalization)
 
 | Agent | Role | Model | Disallowed Tools |
 |---------|------|------|-----------|
 | `mpl-git-master` | Atomic commit — style detection, semantic splitting, 3+ files = 2+ commits | sonnet | Write, Edit, Task |
-| `mpl-compound` | Learning extraction — distills learnings/decisions/issues after pipeline completion | sonnet | None (full tool access) |
+
+### Removed Agents (v0.11.0)
+
+The following agents were removed and their responsibilities consolidated into remaining agents:
+
+| Removed Agent | Absorbed By | Rationale |
+|---------------|------------|-----------|
+| `mpl-ambiguity-resolver` | `mpl-interviewer` | Single opus call handles PP discovery + ambiguity resolution |
+| `mpl-pre-execution-analyzer` | `mpl-interviewer` | Gap/tradeoff analysis integrated into interview |
+| `mpl-verification-planner` | `mpl-decomposer` | A/S/H classification done inline during decomposition |
+| `mpl-test-agent` | `mpl-phase-runner` | Testing integrated into Build-Test-Fix micro-cycle |
+| `mpl-code-reviewer` | `mpl-phase-runner` | Code review integrated into phase execution |
+| `mpl-compound` | (orchestrator) | Learning extraction handled by orchestrator at finalize |
+| `mpl-scout` | (orchestrator) | Search functionality handled by orchestrator directly |
+| `mpl-phase-seed-generator` | `mpl-decomposer` | Seed generation integrated into decomposition |
 
 ### Utility Agents
 
@@ -333,24 +328,24 @@ TODO implementation ──→ Test relevant module ──→ Pass? ──→ Nex
 - At phase end: all tests from current + previous phases are run cumulatively to prevent regressions
 - On failure, references Phase 0 artifacts (error-spec, type-policy, api-contracts)
 
-### 5.2 5-Gate Quality System
+### 5.2 Gate System (3 Hard + 1 Advisory)
 
-After all phase executions complete, must pass through 5-stage quality gates sequentially:
+After all phase executions complete, must pass through 3 Hard Gates plus 1 Advisory gate:
 
-| Gate | Name | Owner | Pass Criteria | On Failure |
-|------|------|------|----------|--------|
-| Gate 0.5 | Type Check | (orchestrator) | 0 type errors | Enter Fix Loop then Gate 1 |
-| Gate 0.7 | Cross-Boundary Advisory → **L1 Hard Gate (v0.10.0)** | (orchestrator) | advisory → **blocking (v0.10.0)** | Warnings route to Gate 2 + Step 5.1.8; **v0.10.0: boundary mismatches block Phase completion (see Phase Runner Step 4.57)** |
-| Gate 1 | Automated Testing | (orchestrator) | pass_rate ≥ 95% | Enter Fix Loop |
-| Gate 1.5 | Metrics (F-50) | (orchestrator) | coverage ≥ 60% (MVP) / 80% (strict) | Re-invoke Test Agent (max 2 times) |
-| Gate 2 | Code Review | mpl-code-reviewer | PASS verdict | NEEDS_FIXES → Fix Loop, REJECT → mpl-failed |
-| Gate 3 | PP Compliance | (orchestrator + Human) | No PP violations + H-items resolved | Enter Fix Loop |
+| Gate | Name | Type | Owner | Pass Criteria | On Failure |
+|------|------|------|------|----------|--------|
+| Hard 1 | Build + Type Check | Hard | (orchestrator) | 0 build errors, 0 type errors | Enter Fix Loop |
+| Hard 2 | Automated Testing | Hard | (orchestrator) | pass_rate ≥ 95% | Enter Fix Loop |
+| Hard 3 | PP Compliance | Hard | (orchestrator + Human) | No PP violations + H-items resolved | Enter Fix Loop |
+| Advisory | Cross-Boundary Check | Advisory | (orchestrator) | Boundary contract consistency | Warnings logged, non-blocking |
 
-Gate 0.5 performs project-wide type checking. Gate 1 runs the full test suite (including S-items). Gate 1.5 measures coverage, code duplication, and bundle size (F-50). Gate 2 reviews code across 10 categories (correctness, security, performance, maintainability, PP compliance, design system, bundle health, etc.). Gate 3 validates PP compliance holistically and confirms H-items with the user.
+Hard 1 performs project-wide build and type checking (consolidates previous Gate 0.5). Hard 2 runs the full test suite including S-items and regression suite (consolidates previous Gate 1 + Gate 1.5). Hard 3 validates PP compliance holistically and confirms H-items with the user (consolidates previous Gate 3). The Advisory gate checks cross-boundary contract consistency (evolved from Gate 0.7).
+
+> **Historical note (pre-v0.11.0):** The previous 5-Gate system (Gate 0.5, 0.7, 1, 1.5, 2, 3) included a separate Code Review gate (Gate 2) handled by `mpl-code-reviewer`. In v0.11.0, code review responsibilities are absorbed into Phase Runner's Build-Test-Fix cycle, and the Gate 1.5 metrics gate and Gate 2 code review gate are removed as separate stages.
 
 ### 5.3 A/S/H Verification Classification
 
-`mpl-verification-planner` classifies all acceptance criteria into three categories:
+`mpl-decomposer` classifies all acceptance criteria inline into three categories:
 
 | Classification | Description | Verification Method | Example |
 |------|------|----------|------|
@@ -358,7 +353,7 @@ Gate 0.5 performs project-wide type checking. Gate 1 runs the full test suite (i
 | **S-items** (Sandbox Agent Testing) | Agent verifies based on scenarios | BDD/Gherkin scenario execution | "When user logs in, dashboard is displayed" |
 | **H-items** (Human-Required) | Automation insufficient | User confirmation (Side Interview) | UX judgment, business logic appropriateness |
 
-A-items are verified by Phase Runner and Test Agent. S-items are verified at Gate 1 (automated testing). H-items are confirmed with the user through Side Interview at Gate 3.
+A-items are verified by Phase Runner. S-items are verified at Hard 2 (automated testing). H-items are confirmed with the user through Side Interview at Hard 3.
 
 ### 5.4 Convergence Detection
 
@@ -381,7 +376,7 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
 ```
 .mpl/
 ├── state.json                    # Pipeline state (run_mode, current_phase)
-├── config.json                   # Configuration (maturity_mode, max_fix_loops, etc.)
+├── config.json                   # Configuration (max_fix_loops, pp_proximity, etc.)
 ├── pivot-points.md               # Pivot Points
 ├── discoveries.md                # Discovery log
 ├── cache/
@@ -435,9 +430,9 @@ Total PD token cost: ~2K~5K tokens for a 10-phase project (well within 1M budget
 
 Discoveries reported by Phase Runner are processed in the following order:
 
-1. **PP Conflict Check**: CONFIRMED PP conflict → auto-reject. PROVISIONAL → HITL or auto-approve based on maturity_mode.
-2. **PD Override Check**: Request to change past decisions → HITL or auto-approve based on maturity_mode.
-3. **General Discovery**: explore → apply immediately, standard → review at phase transition, strict → next cycle backlog.
+1. **PP Conflict Check**: CONFIRMED PP conflict → auto-reject. PROVISIONAL → HITL or auto-approve based on pp_proximity.
+2. **PD Override Check**: Request to change past decisions → HITL or auto-approve based on pp_proximity.
+3. **General Discovery**: non_pp → apply immediately, pp_adjacent → review at phase transition, pp_core → HITL confirmation required.
 
 All Discoveries are recorded in `.mpl/discoveries.md`.
 
@@ -466,13 +461,10 @@ The following options are supported in `.mpl/config.json`:
 
 | Option | Default | Description |
 |------|--------|------|
-| `maturity_mode` | `"standard"` | Maturity mode (explore/standard/strict) |
 | `max_fix_loops` | `10` | Maximum Fix Loop iterations |
 | `max_total_tokens` | `900000` | Total token upper limit (v0.6.7: raised from 500K for 1M context) |
 | `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
-| `cluster_ralph.enabled` | `true` | Enable Cluster Ralph feature-scoped verify-fix loop (v0.8.0) |
-| `cluster_ralph.max_fix_attempts` | `2` | Max fix attempts per cluster E2E failure (v0.8.0) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |
 | `convergence.stagnation_window` | `3` | Fix attempts to evaluate for stagnation (see `config-schema.md`) |
 | `convergence.min_improvement` | `5` | Minimum pass_rate improvement % per window |
@@ -522,7 +514,7 @@ Structural protocol changes that leverage 1M context for richer cross-phase info
 - `hooks/lib/mpl-budget-predictor.mjs` — fallback 1M, safety margin 1.10
 - `skills/mpl/SKILL.md`, `README.md`, `README_ko.md` — 2-Tier documentation updates
 
-**Preserved (unchanged across both versions):** Micro-phase decomposition, orchestrator-worker separation, 5-Gate quality system, A/S/H verification, convergence detection, build-test-fix micro-cycle, bounded retries, write guard hook.
+**Preserved (unchanged across both versions):** Micro-phase decomposition, orchestrator-worker separation, gate quality system, A/S/H verification, convergence detection, build-test-fix micro-cycle, bounded retries, write guard hook.
 
 Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
@@ -859,6 +851,23 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 
 **Affected files:** `.mcp.json`
 **Breaking changes:** NONE
+
+### v0.11.0 — v2 Phase 2: Structural Transition (2026-03-31)
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Gate restructuring | 6 Gates (0.5/0.7/1/1.5/1.7/2/3) | 3 Hard + 1 Advisory | structural | Probabilistic gates merged, mechanical gates separated |
+| Hat model | maturity_mode × pipeline_tier | PP-proximity (pp_core/pp_adjacent/non_pp) | structural | Single axis simplification |
+| Agent consolidation | 16 agents | 8 agents | structural | 8 agents deleted, core logic absorbed |
+| Phase Runner | ~718 lines | 171 lines | reduction | Seed-based execution, domain awareness removed |
+| Decomposer | ~662 lines | 186 lines | reduction | Verification planner + pre-execution analyzer absorbed |
+| Interviewer | ~509 lines | 355 lines | absorption | Ambiguity resolver merged |
+| Cluster Ralph | Active | Removed | removal | Replaced by Hat model PP-proximity |
+| Redecomposition | max 2 redecompositions | Removed (circuit break → mpl-failed) | removal | Phase-level retry only principle |
+| Reflexion | 5-stage template | 4-stage template | simplification | Divergence Point removed |
+
+**Affected files:** 50 files (agents, commands, hooks, skills, docs, mcp-server)
+**Breaking changes:** Gate structure, agent names, state schema (pipeline_tier → pp_proximity)
 
 ### v0.10.2 — Skill Quality Polish (2026-03-30)
 

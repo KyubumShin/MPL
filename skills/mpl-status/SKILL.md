@@ -126,7 +126,7 @@ Based on state, suggest next action:
 | phase3 + gate failed | "Enter Phase 4 fix loop or re-plan" |
 | phase4 + stagnating | "Consider model escalation or re-plan" |
 | phase5 | "Finalize: extract learnings and commit" |
-| completed | "Pipeline complete. Run /mpl:mpl-compound to extract knowledge" |
+| completed | "Pipeline complete. Learning extraction runs inline during finalize, or run /mpl:mpl-compound manually" |
 | cancelled | "Pipeline was cancelled. Run /mpl:mpl-resume to continue" |
 
 ## Error States

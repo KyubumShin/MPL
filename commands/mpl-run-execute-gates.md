@@ -1,26 +1,35 @@
 ---
-description: MPL Execute Protocol - 5-Gate Quality System, Fix Loop, Convergence Detection
+description: MPL Execute Protocol - 3 Hard Gate + 1 Advisory, Fix Loop, Convergence Detection
 ---
 
-# MPL Execution: 5-Gate Quality System (Steps 4.5-4.8)
+# MPL Execution: Gate System (Steps 4.5-4.8)
 
-This file contains the 5-Gate Quality system, Fix Loop with Convergence Detection,
-Partial Rollback, and Graceful Pause protocol.
+3 Hard Gates (mechanical, $0, binary pass/fail) + 1 Advisory Gate (LLM, non-blocking).
 Load this when entering Step 4.5 (after all phases complete) or when a gate fails.
 
 See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-context.md` (context assembly), `mpl-run-execute-parallel.md` (parallel dispatch).
 
 ---
 
-### 4.5: 5-Gate Quality
+## Floor Definition
 
-After all phases complete, apply the 5-Gate Quality system before finalization.
+**ALL phases, regardless of PP-proximity level, must pass Hard 1 + Hard 2 + Hard 3.**
+This is the Floor — the minimum quality bar that cannot be lowered.
 
-#### Gate 0.5: Lint + Type Check (F-17, V-02 v0.8.0)
+Advisory Gate is applied for PP-core and PP-adjacent phases only.
+Non-PP phases pass with Floor alone.
 
-Before running tests, perform lint detection and project-level type checking.
+---
 
-**Step 1: Lint Auto-Detection and Execution (V-02, v0.8.0)**
+### 4.5: Gate System
+
+After all phases complete, apply the Gate system before finalization.
+
+#### Hard 1: Build + Lint + Type ($0, mechanical, binary)
+
+Binary pass/fail. All build tools, linters, and type checkers must succeed.
+
+**Step 1: Lint Auto-Detection and Execution**
 
 ```
 lint_commands = []
@@ -44,14 +53,14 @@ lint_failures = []
 for each { cmd, name } in lint_commands:
   result = Bash(cmd, timeout=60000)
   if result.exit_code != 0:
-    announce: "[MPL] Gate 0.5 FAIL: {name} lint failed"
+    announce: "[MPL] Hard 1 FAIL: {name} lint failed"
     announce: "{first 20 lines of result.stderr}"
     lint_failures.append({ tool: name, errors: result.stderr })
   else:
-    announce: "[MPL] Gate 0.5: {name} lint passed ✓"
+    announce: "[MPL] Hard 1: {name} lint passed"
 
 if lint_failures.length > 0:
-  announce: "[MPL] Gate 0.5: {lint_failures.length} lint tool(s) failed. Entering fix loop."
+  announce: "[MPL] Hard 1: {lint_failures.length} lint tool(s) failed. Entering fix loop."
   → Enter fix loop targeting lint errors first
 ```
 
@@ -60,74 +69,16 @@ if lint_failures.length > 0:
 ```
 diagnostics = lsp_diagnostics_directory(path=".", strategy="auto")
 // strategy="auto": uses tsc when tsconfig.json exists, falls back to LSP iteration
-// Standalone fallback (F-04): Bash("npx tsc --noEmit") or Bash("python -m py_compile *.py")
+// Standalone fallback: Bash("npx tsc --noEmit") or Bash("python -m py_compile *.py")
 
 if diagnostics.errors > 0:
-  Report: "[MPL] Type check: {errors} errors found. Entering fix loop."
-  -> Enter fix loop targeting type errors before Gate 1
+  Report: "[MPL] Hard 1 FAIL: Type check: {errors} errors. Entering fix loop."
+  -> Enter fix loop targeting type errors
 
-if diagnostics.warnings > 5:
-  Report: "[MPL] Type check: {warnings} warnings. Proceeding with caution."
-
-Report: "[MPL] Gate 0.5: Lint + Type check clean. Proceeding to Gate 1."
+Report: "[MPL] Hard 1: Type check clean."
 ```
 
-This catches lint and type errors before test execution, reducing fix loop iterations.
-
-#### Gate 0.7: Cross-Boundary Advisory (CB-03, v0.9.1)
-
-**v0.10.0**: Gate 0.7 upgraded to L1 Hard Gate. Boundary mismatches now block Phase completion. See Phase Runner Step 4.57.
-
-**Precondition**: `api-contracts.md` contains `## Boundary Pairs` section (from CB-01).
-**Mode**: advisory (non-blocking — does NOT enter fix loop on warnings).
-
-```
-if exists("{mpl_dir}/phase0/api-contracts.md"):
-  boundary_section = extract_section("api-contracts.md", "## Boundary Pairs")
-  if boundary_section is empty:
-    announce: "[MPL] Gate 0.7: No boundary pairs detected. Skipping."
-    → proceed to Gate 1
-
-  warnings = []
-  for each boundary_pair in boundary_section:
-    // 1. Extract caller-side parameter names
-    caller_params = Grep(pair.caller.symbol + ".*\\{([^}]+)\\}", pair.caller.file)
-
-    // 2. Extract callee-side parameter names
-    callee_params = Grep("fn " + pair.callee.symbol.split("(")[0] + "\\(([^)]+)\\)", pair.callee.file)
-
-    // 3. Apply framework_rules (camelCase↔snake_case conversion)
-    normalized_caller = apply_naming_rules(caller_params, pair.framework_rules)
-    normalized_callee = apply_naming_rules(callee_params, pair.framework_rules)
-
-    // 4. Compare
-    mismatches = diff(normalized_caller, normalized_callee)
-    for each mismatch:
-      warnings.push({
-        pair_id: pair.id,
-        type: mismatch.type,  // "missing_param", "name_mismatch", "type_mismatch"
-        caller: mismatch.caller_value,
-        callee: mismatch.callee_value,
-        severity: "MED"
-      })
-
-  // Write report
-  Write(".mpl/mpl/gate-0.7-report.md", format_warnings(warnings))
-
-  if warnings.length == 0:
-    announce: "[MPL] Gate 0.7: All {pair_count} boundary pairs consistent. ✓"
-  elif warnings.length < 5:
-    announce: "[MPL] Gate 0.7: {warnings.length} advisory warnings. Report: .mpl/mpl/gate-0.7-report.md"
-  else:
-    announce: "[MPL] Gate 0.7: {warnings.length} advisory warnings (≥5). Cross-boundary concentrated review recommended."
-    announce: "[MPL] Report: .mpl/mpl/gate-0.7-report.md"
-
-  // Route warnings to Gate 2 context (non-blocking, advisory only)
-```
-
-**Step 3: Multi-Stack Build Verification (B-02, v0.6.3)**
-
-Gate 0.5 must verify ALL build tools in the project, not just TypeScript:
+**Step 3: Multi-Stack Build Verification**
 
 ```
 build_commands = []
@@ -158,14 +109,17 @@ if exists("pom.xml"):
 for each { cmd, name } in build_commands:
   result = Bash(cmd, timeout=120000)
   if result.exit_code != 0:
-    announce: "[MPL] Gate 0.5 FAIL: {name} failed (exit {result.exit_code})"
+    announce: "[MPL] Hard 1 FAIL: {name} failed (exit {result.exit_code})"
     announce: "{first 20 lines of result.stderr}"
     → enter fix loop (target the specific build tool failure)
   else:
-    announce: "[MPL] Gate 0.5: {name} passed ✓"
+    announce: "[MPL] Hard 1: {name} passed"
 ```
 
-#### Gate 1: Automated Tests + Regression Suite (TS-03, v0.8.1)
+Hard 1 passes when: all lint tools + type check + all build tools succeed.
+Report: `[MPL] Hard 1: Build + Lint + Type PASSED.`
+
+#### Hard 2: Full Test Suite + Regression ($0, mechanical, binary)
 
 Run the full test suite **including accumulated regression tests**:
 - Execute all test commands (pytest, npm test, etc.)
@@ -175,22 +129,22 @@ Run the full test suite **including accumulated regression tests**:
   if regression_suite AND regression_suite.regression_command:
     regression_result = Bash(regression_suite.regression_command, timeout=120000)
     if regression_result.exit_code != 0:
-      announce: "[MPL] Gate 1: Regression suite FAILED ({regression_suite.total_assertions} assertions)"
+      announce: "[MPL] Hard 2: Regression suite FAILED ({regression_suite.total_assertions} assertions)"
       → include regression failures in fix loop context
     else:
-      announce: "[MPL] Gate 1: Regression suite PASSED ✓ ({regression_suite.total_assertions} assertions)"
+      announce: "[MPL] Hard 2: Regression suite PASSED ({regression_suite.total_assertions} assertions)"
   ```
-- Combined pass_rate (current + regression) must be >= 95% to proceed to Gate 2
+- Combined pass_rate (current + regression) must be >= 95% to pass
 - If pass_rate < 95%: enter fix loop (see 4.6)
 
-**Zero-Test Block (B-01, v0.6.2):**
+**Zero-Test Block:**
 ```
 test_count = count total tests from test runner output
 mandatory_domains = phases.filter(p => p.phase_domain in ["ui", "api", "algorithm", "db", "ai"])
 
 if test_count == 0 AND mandatory_domains.length > 0:
-  Gate 1 = FAIL
-  announce: "[MPL] Gate 1 FAIL: 0 tests found but {mandatory_domains.length} mandatory-domain phases exist."
+  Hard 2 = FAIL
+  announce: "[MPL] Hard 2 FAIL: 0 tests found but {mandatory_domains.length} mandatory-domain phases exist."
   announce: "[MPL] Forcing Test Agent dispatch for mandatory phases."
 
   // Force Test Agent for each mandatory-domain phase that has no tests
@@ -203,169 +157,147 @@ if test_count == 0 AND mandatory_domains.length > 0:
         Interface contracts: {phase.interface_contract}
         Write and run tests. Return test results.")
 
-  // Re-run Gate 1 after Test Agent
+  // Re-run Hard 2 after Test Agent
   re-execute test suite → check pass_rate again
 ```
 
-#### Gate 1.5: Coverage + Duplication + Bundle Metrics (F-50)
+Hard 2 passes when: pass_rate >= 95% (including regression).
+Report: `[MPL] Hard 2: Tests {pass_rate}% PASSED.`
 
-After Gate 1 passes (tests must pass before measuring coverage):
+#### Hard 3: L1/L2 Contract Diff Guard ($0, mechanical, binary)
 
-```
-// 1. Coverage Check
-coverage_result = Bash("npx vitest run --coverage --reporter=json" or "pytest --cov --cov-report=json")
-// Parse: line_coverage, branch_coverage
+Mechanical boundary contract verification. No LLM involved — pure key extraction and diff.
 
-// 2. Duplication Check (if jscpd or similar available)
-duplication_result = Bash("npx jscpd src/ --reporters json") // optional, soft gate
-
-// 3. Bundle Size Check (if UI project with build)
-bundle_result = Bash("npm run build 2>&1") // parse output size
-
-// Thresholds (MVP mode)
-coverage_thresholds = { lines: 60, branches: 50 }
-// Thresholds (Production mode — when maturity_mode == "strict")
-// coverage_thresholds = { lines: 80, branches: 70 }
-duplication_threshold = 5  // percent
-
-if line_coverage < coverage_thresholds.lines:
-  Report: "[MPL] Gate 1.5: Line coverage {line_coverage}% < {threshold}%. Dispatching Test Agent for gap coverage."
-  // Auto-fix: dispatch mpl-test-agent with coverage gaps
-  // Max 2 retry attempts
-  coverage_fix = Task(subagent_type="mpl-test-agent", model="sonnet",
-       prompt="Coverage gaps found. Write tests to improve coverage for: {uncovered_files}")
-  // Re-run coverage check after fix
-
-if duplication > duplication_threshold:
-  Report: "[MPL] Gate 1.5: Code duplication {duplication}% > {threshold}%. (Warning only)"
-  // Soft gate: warning only, does not block
-
-if bundle_size > pp_budget:
-  Report: "[MPL] Gate 1.5: Bundle {bundle_size}KB > budget {pp_budget}KB. (H-item for review)"
-  // Soft gate: architectural decision, flagged as H-item
-```
-
-Gate 1.5 pass criteria: coverage thresholds met (or 2 fix attempts exhausted → soft pass with warning).
-Token impact: Happy path ~1,900 tokens. Worst case (2 coverage fix retries) ~22,000 tokens.
-
-Report: `[MPL] Gate 1.5: Coverage {line}%/{branch}%, Duplication {dup}%, Bundle {size}KB.`
-
-#### Gate 1.7: Browser QA (T-03, v4.0)
-
-**Precondition**: UI-domain phases exist AND Chrome MCP server is available.
-Skip if: no UI phases, or MCP unavailable, or Frugal/Standard tier (non-blocking skip).
+**Precondition**: `.mpl/contracts/*.json` exist (generated by Decomposer L0/L1).
 
 ```
-if phases.any(p => p.phase_domain == "ui"):
-  qa_result = Task(subagent_type="mpl-qa-agent", model="sonnet",
-    prompt="Run browser QA on {dev_server_url}.
-    Phase 0 UI spec: {phase0_artifacts}
-    Expected elements: {from verification plan}
-    Check: console errors, accessibility, core element presence.")
+if not exists(".mpl/contracts/") or Glob(".mpl/contracts/*.json").length == 0:
+  announce: "[MPL] Hard 3: No contracts found. Skipping (auto-pass)."
+  → pass
 
-  if qa_result.status == "SKIPPED":
-    announce: "[MPL] Gate 1.7: Skipped ({qa_result.reason})"
-  elif qa_result.status == "PASSED":
-    announce: "[MPL] Gate 1.7: Browser QA passed. {qa_result.checks_passed}/{qa_result.checks_total}"
-  else:
-    announce: "[MPL] Gate 1.7: Browser QA issues found: {qa_result.summary}"
-    // Issues are WARNING level — defer to Step 5.5 Post-Execution Review
-    // Browser QA does NOT block the pipeline (T-10 pattern)
-    append qa_result.issues to .mpl/mpl/deferred-review.md
+contract_files = Glob(".mpl/contracts/*.json")
+violations = []
+
+for each contract_file in contract_files:
+  contract = JSON.parse(Read(contract_file))
+
+  for each boundary in contract.boundaries:
+    // 1. Extract caller-side keys (mechanical grep)
+    caller_keys = Grep(boundary.caller.symbol + ".*\\{([^}]+)\\}", boundary.caller.file)
+
+    // 2. Extract callee-side keys (mechanical grep)
+    callee_keys = Grep("fn " + boundary.callee.symbol.split("(")[0] + "\\(([^)]+)\\)", boundary.callee.file)
+
+    // 3. Apply naming convention rules (camelCase↔snake_case)
+    normalized_caller = apply_naming_rules(caller_keys, boundary.framework_rules)
+    normalized_callee = apply_naming_rules(callee_keys, boundary.framework_rules)
+
+    // 4. Compare — any mismatch is a HARD FAIL
+    mismatches = diff(normalized_caller, normalized_callee)
+    for each mismatch:
+      violations.push({
+        contract: contract_file,
+        boundary_id: boundary.id,
+        type: mismatch.type,  // "missing_param", "name_mismatch", "type_mismatch"
+        caller: mismatch.caller_value,
+        callee: mismatch.callee_value
+      })
+
+if violations.length > 0:
+  Write(".mpl/mpl/hard3-violations.md", format_violations(violations))
+  announce: "[MPL] Hard 3 FAIL: {violations.length} contract violations. Report: .mpl/mpl/hard3-violations.md"
+  → enter fix loop
 else:
-  announce: "[MPL] Gate 1.7: Skipped (no UI-domain phases)"
+  announce: "[MPL] Hard 3: All {contract_files.length} contracts verified."
 ```
 
-**dev_server_url detection**:
-1. `.mpl/config.json` → `dev_server_url` (explicit)
-2. Parse `package.json` scripts → "dev", "start", "serve" → extract port
-3. Defaults: `:5173` (Vite), `:3000` (React/Next), `:8080` (Vue)
-4. Not detected → Gate 1.7 SKIP
+Hard 3 passes when: zero contract violations.
+Report: `[MPL] Hard 3: L1/L2 Contract Diff PASSED.`
 
-Gate 1.7 is **non-blocking**. Issues are deferred to Step 5.5 review.
-Report: `[MPL] Gate 1.7: Browser QA {status}.`
+#### Advisory: Code Review + PP Compliance (LLM, non-blocking)
 
-#### Gate 2: Code Review
+**Non-blocking.** Advisory results are informational — they never trigger the fix loop.
+Applied only for PP-core and PP-adjacent phases. Non-PP phases skip Advisory.
 
 ```
-Task(subagent_type="mpl-code-reviewer", model="sonnet",
-     prompt="""
-     ## Review Scope
-     All files changed during pipeline execution.
-     ### Pivot Points
-     {pivot_points}
-     ### Phase Decisions
-     {all PDs from completed phases}
-     ### PP/PD Compliance Checklist (BM-05, v0.8.6)
-     {auto-generated checklist from PPs and PDs:
-       - [ ] PP-N: {description}
-       - [ ] PD-N: {description} (Phase {N})
-     }
-     ### Interface Contracts
-     {all phase interface_contracts}
-     ### Changed Files
-     {list all created/modified files across all phases}
+if current_phase.pp_proximity == "non_pp":
+  announce: "[MPL] Advisory: Skipped (Non-PP phase)."
+  → proceed to finalization
 
-     Review all changes for the Quality Gate.
-     Check every PP/PD checklist item against the code.
-     """)
+// Code Review
+review_result = (orchestrator inline review):
+  """
+  ## Review Scope
+  All files changed during pipeline execution.
+  ### Pivot Points
+  {pivot_points}
+  ### Phase Decisions
+  {all PDs from completed phases}
+  ### PP/PD Compliance Checklist
+  {auto-generated checklist from PPs and PDs:
+    - [ ] PP-N: {description}
+    - [ ] PD-N: {description} (Phase {N})
+  }
+  ### Interface Contracts
+  {all phase interface_contracts}
+  ### Changed Files
+  {list all created/modified files across all phases}
+
+  Review all changes. Check every PP/PD checklist item against the code.
+  """
+
+// PP Compliance
+pp_result = verify PP compliance:
+  - Check all CONFIRMED PPs are satisfied (no violations)
+  - Check PROVISIONAL PPs for drift (flag deviations)
+  - H-item severity routing:
+    - HIGH H-items → present via AskUserQuestion (blocking)
+    - MED/LOW H-items → append to .mpl/mpl/deferred-review.md (deferred)
+
+// Advisory output (informational)
+Write(".mpl/mpl/advisory-report.md", format_advisory(review_result, pp_result))
+
+if pp_result.high_h_items.length > 0:
+  // HIGH H-items are the only advisory items that block
+  for each item in pp_result.high_h_items:
+    AskUserQuestion("HIGH H-item requires resolution: {item.description}")
+
+announce: "[MPL] Advisory: Review={review_result.verdict}, PP={pp_result.status}, H-items={pp_result.h_item_count} (HIGH:{pp_result.high_h_items.length})"
 ```
 
-Verdict handling:
-- PASS -> proceed to Gate 3
-- NEEDS_FIXES -> enter fix loop with prioritized fix list (see 4.6)
-- REJECT -> report to user, enter mpl-failed state
+Report: `[MPL] Advisory: {verdict}. See .mpl/mpl/advisory-report.md`
 
-#### Gate 3: PP Compliance + H-item Severity Filter (T-10, v3.9)
+---
 
-Final validation focused on Pivot Point compliance and severity-based H-item handling:
-- Verify all CONFIRMED PPs are satisfied (no violations across all phases)
-- Check PROVISIONAL PPs for drift (flag any deviations for user review)
-- **H-item severity routing** (T-10):
-  - **HIGH H-items** → present via AskUserQuestion (blocking — must be resolved)
-  - **MED/LOW H-items** → append to `.mpl/mpl/deferred-review.md` (non-blocking — deferred to Step 5.5)
-  - Format: `- [{severity}] {item} (Phase {N}) — {reason}`
-- S-items are already covered by Gate 1 (automated tests) — no duplication here
+**Gate Summary Report**:
 
-Gate 3 pass criteria: no PP violations detected + all **HIGH** H-items resolved.
-MED/LOW H-items do NOT block Gate 3 — they are reviewed post-execution in Step 5.5.
+All 3 Hard Gates pass → proceed to Step 5 (E2E & Finalize).
+Report: `[MPL] Gates: Hard 1 (Build) PASS → Hard 2 (Tests) {pass_rate}% → Hard 3 (Contracts) PASS → Advisory: {verdict}.`
 
-If Gate 3 fails (PP violation or unresolved HIGH H-item) -> enter fix loop (see 4.6).
-
-All 3 gates pass -> proceed to Step 5 (E2E & Finalize).
-Report: `[MPL] Quality Gates: Gate 0.5 (Types) → Gate 1 (Tests) {pass_rate}% → Gate 1.5 (Metrics) cov:{coverage}% → Gate 2 (Review) {verdict} → Gate 3 (PP) {pass/fail}.`
-
-**RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
+**RUNBOOK Update**: Append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
-## 5-Gate Quality Results
-- **Gate 0.5 (Type Check)**: {errors} errors, {warnings} warnings
-- **Gate 1 (Tests)**: {pass_rate}%
-- **Gate 1.5 (Metrics)**: Coverage {line}%/{branch}%, Duplication {dup}%, Bundle {size}KB
-- **Gate 2 (Code Review)**: {verdict} (10-category)
-- **Gate 3 (PP Compliance)**: {pass/fail}
-- **Overall**: {all_pass ? "PASSED" : "FAILED — entering fix loop"}
+## Gate Results
+- **Hard 1 (Build+Lint+Type)**: {pass/fail}
+- **Hard 2 (Tests+Regression)**: {pass_rate}%
+- **Hard 3 (Contract Diff)**: {pass/fail}
+- **Advisory (Review+PP)**: {verdict} (H-items: {count})
+- **Overall**: {all_hard_pass ? "PASSED" : "FAILED — entering fix loop"}
 - **Timestamp**: {ISO timestamp}
 ```
 
 ### 4.6: Fix Loop (with Convergence Detection)
 
-When any gate fails, enter the fix loop:
+When any Hard gate fails, enter the fix loop:
 
-1. Analyze failure: which gate failed, what specifically failed
-2. (F-16) Optionally dispatch mpl-scout for root cause exploration:
-   ```
-   Task(subagent_type="mpl-scout", model="haiku",
-        prompt="Trace failure: {failure_description}. Find root cause in: {affected_files}")
-   ```
-   Use scout findings to inform fix strategy before dispatching worker.
-   **(P-03, v0.8.7)**: Save scout's `search_trajectory` to `.mpl/mpl/phases/{current_phase}/search-trajectory.json` for observability.
-   If scout search failed (0 useful findings), analyze trajectory to determine cause:
-   - Wrong pattern → retry with different query
-   - QMD stale → fallback to Grep-Only
-   - File not in scope → expand search scope
-3. Dispatch targeted fixes via Phase Runner
-3. Re-run the failed gate + all subsequent gates
+1. Analyze failure: which Hard gate failed, what specifically failed
+2. Dispatch targeted fixes via Phase Runner
+3. Re-run the failed gate + all subsequent Hard gates
 4. Track pass_rate in convergence history
+
+**Retry budget by PP-proximity** (Hat model):
+- PP-core: max 3 fix loop iterations
+- PP-adjacent: max 2 fix loop iterations
+- Non-PP: max 1 fix loop iteration
 
 Convergence detection after each fix attempt:
 
@@ -384,126 +316,58 @@ if convergence_result.status == "regressing":
 Record convergence_status in state: "progressing" | "stagnating" | "regressing"
 ```
 
-Max fix loop iterations: controlled by max_fix_loops from config (default 10).
-Exceeding max -> mpl-failed state.
+Exceeding max iterations → mpl-failed state.
 
 ### 4.6.1: Reflexion-Based Self-Reflection (F-27)
 
-When entering the Fix Loop, perform **structured self-reflection (Self-Reflection)** rather than immediate fixes.
-Applies NeurIPS 2023 Reflexion + Multi-Agent Reflexion (MAR) patterns.
+When entering the Fix Loop, perform **structured self-reflection** before each fix attempt.
 
-#### Reflection Template
-
-Instruct the Phase Runner to execute the template below before each Fix Loop attempt:
+**Reflection Template** (instruct Phase Runner):
 
 ```
 ## Reflection — Fix Attempt {N}
 
 ### 1. Symptom
-Accurately describe the failed test/Gate result.
-- Which tests failed?
-- Error messages?
-- Expected vs actual behavior?
+What failed? Error messages, expected vs actual.
 
 ### 2. Root Cause
-Trace the cause of the symptom.
-- Which part of the code has the problem? (file:line)
-- Why is this code wrong?
-- Why was this cause missed in previous attempts?
+Which code is wrong? (file:line) Why was this missed before?
 
-### 3. Divergence Point
-Where did we deviate from the original plan (mini-plan/Phase 0)?
-- Difference between Phase 0 spec and actual implementation?
-- PP violation?
-- Assumption mismatch?
+### 3. Fix Strategy
+What approach differs from previous attempts?
+Which Phase 0 artifacts should be re-referenced?
 
-### 4. Fix Strategy
-- What approach differs from before?
-- Which Phase 0 artifacts should be re-referenced?
-- Predicted side effects of the fix?
-
-### 5. Learning Extraction
-- What pattern can be extracted from this failure?
-- Pattern classification tag: {tag}
-- How to prevent this failure in future runs?
+### 4. Learning
+Pattern classification tag: {tag}
 ```
 
-#### Reflection Execution Protocol
+**Pattern Classification Tags**:
 
-```pseudocode
-function fix_loop_with_reflection(phase, failures, attempt):
-  # 1. Generate Reflection
-  reflection = phase_runner.generate_reflection(
-    template = REFLECTION_TEMPLATE,
-    failures = failures,
-    phase0_artifacts = load_phase0(),
-    previous_reflections = load_previous_reflections(phase),
-    attempt_number = attempt
-  )
+| Tag | Description |
+|-----|-------------|
+| `type_mismatch` | Type mismatch (dict vs TypedDict, string vs number) |
+| `dependency_conflict` | Version compatibility, import order |
+| `test_flake` | Timing, environment dependencies |
+| `api_contract_violation` | Parameter order, return type |
+| `build_failure` | Compile error, lint error |
+| `logic_error` | Inverted condition, boundary value |
+| `missing_edge_case` | Null, empty array, concurrency |
+| `scope_violation` | PP/Must NOT Do violation |
 
-  # 2. Gate 2 failure — MAR pattern: integrate code reviewer feedback
-  if failure_source == "gate2":
-    reviewer_feedback = gate2_result.feedback
-    reflection.root_cause += "\nCode review feedback: " + reviewer_feedback
+**Integration with Convergence Detection**:
+- **stagnating + same tag repeating**: Force strategy switch
+- **regressing**: Back-reference previous Reflection to revert
+- **improving**: Maintain current strategy
 
-  # 3. Save reflection results
-  save_reflection(phase, attempt, reflection)
-  # Path: .mpl/mpl/phases/{phase_id}/reflections/attempt-{N}.md
-
-  # 4. Pattern classification + save to procedural.jsonl (F-25 integration)
-  appendProcedural(cwd, {
-    timestamp: now(),
-    phase: phase.id,
-    tool: "reflection",
-    action: reflection.fix_strategy,
-    result: "pending",  # updated to success/failure after fix
-    tags: reflection.learning.tags,  # [type_mismatch, dependency_conflict, etc.]
-    context: reflection.root_cause
-  })
-
-  # 5. Execute reflection-based fix
-  fix_result = phase_runner.execute_fix(
-    strategy = reflection.fix_strategy,
-    phase0_refs = reflection.phase0_refs
-  )
-
-  # 6. Record result
-  update_procedural_result(fix_result.success ? "success" : "failure")
-
-  return fix_result
-```
-
-#### Pattern Classification Tags (Taxonomy)
-
-| Tag | Description | Example |
-|-----|-------------|---------|
-| `type_mismatch` | Type mismatch | dict vs TypedDict, string vs number |
-| `dependency_conflict` | Dependency conflict | version compatibility, import order |
-| `test_flake` | Unstable tests | timing, environment dependencies |
-| `api_contract_violation` | API contract violation | parameter order, return type |
-| `build_failure` | Build failure | compile error, lint error |
-| `logic_error` | Logic error | inverted condition, boundary value |
-| `missing_edge_case` | Missing edge case | null, empty array, concurrency |
-| `scope_violation` | Scope violation | PP/Must NOT Do violation |
-
-#### Integration with Convergence Detection
-
-Add Reflection information to existing Convergence Detection (improving/stagnating/regressing):
-- **stagnating + same tag repeating**: Force strategy switch (prevent repeating the same approach)
-- **regressing**: Back-reference previous Reflection's fix_strategy to revert
-- **improving**: Maintain current strategy, Reflection can be omitted
-
-#### Previous Reflection Reference (Cumulative Learning)
-
-From Fix attempt 2 onward, reference previous Reflections to prevent repeating the same approach:
+**Previous Reflection Reference** (from attempt 2 onward):
 ```
 load_previous_reflections(phase):
   - Load all .mpl/mpl/phases/{phase_id}/reflections/attempt-*.md
   - Max 3 (token budget ~1500)
-  - Pass previous failed approaches as "things not to do" list to Phase Runner
+  - Pass previous failed approaches as "things not to do" list
 ```
 
-**RUNBOOK Update (F-10)**: After each fix attempt, append to `.mpl/mpl/RUNBOOK.md`:
+**RUNBOOK Update**: After each fix attempt, append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
 ## Fix Loop Iteration {N}
 - **Target Gate**: {failed_gate}
@@ -512,24 +376,6 @@ load_previous_reflections(phase):
 - **Convergence**: {convergence_status}
 - **Timestamp**: {ISO timestamp}
 ```
-
-#### Reflexion Effect Measurement (Observability Metrics)
-
-Reflexion's effect is recorded in token profiling (phases.jsonl) for post-hoc analysis:
-
-```jsonl
-{"phase":"phase-3","fix_loop":true,"reflexion_applied":true,"attempts":2,"result":"success","tags":["type_mismatch"],"tokens_used":4500}
-```
-
-Measurement items:
-- `reflexion_applied`: true/false — whether Reflexion was applied
-- `attempts`: Fix Loop attempt count
-- `result`: final success/failure
-- `tags`: pattern classification
-
-**A/B comparison is performed as post-hoc analysis after sufficient run data is accumulated.**
-Compare Fix Loop success rate, average attempt count, and token cost between runs with and without Reflexion applied on the same project.
-This is an **observability metric**, not a runtime feature.
 
 ### 4.7: Partial Rollback on Circuit Break
 
@@ -552,18 +398,17 @@ on circuit_break(phase_id, failure_info):
      - Update state_summary to reflect partial completion
      - Mark preserved TODOs in phase state
 
-  4. Generate recovery context for redecomposition:
+  4. Generate recovery context:
      - What was completed (preserved TODO list with outputs)
      - What failed (failure_info with retry history)
      - Contaminated files that were rolled back
-     - Recommendations for redecomposition strategy
 
   5. Report:
      "[MPL] Circuit break on phase-{N}. {safe_count}/{total_count} TODOs preserved.
       Rolled back: {rolled_back_files}. Recovery context saved."
 ```
 
-The recovery context is saved to `.mpl/mpl/phases/phase-N/recovery.md` and used by the decomposer if redecomposition is triggered.
+Recovery context saved to `.mpl/mpl/phases/phase-N/recovery.md`.
 
 ### Step 4.8: Graceful Pause Protocol (F-33)
 

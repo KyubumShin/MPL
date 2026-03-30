@@ -2,13 +2,15 @@
 /**
  * MPL Phase Seed Validation Hook (PostToolUse)
  *
- * Validates Phase Seed YAML output from mpl-phase-seed-generator.
+ * Validates Phase Seed YAML structure when a seed file is written.
+ * Seeds are now generated inline by the orchestrator (not by a separate agent).
  * Ensures required fields exist and, for boundary phases, validates
  * contract_snippet structure.
  *
  * Based on: SEED-03 — Seed Schema Validation Hook
  *
- * Activation: tool_name === "Task" && agent === "mpl-phase-seed-generator"
+ * Activation: tool_name is a file-write tool targeting a seed YAML path,
+ *             OR tool_name === "Task"/"Agent" with seed YAML in output
  * On failure: continue=true, suppressOutput=false + system-reminder with missing fields
  * On success: continue=true, suppressOutput=true
  */
@@ -254,6 +256,40 @@ export function hasContractFilesContext(promptText) {
 }
 
 // ---------------------------------------------------------------------------
+// Seed file path detection
+// ---------------------------------------------------------------------------
+
+/** Seed file path pattern: .mpl/seeds/*.yaml or .mpl/seeds/*.yml */
+const SEED_PATH_RE = /\.mpl\/seeds\/[^/]+\.ya?ml$/;
+
+/**
+ * Check whether a tool invocation is related to seed generation/writing.
+ * Matches:
+ *   1. File-write tools (Write, Edit) targeting a seed YAML path
+ *   2. Task/Agent completions whose output contains phase_seed YAML
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @param {string} responseText
+ * @returns {boolean}
+ */
+export function isSeedRelated(toolName, toolInput, responseText) {
+  // Case 1: Direct file write to seed path
+  if (['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
+    const filePath = toolInput.file_path || toolInput.filePath || '';
+    if (SEED_PATH_RE.test(filePath)) return true;
+  }
+
+  // Case 2: Task/Agent output containing phase_seed YAML
+  if (['Task', 'task', 'Agent', 'agent'].includes(toolName)) {
+    if (responseText && /phase_seed\s*:/.test(responseText) && /```ya?ml/i.test(responseText)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Hook entry point
 // ---------------------------------------------------------------------------
 
@@ -269,18 +305,16 @@ async function main() {
   }
 
   const toolName = data.tool_name || data.toolName || '';
-
-  // Only intercept Task tool completions
-  if (!['Task', 'task'].includes(toolName)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Only activate for mpl-phase-seed-generator agent
   const toolInput = data.tool_input || data.toolInput || {};
-  const agentType = toolInput.subagent_type || toolInput.subagentType || '';
 
-  if (agentType !== 'mpl-phase-seed-generator') {
+  // Extract response text
+  const toolResponse = data.tool_response || data.toolResponse || '';
+  const responseText = typeof toolResponse === 'string'
+    ? toolResponse
+    : JSON.stringify(toolResponse);
+
+  // Only activate for seed-related tool invocations
+  if (!isSeedRelated(toolName, toolInput, responseText)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -292,25 +326,29 @@ async function main() {
     return;
   }
 
-  // Extract response text
-  const toolResponse = data.tool_response || data.toolResponse || '';
-  const responseText = typeof toolResponse === 'string'
-    ? toolResponse
-    : JSON.stringify(toolResponse);
+  // For file-write tools, the content is in toolInput; for Task tools, in response
+  let textToValidate = responseText;
+  if (['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
+    textToValidate = toolInput.content || toolInput.new_string || responseText;
+    // Wrap in yaml fence for extractYaml if raw YAML
+    if (textToValidate && !textToValidate.includes('```yaml')) {
+      textToValidate = '```yaml\n' + textToValidate + '\n```';
+    }
+  }
 
   // Extract YAML from fenced block
-  const yamlText = extractYaml(responseText);
+  const yamlText = extractYaml(textToValidate);
 
   if (!yamlText) {
     // No YAML block found — validation failure
     const message = `<system-reminder>
-[MPL SEED VALIDATION FAILED] mpl-phase-seed-generator output does not contain a YAML block.
+[MPL SEED VALIDATION FAILED] Seed output does not contain a YAML block.
 
 Expected output format: \`\`\`yaml ... \`\`\` fenced block containing phase_seed specification.
 
 Missing: entire YAML output
 
-ACTION REQUIRED: Re-run mpl-phase-seed-generator with clarified instructions.
+ACTION REQUIRED: Regenerate the Phase Seed with valid YAML structure.
 Do NOT proceed to Phase Runner until a valid Phase Seed is produced.
 </system-reminder>`;
 
@@ -348,11 +386,11 @@ Do NOT proceed to Phase Runner until a valid Phase Seed is produced.
   }
 
   const message = `<system-reminder>
-[MPL SEED VALIDATION FAILED] mpl-phase-seed-generator output failed schema validation.
+[MPL SEED VALIDATION FAILED] Phase Seed output failed schema validation.
 
 ${issues.join('\n\n')}
 
-ACTION REQUIRED: Re-run mpl-phase-seed-generator targeting the missing/invalid fields.
+ACTION REQUIRED: Regenerate the Phase Seed targeting the missing/invalid fields.
 Do NOT proceed to Phase Runner until all required Seed fields are present and valid.
 </system-reminder>`;
 

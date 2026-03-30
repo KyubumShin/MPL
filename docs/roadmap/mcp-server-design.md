@@ -447,7 +447,7 @@ else → "continue"
   "current_pass_rate": 0.68,
   "fix_loop_count": 4,
   "max_fix_loops": 10,
-  "suggestion": "Fix loop is not making progress. Try a different strategy: change implementation approach, consult Phase 0 artifacts, or escalate to redecomposition.",
+  "suggestion": "Fix loop is not making progress. Try a different strategy: change implementation approach or consult Phase 0 artifacts.",
   "variance": 0.0002,
   "should_escalate": false,
   "should_circuit_break": true

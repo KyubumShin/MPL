@@ -125,7 +125,7 @@ All TODOs complete
 | Current TODO test failure | Reference Phase 0 artifacts and fix immediately | 2 times (per TODO) |
 | Previous module regression | Analyze regression cause and fix | Included in Phase Runner's 3 retries |
 | Entire phase failure | Phase Runner internal retry | 3 times (per phase) |
-| 3 retry failures | circuit_break → re-decompose | Max 2 re-decompositions |
+| 3 retry failures | circuit_break → mpl-failed | Pipeline failure (preserve completed work) |
 
 ## Phase 5 Entry Condition Tightening → Evolved into 3-Gate Quality System
 

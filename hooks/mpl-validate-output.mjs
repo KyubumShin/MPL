@@ -5,7 +5,7 @@
  *
  * Based on: design doc section 9.2 hook 2 + hoyeon validate_prompt pattern
  *
- * Agents with validate_prompt: pre-execution-analyzer, verification-planner, worker
+ * Agents with validate_prompt: phase-runner, decomposer, worker
  * When these agents complete via Task tool, this hook inserts a [MPL VALIDATION] reminder
  * so the orchestrator checks the output against the agent's Output_Schema.
  */
@@ -29,89 +29,37 @@ const { readStdin } = await import(
 
 // Agents that require output validation
 export const VALIDATE_AGENTS = new Set([
-  'mpl-pre-execution-analyzer',
-  'mpl-verification-planner',
   'mpl-phase-runner',
-  'mpl-interviewer',
-  'mpl-ambiguity-resolver',
-  'mpl-doctor',
-  // mpl-critic: absorbed into mpl-decomposer risk_assessment (v3.1)
-  'mpl-test-agent',
-  'mpl-code-reviewer',
   'mpl-decomposer',
-  'mpl-git-master',
-  'mpl-compound',
+  'mpl-interviewer',
+  'mpl-test-agent',
   'mpl-codebase-analyzer',
+  'mpl-doctor',
+  'mpl-git-master',
   'mpl-phase0-analyzer',
-  'mpl-qa-agent',              // T-03, v0.5.1 — Browser QA
-  'mpl-scout',                 // F-16 — Lightweight exploration
-  'mpl-phase-seed-generator',  // D-01, v0.6.0 — Phase Seed generation
 ]);
 
 // Expected output sections per agent
 export const EXPECTED_SECTIONS = {
-  'mpl-pre-execution-analyzer': [
-    '1. Missing Requirements',
-    '2. AI Pitfalls',
-    '3. Must NOT Do',
-    '4. Recommended Questions',
-    '5. Overall Risk Assessment',
-    '6. Change-Level Analysis',
-    '7. Recommended Execution Order',
-  ],
-  'mpl-verification-planner': [
-    '1. Test Infrastructure',
-    '2. A-items',
-    '3. S-items',
-    '4. H-items',
-    '5. Verification Gaps',
-    '6. External Dependencies',
-  ],
   'mpl-phase-runner': [
     'status',
     'state_summary',
     'verification',
+  ],
+  'mpl-decomposer': [
+    'architecture_anchor',
+    'phases',
   ],
   'mpl-interviewer': [
     'PP-',
     'Priority Order',
     'Interview Metadata',
   ],
-  'mpl-ambiguity-resolver': [
-    'Ambiguity Score',
-    'Dimension Scores',
-  ],
-  // mpl-critic: removed in v3.1 (absorbed into mpl-decomposer risk_assessment)
   'mpl-test-agent': [
     'phase_id',
     'test_files_created',
     'test_results',
     'a_item_coverage',
-  ],
-  'mpl-code-reviewer': [
-    'Overall Verdict',
-    'Findings',
-    'Category Summary',
-    'Verdict Rationale',
-  ],
-  'mpl-decomposer': [
-    'architecture_anchor',
-    'phases',
-  ],
-  'mpl-git-master': [
-    'Commits Created',
-  ],
-  'mpl-compound': [
-    'Learnings',
-    'Decisions',
-    'Issues',
-    'Metrics',
-  ],
-  'mpl-doctor': [
-    'Results',
-    'Tool Availability Detail',
-    'Recommendations',
-    'Summary',
   ],
   'mpl-codebase-analyzer': [
     'project_type',
@@ -119,22 +67,18 @@ export const EXPECTED_SECTIONS = {
     'external_deps',
     'test_infrastructure',
   ],
+  'mpl-doctor': [
+    'Results',
+    'Tool Availability Detail',
+    'Recommendations',
+    'Summary',
+  ],
+  'mpl-git-master': [
+    'Commits Created',
+  ],
   'mpl-phase0-analyzer': [
     'type-policy',
     'error-spec',
-  ],
-  'mpl-qa-agent': [
-    'status',
-    'checks',
-  ],
-  'mpl-scout': [
-    'findings',
-    'search_trajectory',  // P-03, v0.8.7 — Search path observability
-  ],
-  'mpl-phase-seed-generator': [
-    'phase_seed',
-    'goal',
-    'mini_plan_seed',
   ],
 };
 

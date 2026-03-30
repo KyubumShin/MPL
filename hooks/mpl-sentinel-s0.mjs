@@ -5,8 +5,9 @@
  * PostToolUse hook that validates Phase Seed contract_snippet keys against
  * actual contract JSON files (.mpl/contracts/*.json).
  *
- * Catches hallucinated keys: keys that the Seed Generator claims exist in a
- * contract but are not actually present in the SSOT contract registry (CB-08 L0).
+ * Catches hallucinated keys: keys that the orchestrator's inline seed generation
+ * claims exist in a contract but are not actually present in the SSOT contract
+ * registry (CB-08 L0).
  *
  * Validation rules:
  *   - Each key in contract_snippet.inbound must exist in contract JSON `.params`
@@ -171,8 +172,8 @@ async function main() {
 
   const toolName = data.tool_name || data.toolName || '';
 
-  // Only intercept Task/Agent completions (Seed Generator output)
-  if (!['Task', 'task', 'Agent', 'agent'].includes(toolName)) {
+  // Intercept Task/Agent completions and file-write tools (seeds are now inline)
+  if (!['Task', 'task', 'Agent', 'agent', 'Write', 'write', 'Edit', 'edit'].includes(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -184,19 +185,30 @@ async function main() {
     return;
   }
 
-  // Only validate seed generator output
+  // Extract response/content text
   const toolInput = data.tool_input || data.toolInput || {};
-  const agentType = toolInput.subagent_type || toolInput.subagentType || '';
-  if (agentType !== 'mpl-phase-seed-generator') {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Extract response text
   const toolResponse = data.tool_response || data.toolResponse || '';
-  const responseText = typeof toolResponse === 'string'
+  let responseText = typeof toolResponse === 'string'
     ? toolResponse
     : JSON.stringify(toolResponse);
+
+  // For file-write tools, check content for seed YAML
+  if (['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
+    const filePath = toolInput.file_path || toolInput.filePath || '';
+    if (!/\.mpl\/seeds\/[^/]+\.ya?ml$/.test(filePath)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+    responseText = toolInput.content || toolInput.new_string || responseText;
+  }
+
+  // For Task/Agent tools, only validate if output contains phase_seed/contract_snippet
+  if (['Task', 'task', 'Agent', 'agent'].includes(toolName)) {
+    if (!/contract_snippet\s*:/.test(responseText)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+  }
 
   // Extract contract_snippet from seed YAML output
   const snippet = extractContractSnippet(responseText);

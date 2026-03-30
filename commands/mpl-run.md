@@ -1,5 +1,5 @@
 ---
-description: MPL (Micro-Phase Loop) full orchestration protocol
+description: MPL (Micro-Phase Loop) full orchestration protocol with Hat model
 ---
 
 # MPL Orchestration Protocol
@@ -11,20 +11,19 @@ You are now operating as the MPL orchestrator in MPL mode. Follow this protocol 
 1. **You NEVER write source code directly.** All code changes are executed by `mpl-phase-runner` agents dispatched via Task tool.
 2. **State Summary is knowledge transfer SSOT.** Each phase produces a State Summary -- the ONLY information that persists to subsequent phases. No implicit context leakage.
 3. **Validate agent output.** Check required sections in State Summary after every Phase Runner completes.
-4. **Respect phase gates and circuit breaker.** Max 3 retries per phase (Phase Runner internal). Max 2 redecompositions (Orchestrator level). Exceeding limits triggers `mpl-failed`.
+4. **Respect phase gates and circuit breaker.** Retry budget per phase is determined by PP-proximity: PP-core 3, PP-adjacent 2, Non-PP 1. Circuit break leads directly to pipeline failure.
 
 ## State Machine
 
 ```
 mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
-                 ^                    |                      |
-                 +-- mpl-circuit-break               mpl-finalize -> completed
-                           |
-                       mpl-failed
+                                   |                      |
+                            mpl-circuit-break      mpl-finalize -> completed
+                                   |
+                               mpl-failed
 ```
 
-Retry: Phase Runner handles 3 retries internally (D-1 Hybrid). Orchestrator receives `"complete"` or `"circuit_break"` only.
-Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
+Retry: Phase Runner handles retries internally based on PP-proximity level. Orchestrator receives `"complete"` or `"circuit_break"` only. Circuit break transitions directly to `mpl-failed`.
 
 ---
 
@@ -36,7 +35,6 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
 {
   "run_mode": "mpl",
   "current_phase": "mpl-phase-running",
-  "maturity_mode": "standard",
   "tool_mode": "full",
   "started_at": "2026-03-02T10:00:00Z"
 }
@@ -49,14 +47,11 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
   "task": "User request description",
   "status": "running",
   "started_at": "2026-03-02T10:00:00Z",
-  "maturity_mode": "standard",
-  "verification_mode": "incremental",
-  "redecompose_count": 0,
   "phases": { "total": 4, "completed": 2, "current": "phase-3", "failed": 0, "circuit_breaks": 0 },
   "phase_details": [
-    { "id": "phase-1", "name": "Phase Name", "status": "completed", "retries": 0, "criteria_passed": "4/4", "pass_rate": 100, "micro_fixes": 0, "pd_count": 2, "discoveries": 0 }
+    { "id": "phase-1", "name": "Phase Name", "status": "completed", "pp_proximity": "pp_core", "retries": 0, "criteria_passed": "4/4", "pass_rate": 100 }
   ],
-  "totals": { "total_retries": 0, "total_micro_fixes": 0, "total_discoveries": 0, "total_pd_overrides": 0, "elapsed_ms": 0 },
+  "totals": { "total_retries": 0, "total_discoveries": 0, "elapsed_ms": 0 },
   "cumulative_pass_rate": 100
 }
 ```
@@ -98,7 +93,7 @@ Redecomposition: `max_redecompose = 2`. Exceeding triggers `mpl-failed`.
 
 | File | Purpose |
 |------|---------|
-| `routing-patterns.jsonl` | Past execution patterns for tier prediction (F-22, append-only) |
+| `routing-patterns.jsonl` | Past execution patterns for execution pattern learning (F-22, append-only) |
 | `learnings.md` | Run-to-Run accumulated learnings (F-11) |
 
 ### Session Context Persistence (F-12)
@@ -110,39 +105,39 @@ Dual safety net against context loss during long-running pipelines:
 | `<remember priority>` tag | Emitted at each phase transition (Step 4.3.6) | Context compression within session |
 | `RUNBOOK.md` | Updated at each milestone (Steps 4.3, 4.5, 5.6) | Session boundaries |
 
-The orchestrator emits `<remember priority>` after every phase completion with: pipeline_id, current progress, tier, PP summary, last failure reason, and next phase. On context compression, the model retains this critical state and can reconstruct the execution context from RUNBOOK.md.
+The orchestrator emits `<remember priority>` after every phase completion with: pipeline_id, current progress, PP summary, last failure reason, and next phase. On context compression, the model retains this critical state and can reconstruct the execution context from RUNBOOK.md.
 
 ---
 
 ## Model Routing
 
-| Agent | Default | Escalate to opus when |
-|-------|---------|----------------------|
-| mpl-decomposer | opus | Always opus (complex reasoning) |
-| mpl-phase-runner | sonnet | L complexity or architecture changes |
+| Agent | Model | Escalation |
+|-------|-------|-----------|
+| mpl-decomposer | opus | Always opus |
+| mpl-interviewer | opus | Always opus |
+| mpl-phase-runner | sonnet | opus for L complexity or architecture |
+| mpl-test-agent | sonnet | — |
+| mpl-codebase-analyzer | haiku | — |
 
 ---
 
-## Adaptive Pipeline Routing (F-20)
+## Hat Model (PP-Proximity)
 
-Triage (Step 0) determines `pipeline_tier` via Quick Scope Scan. The tier controls which steps are executed:
+Each phase is classified by its proximity to Pivot Points. This determines the quality depth and retry budget.
 
-| Tier | Score | Steps Executed | Skipped | ~Tokens |
-|------|-------|---------------|---------|---------|
-| **frugal** | < 0.3 | Error Spec → Single Fix Cycle → Gate 1 → Commit | PP, Phase 0 Steps 1-3, Decomposition, Gate 2/3 | ~5-15K |
-| **standard** | 0.3~0.65 | PP(light) → Error Spec → Single Phase → Gate 1 → Commit | Full PP, Phase 0 Steps 1-3, Multi-phase decomposition, Gate 2/3 | ~20-40K |
-| **frontier** | > 0.65 | Full 9+ step pipeline | None | ~50-100K+ |
+| PP-Proximity | Gates Applied | Retry Budget | Description |
+|-------------|---------------|-------------|-------------|
+| **PP-core** | 3 Hard + Advisory | 3 | Directly modifies PP-referenced files |
+| **PP-adjacent** | 3 Hard + Advisory | 2 | Modifies files that depend on PP-core, or handles security/data |
+| **Non-PP** | Floor only (3 Hard) | 1 | No PP relationship |
 
-User hints (`"mpl bugfix"` → frugal, `"mpl small"` → standard) override auto-scoring.
+**Classification heuristic** (Decomposer assigns per-phase):
+- PP-core: phase impact files overlap with files referenced in `pivot-points.md`
+- PP-adjacent: phase impact files import/depend on PP-core files, OR phase handles security/data regardless of PP
+- Non-PP: everything else
+- User override: `pp_proximity_override` in decomposition.yaml per phase
 
-### Dynamic Escalation (F-21)
-
-On circuit break, if tier < frontier, auto-escalate:
-```
-frugal → circuit break → standard (preserve completed TODOs)
-standard → circuit break → frontier (preserve completed phase work)
-frontier → circuit break → redecomposition (existing behavior)
-```
+**Security/data escalation**: phases touching auth, encryption, database schema, or PII always get PP-adjacent or above, regardless of PP proximity.
 
 ## Phase-Specific Protocols (MUST Read)
 
@@ -166,7 +161,7 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 | `mpl-run-decompose.md` | 3 ~ 3-B | Phase Decomposition, Verification Planning (Critic absorbed into Decomposer) | ~3K |
 | `mpl-run-execute.md` | 4 | Phase Execution Loop (core), Phase Runner dispatch, Result Processing | ~9K |
 | `mpl-run-execute-context.md` | 4.1 | Context Assembly, Memory Loading, Checkpoint Recovery | ~4K |
-| `mpl-run-execute-gates.md` | 4.5-4.8 | 5-Gate Quality System, Fix Loop, Convergence Detection, Graceful Pause | ~7K |
+| `mpl-run-execute-gates.md` | 4.5-4.8 | 3 Hard Gate + 1 Advisory, Fix Loop, Convergence Detection, Graceful Pause | ~5K |
 | `mpl-run-execute-parallel.md` | 4.2.3-4.2.4 | TODO Parallel Dispatch, Background Execution, Context Cleanup | ~1K |
 | `mpl-run-finalize.md` | 5 | E2E, Learnings, Commits, PR, Metrics | ~5K |
 | `mpl-run-finalize-resume.md` | 6 | Resume Protocol, Budget Pause Resume, Discovery Processing, Related Skills | ~2K |
