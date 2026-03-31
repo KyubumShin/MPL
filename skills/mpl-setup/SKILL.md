@@ -465,7 +465,7 @@ if backend == "kitty":
 
 The MPL MCP Server provides deterministic ambiguity scoring and active state access for agents.
 
-#### Detection (v0.8.1 — fixed dependency check)
+#### Detection (v0.11.0 — robust dependency recovery)
 
 ```
 mcp_server_dir = "${CLAUDE_PLUGIN_ROOT}/mcp-server"
@@ -479,12 +479,41 @@ deps_installed = exists("${mcp_server_dir}/node_modules/@modelcontextprotocol")
 
 // Step 3: Determine status
 if dist_exists AND deps_installed:
-  mcp_available = true
+  // Step 3a: Verify server actually starts (not just files present)
+  verify = Bash("cd ${mcp_server_dir} && node -e \"import('./dist/index.js')\" 2>&1 | head -5", timeout=10s)
+  if verify.exitCode == 0:
+    mcp_available = true
+  else:
+    // Files present but broken — reinstall deps
+    Report: "MCP Server files present but import fails. Reinstalling dependencies..."
+    Bash("cd ${mcp_server_dir} && rm -rf node_modules && npm install")
+    // Re-verify
+    verify2 = Bash("cd ${mcp_server_dir} && node -e \"import('./dist/index.js')\" 2>&1 | head -5", timeout=10s)
+    if verify2.exitCode == 0:
+      mcp_available = true
+    else:
+      Report: "MCP Server dependency install failed: ${verify2.stderr}. Scoring will use in-prompt fallback."
+      mcp_available = false
+
 elif dist_exists AND NOT deps_installed:
   // Built but dependencies missing (common after plugin install from cache)
+  // This is the most frequent failure mode — plugin cache copies dist/ but not node_modules/
   Report: "MCP Server built but dependencies missing. Installing..."
-  Bash("cd ${mcp_server_dir} && npm install --production")
-  mcp_available = true
+  install_result = Bash("cd ${mcp_server_dir} && npm install 2>&1")
+  if install_result.exitCode == 0:
+    // Verify the installed deps actually work
+    verify = Bash("cd ${mcp_server_dir} && node -e \"import('./dist/index.js')\" 2>&1 | head -5", timeout=10s)
+    if verify.exitCode == 0:
+      mcp_available = true
+      Report: "MCP Server dependencies installed successfully."
+    else:
+      Report: "Dependencies installed but server still fails: ${verify.stderr}. Trying full rebuild..."
+      Bash("cd ${mcp_server_dir} && npm install && npm run build 2>&1")
+      mcp_available = exists("${mcp_server_dir}/node_modules/@modelcontextprotocol")
+  else:
+    Report: "npm install failed: ${install_result.stderr}. MCP Server disabled — scoring uses in-prompt fallback."
+    mcp_available = false
+
 elif NOT dist_exists:
   mcp_available = false
 ```

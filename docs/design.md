@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.11.0 Design Document
+# MPL (Micro-Phase Loop) v0.11.1 Design Document
 
 ## 1. Overview
 
@@ -850,6 +850,15 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | .mcp.json args path | `mcp-server/dist/index.js` (relative) | `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` (absolute via env var) | bugfix | Plugin MCP server failed to start because relative path resolved against CWD, not plugin root. `${CLAUDE_PLUGIN_ROOT}` is expanded by Claude Code at runtime to the correct plugin installation directory. |
 
 **Affected files:** `.mcp.json`
+**Breaking changes:** NONE
+
+### v0.11.1 — MCP Server Dependency Recovery (2026-03-31)
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| MCP setup dep recovery | Check `node_modules` existence only | Import verification + auto-reinstall + full rebuild fallback | fix | Plugin cache installs dist/ without node_modules, causing MCP server startup failure |
+
+**Affected files:** `skills/mpl-setup/SKILL.md`
 **Breaking changes:** NONE
 
 ### v0.11.0 — v2 Phase 2: Structural Transition (2026-03-31)
