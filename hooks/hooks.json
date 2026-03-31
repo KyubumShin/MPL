@@ -54,6 +54,46 @@
         ]
       },
       {
+        "matcher": "Task|Agent|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-validate-seed.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-sentinel-s0.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-sentinel-s1.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-sentinel-s3.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "hooks": [
           {
             "type": "command",

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.11.2 Design Document
+# MPL (Micro-Phase Loop) v0.11.3 Design Document
 
 ## 1. Overview
 
@@ -850,6 +850,17 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | .mcp.json args path | `mcp-server/dist/index.js` (relative) | `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` (absolute via env var) | bugfix | Plugin MCP server failed to start because relative path resolved against CWD, not plugin root. `${CLAUDE_PLUGIN_ROOT}` is expanded by Claude Code at runtime to the correct plugin installation directory. |
 
 **Affected files:** `.mcp.json`
+**Breaking changes:** NONE
+
+### v0.11.3 — Sentinel Activation + Platform Constraints (2026-03-31)
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Sentinel hooks registration | S0/S1/S3/validate-seed files existed but not in hooks.json | All 4 registered in PostToolUse with appropriate matchers | fix | Sentinel hooks were dead code — never executed despite being implemented in v0.10.0 |
+| Phase 0 Step 5: Platform Constraints | No platform constraint awareness | Step 5 generates platform-constraints.md from LLM knowledge of tech stack | feature | exp5: window.prompt() blocked in Tauri WebView but Phase Runner didn't know (B-1 bug) |
+| Finalize protocol load enforcement | phase-controller silently entered finalize | system-reminder forces orchestrator to read gate/finalize protocols + check platform-constraints | fix | exp1/exp5: finalize protocol never loaded, E2E rules were dead letter |
+
+**Affected files:** `hooks/hooks.json`, `agents/mpl-phase0-analyzer.md`, `hooks/mpl-phase-controller.mjs`
 **Breaking changes:** NONE
 
 ### v0.11.2 — Ambiguity Gate Enforcement (2026-03-31)

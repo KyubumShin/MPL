@@ -272,12 +272,66 @@ disallowedTools: Edit, Task
 
     Save updated error-spec to `{output_dir}/error-spec.md`
 
+    #### Step 5 — Platform Constraints (ALL grades, mandatory)
+
+    Identify runtime platform constraints that cannot be discovered through code analysis alone.
+    Uses the confirmed tech stack from PP Interview — no external tools or web search needed.
+
+    ```
+    // 1. Identify target platform from PP and codebase analysis
+    tech_stack = extract from codebase_analysis and pivot_points
+    //   e.g., "Tauri v2", "Electron", "React Native", "WebView", "Node.js CLI"
+
+    // 2. Generate platform constraints from LLM knowledge
+    //    Based on tech_stack, list APIs/patterns that are:
+    //    - Blocked or unavailable in the target runtime
+    //    - Behave differently from standard browser/Node.js
+    //    - Require platform-specific alternatives
+    //
+    //    Common examples by platform:
+    //    Tauri v2 WebView:
+    //      - window.prompt() / window.confirm() / window.alert() → blocked, use custom dialog
+    //      - File.path on HTML File object → unavailable, use Tauri dialog.open()
+    //      - navigator.clipboard (HTTP) → use Tauri clipboard plugin
+    //      - fetch to localhost → may require allowlist in tauri.conf.json
+    //    Electron:
+    //      - require('fs') in renderer → blocked by contextIsolation, use preload bridge
+    //      - window.open() → may not work as expected, use BrowserWindow
+    //    React Native:
+    //      - DOM APIs → unavailable, use React Native components
+    //      - CSS → use StyleSheet.create()
+    //      - localStorage → use AsyncStorage
+
+    // 3. Cross-reference with project code (if brownfield)
+    if modules > 0:
+      for each constraint in generated_list:
+        Grep(pattern=constraint.blocked_api_pattern, path="src/")
+        if found: constraint.status = "VIOLATION_FOUND"
+        else: constraint.status = "OK"
+
+    // 4. Output format
+    Each constraint entry:
+      - id: "PC-{n}"
+      - blocked_api: the API/pattern that must not be used
+      - reason: why it's blocked in this platform
+      - alternative: what to use instead
+      - status: OK | VIOLATION_FOUND | UNCHECKED (greenfield)
+    ```
+
+    Save to `{output_dir}/platform-constraints.md`
+
+    **Note**: This step uses LLM knowledge only — no Context7, WebSearch, or llms.txt.
+    The tech stack is already confirmed in PP, so the LLM can generate accurate constraints
+    without external lookups. If a constraint is uncertain, mark confidence as "low" and
+    let Phase Runner verify during Build-Test-Fix.
+
     ### Phase 4: Validation
 
     For each generated artifact:
     1. Structure check: required sections exist
     2. Coverage check: test-called functions present in contracts (>80%)
     3. Consistency check: types match across artifacts
+    4. Platform constraints check: if platform detected, constraints file exists
 
     ### Phase 5: Cache Save
 
@@ -288,7 +342,7 @@ disallowedTools: Edit, Task
       "commit_hash": "HEAD",
       "timestamp": "ISO",
       "complexity_grade": "...",
-      "artifacts": ["api-contracts.md", ...],
+      "artifacts": ["api-contracts.md", "platform-constraints.md", ...],
       "validation_result": { "passed": N, "total": M }
     }
     ```
@@ -305,7 +359,7 @@ disallowedTools: Edit, Task
     ## Phase 0 Enhanced Summary
     - Complexity: {score} ({grade})
     - Steps executed: {list}
-    - Artifacts: {count}/4 generated
+    - Artifacts: {count}/5 generated
     - Validation: {passed}/{total} passed
     - Cache: {HIT|MISS|PARTIAL}
     - Key findings: {1-3 bullet points}

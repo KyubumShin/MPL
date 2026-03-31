@@ -359,9 +359,17 @@ async function main() {
           stopReason: '[MPL] Phase 5: Finalize complete. MPL pipeline finished.'
         }));
       } else {
+        // Protocol load enforcement: remind orchestrator to load finalize protocol
+        // This prevents the exp5 failure where finalize rules were never read
+        const protocolReminder = '\n\nIMPORTANT: Before proceeding, you MUST read the finalize protocol documents:\n' +
+          '1. Read the gate execution protocol (mpl-run-execute-gates or equivalent)\n' +
+          '2. Read the finalize protocol (mpl-run-finalize or equivalent)\n' +
+          '3. Execute all Hard Gates (H1: Build+Lint+Type, H2: Full Test Suite, H3: Contract Diff Guard)\n' +
+          '4. Run project-root-level tests (cargo test --workspace, npx vitest run, pytest, etc.)\n' +
+          '5. Check platform-constraints.md violations if it exists in .mpl/mpl/phase0/';
         console.log(JSON.stringify({
           continue: true,
-          stopReason: '[MPL] Phase 5: Finalize in progress. Extract learnings, commit, then set state.finalize_done = true to complete.'
+          stopReason: '[MPL] Phase 5: Finalize in progress. Extract learnings, commit, then set state.finalize_done = true to complete.' + protocolReminder
         }));
       }
       break;
