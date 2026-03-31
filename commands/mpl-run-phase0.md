@@ -471,12 +471,37 @@ else:
   // NOTE: "skip" branch removed. Interview always runs at minimum "light" level.
   // Even high-density prompts go through Round 1+2 interview before Uncertainty Scan.
 
-// Two-phase interview execution:
-Task(subagent_type="mpl-interviewer", ...)  // Phase 1: PP Discovery
+// Two-stage interview execution:
+
+// Stage 1: PP Discovery (mpl-interviewer)
+Task(subagent_type="mpl-interviewer", model=model_phase1, prompt=`
+  interview_depth: ${interview_depth}
+  information_density: ${information_density}
+  user_request: ${user_request}
+  provided_specs: ${provided_specs}
+`)
 → save pivot-points.md + user_responses_summary
 
-// Stage 2: Ambiguity Resolution + Requirements (performed by mpl-interviewer)
+// Stage 2: Ambiguity Resolution + Requirements (mpl-ambiguity-resolver)
+// MUST be a separate Task — mpl-interviewer does NOT perform this.
+// Scoring MUST use mpl_score_ambiguity MCP tool (not self-scoring).
+Task(subagent_type="mpl-ambiguity-resolver", model=model_stage2, prompt=`
+  interview_depth: ${interview_depth}
+  information_density: ${information_density}
+  pivot_points: read .mpl/pivot-points.md
+  user_responses_summary: from Stage 1 output
+  provided_specs: ${provided_specs}
+  project_type: ${field_classification}
+`)
 → save requirements-light.md or requirements-{hash}.md + ambiguity score
+
+// After Stage 2 completes, record ambiguity_score to state:
+// The orchestrator MUST extract ambiguity_score from Stage 2 output and write to state.
+// This is enforced by mpl-phase-controller Stop hook — mpl-decompose phase
+// will be BLOCKED if ambiguity_score is missing from state.
+mpl_state_write(cwd, { ambiguity_score: stage2_result.ambiguity_score })
+// Only then transition to mpl-decompose:
+mpl_state_write(cwd, { current_phase: "mpl-decompose" })
 ```
 
 ### Model Routing (F-26)

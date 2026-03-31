@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.11.1 Design Document
+# MPL (Micro-Phase Loop) v0.11.2 Design Document
 
 ## 1. Overview
 
@@ -850,6 +850,20 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | .mcp.json args path | `mcp-server/dist/index.js` (relative) | `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` (absolute via env var) | bugfix | Plugin MCP server failed to start because relative path resolved against CWD, not plugin root. `${CLAUDE_PLUGIN_ROOT}` is expanded by Claude Code at runtime to the correct plugin installation directory. |
 
 **Affected files:** `.mcp.json`
+**Breaking changes:** NONE
+
+### v0.11.2 — Ambiguity Gate Enforcement (2026-03-31)
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Stage 1/2 separation | mpl-interviewer "Unified" (PP + Ambiguity) | mpl-interviewer=Stage 1 (PP only), mpl-ambiguity-resolver=Stage 2 (separate Task) | fix | Ambiguity scoring was silently skipped because unified agent only did PP discovery |
+| MCP-based scoring | Agent self-scores ambiguity inline | mpl_score_ambiguity MCP tool mandatory, self-scoring prohibited | feature | External LLM (haiku) + code-computed weights ensure objective, deterministic scoring |
+| Ambiguity Gate hook | No gate before decomposition | PreToolUse hook (mpl-ambiguity-gate.mjs) blocks Task(mpl-decomposer) if score missing or > 0.2 | feature | Prevents decomposition without ambiguity resolution |
+| Phase controller cases | No mpl-init/mpl-decompose/mpl-ambiguity-resolve handling | Stop hook checks score at mpl-decompose, auto-reverts to mpl-ambiguity-resolve if threshold not met | feature | Dual-layer gate (PreToolUse L1 + Stop L2) |
+| State schema | No ambiguity_score field | ambiguity_score: number \| null added to MplState + DEFAULT_STATE | schema | Required for gate enforcement |
+| Validate output | mpl-ambiguity-resolver not validated | Added to VALIDATE_AGENTS with expected sections | fix | Stage 2 output now validated by PostToolUse hook |
+
+**Affected files:** `agents/mpl-interviewer.md`, `agents/mpl-ambiguity-resolver.md`, `commands/mpl-run-phase0.md`, `hooks/mpl-ambiguity-gate.mjs` (new), `hooks/mpl-phase-controller.mjs`, `hooks/mpl-validate-output.mjs`, `hooks/hooks.json`, `hooks/lib/mpl-state.mjs`, `mcp-server/src/lib/state-manager.ts`
 **Breaking changes:** NONE
 
 ### v0.11.1 — MCP Server Dependency Recovery (2026-03-31)

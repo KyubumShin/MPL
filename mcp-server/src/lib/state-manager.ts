@@ -45,6 +45,7 @@ export interface MplState {
     min_improvement: number;
     regression_threshold: number;
   };
+  ambiguity_score: number | null;
   session_status: string | null;
   pause_reason: string | null;
   resume_from_phase: string | null;
@@ -89,6 +90,7 @@ const DEFAULT_STATE: MplState = {
     min_improvement: 0.05,
     regression_threshold: -0.10,
   },
+  ambiguity_score: null,
   session_status: null,
   pause_reason: null,
   resume_from_phase: null,

@@ -116,6 +116,74 @@ async function main() {
   const phase = state.current_phase;
 
   switch (phase) {
+    case 'mpl-init': {
+      // Init phase: triage + interview in progress
+      console.log(JSON.stringify({
+        continue: true,
+        stopReason: '[MPL] Initialization in progress. Complete Triage → Stage 1 (PP Interview) → Stage 2 (Ambiguity Resolution) before Decomposition.'
+      }));
+      break;
+    }
+
+    case 'mpl-decompose': {
+      // GATE: ambiguity_score MUST exist AND meet threshold before decomposition proceeds.
+      // Stage 2 (mpl-ambiguity-resolver) writes ambiguity_score to state via mpl_score_ambiguity MCP tool.
+      const ambiguityScore = state.ambiguity_score;
+      const hasScore = ambiguityScore !== null && ambiguityScore !== undefined;
+      const threshold = 0.2;
+
+      if (!hasScore) {
+        // Block decomposition — ambiguity resolution was skipped
+        writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: '[MPL] ⛔ Decomposition BLOCKED: ambiguity_score not found in state. ' +
+            'Reverting to Stage 2 (mpl-ambiguity-resolver). ' +
+            'Run Task(subagent_type="mpl-ambiguity-resolver") to resolve ambiguity and record score via mpl_score_ambiguity MCP tool.'
+        }));
+      } else if (ambiguityScore > threshold) {
+        // Block decomposition — score exceeds threshold, re-run ambiguity resolution
+        writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ Decomposition BLOCKED: ambiguity_score=${ambiguityScore} exceeds threshold ${threshold}. ` +
+            'Reverting to Stage 2 (mpl-ambiguity-resolver) for additional Socratic resolution. ' +
+            'Run Task(subagent_type="mpl-ambiguity-resolver") to continue resolving weakest dimensions.'
+        }));
+      } else {
+        // Score exists and meets threshold — proceed
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] Decomposition: ambiguity_score=${ambiguityScore} (threshold: <=${threshold}). ✓ Proceed with micro-phase decomposition.`
+        }));
+      }
+      break;
+    }
+
+    case 'mpl-ambiguity-resolve': {
+      // Stage 2: Ambiguity Resolution in progress
+      const currentScore = state.ambiguity_score;
+      const hasCurrentScore = currentScore !== null && currentScore !== undefined;
+      const ambThreshold = 0.2;
+
+      if (hasCurrentScore && currentScore <= ambThreshold) {
+        // Threshold met — transition to decompose
+        writeState(cwd, { current_phase: 'mpl-decompose' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] Ambiguity resolved: score=${currentScore} (<=${ambThreshold}). Transitioning to Decomposition.`
+        }));
+      } else {
+        const scoreInfo = hasCurrentScore ? ` Current score: ${currentScore}.` : '';
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] Stage 2: Ambiguity Resolution in progress.${scoreInfo} Target: <=${ambThreshold}. ` +
+            'Run Task(subagent_type="mpl-ambiguity-resolver") and use mpl_score_ambiguity MCP tool to measure progress.'
+        }));
+      }
+      break;
+    }
+
     case 'phase1-plan': {
       // Phase 1: Quick Plan (legacy/backward-compat when research is skipped)
       console.log(JSON.stringify({

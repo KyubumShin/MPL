@@ -32,6 +32,7 @@ export const VALIDATE_AGENTS = new Set([
   'mpl-phase-runner',
   'mpl-decomposer',
   'mpl-interviewer',
+  'mpl-ambiguity-resolver',
   'mpl-test-agent',
   'mpl-codebase-analyzer',
   'mpl-doctor',
@@ -54,6 +55,12 @@ export const EXPECTED_SECTIONS = {
     'PP-',
     'Priority Order',
     'Interview Metadata',
+  ],
+  'mpl-ambiguity-resolver': [
+    'ambiguity_score',
+    'Spec Analysis',
+    'PP Conformance',
+    'requirements',
   ],
   'mpl-test-agent': [
     'phase_id',
