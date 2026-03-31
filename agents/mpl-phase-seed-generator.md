@@ -134,7 +134,48 @@ disallowedTools: Write, Edit, Task
       - Must be machine-evaluable (not subjective)
       - Include: all success criteria pass, all interface_contract.produces exist, cumulative tests pass
 
-    Step 9: Assemble Seed
+    Step 8.5: Generate Probing Hints (HA-03, v0.12.0)
+      - Based on phase domain and characteristics, generate optional adversarial testing hints
+      - Categories and triggers:
+        | Phase Domain | Probing Hints |
+        |-------------|---------------|
+        | api / db    | "동시 요청 시 상태 충돌 테스트", "트랜잭션 격리 수준 검증" |
+        | algorithm   | "빈 입력/null 입력 경계값 테스트", "중복 호출 멱등성 검증" |
+        | ui (WebView)| "WebView 환경에서 브라우저 네이티브 API(prompt/confirm/alert) 사용 여부" |
+        | ui (SSR)    | "SSR 환경에서 window/document 직접 접근 여부" |
+        | infra       | "리소스 해제 누락(고아 연산) 테스트" |
+        | general     | At least one relevant probing hint based on phase scope |
+      - Platform constraint hints (from Phase 0 target_platform detection):
+        | Platform Config | Auto-Generated Hint |
+        |----------------|---------------------|
+        | tauri.conf.json exists | "Tauri WebView에서 window.prompt/confirm/alert 차단 — 커스텀 다이얼로그 확인" |
+        | electron-builder.json exists | "Renderer 프로세스에서 Node.js native API 직접 호출 여부" |
+        | next.config.js exists | "SSR 컴포넌트에서 window/document 직접 접근 여부" |
+      - If no relevant hints can be determined: omit field (not an error)
+      - Test Agent uses these hints to generate at least 1 adversarial test per hint
+
+    Step 8.7: Platform MND Auto-Injection (HA-05, v0.12.0)
+      - From Phase 0 codebase analysis, detect target_platform configuration files
+      - Auto-inject platform-specific Must NOT Do constraints:
+        | Detection | Auto-Injected MND |
+        |-----------|-------------------|
+        | tauri.conf.json | "window.prompt/confirm/alert 사용 금지 — Tauri dialog API 사용 필수" |
+        | tauri.conf.json | "HTML File.path 접근 금지 — Tauri dialog.open() API로 절대 경로 획득 필수" |
+        | electron-builder.json | "Renderer에서 require('fs') 등 Node.js API 직접 호출 금지 — preload bridge 사용" |
+        | next.config.js + app/ | "서버 컴포넌트에서 useState/useEffect 등 클라이언트 훅 사용 금지" |
+      - These MNDs are added to the constraints section with source_pp: "platform_auto"
+
+    Step 9: Self-Verification Checklist (HA-05, v0.12.0)
+      After assembling the Seed, verify against these 5 criteria and fix any failures before output:
+      1. Can Runner determine exact import paths from this interface_contract?
+      2. Do example I/Os include boundary values (empty input, max values, error cases)?
+      3. Does Must NOT Do clearly limit implementation scope?
+         - Are functional scope limits explicit?
+         - Are platform/runtime environment constraints reflected? (WebView forbidden APIs, SSR constraints, etc.)
+      4. Does contract_snippet specify bidirectional dependencies?
+      5. Do error cases include recovery strategies (retry, fallback, propagate)?
+
+    Step 10: Assemble Seed
       - Combine all outputs into phase-seed.yaml
       - The Seed is immutable — Phase Runner follows it exactly
   </Reasoning_Steps>
@@ -216,6 +257,12 @@ disallowedTools: Write, Edit, Task
         a_items: [string]
         s_items: [string]
         h_items: [string]
+
+      probing_hints:                 # v0.12.0 HA-03: optional adversarial testing hints for Test Agent
+        - string                     # e.g., "동시 요청 시 상태 충돌 테스트"
+        # OR structured form:
+        # - category: "platform_constraint" | "concurrency" | "boundary" | "idempotency"
+        #   hint: string
 
       risk_notes: [string]           # phase-specific risks from decomposer
     ```

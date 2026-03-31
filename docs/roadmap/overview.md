@@ -260,6 +260,30 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.12.0 — Harness Analysis Adoption: Adversarial Verification + Platform Safety (2026-03-31)
+
+### Summary
+
+v0.12.0 adopts 5 features from cross-analysis of Claude Code's Coordinator architecture (instructkr/claude-code) and Anthropic's "Harness Design for Long-Running Apps" blog post. All changes are prompt/schema-level — no structural changes to the pipeline. Key theme: preventing the self-evaluation failure pattern (exp5 B-1~B-3) through adversarial verification and platform-aware MND generation.
+
+### Changes
+
+| ID | Feature | Type | Description |
+|----|---------|------|-------------|
+| HA-01 | **Synthesis-First Delegation** | Prompt | Core Rule #5 in orchestrator: 4 lazy delegation anti-patterns prohibited |
+| HA-02 | **Adversarial Verification Prompt** | Prompt | Test Agent: 5 self-rationalization anti-patterns + structured output (Test/Expected/Actual/Verdict) + probing hints processing |
+| HA-03 | **Seed Probing Hints** | Schema | `probing_hints` optional field in phase_seed.yaml — domain-specific + platform constraint adversarial testing hints |
+| HA-04 | **Export Manifest Warnings** | Schema | `warnings` field in Phase Runner output + State Summary section + orchestrator Step 5.5 processing |
+| HA-05 | **Seed Self-Verification + Platform MND** | Prompt | 5-item self-verification checklist + auto-injection of platform-specific MND from config file detection (Tauri, Electron, Next.js) |
+
+### Source Analysis
+
+- `analysis/instructkr-claude-code-analysis.md` — Claude Code Coordinator deep-dive
+- `analysis/anthropic-harness-design-longrunning.md` — Anthropic blog analysis
+- `analysis/mpl-adoption-candidates-debate.md` — 10 candidates, 2-phase debate per candidate
+
+---
+
 ## v0.11.0 — Gate 3H+1A + Hat Model + Agent Consolidation (2026-03-31)
 
 ### Summary
@@ -665,6 +689,8 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**0.10.2**~~ | ~~T-11 Skill Quality Polish: Description trigger hints (3-tier) + deprecated stub + setup split~~ | ✅ **Implemented** |
 | ~~**v0.11.1**~~ | ~~MCP Server dependency recovery in mpl-setup~~ | ✅ **Implemented** |
 | ~~**v0.11.0**~~ | ~~v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8~~ | ✅ **Implemented** |
+| ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ✅ **Implemented** |
+| **v0.13.0** | HA-06: Advisory Gate Playwright E2E Smoke (조건부) | 🟠 Planned |
 | **v1.0.0** | v2 Phase 3: MCP Judge + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
 | **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |

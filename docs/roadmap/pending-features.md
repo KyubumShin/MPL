@@ -1,7 +1,7 @@
 # MPL Roadmap TEMP: Pending Feature Candidates
 
 > **Status**: Pending implementation (for review)
-> **Last updated**: 2026-03-24
+> **Last updated**: 2026-03-31
 > **Purpose**: Consolidated list of all features not yet implemented. Completed items have been moved to `overview.md`.
 
 ---
@@ -1608,6 +1608,256 @@ Architect의 Module 7(lifecycle_pairs, transaction_candidates, security_findings
 **합의점**: CB-01~04 + PR-01~05(프롬프트 강화) → v0.9.0. Module 7/Gate 0.8 → deferred. DRY/FC → out of scope.
 
 **분기점 해소**: Gate 0.8 신설 불필요 (Contrarian 승). 단, Architect의 Module 7 + Gate 0.8 설계는 escalation trigger 조건부로 보존.
+
+---
+
+## Source: Harness Analysis — instructkr/claude-code + Anthropic Blog (2026-03-31)
+
+> **분석 보고서**: `analysis/mpl-adoption-candidates-debate.md`
+> **원본 분석**: `analysis/instructkr-claude-code-analysis.md` (Coordinator 분석), `analysis/anthropic-harness-design-longrunning.md` (Anthropic 블로그 분석)
+> **토론 형식**: 후보별 2페이즈 찬반 토론 → 판정. 전체 10개 후보 중 6개 도입, 4개 미도입.
+
+### Introduction Candidate Summary
+
+| # | Feature | Inspiration Source | Priority | Target Version | Status | Token Cost |
+|---|---------|-------------------|----------|---------------|--------|------------|
+| HA-01 | Synthesis-First Delegation (합성 중심 위임) | Coordinator 시스템 프롬프트 | 🟠 Medium | v0.12.0 | ✅ Done | 0 (prompt only) |
+| HA-02 | Adversarial Verification Prompt (적대적 검증 프롬프트) | Coordinator Verification Agent | 🔴 High | v0.12.0 | ✅ Done | 0 (prompt only) |
+| HA-03 | Seed Probing Hints (Seed 프로빙 힌트) + 플랫폼 제약 | Coordinator + Anthropic Blog + exp5 B-1 | 🟠 Medium | v0.12.0 | ✅ Done | ~200/phase |
+| HA-04 | Export Manifest Warnings Field | Coordinator Scratchpad 대안 | 🟡 Low | v0.12.0 | ✅ Done | 0 (schema only) |
+| HA-05 | Seed Generator 구현 가능성 체크리스트 + MND 플랫폼 제약 | Anthropic Sprint Contract 대안 + exp5 B-1 | 🟠 Medium | v0.12.0 | ✅ Done | 0 (prompt only) |
+| HA-06 | Advisory Gate Playwright E2E 스모크 | Anthropic Active Testing | 🟠 Medium | v0.13.0 | ❌ Pending | ~3-5K (조건부) |
+| HA-07 | Evaluator 프롬프트 튜닝 프로세스 | Anthropic Evaluator Tuning | 🟢 Optional | — | ❌ Process | 0 (protocol only) |
+| HA-08 | Load-Bearing Ablation Study 프로토콜 | Anthropic Load-Bearing Principle | 🟢 Optional | — | ❌ Process | 0 (protocol only) |
+
+> **버전 배치 근거**: HA-01~05는 프롬프트/스키마 변경으로 현재 v0.11.3에서 Y-level 범프(v0.12.0)가 적절. HA-06은 기능 추가이므로 다음 Y-level(v0.13.0)로 분리. exp5 B-1~B-3 실증 근거로 HA-03/HA-05에 플랫폼 제약 관련 내용 통합, HA-06 우선순위 🟡→🟠 상향.
+
+---
+
+### HA-01: Synthesis-First Delegation (합성 중심 위임)
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-01 | Synthesis-First Delegation | ❌ Pending | 🟠 Medium | v0.12.0 |
+
+**출처**: Claude Code Coordinator 시스템 프롬프트 — "based on your findings" 류 게으른 위임 금지 원칙.
+
+**판정**: 부분 도입. Orchestrator → Seed Generator 위임 프롬프트에만 적용. Seed → Runner 구간은 schema validation이 이미 커버.
+
+**구현 내용**:
+Orchestrator 프롬프트에 anti-pattern 경고 추가 (5줄):
+```
+# Anti-pattern: 게으른 위임 금지
+- "이전 결과 참고해서 구현해" → 금지. 구체적 파일 경로, 발견 사항 요약, 구현 스펙을 직접 작성할 것
+- "based on your findings" → 금지. 연구 결과를 소화한 후 구체적 지시사항으로 변환
+- "알아서 판단해" → 금지. 판단 기준을 명시적으로 제공할 것
+```
+
+**비용**: 0 (프롬프트 추가만)
+
+---
+
+### HA-02: Adversarial Verification Prompt (적대적 검증 프롬프트)
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-02 | Adversarial Verification Prompt | ❌ Pending | 🔴 High | v0.12.0 |
+
+**출처**: Claude Code Verification Agent의 자기합리화 anti-pattern + Anthropic 블로그의 Evaluator 관대함 문제.
+
+**판정**: 부분 도입. Test Agent 프롬프트에 2가지 추가.
+
+**구현 내용**:
+
+1. 자기합리화 anti-pattern 목록 (6줄):
+```
+# 금지 패턴 — 다음과 같은 판단은 확증 편향의 신호
+- "코드가 올바르게 보인다" → 실제 실행 결과로 증명할 것
+- "이 정도면 충분하다" → 충분함의 기준을 Seed의 예시 I/O와 대조할 것
+- "사소한 문제이므로 통과" → 사소함의 근거를 명시할 것
+- "전체적으로 잘 구현되었다" → 항목별 검증 결과를 개별 나열할 것
+- 문제를 발견하고도 합리화하지 말 것 — 발견된 문제는 모두 보고
+```
+
+2. 구조화된 검증 출력 형식:
+```
+각 테스트에 대해:
+- Test: [테스트 설명]
+- Expected: [Seed 기반 기대 결과]
+- Actual: [실제 결과]
+- Verdict: PASS | FAIL | WARN
+```
+
+**비용**: 0 (프롬프트 추가만)
+
+---
+
+### HA-03: Seed Probing Hints (Seed 프로빙 힌트)
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-03 | Seed Probing Hints + Platform Constraints | ❌ Pending | 🟠 Medium | v0.12.0 |
+
+**출처**: Claude Code의 적대적 프로빙(동시성, 경계값, 멱등성, 고아 연산) + Phase 유형별 차별화 필요성 + **exp5 B-1 실증** (Tauri WebView `window.prompt()` 차단 미탐지).
+
+**판정**: 부분 도입. Seed Generator가 Phase 유형에 따라 선택적으로 포함. **플랫폼 제약 카테고리 추가** (2페이즈 토론 결과: MND가 본질적 예방, probing_hints는 안전망).
+
+**구현 내용**:
+`phase_seed.yaml` schema에 선택적 필드 추가:
+```yaml
+probing_hints:    # optional, Seed Generator가 Phase 유형에 따라 생성
+  - "동시 요청 시 상태 충돌 테스트"
+  - "빈 입력/null 입력 경계값 테스트"
+  - "중복 호출 멱등성 검증"
+  - category: platform_constraint    # Phase 0에서 target_platform 감지 시
+    hint: "WebView 환경에서 브라우저 네이티브 API(prompt/confirm/alert) 사용 가능 여부"
+  - category: platform_constraint
+    hint: "HTML File 객체 vs 플랫폼별 파일 선택 API 경로 차이"
+```
+
+Test Agent는 `probing_hints`가 존재하면 해당 힌트 기반 적대적 테스트를 최소 1개 포함.
+
+**핵심 변경 (피드백 토론 합의)**: 플랫폼 제약의 본질적 해결은 MND 자동 생성 (HA-05에서 처리). probing_hints의 `platform_constraint`는 MND 누락 시 안전망 역할.
+
+**비용**: ~200 tokens/phase (hints 생성)
+
+---
+
+### HA-04: Export Manifest Warnings Field
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-04 | Export Manifest Warnings Field | ❌ Pending | 🟡 Low | v0.12.0 |
+
+**출처**: Claude Code Scratchpad 패턴의 대안. 채널 레지스트리 원칙을 유지하면서 예상치 못한 발견을 등록된 채널로 전달.
+
+**판정**: 도입 (Scratchpad 미도입의 대안).
+
+**구현 내용**:
+export manifest에 `warnings` 필드 추가:
+```json
+{
+  "file": "src/auth/validate.ts",
+  "symbols": ["validateToken"],
+  "signature": "(token: string) => boolean",
+  "test_framework": "vitest",
+  "test_dir": "tests/auth/",
+  "warnings": [
+    "bcrypt 의존성이 없어 argon2로 대체함 — 다음 Phase에서 호환성 확인 필요",
+    "rate-limiter 구현 시 Redis 연결 필요할 수 있음"
+  ]
+}
+```
+
+Orchestrator가 다음 Seed 생성 시 warnings를 반영.
+
+**비용**: 0 (schema 확장만)
+
+---
+
+### HA-05: Seed Generator 구현 가능성 체크리스트
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-05 | Seed Generator 구현 가능성 체크리스트 + MND Platform Constraints | ❌ Pending | 🟠 Medium | v0.12.0 |
+
+**출처**: Anthropic Sprint Contract의 대안 + **exp5 B-1 실증** (MND에 플랫폼 제약 부재로 `window.prompt()` 사용).
+
+**판정**: 도입 (Sprint Contract 양방향 협상 미도입의 대안) + **MND 플랫폼 제약 자동 생성** (피드백 토론 합의).
+
+**구현 내용**:
+
+1. Seed Generator 프롬프트에 구현 가능성 체크리스트 5항목 추가 (3번 항목에 플랫폼 제약 통합):
+```
+# Seed 생성 전 자기 검증 체크리스트
+Seed를 생성한 후, 다음 5가지를 검증하고 미달 시 수정:
+1. 이 인터페이스로 Runner가 import 경로를 확정할 수 있는가?
+2. 예시 I/O가 경계값(빈 입력, 최대값, 에러)을 포함하는가?
+3. Must NOT Do가 구현 범위를 명확히 제한하는가?
+   - 기능 범위 제한이 명확한가?
+   - 플랫폼/런타임 환경 제약이 반영되어 있는가? (WebView 금지 API, SSR 제약 등)
+4. contract_snippet이 양방향 의존성을 모두 명시하는가?
+5. 에러 케이스가 복구 전략(retry, fallback, propagate)을 포함하는가?
+```
+
+2. Phase 0에서 `target_platform` 감지 → MND 플랫폼 제약 자동 생성:
+```
+# Phase 0 플랫폼 감지 → MND 자동 주입
+- tauri.conf.json 존재 → MND: "window.prompt/confirm/alert 사용 금지, Tauri dialog API 사용"
+- electron-builder.json 존재 → MND: "Node.js native API를 renderer에서 직접 호출 금지"
+- next.config.js 존재 → MND: "SSR 환경에서 window/document 직접 접근 금지"
+```
+
+**비용**: 0 (프롬프트 추가만)
+
+---
+
+### HA-06: Advisory Gate Playwright E2E 스모크
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-06 | Advisory Gate Playwright E2E Smoke | ❌ Pending | 🟠 Medium | v0.13.0 |
+
+**출처**: Anthropic 블로그 — 정적 분석보다 능동적 Playwright 테스팅이 효과적. **exp5 B-1~B-3이 필요성을 실증** (단위 테스트 100% pass에도 E2E 동작 불가).
+
+**판정**: 조건부 도입. `has_ui && playwright_available` 시에만 활성화. Hard Gate 아닌 Advisory 레벨. 피드백 토론 결과 v0.13.0 유지하되 **우선순위 🟡→🟠 상향**, v0.13.0의 첫 번째 구현 대상으로 지정. 버전 규칙(Y=기능 추가) 준수. v0.12.0의 다중 방어선(HA-02 적대적 검증 + HA-05 MND 플랫폼 제약)이 1차 커버.
+
+**구현 내용**:
+- Phase 0 분석 시 `has_ui: true` 플래그 감지 (React, Vue, HTML 파일 존재 여부)
+- Advisory Gate에 E2E 스모크 테스트 옵션 추가
+- Playwright MCP 미설치 시 graceful skip
+- Hard Gate에는 포함하지 않음 (결정론성 유지)
+
+**비용**: ~3-5K tokens (조건부, UI 프로젝트에서만)
+
+**의존성**: Playwright MCP (optional), T-03 Browser QA Gate (v4.0 done)와 연계 가능
+
+---
+
+### HA-07: Evaluator 프롬프트 튜닝 프로세스
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-07 | Evaluator Prompt Tuning Process | ❌ Process (코드 변경 아님) | 🟢 Optional | — |
+
+**출처**: Anthropic 블로그 — 반복적 Evaluator 로그 분석 → 프롬프트 수정 사이클.
+
+**판정**: 프로세스로 도입. MPL 코드 변경 없음. harness_lab 실험 프로토콜에 추가.
+
+**프로토콜**:
+1. 매 실험 후 Test Agent/Advisory Gate 로그에서 "문제 발견 후 합리화한 사례" 수집
+2. 해당 사례를 anti-pattern으로 에이전트 프롬프트에 반영
+3. `analysis/prompt-tuning-log.md`에 변경 이력 기록
+
+---
+
+### HA-08: Load-Bearing Ablation Study 프로토콜
+
+| ID | Feature | Status | Priority | Target |
+|----|---------|--------|----------|--------|
+| HA-08 | Load-Bearing Ablation Study Protocol | ❌ Process (코드 변경 아님) | 🟢 Optional | — |
+
+**출처**: Anthropic 블로그 — "하네스의 각 구성요소는 모델 한계에 대한 가정을 인코딩. 한 번에 하나씩 제거하고 영향을 검토."
+
+**판정**: 실험 방법론으로 채택. MPL 코드 변경 없음.
+
+**프로토콜**:
+1. 대상 구성요소 비활성화 (예: Advisory Gate 제거, probing_hints 제거)
+2. 동일 벤치마크(Yggdrasil 등)에서 성능 비교
+3. 통계적 유의성 판단 후 제거/유지 결정
+
+---
+
+### 미도입 판정 목록 (참고)
+
+다음 4개 후보는 토론 결과 미도입으로 판정되었다. 상세 근거는 `analysis/mpl-adoption-candidates-debate.md` 참조.
+
+| 후보 | 미도입 이유 | 대안 |
+|------|-----------|------|
+| Continue vs Spawn 매트릭스 | Phase 격리 원칙 위배, Seed `failure_context`로 대체 가능 | 이미 v2 설계에 반영 |
+| Scratchpad 크로스워커 지식 공유 | 채널 레지스트리 원칙(모순 #2 해결)에 정면 위배 | HA-04 (warnings 필드) |
+| Generator-Evaluator 분리 | Test Agent + Diff Guard + Advisory Gate로 이미 3중 구현 | 추가 불필요 |
+| Context Reset 전략 | Opus 4.6에서 불필요 추세, 실제 문제 미발생 | 모니터링만 |
 
 ---
 

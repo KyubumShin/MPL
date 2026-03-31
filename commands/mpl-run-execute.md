@@ -568,6 +568,10 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
 3. Save verification to .mpl/mpl/phases/phase-N/verification.md
 4. Update phase-decisions.md with result.new_decisions
 5. Process discoveries (see Discovery Processing section)
+5.5. **Process warnings (HA-04, v0.12.0)**: If result.warnings is non-empty, store warnings for next Seed generation:
+     - Append to `.mpl/mpl/phases/phase-N/warnings.json` (for traceability)
+     - When generating the next Phase Seed, include relevant warnings in the `prior_summaries` context
+     - Warnings that affect adjacent phases (dependency substitutions, platform constraints) → inject into next Seed's constraints section
 6. Update MPL state:
    phases.completed++, phase_details[N].status = "completed"
    phase_details[N].criteria_passed, pass_rate, micro_fixes, pd_count, discoveries

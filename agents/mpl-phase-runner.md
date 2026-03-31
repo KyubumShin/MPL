@@ -111,6 +111,12 @@ disallowedTools: []
     - **## Phase Decisions**: PD-N entries with rationale (L2)
     - **## Verification Results**: PASS/FAIL with evidence (L2)
     - **## Notes for Next Phase**: env vars, import paths, deferred discoveries (L2)
+    - **## Warnings** (v0.12.0 HA-04): unexpected findings during implementation that may affect subsequent phases. Examples:
+      - Dependency substitutions (e.g., "bcrypt unavailable, used argon2 — verify compatibility in next phase")
+      - Platform constraint discoveries (e.g., "Tauri WebView blocks window.prompt — custom dialog needed")
+      - Performance concerns (e.g., "FTS5 index on 500K rows may need optimization")
+      - Missing infrastructure (e.g., "Redis connection may be required for rate-limiter in Phase 5")
+      This section is OPTIONAL — only include if unexpected findings occurred. Orchestrator uses these warnings when generating the next Phase Seed.
 
     Convert working.md to episodic format for `working_memory_snapshot` output field.
   </Execution_Flow>
@@ -144,6 +150,7 @@ disallowedTools: []
           { "criterion": "str", "pass": true, "evidence": "str" }
         ]
       },
+      "warnings": ["string | null"],
       "working_memory_snapshot": "episodic format string | null",
       "failure_info": null
     }

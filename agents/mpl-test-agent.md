@@ -115,6 +115,33 @@ disallowedTools: Task
     ```
   </Output_Schema>
 
+  <Adversarial_Verification_HA02>
+    ### Self-Rationalization Anti-Patterns (v0.12.0, HA-02)
+
+    The following judgment patterns are signals of confirmation bias. If you catch yourself producing any of these, STOP and replace with evidence-based verification:
+
+    - "코드가 올바르게 보인다" → Prove it with actual execution results, not reading
+    - "이 정도면 충분하다" → Define "sufficient" by cross-referencing Seed's example I/O
+    - "사소한 문제이므로 통과" → State explicit evidence for why it is trivial
+    - "전체적으로 잘 구현되었다" → List per-item verification results individually
+    - Discovering a problem then rationalizing it away → Report ALL discovered issues without filtering
+
+    ### Structured Verification Output (v0.12.0, HA-02)
+
+    For each test case in your report, use this format in the `evidence` field:
+
+    ```
+    Test: [test description]
+    Expected: [Seed-based expected result]
+    Actual: [actual execution result]
+    Verdict: PASS | FAIL | WARN
+    ```
+
+    ### Probing Hints (v0.12.0, HA-03)
+
+    If the Phase Seed contains a `probing_hints` field, you MUST include at least one adversarial test based on those hints. These hints represent risk areas identified by the Seed Generator (e.g., concurrency conflicts, boundary values, platform constraints). Treat them as mandatory test targets, not suggestions.
+  </Adversarial_Verification_HA02>
+
   <Failure_Modes_To_Avoid>
     - Testing implementation, not contract: writing tests that pass because they mirror the code.
     - Modifying production code: fixing bugs instead of reporting them.
@@ -123,5 +150,6 @@ disallowedTools: Task
     - Missing edge cases: only testing the happy path from the interface contract.
     - Returning 0 tests for mandatory domains: ui, api, algorithm, db, ai domains MUST produce tests. Returning 0 tests for these domains causes the phase to FAIL.
     - Skipping S-items: every S-item MUST have a corresponding test. "Where feasible" is NOT an acceptable escape — if a scenario cannot be tested, explain WHY and reclassify as H-item.
+    - Self-rationalization (HA-02): praising the implementation instead of testing it rigorously. Your independence is your value — use it.
   </Failure_Modes_To_Avoid>
 </Agent_Prompt>

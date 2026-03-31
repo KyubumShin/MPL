@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.11.3 Design Document
+# MPL (Micro-Phase Loop) v0.12.0 Design Document
 
 ## 1. Overview
 
@@ -851,6 +851,20 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 
 **Affected files:** `.mcp.json`
 **Breaking changes:** NONE
+
+### v0.12.0 — Harness Analysis Adoption: Adversarial Verification + Platform Safety (2026-03-31)
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| HA-01: Synthesis-first delegation | No delegation quality enforcement | Core Rule #5: lazy delegation anti-patterns prohibited (4 patterns listed) | feature | Claude Code Coordinator pattern — prevents "based on your findings" style prompts that delegate understanding |
+| HA-02: Adversarial verification prompt | Test Agent had no bias mitigation | Self-rationalization anti-patterns (5 patterns) + structured verification output (Test/Expected/Actual/Verdict) | feature | Claude Code Verification Agent + Anthropic blog: LLMs systematically rationalize away discovered issues |
+| HA-03: Seed probing hints | No adversarial testing guidance in Seed | `probing_hints` optional field in phase_seed.yaml — domain-specific + platform constraint hints | feature | exp5 B-1: Tauri WebView `window.prompt()` blocked but not tested. Probing hints provide safety net |
+| HA-04: Export manifest warnings | No mechanism for unexpected findings between phases | `warnings` field in Phase Runner output + State Summary `## Warnings` section + orchestrator Step 5.5 processing | feature | Alternative to Scratchpad (rejected for violating channel registry principle) — registered channel for ad-hoc findings |
+| HA-05: Seed self-verification + Platform MND | Seed Generator had no self-check or platform awareness | 5-item self-verification checklist (Step 9) + Platform MND auto-injection (Step 8.7) from config file detection | feature | exp5 B-1~B-3: MND lacked platform constraints → Runner used browser APIs blocked in Tauri WebView |
+
+**Affected files:** `commands/mpl-run.md`, `agents/mpl-test-agent.md`, `agents/mpl-phase-seed-generator.md`, `agents/mpl-phase-runner.md`, `commands/mpl-run-execute.md`, `docs/design.md`
+**Breaking changes:** NONE
+**Source analysis:** `analysis/mpl-adoption-candidates-debate.md`, `analysis/instructkr-claude-code-analysis.md`, `analysis/anthropic-harness-design-longrunning.md`
 
 ### v0.11.3 — Sentinel Activation + Platform Constraints (2026-03-31)
 
