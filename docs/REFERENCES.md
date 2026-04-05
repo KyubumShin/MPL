@@ -97,8 +97,8 @@ A record of external sources and projects that provided inspiration.
 
 | Concept | MPL Adaptation | Applied Location |
 |------|---------|----------|
-| **BM25 + Semantic + LLM Reranking** — 3-stage hybrid search pipeline | Added qmd_search, qmd_deep_search, qmd_vector_search to Scout's Available_Tools | `agents/mpl-scout.md` |
-| **/recall pattern** — Load past context before session starts | Scout 2-layer search: QMD recall (Layer 1) → Live tools (Layer 2) | `agents/mpl-scout.md` Search_Strategy |
+| **BM25 + Semantic + LLM Reranking** — 3-stage hybrid search pipeline | Added qmd_search, qmd_deep_search, qmd_vector_search to orchestrator's available tools | *(v1: `agents/mpl-scout.md` — removed in v2, Scout functionality absorbed by orchestrator)* |
+| **/recall pattern** — Load past context before session starts | 2-layer search: QMD recall (Layer 1) → Live tools (Layer 2) | *(v1: `agents/mpl-scout.md` — removed in v2)* |
 | **Cross-session learning accumulation** — JSONL → Markdown → QMD indexing automation | Register .mpl/ artifacts as QMD collection, recall past analysis results | `skills/mpl-setup/SKILL.md` Step 3g |
 | **MCP server integration** — Expose 6 tools to Claude Code via qmd mcp | Scout searches QMD via MCP, 0 LLM tokens | `agents/mpl-doctor.md` Category 10 |
 

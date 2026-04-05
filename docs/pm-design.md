@@ -119,7 +119,7 @@ The existing Triage's `interview_depth` field simultaneously determines both the
 triage_result:
   information_density: 3     # existing
   interview_depth: full       # existing — PM scope also determined by this
-  pipeline_tier: standard     # F-20
+  pp_proximity: pp_adjacent    # F-20
 ```
 
 ### 2.3 Why Integrated? (Advantages over Separation)
@@ -838,11 +838,11 @@ interview_depth =
 
 ### 8.3 Interaction with Pipeline Tier
 
-| Pipeline Tier | interview_depth tendency | PM behavior |
+| PP-Proximity | interview_depth tendency | PM behavior |
 |---------------|------------------------|------------|
-| **Frugal** (< 0.3) | light (+ Uncertainty Scan) | Lightweight requirements confirmation (F-35: interview mandatory) |
-| **Standard** (0.3~0.65) | light | Lightweight requirements structuring |
-| **Frontier** (> 0.65) | full | Full Socratic + solution options |
+| **non_pp** (< 0.3) | light (+ Uncertainty Scan) | Lightweight requirements confirmation (F-35: interview mandatory) |
+| **pp_adjacent** (0.3~0.65) | light | Lightweight requirements structuring |
+| **pp_core** (> 0.65) | full | Full Socratic + solution options |
 
 ---
 

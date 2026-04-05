@@ -82,7 +82,7 @@ describe('checkPlanStatus', () => {
 describe('checkGateResults', () => {
   it('should report all passed when all gates true', () => {
     const result = checkGateResults({
-      gate_results: { gate1_passed: true, gate2_passed: true, gate3_passed: true }
+      gate_results: { hard1_passed: true, hard2_passed: true, hard3_passed: true }
     });
     assert.strictEqual(result.allPassed, true);
     assert.strictEqual(result.anyFailed, false);
@@ -90,7 +90,7 @@ describe('checkGateResults', () => {
 
   it('should report partial pass', () => {
     const result = checkGateResults({
-      gate_results: { gate1_passed: true, gate2_passed: false, gate3_passed: null }
+      gate_results: { hard1_passed: true, hard2_passed: false, hard3_passed: null }
     });
     assert.strictEqual(result.allPassed, false);
     assert.strictEqual(result.anyFailed, true);
@@ -98,15 +98,15 @@ describe('checkGateResults', () => {
 
   it('should report no evaluation when all null', () => {
     const result = checkGateResults({
-      gate_results: { gate1_passed: null, gate2_passed: null, gate3_passed: null }
+      gate_results: { hard1_passed: null, hard2_passed: null, hard3_passed: null }
     });
     assert.strictEqual(result.allPassed, false);
     assert.strictEqual(result.anyFailed, false);
   });
 
-  it('should handle only gate1 present', () => {
+  it('should handle only hard1 present', () => {
     const result = checkGateResults({
-      gate_results: { gate1_passed: true, gate2_passed: null, gate3_passed: null }
+      gate_results: { hard1_passed: true, hard2_passed: null, hard3_passed: null }
     });
     assert.strictEqual(result.allPassed, true);
     assert.strictEqual(result.anyFailed, false);

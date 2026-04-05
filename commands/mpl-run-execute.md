@@ -427,7 +427,7 @@ If `.mpl/prompts/domains/` directory or the corresponding domain file doesn't ex
 
 After execution completes, also record domain information in routing-patterns.jsonl:
 ```jsonl
-{"ts":"...","desc":"...","tier":"frontier","domain_distribution":{"db":2,"api":3,"test":1},"result":"success","tokens":85000}
+{"ts":"...","desc":"...","proximity":"non_pp","domain_distribution":{"db":2,"api":3,"test":1},"result":"success","tokens":85000}
 ```
 Next run can reference domain distribution of similar tasks for pre-emptive prompt caching.
 

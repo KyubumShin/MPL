@@ -88,9 +88,10 @@ describe('VALIDATE_AGENTS', () => {
   it('should contain all expected agents', () => {
     const expected = [
       'mpl-phase-runner', 'mpl-decomposer',
-      'mpl-interviewer', 'mpl-test-agent',
-      'mpl-codebase-analyzer', 'mpl-doctor',
-      'mpl-git-master', 'mpl-phase0-analyzer',
+      'mpl-interviewer', 'mpl-ambiguity-resolver',
+      'mpl-test-agent', 'mpl-codebase-analyzer',
+      'mpl-doctor', 'mpl-git-master',
+      'mpl-phase0-analyzer',
     ];
     assert.strictEqual(VALIDATE_AGENTS.size, expected.length);
     for (const agent of expected) {
@@ -102,7 +103,7 @@ describe('VALIDATE_AGENTS', () => {
     const deleted = [
       'mpl-scout', 'mpl-code-reviewer', 'mpl-qa-agent',
       'mpl-verification-planner', 'mpl-compound',
-      'mpl-ambiguity-resolver', 'mpl-pre-execution-analyzer',
+      'mpl-pre-execution-analyzer',
       'mpl-phase-seed-generator',
     ];
     for (const agent of deleted) {
@@ -130,7 +131,7 @@ describe('EXPECTED_SECTIONS', () => {
     const deleted = [
       'mpl-pre-execution-analyzer', 'mpl-verification-planner',
       'mpl-code-reviewer', 'mpl-compound', 'mpl-qa-agent',
-      'mpl-scout', 'mpl-phase-seed-generator', 'mpl-ambiguity-resolver',
+      'mpl-scout', 'mpl-phase-seed-generator',
     ];
     for (const agent of deleted) {
       assert.strictEqual(EXPECTED_SECTIONS[agent], undefined, `sections should be removed for: ${agent}`);

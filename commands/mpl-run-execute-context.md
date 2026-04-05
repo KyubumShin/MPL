@@ -7,7 +7,7 @@ description: MPL Execute Protocol - Context Assembly, Memory Loading, Checkpoint
 This file contains the detailed Context Assembly protocol for MPL Phase Execution.
 Load this when entering Step 4.1 during phase execution.
 
-See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-gates.md` (5-Gate system), `mpl-run-execute-parallel.md` (parallel dispatch).
+See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-gates.md` (3H+1A Gate system), `mpl-run-execute-parallel.md` (parallel dispatch).
 
 ---
 
@@ -325,7 +325,7 @@ state.last_phase_compaction_count = state.compaction_count
 
 Phases determined as risk=HIGH in Pre-Execution Analysis (Step 1-B) are executed in isolation within a worktree.
 
-> **Applies when**: Worktree isolation is **activated only in Frontier tier**. Frugal/Standard tier skips this step because the single Phase overhead exceeds the benefit.
+> **Applies when**: Worktree isolation is **activated only for Non-PP proximity**. PP-core/PP-adjacent skips this step because the single Phase overhead exceeds the benefit.
 
 #### Determination Criteria
 
@@ -379,7 +379,7 @@ Reference risk_level from the current Phase info in state.json:
 
 #### Limitations
 
-- Worktree isolation is active only in Frontier tier (Frugal/Standard: single Phase, worktree overhead > benefit)
+- Worktree isolation is active only for Non-PP proximity (PP-core/PP-adjacent: single Phase, worktree overhead > benefit)
 - Maintain only 1 worktree at a time (no parallel worktrees)
 - Do not copy `.mpl/` directory to worktree (reference original)
 - Phase Runner's Read/Grep scope inside worktree is remapped to the worktree path

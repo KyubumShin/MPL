@@ -6,7 +6,7 @@
 
 MPL's core philosophy is **strengthening pre-specification (Phase 0) to make post-correction (Phase 5) unnecessary**. Through 7 experiments (Exp 1~8, excluding Exp 2), it was empirically verified that tokens invested in Phase 0 can completely eliminate the debugging/correction cost of Phase 5.
 
-In v3.0, this vision has been **fully implemented**, and additionally, features not in the roadmap (Pre-Execution Analysis, 5-Gate quality, Convergence Detection, etc.) were also introduced.
+In v3.0, this vision has been **fully implemented**, and additionally, features not in the roadmap (Pre-Execution Analysis, 5-Gate (v1) quality, Convergence Detection, etc.) were also introduced. In v2 (v0.11.0+), the 5-Gate system was restructured to **3 Hard + 1 Advisory (3H+1A) Gate**.
 
 ---
 
@@ -25,7 +25,7 @@ In v3.0, this vision has been **fully implemented**, and additionally, features 
 | Metric | v1.0 baseline | v2.0 target | v3.0 achieved | Status |
 |--------|--------------|------------|--------------|--------|
 | Total token usage | ~81K | 50~55K | Adaptive (variable by complexity) | ✓ Complexity-based optimization |
-| Phase 4 pass rate | 66~83% | 95%+ | Replaced by 5-Gate system | ✓ 95%+ required |
+| Phase 4 pass rate | 66~83% | 95%+ | Replaced by 5-Gate (v1) → 3H+1A Gate (v2) system | ✓ 95%+ required |
 | Phase 5 dependency | High (required) | Minimal (conditional) | Replaced by Fix Loop + Convergence Detection | ✓ Effectively eliminated |
 | Phase 0 tokens | ~5K | 8~25K (by complexity) | 8~25K (4-grade adaptive) | ✓ Goal achieved |
 | Debugging cycle count | 3~5 | 0~1 | Build-Test-Fix (max 2 per TODO) | ✓ Switched to immediate correction |
@@ -53,7 +53,7 @@ In v3.0, this vision has been **fully implemented**, and additionally, features 
 |---------|--------|---------------|-------|
 | Build-Test-Fix micro cycle | ✓ | ✓ | Max 2 retries per TODO |
 | Cumulative testing (regression prevention) | ✓ | ✓ | Full execution at phase end |
-| Stricter Phase 5 entry conditions | ✓ | ✓ | Evolved into 5-Gate system |
+| Stricter Phase 5 entry conditions | ✓ | ✓ | Evolved into 5-Gate (v1) → 3H+1A Gate (v2) system |
 | Automatic complexity detector | ✓ | ✓ | Integrated at Step 2.5 |
 | Test Agent (independent verification) | - | ✓ | Added in v3.0: separated from code author |
 | Convergence Detection | - | ✓ | Added in v3.0: improving/stagnating/regressing |
@@ -77,7 +77,7 @@ Features newly introduced in v3.0 that were not planned in the roadmap:
 |---------|-------------|--------------|
 | **Triage** | Automatic interview depth decision based on information_density (light/full, skip removed) | (orchestrator) |
 | **Pre-Execution Analysis** | Gap/Tradeoff integration + Verification 2-stage pre-analysis | mpl-pre-execution-analyzer, mpl-verification-planner |
-| **5-Gate quality system** | Gate 0.5 (type check) + Gate 1 (auto tests) + Gate 2 (code review) + Gate 3 (PP compliance) + Gate 3.5 (H-items) | mpl-code-reviewer |
+| **5-Gate quality system (v1)** | Gate 0.5 (type check) + Gate 1 (auto tests) + Gate 2 (code review) + Gate 3 (PP compliance) + Gate 3.5 (H-items). *v2에서 3H+1A Gate로 재편: Gate 0.5 → Advisory, Gate 1.5/1.7 제거* | mpl-code-reviewer |
 | **A/S/H verification classification** | Agent/Sandbox/Human verification item classification | mpl-verification-planner |
 | **Test Agent** | Test agent independent from code author | mpl-test-agent |
 | **Convergence Detection** | Detecting improving/stagnating/regressing in Fix Loop | (orchestrator) |
@@ -99,7 +99,7 @@ All 7 experiments achieved 77/77 = 100% (based on final test suite). These exper
 | Exp 5 | Test stub generation | 69/89 (77%) → 77/77 (100%) | Build-Test-Fix micro cycle |
 | Exp 6 | Incremental testing | 74/89 (83%) → 77/77 (100%) | Incremental Verification |
 | Exp 7 | Error specification | 77/77 (100%) | Step 4: Error Specification |
-| Exp 8 | Hybrid verification | 77/77 (100%) | 5-Gate quality system |
+| Exp 8 | Hybrid verification | 77/77 (100%) | 5-Gate (v1) → 3H+1A Gate (v2) quality system |
 
 > **Key finding**: The cumulative score progression (38% → 58% → 65% → 77% → 83% → 100%) shows that scores monotonically increase as Phase 0 techniques are added. This finding became the basis for the complexity-adaptive Phase 0 design.
 
@@ -118,14 +118,14 @@ Each step improves scores independently, but synergy is maximized when combined.
 
 ## Token Budget Reallocation
 
-Token budget changes from v1.0 to v3.0. v3.0 changed structure by replacing Phase 5 with Fix Loop + 5-Gate:
+Token budget changes from v1.0 to v3.0. v3.0 changed structure by replacing Phase 5 with Fix Loop + 5-Gate (v1; v2에서 3H+1A Gate로 재편):
 
 ```
 v1.0 (original)                     v3.0 (achieved)
 ┌──────────────────────────┐        ┌──────────────────────────┐
 │ Phase 0:  ~5K  ( 6%)     │        │ Phase 0: 8~25K (adaptive) │
 │ Phase 1: ~15K (19%)      │        │ Phase execution: adaptive  │
-│ Phase 2: ~15K (19%)      │        │ 5-Gate: ~2K              │
+│ Phase 2: ~15K (19%)      │        │ 5-Gate (v1→3H+1A): ~2K  │
 │ Phase 3: ~15K (19%)      │        │ Fix Loop: 0~10K (conditional) │
 │ Phase 4: ~15K (19%)      │        │ Finalize: ~2K            │
 │ Phase 5: ~16K (20%)      │        │                          │
@@ -257,6 +257,18 @@ Structural protocol changes leveraging 1M context for richer cross-phase informa
 | `docs/design.md` | v0.7.0 version bump, all planned notes resolved |
 
 Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
+
+---
+
+## v0.12.1 — v2 Completion: Agent Deletion + Terminology Cleanup (2026-04-04)
+
+Completes the v2 structural transition started in v0.11.0:
+
+- **7 agent files deleted**: mpl-code-reviewer, mpl-compound, mpl-phase-seed-generator, mpl-pre-execution-analyzer, mpl-qa-agent, mpl-scout, mpl-verification-planner
+- **v1→v2 terminology migration** across 38 files: `gate1/2/3` → `hard1/2/3`, `pipeline_tier` → `pp_proximity`, `5-Gate` → `3H+1A Gate`
+- **routing-patterns backward compat**: `p.proximity || p.tier` fallback
+- **MCP dist rebuild**: TypeScript schema aligned with v2 state (ambiguity_score, advisory_result)
+- **Version history annotations**: Deleted agent paths marked *(removed in v0.11.0)*
 
 ---
 
@@ -416,7 +428,7 @@ v0.6.3 addresses 5 verification gaps discovered in Yggdrasil 27-phase test: buil
 
 | ID | Feature | Type | Description |
 |----|---------|------|-------------|
-| B-02 | **Multi-Stack Build Verification** | Gate 0.5 enhancement | Auto-detect and run ALL project build tools (npm, cargo, go, python, etc.). |
+| B-02 | **Multi-Stack Build Verification** | Gate 0.5 (v1) enhancement. *v2: Advisory Gate* | Auto-detect and run ALL project build tools (npm, cargo, go, python, etc.). |
 | B-02 | **Cross-Layer Contract Test** | New verification type | Validate IPC/API type alignment between frontend and backend layers. |
 | B-02 | **Architecture Decision Enforcement** | Phase 0 extension | Mandatory architecture decisions for detected patterns (DB path, IPC protocol, auth). |
 | B-02 | **Runtime Verification** | Phase Runner extension | Dev server startup check after static verification passes. |
@@ -540,7 +552,7 @@ v4.0 adds verification depth: catching infeasible specs earlier, validating UI i
 | ID | Feature | Type | Description |
 |----|---------|------|-------------|
 | T-11 | **Feasibility 2-Layer Defense** | Agent extension | **Layer 1**: Stage 2 PP Conformance Check extended with `INFEASIBLE` classification. Checks API availability, constraint compatibility, tech viability, scope via Grep/Glob on codebase — catches ~80% of feasibility issues during interview at zero additional cost. **Layer 2**: Decomposer `go_no_go` extended with `RE_INTERVIEW` signal + `re_interview_questions` field. Safety net for Phase 0-dependent issues. |
-| T-03 | **Browser QA (Gate 1.7)** | New agent + Gate | New `mpl-qa-agent` validates UI via Claude in Chrome MCP tools (tabs, read_page, find, console, screenshot). Gate 1.7 inserted between Gate 1.5 and Gate 2. **Non-blocking** — issues defer to Step 5.5. Graceful skip when Chrome MCP unavailable. |
+| T-03 | **Browser QA (Gate 1.7)** (v1) | New agent + Gate | New `mpl-qa-agent` validates UI via Chrome MCP tools. Gate 1.7 inserted between Gate 1.5 and Gate 2. **Non-blocking** — issues defer to Step 5.5. Graceful skip when Chrome MCP unavailable. *v2: Gate 1.5/1.7 제거됨. Advisory Gate로 이동 가능.* |
 | T-04 | **PR Creation (Step 5.4b)** | Agent extension + Step | `mpl-git-master` extended with PR creation mode (`pr_creation: true`). Creates feature branch, pushes, opens PR via `gh pr create` with Gate evidence + deferred items in body. Optional, activated by config or prompt keywords. |
 
 ### New Agent
@@ -683,7 +695,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | **0.9.3** | LT-01 Contract Changes + LT-03a Contract Verification Gate + LT-04 Multi-Resolution Summary | Feature: contract & summary |
 | ~~**0.9.4**~~ | ~~Pre-v2 Cleanup: Worker Agent Removal + Principle 1/5 Rename + Version Notation~~ | ✅ **Implemented** |
 | ~~**0.9.5**~~ | ~~T-05 Design Contract + T-06 Doc Sync~~ | T-05 Dropped (Seed 대체), T-06 → v1.0.1 |
-| ~~**Experiment**~~ | ~~T-02 Same-model dual review~~ | Dropped (MCP Judge 흡수) |
+| ~~**Experiment**~~ | ~~T-02 Same-model dual review~~ | Dropped (Always-On Judge 흡수, codex-plugin-cc) |
 | ~~**0.10.0**~~ | ~~Mechanical Boundary Foundation: Channel Registry + Adjacent Contracts + Seed Extension + Sentinels + L1 Hard Gate~~ | ✅ **Implemented** |
 | ~~**0.10.1**~~ | ~~MCP Path Fix: .mcp.json args `${CLAUDE_PLUGIN_ROOT}` prefix~~ | ✅ **Implemented** |
 | ~~**0.10.2**~~ | ~~T-11 Skill Quality Polish: Description trigger hints (3-tier) + deprecated stub + setup split~~ | ✅ **Implemented** |
@@ -691,7 +703,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**v0.11.0**~~ | ~~v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8~~ | ✅ **Implemented** |
 | ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ✅ **Implemented** |
 | **v0.13.0** | HA-06: Advisory Gate Playwright E2E Smoke (조건부) | 🟠 Planned |
-| **v1.0.0** | v2 Phase 3: MCP Judge + Runner/Test 분리 + L2 | 🟠 Planned |
+| **v1.0.0** | v2 Phase 3: Always-On Judge (codex-plugin-cc) + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
 | **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |
 | **Dropped** | T-05, TS-01/02, BM-04, F-269, T-09, F-06 | v2 대체 또는 수요 부재 |
@@ -768,8 +780,8 @@ After: System auto-determines + dynamic switching
 
 | ID | Item | Status | Description |
 |----|------|--------|-------------|
-| F-20 | **Adaptive Pipeline Router — Single Entry Point** | ✅ **S1 complete** | Extend Triage (Step 0) to auto-calculate `pipeline_tier` (frugal/standard/frontier). Measure affected file count, test presence, import depth via Quick Scope Scan (Glob/Grep, ~1-2K tokens). Determine tier via `pipeline_score` formula. Integrate keyword-detector as single entry point (remove separate mpl-bugfix/mpl-small branches). User hints (bugfix/small) function only as tier overrides. **Ouroboros PAL Router reference** |
-| F-21 | **Dynamic Escalation/Downgrade** | ✅ **S1 complete** | Automatic tier switching during execution. Frugal circuit break → escalate to Standard → still failing → escalate to Frontier. On escalation, preserve completed work, re-run only failed phase with expanded pipeline. Downgrade implemented via previous routing pattern reference in Phase 0 (F-22 linkage) |
+| F-20 | **Adaptive Pipeline Router — Single Entry Point** (v1) | ✅ **S1 complete** | Extend Triage (Step 0) to auto-calculate `pipeline_tier` (v1; v2: `pp_proximity`로 대체) (frugal/standard/frontier). Measure affected file count, test presence, import depth via Quick Scope Scan. Determine tier via `pipeline_score` formula. *v2: Hat model(pp_proximity)로 대체. frugal/standard/frontier → Light/Standard/Full hat.* **Ouroboros PAL Router reference** |
+| F-21 | **Dynamic Escalation/Downgrade** (v1) | ✅ **S1 complete** | Automatic tier switching during execution. *v2: escalateTier 제거됨. Hat model에서 escalation 구조 변경.* |
 | F-10 | **RUNBOOK.md — Integrated Execution Log** | ✅ **S1 complete** | Introduce `docs/documentation.md` concept to MPL. Auto-update Current Status, Milestone Progress, Key Decisions, Known Issues, How to Resume sections in `.mpl/mpl/RUNBOOK.md` during pipeline execution. Anyone — human or agent — can grasp current status and resume immediately from this single file |
 | F-11 | **Run-to-Run Learning Accumulation** | ✅ **S2 complete** | RUNBOOK decisions/issues distilled via `mpl-compound` to `.mpl/memory/learnings.md` on execution completion. Auto-loaded in next execution Phase 0. Accumulates failure patterns (type confusion, error mismatch), success patterns, project conventions (discovered). **Flow**: Record in RUNBOOK during execution → compound distillation → next Phase 0 reference |
 | F-12 | **In-session Context Persistence** | ✅ **S2 complete** | Orchestrator marks key state (current phase, PP summary, last failure cause) with `<remember priority>` tags at each phase transition. Dual safety net of RUNBOOK.md (file-based) and `<remember>` (tag-based) to handle context compression during long executions |
@@ -842,7 +854,7 @@ After: System auto-determines + dynamic switching
 |----|------|--------------|--------|
 | F-34 | Auto-Permission Learning | `mpl-auto-permit.mjs`, `mpl-permit-learner.mjs` | Sprint 5 |
 | F-40 | Test Agent Mandatory | Gate 1 requires mpl-test-agent | Sprint 6 |
-| F-50 | Gate 1.5 Coverage | Coverage threshold gate | Sprint 6 |
+| F-50 | ~~Gate 1.5 Coverage~~ (v1) | Coverage threshold gate. *v2: Gate 1.5 제거됨* | Sprint 6 |
 
 #### LOW — Maintenance
 
@@ -853,9 +865,11 @@ After: System auto-determines + dynamic switching
 
 ---
 
-### Adaptive Pipeline Router Detailed Design (F-20, F-21, F-22)
+### Adaptive Pipeline Router Detailed Design (F-20, F-21, F-22) — (v1)
 
-#### Pipeline Score Formula
+> **⚠ v2 이후 Deprecated**: Hat model(pp_proximity)로 대체됨. pipeline_tier → pp_proximity, frugal/standard/frontier → Light/Standard/Full hat, escalateTier 제거. 역사적 참조용.
+
+#### Pipeline Score Formula (v1)
 
 Calculated after Quick Scope Scan in Triage (Step 0):
 
@@ -871,7 +885,7 @@ risk_signal:      keyword_hint or prompt analysis (0.0~1.0)
 
 Quick Scope Scan completes in ~1-2K tokens using only Glob/Grep. A lightweight version of the existing Step 2 codebase analysis.
 
-#### 3-Tier Pipeline Mapping
+#### 3-Tier Pipeline Mapping (v1; v2: Hat model)
 
 | Tier | Score | Execution steps | Skipped | Expected tokens |
 |------|-------|----------------|---------|----------------|
@@ -881,7 +895,7 @@ Quick Scope Scan completes in ~1-2K tokens using only Glob/Grep. A lightweight v
 
 User hint override: `"mpl bugfix"` → force tier to frugal, `"mpl small"` → force standard. Auto-calculated if no hint.
 
-#### Dynamic Escalation Protocol
+#### Dynamic Escalation Protocol (v1; v2: escalateTier 제거)
 
 ```
 [Frugal] ──circuit break──→ [Standard] ──circuit break──→ [Frontier]
@@ -896,8 +910,8 @@ Record `escalation_history` in state.json on escalation:
 
 ```json
 {
-  "pipeline_tier": "standard",
-  "escalation_history": [
+  "pipeline_tier": "standard",  // v1; v2: pp_proximity로 대체
+  "escalation_history": [       // v1; v2: escalateTier 제거
     {"from": "frugal", "to": "standard", "reason": "circuit_break", "preserved_todos": 3}
   ]
 }
@@ -935,7 +949,7 @@ Triage (Step 0) — extended
 │   ├── test presence check
 │   └── import depth sampling
 ├── routing-patterns.jsonl matching (previous pattern reference) [F-22]
-├── pipeline_score calculation → pipeline_tier               [F-20]
+├── pipeline_score calculation → pipeline_tier (v1→pp_proximity) [F-20]
 └── .mpl/memory/learnings.md load                            [F-11]
 
 PP + Requirements Integrated Interview (Step 1) — mpl-interviewer v2  [F-26, F-35]
@@ -992,7 +1006,7 @@ Started: 2026-03-07T10:00:00Z
 ## Current Status
 - Phase: 3/5 (phase-3: Add validation layer)
 - Pipeline Mode: full
-- Maturity: standard
+- ~~Maturity: standard~~ (v1; v2: maturity_mode 제거)
 
 ## Milestone Progress
 - [x] Phase 1: DB schema migration — PASS (4/4 criteria)

@@ -31,7 +31,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
   </Rules>
 
   <Reasoning_Steps>
-    Step 1: Gap analysis (from mpl-pre-execution-analyzer)
+    Step 1: Gap analysis (from interview / mpl-interviewer)
       - Identify missing requirements, ambiguities, and AI pitfalls in the request BEFORE decomposing.
       - Flag unstated assumptions (auth model, error handling, persistence strategy).
       - If critical gaps found, set go_no_go = "RE_INTERVIEW" with specific questions.

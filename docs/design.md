@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.12.0 Design Document
+# MPL (Micro-Phase Loop) v0.12.1 Design Document
 
 ## 1. Overview
 
@@ -541,7 +541,7 @@ Replaces the mechanical B-04 checkpoint system with semantic, feature-aligned cl
 - `commands/mpl-run-execute.md` — Step 4.0.1 cluster init, Step 4.4 Cluster E2E + Fix Loop, Step 4.5a Final E2E, execute_scenario helper
 - `commands/mpl-run-execute-gates.md` — Gate 0.5 lint auto-detection + execution (V-02)
 - `commands/mpl-run-finalize.md` — Step 5.1.5 Scope Drift Report (V-05)
-- `agents/mpl-phase-seed-generator.md` — Step 2.5 TSConfig strict constraint (V-03)
+- `agents/mpl-phase-seed-generator.md` *(removed in v0.11.0)* — Step 2.5 TSConfig strict constraint (V-03)
 - `prompts/langs/typescript.md` — TSConfig strict baseline (V-03)
 - `docs/config-schema.md` — NEW: consolidated config reference (V-04)
 - `docs/design.md` — Version bump, v0.8.0 history
@@ -564,7 +564,7 @@ Full spec: `docs/roadmap/v0.6.7-cluster-ralph.md`
 **Affected files:**
 - `agents/mpl-interviewer.md` — Round 1-T (Q-T1 Test Strategy, Q-T2 Coverage Target)
 - `agents/mpl-decomposer.md` — Step 8.6 (test strategy PP-driven framework selection)
-- `agents/mpl-phase-seed-generator.md` — Step 2.7 (reference file auto-selection) + `reference_files` output field
+- `agents/mpl-phase-seed-generator.md` *(removed in v0.11.0)* — Step 2.7 (reference file auto-selection) + `reference_files` output field
 - `commands/mpl-run-execute.md` — Step 4.1.6 (regression suite loading) + Step 4.3 item 11 (regression accumulation) + Phase Runner regression context
 - `commands/mpl-run-execute-gates.md` — Gate 1 (regression suite execution)
 
@@ -652,7 +652,7 @@ Analysis: `analysis/mpl-3field-classification.md` → renamed to 4-Field classif
 
 **Affected files:**
 - `hooks/lib/mpl-memory.mjs` — `addPhaseHint()` function (BM-02)
-- `agents/mpl-code-reviewer.md` — Investigation Protocol Step 1b PP/PD checklist (BM-05)
+- `agents/mpl-code-reviewer.md` *(removed in v0.11.0)* — Investigation Protocol Step 1b PP/PD checklist (BM-05)
 - `commands/mpl-run-execute-gates.md` — Gate 2 prompt with PP/PD checklist (BM-05)
 - `agents/mpl-phase-runner.md` — Step 4 cumulative regression parallel flags table (LT-02)
 - `hooks/lib/mpl-state.mjs` — `h_item_metrics` field in DEFAULT_STATE (LT-05)
@@ -672,7 +672,7 @@ Scout agent now logs its full search trajectory, enabling post-mortem analysis o
 | Validation | P-03 | `search_trajectory` added to mpl-scout expected sections in validate-output hook | Hook extension |
 
 **Affected files:**
-- `agents/mpl-scout.md` — Output_Format extended with `search_trajectory` array + documentation
+- `agents/mpl-scout.md` *(removed in v0.11.0)* — Output_Format extended with `search_trajectory` array + documentation
 - `commands/mpl-run-execute-gates.md` — Fix loop scout trajectory save + failure analysis
 - `commands/mpl-run-phase0-analysis.md` — Phase 0 scout trajectory save
 - `hooks/mpl-validate-output.mjs` — `search_trajectory` added to mpl-scout expected sections
@@ -711,9 +711,9 @@ Dependency-based compression for state summaries. Instead of loading all depende
 
 **Affected files:**
 - `prompts/domains/db.md` — transaction wrapping rule (PR-01)
-- `agents/mpl-code-reviewer.md` — Security, Correctness, Design System categories (PR-02, PR-03, PR-04)
+- `agents/mpl-code-reviewer.md` *(removed in v0.11.0)* — Security, Correctness, Design System categories (PR-02, PR-03, PR-04)
 - `agents/mpl-phase0-analyzer.md` — Step 4 Error Spec strict/unwrap checks (PR-05)
-- `agents/mpl-verification-planner.md` — A-TX auto-insert for DB phases (PR-01)
+- `agents/mpl-verification-planner.md` *(removed in v0.11.0)* — A-TX auto-insert for DB phases (PR-01)
 
 **Breaking changes: NONE.** All changes are prompt text additions. No schema, protocol, or config changes.
 
@@ -733,9 +733,9 @@ Dependency-based compression for state summaries. Instead of loading all depende
 - `agents/mpl-decomposer.md` — Rule 8 boundary-pair awareness (CB-02)
 - `commands/mpl-run-execute-gates.md` — Gate 0.7 section (CB-03)
 - `docs/design.md` — Gate table updated with Gate 0.7 (CB-03)
-- `agents/mpl-code-reviewer.md` — Step 4.5 gate-0.7 integration (CB-03)
+- `agents/mpl-code-reviewer.md` *(removed in v0.11.0)* — Step 4.5 gate-0.7 integration (CB-03)
 - `commands/mpl-run-finalize.md` — Gate 0.7 warning aggregation (CB-03)
-- `agents/mpl-verification-planner.md` — Section 5.5 mock boundary gaps (CB-04)
+- `agents/mpl-verification-planner.md` *(removed in v0.11.0)* — Section 5.5 mock boundary gaps (CB-04)
 
 **Breaking changes: NONE.**
 
@@ -833,7 +833,7 @@ Documentation-only release. No code changes. Prepares the codebase for v2 struct
 **Modified files:**
 - `docs/design.md` — Channel Registry, Gate table, changelog
 - `agents/mpl-decomposer.md` — adjacent_contracts (CB-L0)
-- `agents/mpl-phase-seed-generator.md` — contract_files input, contract_snippet output (SEED-01/02)
+- `agents/mpl-phase-seed-generator.md` *(removed in v0.11.0)* — contract_files input, contract_snippet output (SEED-01/02)
 - `agents/mpl-phase-runner.md` — export-manifest generation, L1 Hard Gate (CB-L1)
 - `agents/mpl-test-agent.md` — S3 validation note
 - `commands/mpl-run-execute.md` — Seed validation + Sentinel steps
@@ -852,6 +852,19 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 **Affected files:** `.mcp.json`
 **Breaking changes:** NONE
 
+### v0.12.1 — v2 Completion: Agent Deletion + Terminology Cleanup (2026-04-04)
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Delete 7 agents per 17→8 plan | 7 agent .md files still existed | Deleted: code-reviewer, compound, phase-seed-generator, pre-execution-analyzer, qa-agent, scout, verification-planner | cleanup | v0.11.0 consolidated to 8 agents but files remained |
+| v1→v2 terminology migration | `gate1/gate2/gate3`, `pipeline_tier`, `5-Gate` in 38 files | `hard1/hard2/hard3`, `pp_proximity`, `3H+1A Gate` | refactor | Code and docs now use consistent v2 terms |
+| routing-patterns backward compat | No fallback | `p.proximity \|\| p.tier` | bugfix | Prevent breakage during gradual migration |
+| MCP dist rebuild | Old v1 schema fields | v2 schema (ambiguity_score, advisory_result) | cleanup | TypeScript types match runtime state |
+| Version history annotations | Deleted agent paths referenced as current | Annotated with *(removed in v0.11.0)* | docs | Prevent confusion in version history |
+
+**Affected files:** 38 files — agents/ (7 deleted), hooks/ (tests, routing-patterns), mcp-server/dist/, docs/, skills/, commands/, README
+**Breaking changes:** NONE (all agent files were already unused since v0.11.0)
+
 ### v0.12.0 — Harness Analysis Adoption: Adversarial Verification + Platform Safety (2026-03-31)
 
 | Change | Before | After | Type | Rationale |
@@ -862,7 +875,7 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | HA-04: Export manifest warnings | No mechanism for unexpected findings between phases | `warnings` field in Phase Runner output + State Summary `## Warnings` section + orchestrator Step 5.5 processing | feature | Alternative to Scratchpad (rejected for violating channel registry principle) — registered channel for ad-hoc findings |
 | HA-05: Seed self-verification + Platform MND | Seed Generator had no self-check or platform awareness | 5-item self-verification checklist (Step 9) + Platform MND auto-injection (Step 8.7) from config file detection | feature | exp5 B-1~B-3: MND lacked platform constraints → Runner used browser APIs blocked in Tauri WebView |
 
-**Affected files:** `commands/mpl-run.md`, `agents/mpl-test-agent.md`, `agents/mpl-phase-seed-generator.md`, `agents/mpl-phase-runner.md`, `commands/mpl-run-execute.md`, `docs/design.md`
+**Affected files:** `commands/mpl-run.md`, `agents/mpl-test-agent.md`, `agents/mpl-phase-seed-generator.md` *(removed in v0.11.0)*, `agents/mpl-phase-runner.md`, `commands/mpl-run-execute.md`, `docs/design.md`
 **Breaking changes:** NONE
 **Source analysis:** `analysis/mpl-adoption-candidates-debate.md`, `analysis/instructkr-claude-code-analysis.md`, `analysis/anthropic-harness-design-longrunning.md`
 
@@ -905,7 +918,7 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | Change | Before | After | Type | Rationale |
 |--------|--------|-------|------|-----------|
 | Gate restructuring | 6 Gates (0.5/0.7/1/1.5/1.7/2/3) | 3 Hard + 1 Advisory | structural | Probabilistic gates merged, mechanical gates separated |
-| Hat model | maturity_mode × pipeline_tier | PP-proximity (pp_core/pp_adjacent/non_pp) | structural | Single axis simplification |
+| Hat model | maturity_mode × pipeline_tier | PP-proximity (near/mid/far) | structural | Single axis simplification |
 | Agent consolidation | 16 agents | 8 agents | structural | 8 agents deleted, core logic absorbed |
 | Phase Runner | ~718 lines | 171 lines | reduction | Seed-based execution, domain awareness removed |
 | Decomposer | ~662 lines | 186 lines | reduction | Verification planner + pre-execution analyzer absorbed |

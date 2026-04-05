@@ -50,11 +50,10 @@ Output a structured dashboard:
 ║  Completed: {N}  Pending: {N}  Failed: {N}       ║
 ╠══════════════════════════════════════════════════╣
 ║  Quality Gates:                                  ║
-║  Gate 0.5 (Types):    {PASS|FAIL|PENDING|N/A}    ║
-║  Gate 1   (Tests):    {PASS|FAIL|PENDING}         ║
-║  Gate 1.5 (Coverage): {PASS|FAIL|PENDING|N/A}    ║
-║  Gate 2   (Review):   {PASS|FAIL|PENDING}         ║
-║  Gate 3   (PP+H):     {PASS|FAIL|PENDING|N/A}    ║
+║  Hard 1 (Build+Type): {PASS|FAIL|PENDING}         ║
+║  Hard 2 (Tests):      {PASS|FAIL|PENDING}         ║
+║  Hard 3 (PP):         {PASS|FAIL|PENDING}         ║
+║  Advisory (Contract): {PASS|WARN|N/A}             ║
 ╠══════════════════════════════════════════════════╣
 ║  Research:                                       ║
 ║  Mode: {full|light|standalone|skipped}           ║
@@ -126,7 +125,7 @@ Based on state, suggest next action:
 | phase3 + gate failed | "Enter Phase 4 fix loop or re-plan" |
 | phase4 + stagnating | "Consider model escalation or re-plan" |
 | phase5 | "Finalize: extract learnings and commit" |
-| completed | "Pipeline complete. Learning extraction runs inline during finalize, or run /mpl:mpl-compound manually" |
+| completed | "Pipeline complete. Learning extraction runs inline during finalize." |
 | cancelled | "Pipeline was cancelled. Run /mpl:mpl-resume to continue" |
 
 ## Error States

@@ -6,9 +6,6 @@ export interface MplState {
     pipeline_id: string | null;
     run_mode: string;
     tool_mode: string;
-    pipeline_tier: string | null;
-    pipeline_score: number | null;
-    tier_hint: string | null;
     escalation_history: string[];
     interview_depth: string | null;
     current_phase: string;
@@ -21,9 +18,10 @@ export interface MplState {
         failed_todos: number;
     };
     gate_results: {
-        gate1_passed: boolean | null;
-        gate2_passed: boolean | null;
-        gate3_passed: boolean | null;
+        hard1_passed: boolean | null;
+        hard2_passed: boolean | null;
+        hard3_passed: boolean | null;
+        advisory_result: string | null;
     };
     fix_loop_count: number;
     max_fix_loops: number;
@@ -40,6 +38,7 @@ export interface MplState {
         min_improvement: number;
         regression_threshold: number;
     };
+    ambiguity_score: number | null;
     session_status: string | null;
     pause_reason: string | null;
     resume_from_phase: string | null;

@@ -1,5 +1,7 @@
 # Adaptive Pipeline Router — Implementation Plan
 
+> **⚠ v2 이후 Deprecated**: Hat model(pp_proximity)로 대체됨. 역사적 참조용.
+
 > Implementation plan for F-20, F-21, F-22. Based on Ouroboros PAL Router analysis.
 > Written: 2026-03-07
 

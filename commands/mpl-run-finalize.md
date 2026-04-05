@@ -344,7 +344,7 @@ user's original prompt contains "PR", "pull request", or "ship".
 ```
 if config.auto_pr?.enabled or task_prompt_mentions_pr:
   // Gather PR context
-  gate_results = Read(".mpl/mpl/RUNBOOK.md") → extract "5-Gate Quality Results" section
+  gate_results = Read(".mpl/mpl/RUNBOOK.md") → extract "3H+1A Gate Quality Results" section
   deferred = Read(".mpl/mpl/deferred-review.md") or "None"
   pp_summary = Read(".mpl/pivot-points.md") → first 3 PPs
 
@@ -406,9 +406,9 @@ Save to `.mpl/mpl/metrics.json`:
   "tradeoff_analysis": { "aggregate_risk": "LOW", "irreversible_count": 0 },
   "critic_assessment": "READY",
   "three_gate_results": {
-    "gate1_pass_rate": 100,
-    "gate2_verdict": "PASS",
-    "gate3_pass": true
+    "hard1_pass_rate": 100,
+    "hard2_verdict": "PASS",
+    "hard3_pass": true
   },
   "verification_plan": { "a_items": 0, "s_items": 0, "h_items": 0 },
   "triage": { "interview_depth": "full", "prompt_density": 3 }
@@ -535,7 +535,7 @@ pattern = {
 appendPattern(cwd, pattern)
 // Uses hooks/lib/mpl-routing-patterns.mjs
 
-Report: "[MPL] Routing pattern recorded: tier={tier}, result={result}, tokens={tokens}."
+Report: "[MPL] Routing pattern recorded: proximity={proximity}, result={result}, tokens={tokens}."
 ```
 
 ### 5.7: Update State

@@ -9,7 +9,7 @@ MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh 
 
 ## Activation Protocol
 
-1. Initialize `.mpl/state.json` with `run_mode: "auto"` (keyword hook has already done this with tier_hint)
+1. Initialize `.mpl/state.json` with `run_mode: "auto"` (keyword hook has already done this with pp_hint)
 2. Initialize `.mpl/mpl/state.json` for MPL-specific tracking
 3. Read state to determine current phase and `pp_proximity` distribution
 4. **Load the detailed orchestration protocol**: read `MPL/commands/mpl-run.md`
@@ -56,7 +56,7 @@ mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
 | `.mpl/mpl/profile/run-summary.json` | Complete run profile |
 | `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
 | `.mpl/mpl/phases/phase-N/` | Per-phase artifacts (mini-plan, state-summary, verification) |
-| `.mpl/memory/routing-patterns.jsonl` | Past execution patterns for tier prediction (F-22) |
+| `.mpl/memory/routing-patterns.jsonl` | Past execution patterns for proximity prediction (F-22) |
 | `.mpl/memory/learnings.md` | Run-to-run accumulated learnings (F-11) |
 | `.mpl/pivot-points.md` | Immutable constraints (shared with standard mode) |
 
@@ -95,8 +95,8 @@ Do NOT proceed with Phase execution without loading the corresponding protocol f
 
 | Skill | Purpose |
 |-------|---------|
-| `/mpl:mpl` | MPL pipeline — single entry point with auto tier routing (this skill) |
-| `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to standard tier) |
+| `/mpl:mpl` | MPL pipeline — single entry point with auto proximity routing (this skill) |
+| `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to pp_adjacent) |
 | `/mpl:mpl-pivot` | Pivot Points interview (immutable constraints) |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |

@@ -8,7 +8,7 @@ This file contains the Task-based TODO protocol, Background Execution for indepe
 and Orchestrator Context Cleanup.
 Load this when parallel TODOs are detected during phase execution.
 
-See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-context.md` (context assembly), `mpl-run-execute-gates.md` (5-Gate system).
+See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-context.md` (context assembly), `mpl-run-execute-gates.md` (3H+1A Gate system).
 
 ---
 

@@ -87,7 +87,6 @@ If `.mpl/config.json` does not exist, create it:
 
 ```json
 {
-  "maturity_mode": "standard",
   "max_fix_loops": 10,
   "max_total_tokens": 900000,
   "gate1_strategy": "auto",

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.12.0
+# MPL (Micro-Phase Loop) v0.12.1
 
 **예방이 치료보다 낫다. 명세가 디버깅보다 낫다.**
 
@@ -89,7 +89,7 @@ PP 인터뷰        → 6개 Pivot Points 추출 (3 CONFIRMED, 3 PROVISIONAL)
 Phase 0 Enhanced → API 계약 + 타입 정책 + 에러 명세 생성
 분해              → 4개 마이크로 페이즈 + 인터페이스 계약
 페이즈 실행       → 4 페이즈 × (계획 → 페이즈 러너 → 테스트 → 검증)
-3H+1A Gate       → Gate 1: 테스트(Hard), Gate 2: 리뷰(Hard), Gate 3: PP(Hard), Gate 0.5: 타입(Advisory)
+3H+1A Gate       → Hard 1: 빌드+타입, Hard 2: 테스트, Hard 3: PP 준수, Advisory: 크로스 바운더리
 RUNBOOK          → 전체 실행 로그 (세션 연속성 보장)
 ```
 
@@ -123,10 +123,10 @@ MPL의 핵심은 **분해-실행-검증** 루프이며, 각 반복은 새로운 
                                │
                     ┌──────────▼──────────────┐
                     │  3 Hard + 1 Advisory    │
-                    │  Gate 1: 테스트 (Hard)  │
-                    │  Gate 2: 리뷰 (Hard)    │
-                    │  Gate 3: PP (Hard)      │
-                    │  Gate 0.5: 타입 (Adv.)  │
+                    │  Hard 1: 빌드+타입      │
+                    │  Hard 2: 테스트         │
+                    │  Hard 3: PP 준수        │
+                    │  Advisory: 크로스 바운더리│
                     └──────────┬──────────────┘
                                │
                            완료
@@ -271,10 +271,10 @@ Hat 레벨이 실패하면, 포기하지 않고 성장한다:
 
 | Gate | 타입 | 방법 | 통과 기준 |
 |------|------|------|----------|
-| **Gate 0.5** | Advisory | 프로젝트 전체 타입 검사 (`lsp_diagnostics_directory`) | 타입 에러 제로 (경고, 차단하지 않음) |
-| **Gate 1** | **Hard** | 자동화 테스트 (A + S items) | pass_rate >= 95% |
-| **Gate 2** | **Hard** | 코드 리뷰 | PASS 판정 |
-| **Gate 3** | **Hard** | PP 준수 + H-item 해결 | 위반 없음 + 모든 H-items 해결 |
+| **Hard 1** | **Hard** | 빌드 + 타입 검사 (프로젝트 전체) | 빌드 에러 0, 타입 에러 0 |
+| **Hard 2** | **Hard** | 자동화 테스트 (A + S items) | pass_rate >= 95% |
+| **Hard 3** | **Hard** | PP 준수 + H-item 해결 | 위반 없음 + 모든 H-items 해결 |
+| **Advisory** | Advisory | 크로스 바운더리 계약 검사 | 바운더리 계약 일관성 (경고, 차단하지 않음) |
 
 ### 수렴 감지
 
@@ -296,7 +296,7 @@ Fix loop에서 pass rate 이력을 추적하여 자동 판단:
 ```
 MPL/
 ├── agents/                 # 8개 에이전트 정의 (YAML)
-│   └── mpl-scout.md        # Haiku 기반 읽기 전용 탐색 (F-16)
+│   └── mpl-interviewer.md   # PP 인터뷰 + 모호성 해소 (opus)
 ├── commands/               # 오케스트레이션 프로토콜 (토큰 효율을 위해 분할)
 │   ├── mpl-run.md          # 라우터: 어떤 프로토콜 파일을 로드할지
 │   ├── mpl-run-phase0.md   # Steps -1 ~ 2.5: 트리아지, PP, Phase 0
@@ -334,13 +334,12 @@ MPL/
 - **Dynamic Escalation (F-21)** — light → standard → full 서킷 브레이크 시, 완료된 작업 보존
 - **RUNBOOK (F-10)** — 통합 실행 로그, 9개 파이프라인 지점에서 자동 업데이트, 세션 재개 가능
 - **Session Persistence (F-12)** — 페이즈 전환마다 `<remember priority>` 태그 + RUNBOOK 이중 안전망
-- **Run-to-Run Learning (F-11)** — mpl-compound가 RUNBOOK → `.mpl/memory/learnings.md` 증류
+- **Run-to-Run Learning (F-11)** — 오케스트레이터가 RUNBOOK → `.mpl/memory/learnings.md` 증류
 - **Routing Pattern Learning (F-22)** — 과거 실행 패턴의 Jaccard 유사도 매칭
 - **Self-Directed Context (F-24)** — Phase Runner가 스코프 바운디드 영향 파일 내 Read/Grep 가능
 - **Task-based TODO (F-23)** — 실행 중 TaskCreate/TaskUpdate가 주요 TODO 상태 관리자
 - **Background Execution (F-13)** — 독립 TODO를 `run_in_background: true`로 병렬 디스패치
-- **mpl-scout (F-16)** — Haiku 기반 읽기 전용 탐색 에이전트, 경량 코드베이스 분석
-- **Gate 0.5 Type Check (F-17)** — Gate 1 전 프로젝트 전체 `lsp_diagnostics_directory`
+- **Hard 1 빌드+타입 검사** — 프로젝트 전체 빌드 및 타입 검사 (이전 Gate 0.5 통합)
 - **Standalone Mode (F-04)** — 도구 가용성 자동 감지, LSP/AST 미설치 시 Grep/Glob 폴백
 - **Phase 0 Caching** — 해시 기반 캐시 키, 캐시 히트 시 Phase 0 전체 스킵 (~8-25K 토큰 절감)
 - **2-Tier PD** — Phase Decisions를 Active/Summary로 분류, 페이즈당 일정 토큰 예산

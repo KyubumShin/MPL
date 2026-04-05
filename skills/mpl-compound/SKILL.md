@@ -1,8 +1,10 @@
 ---
-description: "Learning extraction and knowledge distillation — standalone or post-pipeline. Usually called internally after pipeline completion. May also trigger when the user explicitly asks to extract learnings or review decisions: '배운 점 정리', 'compound', '회고해줘'."
+description: "[DEPRECATED] Learning extraction now runs inline during finalize (Step 5.2). This skill is kept for standalone use only. Triggers on: 'compound', '배운 점 정리', '회고해줘'."
 ---
 
-# MPL Compound
+# MPL Compound (Deprecated)
+
+> **Deprecation Notice (v2):** In v2, learning extraction runs inline during the finalize step (Step 5.2) — the separate mpl-compound agent was removed. This skill is retained only for standalone use outside the pipeline.
 
 Extract learnings, decisions, issues, and metrics from a completed pipeline run or coding session.
 

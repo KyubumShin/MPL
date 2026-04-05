@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.12.0
+# MPL (Micro-Phase Loop) v0.12.1
 
 **Prevention over cure. Specification over debugging.**
 
@@ -121,7 +121,7 @@ PP Interview      → 6 Pivot Points extracted (3 CONFIRMED, 3 PROVISIONAL)
 Phase 0 Enhanced  → API contracts + type policy + error spec generated
 Decomposition     → 4 micro-phases with interface contracts
 Phase Execution   → 4 phases × (plan → execute → test → verify)
-3H+1A Gate        → Gate 1: tests (Hard), Gate 2: review (Hard), Gate 3: PP (Hard), Gate 0.5: types (Advisory)
+3H+1A Gate        → Hard 1: build+types, Hard 2: tests, Hard 3: PP compliance, Advisory: cross-boundary
 RUNBOOK           → Full execution log for session continuity
 ```
 
@@ -155,10 +155,10 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
                                │
                     ┌──────────▼──────────────┐
                     │  3 Hard + 1 Advisory    │
-                    │  Gate 1: Tests (Hard)   │
-                    │  Gate 2: Review (Hard)  │
-                    │  Gate 3: PP (Hard)      │
-                    │  Gate 0.5: Types (Adv.) │
+                    │  Hard 1: Build+Types    │
+                    │  Hard 2: Tests          │
+                    │  Hard 3: PP Compliance  │
+                    │  Advisory: Cross-Boundary│
                     └──────────┬──────────────┘
                                │
                            Complete
@@ -303,10 +303,10 @@ Three hard gates that block completion, plus one advisory gate:
 
 | Gate | Type | Method | Pass Criteria |
 |------|------|--------|---------------|
-| **Gate 0.5** | Advisory | Project-wide type check (`lsp_diagnostics_directory`) | Zero type errors (warns, does not block) |
-| **Gate 1** | **Hard** | Automated tests (A + S items) | pass_rate >= 95% |
-| **Gate 2** | **Hard** | Code review | PASS verdict |
-| **Gate 3** | **Hard** | PP compliance + H-item resolution | No violations + all H-items resolved |
+| **Hard 1** | **Hard** | Build + Type Check (project-wide) | 0 build errors, 0 type errors |
+| **Hard 2** | **Hard** | Automated tests (A + S items) | pass_rate >= 95% |
+| **Hard 3** | **Hard** | PP compliance + H-item resolution | No violations + all H-items resolved |
+| **Advisory** | Advisory | Cross-boundary contract check | Boundary contract consistency (warns, does not block) |
 
 ### Convergence Detection
 
@@ -328,7 +328,7 @@ Fix loops track pass rate history for automatic decisions:
 ```
 MPL/
 ├── agents/                 # 8 agent definitions (YAML frontmatter)
-│   └── mpl-scout.md        # Haiku-based read-only exploration (F-16)
+│   └── mpl-interviewer.md   # PP Interview + ambiguity resolution (opus)
 ├── commands/               # Orchestration protocols (split for token efficiency)
 │   ├── mpl-run.md          # Router: which protocol file to load
 │   ├── mpl-run-phase0.md   # Steps -1 ~ 2.5: Triage, PP, Phase 0
@@ -375,13 +375,12 @@ MPL/
 - **Dynamic Escalation (F-21)** — light → standard → full on circuit break, preserving completed work
 - **RUNBOOK (F-10)** — Integrated execution log, auto-updated at 9 pipeline points, enables session resume
 - **Session Persistence (F-12)** — `<remember priority>` tags at phase transitions + RUNBOOK dual safety net
-- **Run-to-Run Learning (F-11)** — mpl-compound distills RUNBOOK → `.mpl/memory/learnings.md`
+- **Run-to-Run Learning (F-11)** — Orchestrator distills RUNBOOK → `.mpl/memory/learnings.md`
 - **Routing Pattern Learning (F-22)** — Jaccard similarity matching on past execution patterns
 - **Self-Directed Context (F-24)** — Phase Runner can Read/Grep within scope-bounded impact files
 - **Task-based TODO (F-23)** — TaskCreate/TaskUpdate as primary TODO state manager during execution
 - **Background Execution (F-13)** — Independent TODOs dispatched with `run_in_background: true`
-- **mpl-scout (F-16)** — Haiku-based exploration with Grep/Glob/LSP, optional QMD semantic search
-- **Gate 0.5 Type Check (F-17)** — Project-wide `lsp_diagnostics_directory` before Gate 1
+- **Hard 1 Build+Type Check** — Project-wide build and type checking (consolidates previous Gate 0.5)
 - **4-Layer Templates (F-39)** — Domain + Subdomain + Task Type + Language prompt composition
 - **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable
 - **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)

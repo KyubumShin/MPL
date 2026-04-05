@@ -26,7 +26,7 @@ Fallbacks for environments where QMD (semantic search) tools are unavailable:
 | `qmd_vector_search` (semantic) | `Grep` with expanded keyword set | Lower (semantic search unavailable) |
 | `qmd_deep_search` (hybrid) | `Grep` + `Glob` combination | Medium |
 
-The Scout agent automatically switches to Grep-Only mode when QMD is unavailable (see `mpl-scout.md` Search_Strategy).
+The orchestrator automatically switches to Grep-Only mode when QMD is unavailable (Scout functionality was absorbed by the orchestrator in v2).
 
 ## Detection Logic
 

@@ -101,10 +101,9 @@ writeState(cwd, { research: { status: '{next incomplete stage}' } })
 
 - Check which gates were already evaluated
 - Re-run only failed or unevaluated gates
-- If gate0_5_passed=true, skip to Gate 1
-- If gate1_passed=true, skip to Gate 1.5
-- If gate1_5_passed=true, skip to Gate 2
-- If gate2_passed=true, skip to Gate 3
+- If hard1_passed=true, skip to Hard 2
+- If hard2_passed=true, skip to Hard 3
+- If hard3_passed=true, skip to Advisory
 
 #### Resume Phase 4 (Fix Loop)
 

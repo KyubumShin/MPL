@@ -133,12 +133,11 @@ PROVISIONAL PPs:
 In early exploration stages where a PP cannot be defined:
 ```json
 {
-  "maturity_mode": "explore",
   "pivot_points": [],
   "pp_status": "deferred"
 }
 ```
-Start in explore mode without PP, and extract PP candidates from patterns discovered during Phase 2.
+Start without PP, and extract PP candidates from patterns discovered during Phase 2.
 
 ## Output
 

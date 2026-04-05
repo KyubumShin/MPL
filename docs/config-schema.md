@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.12.0
-> **Last updated**: 2026-03-31
+> **Version**: v0.12.1
+> **Last updated**: 2026-04-04
 
 ---
 
@@ -35,7 +35,7 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
-| `phase_seed.enabled` | boolean | `true` (Frontier) | Enable Phase Seed generation for deterministic TODO structure | `mpl-run-execute.md` |
+| `phase_seed.enabled` | boolean | `true` (pp_core) | Enable Phase Seed generation for deterministic TODO structure | `mpl-run-execute.md` |
 
 ## Hat Model (PP-Proximity, v0.11.0)
 
@@ -78,7 +78,7 @@ Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
 | `version` | string | Manifest schema version (e.g., `"0.9.0"`) |
 | `generated_at` | string (ISO 8601) | When manifest was generated |
 | `commit_hash` | string | Git HEAD at generation time |
-| `pipeline_tier` | `"frugal"` \| `"standard"` \| `"frontier"` | Last run's pipeline tier |
+| `pp_proximity` | `"pp_core"` \| `"pp_adjacent"` \| `"non_pp"` | Last run's PP-proximity classification |
 | `field_classification` | string | Last run's field classification |
 | `artifact_count` | number | Number of tracked artifacts |
 | `artifacts` | ArtifactEntry[] | Artifact metadata list |

@@ -3,7 +3,7 @@
  * MPL Routing Pattern Learning (F-22)
  *
  * Records execution results and matches similar past patterns
- * to improve tier prediction in future Triage runs.
+ * to improve proximity prediction in future Triage runs.
  *
  * File: .mpl/memory/routing-patterns.jsonl (append-only)
  * Reference: Ouroboros DowngradeManager (Jaccard similarity)
@@ -56,8 +56,8 @@ export function jaccardSimilarity(a, b) {
  * @param {string} cwd - Working directory
  * @param {object} pattern
  * @param {string} pattern.description - Task description (user prompt summary)
- * @param {string} pattern.tier - Final pipeline_tier
- * @param {string|null} pattern.escalated_from - Original tier if escalated, null otherwise
+ * @param {string} pattern.proximity - Final pp_proximity
+ * @param {string|null} pattern.escalated_from - Original proximity if escalated, null otherwise
  * @param {string} pattern.result - "success" | "partial" | "failed"
  * @param {number} pattern.tokens - Estimated total tokens used
  * @param {number} pattern.files - Number of affected files
@@ -72,7 +72,7 @@ export function appendPattern(cwd, pattern) {
   const entry = {
     ts: new Date().toISOString(),
     desc: pattern.description,
-    tier: pattern.tier,
+    proximity: pattern.proximity,
     ...(pattern.escalated_from ? { escalated_from: pattern.escalated_from } : {}),
     result: pattern.result,
     tokens: pattern.tokens || 0,
@@ -86,7 +86,7 @@ export function appendPattern(cwd, pattern) {
 }
 
 /**
- * Find similar past patterns for tier recommendation
+ * Find similar past patterns for proximity recommendation
  * @param {string} cwd - Working directory
  * @param {string} description - Current task description
  * @param {number} threshold - Jaccard similarity threshold (default 0.8)
@@ -118,9 +118,9 @@ export function findSimilarPattern(cwd, description, threshold = 0.8) {
   }
 
   if (bestSimilarity >= threshold && bestMatch) {
-    // Use the final tier (post-escalation) so similar tasks start at the tier that
+    // Use the final proximity (post-escalation) so similar tasks start at the proximity that
     // actually succeeded, avoiding repeated escalation overhead.
-    const recommendedTier = bestMatch.tier;
+    const recommendedTier = bestMatch.proximity;
     return {
       match: bestMatch,
       similarity: Math.round(bestSimilarity * 1000) / 1000,
@@ -134,27 +134,28 @@ export function findSimilarPattern(cwd, description, threshold = 0.8) {
 /**
  * Get pattern stats for diagnostics
  * @param {string} cwd
- * @returns {{ total: number, by_tier: object, by_result: object }}
+ * @returns {{ total: number, by_proximity: object, by_result: object }}
  */
 export function getPatternStats(cwd) {
   const filePath = join(cwd, MEMORY_DIR, PATTERNS_FILE);
   if (!existsSync(filePath)) {
-    return { total: 0, by_tier: {}, by_result: {} };
+    return { total: 0, by_proximity: {}, by_result: {} };
   }
 
   try {
     const lines = readFileSync(filePath, 'utf-8').trim().split('\n').filter(Boolean);
     const patterns = lines.map(line => JSON.parse(line));
 
-    const byTier = {};
+    const byProximity = {};
     const byResult = {};
     for (const p of patterns) {
-      byTier[p.tier] = (byTier[p.tier] || 0) + 1;
+      const key = p.proximity || p.tier; // backward compat with old records
+      byProximity[key] = (byProximity[key] || 0) + 1;
       byResult[p.result] = (byResult[p.result] || 0) + 1;
     }
 
-    return { total: patterns.length, by_tier: byTier, by_result: byResult };
+    return { total: patterns.length, by_proximity: byProximity, by_result: byResult };
   } catch {
-    return { total: 0, by_tier: {}, by_result: {} };
+    return { total: 0, by_proximity: {}, by_result: {} };
   }
 }
