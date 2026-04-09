@@ -1,0 +1,29 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mpl",
+  "description": "Micro-Phase Loop - Coherence-first autonomous coding pipeline with decomposition, phase execution, and verification",
+  "owner": {
+    "name": "KyubumShin"
+  },
+  "plugins": [
+    {
+      "name": "mpl",
+      "description": "Decomposes tasks into micro-phases with independent plan-execute-verify mini-loops. Orchestrator-Worker separation enforced via hooks.",
+      "version": "0.12.1",
+      "author": {
+        "name": "KyubumShin"
+      },
+      "source": "./",
+      "category": "workflow",
+      "homepage": "https://github.com/KyubumShin/MPL",
+      "tags": [
+        "agent",
+        "orchestration",
+        "micro-phase",
+        "pipeline",
+        "autonomous-coding"
+      ]
+    }
+  ],
+  "version": "0.12.1"
+}
