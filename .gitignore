@@ -1,5 +1,6 @@
 mcp-server/node_modules/
 mcp-server/dist/
-.claude/worktrees/
+.claude/
+.mpl/
 node_modules/
 .omc/

@@ -364,6 +364,138 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 ---
 
+## 병렬처리 & Decomposer 강화 — 토론 합의안 (2026-04-06)
+
+> **Source**: 3건의 구조화 토론 (Pro/Con/Mutant 3자)
+> **Decision records**: `~/project/decision/2026-04-06-mpl-*.md` (3건)
+> **Status**: ❌ Not implemented — 합의 완료, 구현 대기
+
+### PAR-01: Intra-Phase Streaming Dispatch
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| PAR-01 | Phase 내 Streaming Dispatch | ❌ Not implemented | 🟠 Medium | v1.1.0+ |
+
+**현재**: batch-then-wait (3개 TODO 배치 완료 대기 후 다음 배치). `mpl-run-execute-parallel.md:57` MAX_CONCURRENT_TODOS=3 하드코딩.
+
+**합의안**: 슬롯 기반 streaming — 완료된 슬롯에 즉시 다음 ready TODO 투입. `while (remaining > 0) { wait_any_completion(); dispatch_next_ready(); }`. MAX=3 유지 (플랫폼 제약).
+
+**전제조건**: PAR-03 (Decomposer depends_on 정확도) 선행 필수
+
+**설계 원칙**: 스케줄러가 Phase 개념을 하드코딩하지 않음 → PAR-05 (cross-phase) 전환 용이
+
+**토론 기록**: `~/project/decision/2026-04-06-mpl-intra-phase-parallelism.md`
+
+### PAR-02: execution_tiers 활성화
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| PAR-02 | execution_tiers Soft Hint 활용 | ❌ Not implemented | 🟠 Medium | v1.1.0+ |
+
+**현재**: Decomposer가 `execution_tiers`를 생성하지만 Phase Runner가 무시 (`mpl-decomposer.md:156`).
+
+**합의안**: Phase Runner가 tier를 soft 힌트로 참조하여 TODO dispatch 순서에 반영. 강제 아님 — 무시해도 동작에 영향 없음. 실패 시 기존 Phase 단위 fix cycle 유지 (부분 재시작 없음).
+
+### PAR-03: Decomposer depends_on 정확도 강화
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| PAR-03 | depends_on 그래프 정확도 강화 | ❌ Not implemented | 🔴 High | v1.0.0+ |
+
+**근거**: "더 똑똑한 스케줄러보다 더 좋은 TODO 분해가 먼저다." depends_on이 부정확하면 streaming dispatch의 ready queue도 무의미.
+
+**범위**: Decomposer 프롬프트에서 TODO 간 의존성 선언의 정밀도 개선. 파일 수준 충돌 감지는 유지 (심볼 수준 도입하지 않음).
+
+### PAR-04: Phase 실행 메트릭 수집
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| PAR-04 | Phase별 실행 메트릭 수집 | ❌ Not implemented | 🟠 Medium | v1.1.0+ |
+
+**수집 항목**: Phase별 실행 시간, Gate 통과율, TODO 유휴 시간 비율, API 비용. 로그 기반 수동 집계로 시작.
+
+**근거**: PAR-05 (cross-phase) 진입 조건이 메트릭 기반. 메트릭 없으면 Stage 2가 영원히 사장됨 (Mutant 유보).
+
+### PAR-05: 조건부 Cross-Phase Pipelining (Stage 2)
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| PAR-05 | 조건부 Cross-Phase Pipelining | ❌ Not implemented | 🟡 Low | v1.2.0+ |
+
+**활성화 3중 조건** (하나라도 미충족 시 비활성):
+1. Gate 통과율 ≥ 80% (최소 10회 연속 실행 기준)
+2. 선행 Phase의 완료된 TODO에만 의존 (read-only 의존성)
+3. 명시적 opt-in 설정
+
+**안전장치**: CORE Phase 순차 유지, impact_files 충돌 시 순차 fallback (킬 스위치), Gate 실패 시 해당 TODO만 cancel.
+
+**아키텍처**: 하이브리드 2계층 — Phase DAG(스케줄링/롤백 단위) + impact_files 교차 그래프(검증 단위)
+
+**토론 기록**: `~/project/decision/2026-04-06-mpl-parallelism-enhancement.md`
+
+### CTX-01: Pull 기반 컨텍스트 전달 모델
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| CTX-01 | Pull 기반 컨텍스트 전달 | ❌ Not implemented | 🔴 High | v1.0.0+ |
+
+**현재**: Orchestrator가 L0/L1/L2 자동 결정 (파일 overlap + requires 기반). State summary에서 계약 정보 유실 (exp2/exp3 확인).
+
+**합의안**: Push → Pull 모델 전환.
+- **Decomposer**: `interface_contract.requires`에 `artifact` + `section` + `schema` 필드 추가
+- **Runner**: requires에 명시된 artifact를 **직접 Read** (원본 확보, 요약 유실 없음)
+- **검증**: Pull 시점 schema 매칭 자동 수행 (grep/jq 기반)
+- **토큰**: on-demand pull이므로 폭발 없음
+
+```yaml
+# 확장된 interface_contract 예시
+interface_contract:
+  requires:
+    - from_phase: "phase-0-foundation"
+      artifact: "export-manifest"
+      section: "symbols"
+      schema: { type: array, items: string }
+  produces:
+    - artifact: "api-routes"
+      path: "artifacts/api-routes.json"
+      schema: { ... }
+```
+
+**토론 기록**: `~/project/decision/2026-04-06-mpl-decomposer-context-redesign.md`
+
+### CTX-02: Contract 파일 Verbatim 보존
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| CTX-02 | Contract 파일 요약 금지 | ❌ Not implemented | 🔴 High | v1.0.0+ |
+
+**합의안**: contract 파일 및 `interface_contract` 관련 파일은 요약 대상에서 제외. 일반 artifact은 요약 허용 + 원본 경로 보존 (Runner가 필요 시 Read).
+
+**근거**: exp2에서 State summary가 `"All shared types defined"` 같은 요약만 전달하여 구체적 enum/시그니처 유실. Contract 카테고리만 verbatim 강제하면 토큰 비용 제한적.
+
+### CTX-03: boundary_checks in Phase Seed
+
+| ID | Feature | Status | Priority | Version Target |
+|----|---------|--------|----------|----------------|
+| CTX-03 | Phase Seed boundary_checks 필드 | ❌ Not implemented | 🟠 Medium | v1.0.0+ |
+
+**합의안**: Decomposer가 Phase 분해 시 `boundary_checks` 필드를 phase seed에 포함. Pull한 원본에서 contract의 타입/시그니처를 기계적으로 검증 (grep/jq/comm). 기존 CB-08 L1/L2 검증과 상호보완.
+
+### 구현 우선순위 (합의)
+
+| 순서 | ID | 항목 | 근거 |
+|------|-----|------|------|
+| 1 | PAR-03 | Decomposer depends_on 정확도 | 모든 스케줄링의 기반 |
+| 2 | CTX-01 | Pull 기반 컨텍스트 전달 | cross-boundary 결함의 근본 해결 |
+| 3 | CTX-02 | Contract verbatim 보존 | CTX-01과 함께 즉시 적용 가능 |
+| 4 | CTX-03 | boundary_checks | 검증 Gate 활성화 |
+| 5 | PAR-01 | Streaming Dispatch | PAR-03 이후 경량 변경 |
+| 6 | PAR-02 | execution_tiers 활용 | PAR-01과 병행 가능 |
+| 7 | PAR-04 | 메트릭 수집 | PAR-05 진입 조건 |
+| 8 | PAR-05 | Cross-Phase Pipelining | 메트릭 확보 + 3중 조건 충족 시 |
+
+---
+
 ## Context Intelligence Features (from OpenViking/DeerFlow analysis, 2026-03-24)
 
 > **Source**: ByteDance OpenViking (context database) + DeerFlow 2.0 (super agent harness) 비교 분석에서 도출.
