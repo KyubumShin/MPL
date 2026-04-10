@@ -410,8 +410,8 @@ Phase 4: Regression Accumulator + Gate 4
   → Add Gate 4 (Spec Verification)
 
 Phase 5: Update agent prompts
-  → mpl-verification-planner.md: add T1/T2/T3/T4 classification
-  → mpl-test-agent.md: switch to T3 assertion basis
+  → mpl-decomposer.md: add T1/T2/T3/T4 classification *(was mpl-verification-planner, removed v0.11.0)*
+  → mpl-phase-runner.md: switch to T3 assertion basis *(was mpl-test-agent, removed v0.11.0)*
   → mpl-run-execute.md: reflect Gate 4 + regression
 ```
 

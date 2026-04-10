@@ -37,6 +37,7 @@ Version Reference Checklist:
   ☐ .claude-plugin/marketplace.json    → plugins[0].version field
   ☐ mcp-server/package.json            → "version" field
   ☐ docs/design.md                     → title line "# MPL (Micro-Phase Loop) vX.Y.Z"
+  ☐ docs/config-schema.md              → "Version" field in header
   ☐ README.md                          → title line "# MPL (Micro-Phase Loop) vX.Y.Z"
   ☐ README_ko.md                       → title line "# MPL (Micro-Phase Loop) vX.Y.Z"
 ```

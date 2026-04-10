@@ -1,9 +1,9 @@
 # MPL Roadmap TEMP: Pending Feature Candidates
 
-> **⚠ v2 기준 업데이트 필요**: maturity_mode 제거, 5-Gate → 3H+1A Gate, pipeline_tier → pp_proximity 등 v2 구조 변경 반영 필요. 구현 완료 항목은 상태 업데이트됨.
+> **⚠ v2 반영 완료 (v0.12.2)**: maturity_mode 제거, 5-Gate → 3H+1A Gate, pipeline_tier → pp_proximity 반영됨. 삭제된 에이전트(mpl-compound, mpl-scout, mpl-code-reviewer, mpl-verification-planner 등) 참조는 현행 담당자로 주석 처리됨.
 
 > **Status**: Pending implementation (for review)
-> **Last updated**: 2026-03-31
+> **Last updated**: 2026-04-10
 > **Purpose**: Consolidated list of all features not yet implemented. Completed items have been moved to `overview.md`.
 
 ---
@@ -129,7 +129,7 @@ gstack `/design-review` — 80-item design audit, CSS-only atomic commit.
 gstack `/document-release` — Auto-detect affected documents relative to code diff → update.
 
 ### Current MPL State
-- `mpl-compound` extracts learnings/decisions/issues to `.mpl/memory/`
+- Orchestrator extracts learnings/decisions/issues to `.mpl/memory/` *(was mpl-compound, removed v0.11.0)*
 - README, CHANGELOG, API docs and other project document updates are manual
 
 ### Proposal
@@ -615,7 +615,7 @@ Phase Runner 실패 시 orchestrator가 trajectory를 분석하여:
 - "Step 1에서 QMD가 stale 결과 반환" → Grep-Only fallback
 
 **Implementation Location**:
-- `agents/mpl-scout.md` output format 확장
+- Orchestrator search output format 확장 *(was mpl-scout, removed v0.11.0)*
 - `commands/mpl-run-execute.md` Phase Runner 실패 분석 로직
 - `.mpl/mpl/phases/phase-N/search-trajectory.json` 저장
 
@@ -698,7 +698,7 @@ half_life = 90 days
 prune_threshold = 0.1
 ```
 
-`mpl-compound` run 완료 시:
+Orchestrator *(was mpl-compound)* run 완료 시:
 1. 참조된 learning → confidence 복원 (max 1.0)
 2. 미참조 learning → decay 적용
 3. threshold 미달 → pruning-candidates.md에 추가
@@ -707,7 +707,7 @@ prune_threshold = 0.1
 **Implementation Location**:
 - `hooks/lib/mpl-usage-tracker.mjs` (new) — hook/skill 통계 수집
 - `hooks/mpl-validate-output.mjs` 확장 — 통계 기록
-- `agents/mpl-compound.md` 확장 — decay 계산 + pruning report
+- `commands/mpl-run-finalize.md` 확장 — decay 계산 + pruning report *(was mpl-compound)*
 - `.mpl/memory/usage-stats.jsonl` (new)
 - `.mpl/memory/skill-metadata.yaml` (new)
 - `.mpl/memory/pruning-candidates.md` (new)
@@ -1045,7 +1045,7 @@ When confirming each candidate, review the following:
 
 #### BM-02: Semantic Memory Phase Hint
 
-mpl-compound가 파이프라인 완료 시 semantic.md에 **한 줄짜리 Phase 힌트** 추가:
+Orchestrator *(was mpl-compound)* 가 파이프라인 완료 시 semantic.md에 **한 줄짜리 Phase 힌트** 추가:
 ```markdown
 ## Phase Hints
 - DB migration: 스키마 변경과 데이터 마이그레이션을 반드시 별도 Phase로 분리
@@ -1283,7 +1283,7 @@ Gate 0.7: Cross-Boundary Advisory
   Output: `.mpl/mpl/gate-0.7-report.md`
   Mode: advisory (non-blocking)
   Warning routing:
-    - 경고를 mpl-code-reviewer (Gate 2)에 전달 → 리뷰 컨텍스트로 활용
+    - 경고를 Phase Runner inline review *(was mpl-code-reviewer, removed v0.11.0)* 에 전달 → 리뷰 컨텍스트로 활용
     - Step 5.5 (Post-Execution Review) Completion Report에 별도 섹션으로 표시
     - 경고 5건 이상 → orchestrator에 "cross-boundary 집중 검토 권고" 알림
 ```
@@ -1304,7 +1304,7 @@ Gate 0.7: Cross-Boundary Advisory
 
 **Problem**: 프론트엔드 테스트가 invoke를 mock하면 실제 serde 직렬화/역직렬화 경로가 검증되지 않음. 이 "검증 갭"이 Verification Planner 산출물에 명시되지 않아 26건의 직렬화 불일치가 테스트를 통과함.
 
-**Proposal**: mpl-verification-planner 프롬프트에 mock gap 식별 규칙 추가.
+**Proposal**: mpl-decomposer 프롬프트에 mock gap 식별 규칙 추가 *(was mpl-verification-planner, removed v0.11.0)*.
 
 ```yaml
 # Verification Planner 산출물에 자동 추가

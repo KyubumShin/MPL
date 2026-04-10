@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.12.1 Design Document
+# MPL (Micro-Phase Loop) v0.12.2 Design Document
 
 ## 1. Overview
 
@@ -11,7 +11,7 @@ The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent stru
 | Area | Initial (v1.0) | Current |
 |------|------|------|
 | Pipeline Steps | 5 steps (Step 0~5) | 9+ steps (Step 0~6 + sub-steps) |
-| Agents | 5 | 8 |
+| Agents | 5 | 7 |
 | Pre-Analysis | None | Triage + Phase 0 Enhanced |
 | Quality System | Simple verification | Build-Test-Fix + 3 Hard Gates + 1 Advisory + A/S/H classification + Convergence Detection |
 | Caching | None | Phase 0 artifact caching |
@@ -254,7 +254,7 @@ MPL supports natural resume through per-phase state persistence. When a session 
 
 ## 4. Agent Catalog
 
-MPL uses 8 specialized agents (v0.11.0: consolidated from 15 — see v0.11.0 changelog for details). Each agent has clear role boundaries and tool restrictions.
+MPL uses 7 specialized agents (v0.12.2: consolidated from 15 — see v0.11.0 changelog for details). Each agent has clear role boundaries and tool restrictions.
 
 ### Pre-Execution Agents (Analysis/Planning)
 
@@ -797,7 +797,7 @@ Documentation-only release. No code changes. Prepares the codebase for v2 struct
 - `agents/mpl-worker.md` — **Deleted**
 - `docs/design.md` — Principles 1 & 5, Agent Catalog, version notation
 - `agents/mpl-phase-runner.md` — Removed nested agent limitation notes
-- `agents/mpl-test-agent.md`, `agents/mpl-doctor.md` — Worker references removed
+- `agents/mpl-test-agent.md` *(removed in v0.11.0)*, `agents/mpl-doctor.md` — Worker references removed
 - `commands/mpl-run.md`, `mpl-run-execute.md`, `mpl-run-execute-gates.md`, `mpl-run-execute-parallel.md` — Worker → Phase Runner
 - `skills/mpl/SKILL.md`, `skills/mpl-small/SKILL.md`, `skills/mpl-bugfix/SKILL.md` — Worker → Phase Runner
 - `hooks/mpl-write-guard.mjs`, `hooks/mpl-validate-output.mjs` — Worker references removed

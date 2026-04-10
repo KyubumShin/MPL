@@ -17,7 +17,7 @@ Single entry point + automatic tier classification + dynamic escalation + RUNBOO
 
 | ID | Item | Priority | Dependencies | Key Deliverables |
 |----|------|---------|--------|-----------|
-| F-11 | Cross-Run Learning Accumulation | HIGH | F-10 (RUNBOOK) complete | `.mpl/memory/learnings.md`, mpl-compound distillation logic |
+| F-11 | Cross-Run Learning Accumulation | HIGH | F-10 (RUNBOOK) complete | `.mpl/memory/learnings.md`, orchestrator distillation logic *(was mpl-compound, removed v0.11.0)* |
 | F-12 | Intra-Session Context Persistence | HIGH | None | `<remember priority>` marking protocol, RUNBOOK dual safety net |
 | F-22 | Routing Pattern Learning | MED | F-20 (Router) complete | `.mpl/memory/routing-patterns.jsonl`, Jaccard matching |
 
@@ -88,7 +88,7 @@ F-24 (Self-Directed Context) ── independent, but scope can be passed in F-23
 
 | ID | Item | Priority | Dependencies | Key Deliverables |
 |----|------|---------|--------|-----------|
-| F-16 | mpl-scout agent | MED | None | haiku-based exploration agent (Read/Glob/Grep/LSP only) |
+| F-16 | ~~mpl-scout agent~~ *(removed v0.11.0, absorbed by orchestrator)* | MED | None | haiku-based exploration agent (Read/Glob/Grep/LSP only) |
 | F-17 | lsp_diagnostics_directory integration | MED | None | Project-wide type check before Gate 1, standalone fallback |
 | F-04 | Standalone Independent Operation | HIGH | Synergy with F-17 | OMC dependency removal, Grep/Glob fallback, mpl-doctor diagnostics |
 
@@ -104,13 +104,13 @@ F-17 (diagnostics) ──→ F-04 (standalone)
 
 ### Implementation Order
 
-1. **F-16** — Define mpl-scout agent. Create agents/mpl-scout.md, haiku model, read-only tools only.
+1. **F-16** — ~~Define mpl-scout agent~~ *(removed v0.11.0, absorbed by orchestrator)*.
 2. **F-17** — Add lsp_diagnostics_directory call to Gate 1. Standalone fallback specification.
 3. **F-04** — Implement Grep/Glob fallback path when OMC tools (lsp_*, ast_grep) are absent. Complete mpl-setup, mpl-doctor.
 
 ### Acceptance Criteria
 
-- [ ] mpl-scout achieves 50%+ token savings compared to sonnet/opus in Phase 0 structure analysis (F-16)
+- [x] ~~mpl-scout achieves 50%+ token savings~~ *(agent removed v0.11.0, absorbed by orchestrator)* (F-16)
 - [ ] Project-wide type errors are detected before Gate 1 (F-17)
 - [ ] Full MPL pipeline operates normally in environments without OMC installed (F-04)
 - [ ] `/mpl:mpl-doctor` diagnoses missing tools and reports fallback status (F-04)
@@ -166,7 +166,7 @@ F-15, F-05 — independent
 - [ ] Time-based compression applied to episodic.md — latest 2 Phases detailed, older ones compressed (F-25)
 - [ ] Patterns repeated 3+ times are automatically generalized and stored in semantic.md (F-25)
 - [ ] Only relevant memory is selectively loaded from Phase 0 (not full file load) (F-25)
-- [ ] mpl-compound automatically distills procedural.jsonl → learnings.md (F-25)
+- [ ] orchestrator automatically distills procedural.jsonl → learnings.md *(was mpl-compound, removed v0.11.0)* (F-25)
 - [ ] 20-30% additional reduction in Phase 0 time for repeated projects (semantic.md effect) (F-25)
 - [ ] risk=HIGH phases are executed in isolation in worktree and automatically merged on success (F-15)
 - [ ] Only the changed module is re-analyzed without a full Phase 0 re-run when 1 file changes (F-05)
@@ -244,7 +244,7 @@ F-28 (Dynamic Routing) ── independent (Decomposer output expansion)
    - Step 1: Design Reflection Template — failed TODO → symptom → root cause → first deviation point → correction strategy → learning extraction
    - Step 2: Execute Reflection upon Fix Loop entry (insert into Phase Runner protocol)
    - Step 3: Store reflection results in procedural.jsonl with pattern classification tags (type_mismatch, dependency_conflict, test_flake, etc.)
-   - Step 4: Integrate mpl-code-reviewer feedback into reflection when Gate 2 fails (MAR pattern)
+   - Step 4: Integrate Phase Runner inline review feedback into reflection when Gate 2 fails (MAR pattern) *(was mpl-code-reviewer, removed v0.11.0)*
    - Step 5: Selectively load only relevant patterns from Phase 0 based on task description similarity
 3. **F-28** — Phase-level dynamic agent routing
    - Step 1: Add `phase_domain` tag to Decomposer output (db/api/ui/algorithm/test/infra)
@@ -297,7 +297,7 @@ Sprint 6 ──→ Sprint 7 (F-31/F-32→F-33 compaction data + adaptive loading
 **Sprint 5 highlights:**
 - F-25 expanded from 3-Tier to 4-Tier (semantic.md added)
 - Automatic episodic→semantic integration shortens Phase 0 for repeated projects
-- Automatic procedural.jsonl → learnings.md distillation (mpl-compound)
+- Automatic procedural.jsonl → learnings.md distillation (orchestrator, was mpl-compound)
 - Maximize token savings with time-based compression + selective loading
 
 **Sprint 6 highlights:**

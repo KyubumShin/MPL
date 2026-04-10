@@ -139,13 +139,15 @@ Phase 4 complete
 
 ### v3.0 Implementation: 3-Gate Quality System
 
+> **⚠ Historical (v1)**: v2에서 5-Gate → 3 Hard Gate + 1 Advisory로 변경됨. mpl-code-reviewer는 v0.11.0에서 삭제, Phase Runner가 인라인 리뷰 수행.
+
 The concept of tightening Phase 5 entry conditions evolved into the **3-Gate quality system** in v3.0:
 
 | Gate | Name | Pass Criteria | On Failure |
 |------|------|----------|--------|
-| Gate 1 | Automated tests | pass_rate ≥ 95% | Fix Loop |
-| Gate 2 | Code review (mpl-code-reviewer) | PASS verdict | Fix Loop or mpl-failed |
-| Gate 3 | Agent-as-User (S-items) | All pass + no PP violations | Fix Loop |
+| Gate 1 (Hard) | Automated tests | pass_rate ≥ 95% | Fix Loop |
+| Gate 2 (Hard) | Phase Runner inline review *(was mpl-code-reviewer)* | PASS verdict | Fix Loop or mpl-failed |
+| Gate 3 (Hard) | Agent-as-User (S-items) | All pass + no PP violations | Fix Loop |
 
 In the Fix Loop, **Convergence Detection** operates to monitor the real progress of fixes:
 - `improving`: Continue fixing

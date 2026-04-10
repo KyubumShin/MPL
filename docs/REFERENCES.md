@@ -64,7 +64,7 @@ A record of external sources and projects that provided inspiration.
 |------|---------|----------|
 | **TodoWrite → Task Tool evolution** — As model capabilities increase, existing tools become constraints. Replace checkbox lists with inter-agent communication tools | Phase Runner's mini-plan.md checkboxes → Task tool-based TODO management (F-23) | `docs/roadmap/overview.md` F-23 |
 | **RAG → self-directed search** — More effective to have agents "build context themselves" than to "provide" it | Allow Phase Runner scope-bounded search (F-24). Reduce orchestrator context assembly dependency | `docs/roadmap/overview.md` F-24 |
-| **Progressive Disclosure** — Instead of bloating system prompts, load subagent/skill files on demand | Extend mpl-scout (F-16) as Phase Runner context assistant. Guide subagent pattern | `docs/roadmap/overview.md` F-16 |
+| **Progressive Disclosure** — Instead of bloating system prompts, load subagent/skill files on demand | Orchestrator search *(was mpl-scout F-16, removed v0.11.0)* as Phase Runner context assistant. Guide subagent pattern | `docs/roadmap/overview.md` F-16 |
 | **AskUserQuestion tool** — Structured questions are more effective than plain text | Already applied in F-14 (Side Interview + PP Interview) | No change |
 
 #### Patterns Already Well-Applied in MPL

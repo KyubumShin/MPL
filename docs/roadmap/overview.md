@@ -76,10 +76,10 @@ Features newly introduced in v3.0 that were not planned in the roadmap:
 | Feature | Description | Related Agent |
 |---------|-------------|--------------|
 | **Triage** | Automatic interview depth decision based on information_density (light/full, skip removed) | (orchestrator) |
-| **Pre-Execution Analysis** | Gap/Tradeoff integration + Verification 2-stage pre-analysis | mpl-pre-execution-analyzer, mpl-verification-planner |
-| **5-Gate quality system (v1)** | Gate 0.5 (type check) + Gate 1 (auto tests) + Gate 2 (code review) + Gate 3 (PP compliance) + Gate 3.5 (H-items). *v2에서 3H+1A Gate로 재편: Gate 0.5 → Advisory, Gate 1.5/1.7 제거* | mpl-code-reviewer |
-| **A/S/H verification classification** | Agent/Sandbox/Human verification item classification | mpl-verification-planner |
-| **Test Agent** | Test agent independent from code author | mpl-test-agent |
+| **Pre-Execution Analysis** | Gap/Tradeoff integration + Verification 2-stage pre-analysis | mpl-interviewer *(was mpl-pre-execution-analyzer + mpl-verification-planner, removed v0.11.0)* |
+| **3H+1A Gate quality system** | Hard 1 (auto tests) + Hard 2 (inline review) + Hard 3 (PP compliance) + Advisory (type check). *(v1: 5-Gate → v2: 3H+1A)* | mpl-phase-runner *(was mpl-code-reviewer, removed v0.11.0)* |
+| **A/S/H verification classification** | Agent/Sandbox/Human verification item classification | mpl-decomposer *(was mpl-verification-planner, removed v0.11.0)* |
+| **Test Agent** | Test integrated into Phase Runner Build-Test-Fix | mpl-phase-runner *(was mpl-test-agent, removed v0.11.0)* |
 | **Convergence Detection** | Detecting improving/stagnating/regressing in Fix Loop | (orchestrator) |
 | **Side Interview** | User confirmation only for CRITICAL discovery + PP conflicts (non-blocking items logged to deferred-items.md) | (orchestrator) |
 | **Resume protocol** | Continue based on per-phase state persistence | (orchestrator) |
@@ -151,9 +151,9 @@ v1.0 (original)                     v3.0 (achieved)
 |----|------|--------|
 | I-03 | ~~Skill `/mpl:mpl-bugfix` not implemented~~ | **Resolved** — `skills/mpl-bugfix/SKILL.md` created |
 | I-04 | ~~Skill `/mpl:mpl-small` not implemented~~ | **Resolved** — `skills/mpl-small/SKILL.md` created |
-| I-05 | ~~Skill `/mpl:mpl-compound` wrapper missing~~ | **Resolved** — `skills/mpl-compound/SKILL.md` created |
+| I-05 | ~~Skill `/mpl:mpl-compound` wrapper missing~~ | **Resolved** — skill created *(agent removed v0.11.0, finalize에 통합)* |
 | I-06 | ~~Skill `/mpl:mpl-gap-analysis` wrapper missing~~ | **Resolved** — `skills/mpl-gap-analysis/SKILL.md` created |
-| I-07 | ~~`mpl-validate-output` agent list incomplete~~ | **Resolved** — `mpl-decomposer`, `mpl-git-master`, `mpl-compound` added |
+| I-07 | ~~`mpl-validate-output` agent list incomplete~~ | **Resolved** — `mpl-decomposer`, `mpl-git-master` added *(mpl-compound removed v0.11.0)* |
 
 ### ~~MEDIUM (2 items) — Unimplemented roadmap~~ **Resolved** (2026-03-05)
 
@@ -191,7 +191,7 @@ v1.0 (original)                     v3.0 (achieved)
 | 11 | Worker PLAN.md reference fix | Bug | "PLAN.md"→"mini-plan" |
 | 12 | Gate 3 redefinition | Improvement | Agent-as-User (S-items duplicate)→PP Compliance + H-items resolution |
 
-Agent count: 12→10 (critic absorbed + gap/tradeoff integrated, deprecated files deleted) → 12 in v3.2 (mpl-scout, mpl-compound officially added)
+Agent count: 12→10 (critic absorbed + gap/tradeoff integrated, deprecated files deleted) → 12 in v3.2 → **7 in v0.12.2** (mpl-scout, mpl-compound 등 8개 에이전트 통합/삭제)
 
 ### Future Roadmap (original — pre v3.1)
 
@@ -783,7 +783,7 @@ After: System auto-determines + dynamic switching
 | F-20 | **Adaptive Pipeline Router — Single Entry Point** (v1) | ✅ **S1 complete** | Extend Triage (Step 0) to auto-calculate `pipeline_tier` (v1; v2: `pp_proximity`로 대체) (frugal/standard/frontier). Measure affected file count, test presence, import depth via Quick Scope Scan. Determine tier via `pipeline_score` formula. *v2: Hat model(pp_proximity)로 대체. frugal/standard/frontier → Light/Standard/Full hat.* **Ouroboros PAL Router reference** |
 | F-21 | **Dynamic Escalation/Downgrade** (v1) | ✅ **S1 complete** | Automatic tier switching during execution. *v2: escalateTier 제거됨. Hat model에서 escalation 구조 변경.* |
 | F-10 | **RUNBOOK.md — Integrated Execution Log** | ✅ **S1 complete** | Introduce `docs/documentation.md` concept to MPL. Auto-update Current Status, Milestone Progress, Key Decisions, Known Issues, How to Resume sections in `.mpl/mpl/RUNBOOK.md` during pipeline execution. Anyone — human or agent — can grasp current status and resume immediately from this single file |
-| F-11 | **Run-to-Run Learning Accumulation** | ✅ **S2 complete** | RUNBOOK decisions/issues distilled via `mpl-compound` to `.mpl/memory/learnings.md` on execution completion. Auto-loaded in next execution Phase 0. Accumulates failure patterns (type confusion, error mismatch), success patterns, project conventions (discovered). **Flow**: Record in RUNBOOK during execution → compound distillation → next Phase 0 reference |
+| F-11 | **Run-to-Run Learning Accumulation** | ✅ **S2 complete** | RUNBOOK decisions/issues distilled via orchestrator finalize *(was mpl-compound, removed v0.11.0)* to `.mpl/memory/learnings.md` on execution completion. Auto-loaded in next execution Phase 0. Accumulates failure patterns (type confusion, error mismatch), success patterns, project conventions (discovered). **Flow**: Record in RUNBOOK during execution → finalize distillation → next Phase 0 reference |
 | F-12 | **In-session Context Persistence** | ✅ **S2 complete** | Orchestrator marks key state (current phase, PP summary, last failure cause) with `<remember priority>` tags at each phase transition. Dual safety net of RUNBOOK.md (file-based) and `<remember>` (tag-based) to handle context compression during long executions |
 | F-04 | Standalone independent operation | ✅ **S4 complete** | (existing) OMC dependency removed. Grep/Glob fallback |
 
@@ -795,7 +795,7 @@ After: System auto-determines + dynamic switching
 | F-13 | **Background Execution** | ✅ **S3 complete** | Parallel execution of workers for independent TODOs without file conflicts using `run_in_background: true` within Phase Runner. Combined with v3.1 file conflict detection to auto-enforce sequential execution on conflicts |
 | F-14 | **AskUserQuestion HITL** | ✅ **existing implementation** | `AskUserQuestion` tool used in `mpl-interviewer` PP interview + Side Interview. Clickable options improve HITL response speed |
 | F-15 | **Worktree Isolated Execution** | ✅ **S5 complete** | Execute phases with risk=HIGH in Pre-Execution Analysis with `isolation: "worktree"`. Merge on success, auto-cleanup on failure. Partial rollback not needed on circuit break. Activated only in Frontier tier |
-| F-16 | **mpl-scout agent** | ✅ **S4 complete** | Haiku-based lightweight codebase exploration agent. Used for Phase 0 structure analysis, Fix Loop root cause exploration, Phase Runner context assistance. Only Read/Glob/Grep/LSP allowed. Saves sonnet/opus tokens. Claude Code's Guide subagent pattern — extend functionality without adding tools. **"Seeing like an Agent" Progressive Disclosure reference** |
+| F-16 | **~~mpl-scout agent~~** *(removed v0.11.0, absorbed by orchestrator)* | ✅ **S4 complete** | Haiku-based lightweight codebase exploration — functionality absorbed by orchestrator direct search. Originally: Phase 0 structure analysis, Fix Loop root cause exploration, Phase Runner context assistance. **"Seeing like an Agent" Progressive Disclosure reference** |
 | F-17 | **lsp_diagnostics_directory integration** | ✅ **S4 complete** | Project-wide type check before Gate 1 auto tests. Active when tool_mode=full, fallback to `tsc --noEmit` / `python -m py_compile` in standalone |
 | F-23 | **Phase Runner Task-based TODO management** | ✅ **S3 complete** | Phase Runner manages TODOs via Task tool instead of mini-plan.md checkboxes. Cross-worker dependency tracking, automatic parallel execution state sync. Current mini-plan.md pattern has same limitation as Claude Code's early TodoWrite — model gets trapped in list and inter-agent communication is impossible. Synergy with F-13 (Background Execution): dispatch independent TODOs as parallel Tasks. **"Seeing like an Agent" TodoWrite→Task lesson reference** |
 | F-24 | **Phase Runner Self-Directed Context** | ✅ **S3 complete** | Allow Phase Runner scope-bounded search to directly explore needed context. Current: orchestrator assembles context then injects ("given context"). Improvement: provide only impact files list, Phase Runner directly Read/Grep actual content. Scope-bounded search within that phase's impact range to maintain isolation principle. **"Seeing like an Agent" RAG→self-directed search lesson reference** |
@@ -968,7 +968,7 @@ Pre-Execution (Phase 0) — branch by tier
 ├── Frugal:  Error Spec only → single Fix Cycle
 ├── Standard: Error Spec + light PP → single Phase
 ├── Frontier: Full Phase 0 → multi-Phase
-├── Structure analysis via mpl-scout (haiku)                  [F-16]
+├── Structure analysis via orchestrator search (was mpl-scout) [F-16]
 ├── lsp_diagnostics_directory type check                      [F-17]
 ├── 4-Tier Memory selective load                              [F-25]
 │   ├── semantic.md (project knowledge)
@@ -984,7 +984,7 @@ During Execution (Phase 1~N)
 ├── Worktree isolation (HIGH risk phases)                     [F-15]
 ├── Automatic escalation on circuit break                     [F-21]
 │   └── Frugal→Standard→Frontier (completed work preserved)
-├── mpl-scout (Fix Loop root cause exploration)               [F-16]
+├── Orchestrator search (Fix Loop root cause exploration)      [F-16]
 └── Reflection Template execution on Fix Loop entry           [F-27]
     ├── failure cause → root cause → correction strategy → learning extraction
     └── pattern classification → procedural.jsonl storage
