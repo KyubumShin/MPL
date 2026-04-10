@@ -143,6 +143,23 @@ disallowedTools: Write, Edit, Task
     - Check `MPL/README.md` exists
     - Check `MPL/docs/design.md` exists
     - WARN if missing (functional but undocumented)
+
+    ### Category 13: specpill MCP (optional plugin)
+    - Check whether `mcp__specpill__init_session` (or any `mcp__specpill__*`)
+      is registered in the current Claude session
+    - If registered:
+      - PASS: "specpill tools available, WS port {SPECPILL_WS_PORT or 19847}"
+      - Expected core tools: init_session, add_feature, add_flow_node,
+        link_flow_nodes, add_ui_element, wait_for_feedback, resolve_feedback,
+        finalize_spec, get_spec
+    - If not registered:
+      - WARN: "specpill plugin not registered. Socratic loop runs in
+        text-only mode. Install: see skills/mpl-setup/references/specpill-setup.md"
+    - Severity is **capped at WARN** — specpill is optional, never FAIL.
+      The MPL pipeline is fully functional in text-only mode.
+    - If doctor is invoked outside a live MCP-aware session and cannot
+      probe registration, report `N/A` rather than WARN.
+    - Integration contract: `docs/integrations/specpill.md`
   </Diagnostic_Categories>
 
   <Output_Schema>
@@ -172,6 +189,7 @@ disallowedTools: Write, Edit, Task
     | 10 | MCP Server | {PASS|WARN|FAIL} | {tools or "not available"} |
     | 11 | QMD Search | {PASS|WARN} | {version or "not installed"} |
     | 12 | Documentation | {PASS|WARN|FAIL} | {brief} |
+    | 13 | specpill MCP | {PASS|WARN|N/A} | {tools or "not registered (optional)"} |
 
     ## Tool Availability Detail
 

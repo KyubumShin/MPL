@@ -418,6 +418,7 @@ Stage 2 (Ambiguity Resolution):
 3. **Socratic Loop**: repeat targeted Socratic questions on weakest dimension until ambiguity <= 0.2
    - Pre-Research Protocol: present comparison table first for technical choices
    - Re-measure ambiguity after each response
+   - Optional visualization: if `mcp__specpill__*` is registered, the loop gains a flow graph + UI mockup surface and click-targeted feedback pre-empt. See `docs/integrations/specpill.md`. Text-only fallback when absent — no behavior change.
 4. **Lightweight Requirements Structuring**:
    - User Stories + natural language AC + MoSCoW + evidence tagging
    - Save to: `.mpl/pm/requirements-light.md`
@@ -446,6 +447,7 @@ Stage 2 (Ambiguity Resolution):
 3. **Socratic Loop**: repeat targeted Socratic questions on weakest dimension until ambiguity <= 0.2
    - Pre-Research Protocol: present comparison table first for technical choices
    - Re-measure ambiguity after each response
+   - Optional visualization: if `mcp__specpill__*` is registered, the loop gains a flow graph + UI mockup surface and click-targeted feedback pre-empt. See `docs/integrations/specpill.md`. Text-only fallback when absent — no behavior change.
 4. **Solution Options**: 3+ options + tradeoff matrix (with Pre-Research)
    - Minimal / Balanced / Comprehensive
    - User selects → record selected_option

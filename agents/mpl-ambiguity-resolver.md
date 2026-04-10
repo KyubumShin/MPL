@@ -331,6 +331,57 @@ disallowedTools: Write, Edit, Bash, Task
              [Call mpl_score_ambiguity MCP tool again with updated context] → Repeat loop
     ```
 
+    ### Optional: specpill Visualization (when registered)
+
+    If the **specpill** MCP plugin is available in this session, the loop
+    above is enhanced with a visual surface and a click-targeted feedback
+    pre-empt. specpill is **optional** — when not registered, the text-only
+    loop above runs unchanged. specpill is a clarity layer, not a control-
+    flow replacement; loop termination still depends solely on
+    `mpl_score_ambiguity`.
+
+    **Detection** (executed once at the start of Step 3):
+    ```
+    specpill_available = check_tool_available("mcp__specpill__init_session")
+    ```
+
+    **If specpill_available == true:**
+
+    1. **On entry**: call `mcp__specpill__init_session(project_root)`. Then
+       mirror the Stage 1 interview output into specpill via:
+         - `mcp__specpill__add_feature(name, description, priority)` per
+           requirement bucket
+         - `mcp__specpill__add_flow_node(feature_slug, kind, label, after?)`
+           per user-flow step
+         - `mcp__specpill__add_ui_element(...)` only if the user mentioned
+           a UI anchor explicitly
+       The browser, if connected, sees the populated spec immediately.
+
+    2. **Inside the loop**, before each `AskUserQuestion`, attempt a
+       short-timeout pre-empt:
+       ```
+       feedback = mcp__specpill__wait_for_feedback(timeout_ms=1500)
+       if feedback and not feedback.timed_out:
+         # Click-targeted feedback arrived from the browser.
+         # Reflect into context, push any spec changes back via specpill
+         # mutation tools, call mcp__specpill__resolve_feedback(feedback.id),
+         # then re-score and continue the loop.
+       else:
+         # Proceed with the normal AskUserQuestion path.
+         # After the user responds, push the resulting spec changes back
+         # to specpill via the mutation tools.
+       ```
+
+    3. **On exit** (ambiguity ≤ 0.2 AND user approves), call
+       `mcp__specpill__finalize_spec(approved_by="user")`.
+
+    **If specpill_available == false:** run the loop above (text-only) with
+    no changes. Optionally announce once: `[MPL] specpill plugin not
+    registered — Socratic loop runs in text-only mode.`
+
+    **Full integration contract**: see `docs/integrations/specpill.md`.
+    **Install guide**: see `skills/mpl-setup/references/specpill-setup.md`.
+
     ### MCP Tool Usage
 
     ```
