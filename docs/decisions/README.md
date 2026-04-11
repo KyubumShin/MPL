@@ -82,9 +82,10 @@ What changes because of this decision. Include:
 
 | ID | Title | Status | Date |
 |----|-------|--------|------|
+| [AD-0004](AD-0004-test-agent-long-term-architecture.md) | Test Agent long-term architecture — Option A baseline with conditional Option B experiment | accepted | 2026-04-12 |
 | [AD-0003](AD-0003-v012.2-accidental-agent-deletion.md) | v0.12.2 accidental agent deletion — partial revert for mpl-test-agent | accepted | 2026-04-12 |
 | [AD-0002](AD-0002-cb-features-bound-to-ablation-experiment.md) | CB cross-boundary features are bound to the cb-testbed ablation experiment | accepted | 2026-04-12 |
 | [AD-0001](AD-0001-reject-advisor-tool-integration.md) | Reject Anthropic Advisor Tool integration in MPL | accepted | 2026-04-11 |
 
 <!-- Add a row when a new ADR is created. Keep sorted by ID descending (newest first). -->
-<!-- AD-0004 reserved for: PR-02/03/04 architectural deadlock (pending debate) -->
+<!-- AD-0005 reserved for: PR-02/03/04 architectural deadlock (pending debate) -->
