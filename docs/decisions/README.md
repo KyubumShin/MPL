@@ -82,6 +82,9 @@ What changes because of this decision. Include:
 
 | ID | Title | Status | Date |
 |----|-------|--------|------|
+| [AD-0003](AD-0003-v012.2-accidental-agent-deletion.md) | v0.12.2 accidental agent deletion — partial revert for mpl-test-agent | accepted | 2026-04-12 |
 | [AD-0001](AD-0001-reject-advisor-tool-integration.md) | Reject Anthropic Advisor Tool integration in MPL | accepted | 2026-04-11 |
 
 <!-- Add a row when a new ADR is created. Keep sorted by ID descending (newest first). -->
+<!-- AD-0002 reserved for: CB features bound to cb-testbed ablation experiment (pending write) -->
+<!-- AD-0004 reserved for: PR-02/03/04 architectural deadlock (pending debate) -->
