@@ -254,7 +254,9 @@ MPL supports natural resume through per-phase state persistence. When a session 
 
 ## 4. Agent Catalog
 
-MPL uses 7 specialized agents (v0.12.2: consolidated from 15 — see v0.11.0 changelog for details). Each agent has clear role boundaries and tool restrictions.
+MPL uses 7 specialized agents in the active catalog (v0.12.2: consolidated from 15 — see v0.11.0 changelog for details). Each agent has clear role boundaries and tool restrictions.
+
+> **Tree / catalog mismatch (2026-04-12)**: after the AD-0003 partial revert, `agents/` contains 8 files. `mpl-test-agent.md` is present in the tree (restored to undo the accidental v0.12.2 deletion) but **not yet catalogued here** because its long-term architectural role — separate agent (option A) vs inlined into `mpl-phase-runner` (option B) vs redesigned 3-role triangulation (option C) vs dropped in favor of mechanical Hard 3 (option D) — is deferred to the reconciliation audit. Once the audit decides, this section will be updated to match. See `docs/decisions/AD-0003-v012.2-accidental-agent-deletion.md`.
 
 ### Pre-Execution Agents (Analysis/Planning)
 
