@@ -116,6 +116,16 @@ disallowedTools: Task
   </Output_Schema>
 
   <Adversarial_Verification_HA02>
+    <!--
+      Canonical source: prompts/modules/adversarial-verification-ha02.md
+      This block is a synchronized copy. When changing either copy, update
+      both in the same commit. The canonical file is the extraction target
+      for AD-0004 Gate 1 (Option B inlining into mpl-phase-runner).
+      Do NOT edit the content between BEGIN/END markers without updating
+      prompts/modules/adversarial-verification-ha02.md in lockstep.
+    -->
+
+    <!-- HA-02 BEGIN v0.12.0 -->
     ### Self-Rationalization Anti-Patterns (v0.12.0, HA-02)
 
     The following judgment patterns are signals of confirmation bias. If you catch yourself producing any of these, STOP and replace with evidence-based verification:
@@ -139,7 +149,8 @@ disallowedTools: Task
 
     ### Probing Hints (v0.12.0, HA-03)
 
-    If the Phase Seed contains a `probing_hints` field, you MUST include at least one adversarial test based on those hints. These hints represent risk areas identified by the Seed Generator (e.g., concurrency conflicts, boundary values, platform constraints). Treat them as mandatory test targets, not suggestions.
+    If the Phase Seed contains a `probing_hints` field, you MUST include at least one adversarial test based on those hints. These hints represent risk areas identified by the decomposer (e.g., concurrency conflicts, boundary values, platform constraints). Treat them as mandatory test targets, not suggestions.
+    <!-- HA-02 END v0.12.0 -->
   </Adversarial_Verification_HA02>
 
   <Failure_Modes_To_Avoid>
