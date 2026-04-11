@@ -88,7 +88,6 @@ If `.mpl/config.json` does not exist, create it:
 ```json
 {
   "max_fix_loops": 10,
-  "max_total_tokens": 900000,
   "gate1_strategy": "auto",
   "hitl_timeout_seconds": 30,
   "tool_mode": "auto",
@@ -609,9 +608,8 @@ AskUserQuestion: "Would you like to customize advanced settings?"
 If "Customize" selected:
 1. **Maturity mode** (default standard): explore / standard / strict
 2. **Max fix loops** (default 10): How many fix attempts before circuit breaker?
-3. **Token budget** (default 500K): Maximum token spend per pipeline run?
-4. **HITL timeout** (default 30s): How long to wait for human approval?
-5. **Gate 1 strategy** (auto/docker/native/skip): How to run automated tests?
+3. **HITL timeout** (default 30s): How long to wait for human approval?
+4. **Gate 1 strategy** (auto/docker/native/skip): How to run automated tests?
 
 Write all answers to `.mpl/config.json`.
 

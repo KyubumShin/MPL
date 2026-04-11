@@ -97,7 +97,7 @@ disallowedTools: Write, Edit, Task
 
     ### Category 8: Configuration
     - If `.mpl/config.json` exists, validate all fields:
-      max_fix_loops (number), max_total_tokens (number),
+      max_fix_loops (number),
       gate1_strategy (string), convergence (object),
       cluster_ralph.enabled (boolean), cluster_ralph.max_fix_attempts (number),
       coverage_thresholds.lines (number), coverage_thresholds.branches (number),

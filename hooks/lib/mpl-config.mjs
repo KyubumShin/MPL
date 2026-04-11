@@ -29,7 +29,6 @@ function deepMergeConfig(target, source) {
 
 const DEFAULTS = {
   max_fix_loops: 10,
-  max_total_tokens: 900000,
   gate1_strategy: 'auto',  // 'docker', 'native', 'skip'
   hitl_timeout_seconds: 30,
   convergence: {

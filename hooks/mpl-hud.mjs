@@ -248,12 +248,10 @@ function formatFixLoop(count, max) {
   return `${c.dim}${count}/${max}${c.reset}`;
 }
 
-function formatTokens(used, max) {
-  if (!max) return null;
+function formatTokens(used) {
+  if (!used || used <= 0) return null;
   const k = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : `${n}`;
-  const ratio = used / max;
-  const color = ratio >= 0.8 ? c.red : ratio >= 0.5 ? c.yellow : c.dim;
-  return `${color}${k(used)}/${k(max)}${c.reset}`;
+  return `${c.dim}${k(used)}${c.reset}`;
 }
 
 function formatTodos(sprint) {
@@ -377,7 +375,7 @@ async function main() {
     }
 
     // Tokens
-    const tokens = formatTokens(state.cost?.total_tokens || 0, state.cost?.max_total_tokens);
+    const tokens = formatTokens(state.cost?.total_tokens || 0);
     if (tokens) parts2.push(`${c.magenta}tok:${c.reset}${tokens}`);
 
     // Tool mode (compact)

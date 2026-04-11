@@ -46,7 +46,6 @@ const DEFAULT_STATE = {
   session_id: null,
   cost: {
     total_tokens: 0,
-    max_total_tokens: 900000,
     estimated_usd: 0
   },
   convergence: {
@@ -301,7 +300,6 @@ export function initState(cwd, featureName, runMode = 'full', ppHint = null) {
   const isMid = ppHint === 'mid';
 
   const maxFixLoops = config.max_fix_loops ?? (isNear ? 3 : isMid ? 5 : 10);
-  const maxTokens = config.max_total_tokens ?? (isNear ? 150000 : isMid ? 300000 : 900000);
   const convergenceConfig = config.convergence ?? {};
 
   const ppPrefix = isNear ? 'near-' : isMid ? 'mid-' : '';
@@ -312,10 +310,6 @@ export function initState(cwd, featureName, runMode = 'full', ppHint = null) {
     pp_proximity: null,            // Set by Triage after Quick Scope Scan
     current_phase: isNear ? 'phase1a-research' : isMid ? 'small-plan' : 'phase1a-research',
     max_fix_loops: maxFixLoops,
-    cost: {
-      ...DEFAULT_STATE.cost,
-      max_total_tokens: maxTokens
-    },
     convergence: {
       ...DEFAULT_STATE.convergence,
       ...convergenceConfig

@@ -12,7 +12,6 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `max_fix_loops` | number | `10` | Maximum Fix Loop iterations before pipeline failure | `mpl-run-execute-gates.md` |
-| `max_total_tokens` | number | `900000` | Total token upper limit (v0.6.7: raised from 500K for 1M context) | `hooks/lib/mpl-state.mjs` |
 | `gate1_strategy` | `"auto"` \| `"docker"` \| `"native"` \| `"skip"` | `"auto"` | Gate 1 test execution strategy | `mpl-run-execute-gates.md` |
 | `hitl_timeout_seconds` | number | `30` | HITL (Human-in-the-Loop) response wait time in seconds | `design.md` |
 | `tool_mode` | `"standalone"` \| `"mcp"` | `"standalone"` | Tool mode — standalone uses native Claude Code tools, MCP uses QMD server | `docs/standalone.md` |
@@ -119,7 +118,6 @@ Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
 ```json
 {
   "max_fix_loops": 10,
-  "max_total_tokens": 900000,
   "context_cleanup_window": 3,
   "hat": {
     "default_level": "auto",

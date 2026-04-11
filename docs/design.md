@@ -462,7 +462,6 @@ The following options are supported in `.mpl/config.json`:
 | Option | Default | Description |
 |------|--------|------|
 | `max_fix_loops` | `10` | Maximum Fix Loop iterations |
-| `max_total_tokens` | `900000` | Total token upper limit (v0.6.7: raised from 500K for 1M context) |
 | `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |

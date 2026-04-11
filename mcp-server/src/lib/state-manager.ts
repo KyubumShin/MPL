@@ -36,7 +36,6 @@ export interface MplState {
   session_id: string | null;
   cost: {
     total_tokens: number;
-    max_total_tokens: number;
     estimated_usd: number;
   };
   convergence: {
@@ -81,7 +80,6 @@ const DEFAULT_STATE: MplState = {
   session_id: null,
   cost: {
     total_tokens: 0,
-    max_total_tokens: 900000,
     estimated_usd: 0,
   },
   convergence: {
