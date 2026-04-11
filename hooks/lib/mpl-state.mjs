@@ -84,7 +84,8 @@ const DEFAULT_STATE = {
       low_to_high: 0            // Planner said LOW, user upgraded to HIGH
     }
   },
-  // Stage 2 ambiguity score — written by orchestrator after mpl-ambiguity-resolver completes.
+  // Stage 2 ambiguity score — written by orchestrator via mpl_state_write after
+  // the inline mpl_score_ambiguity MCP tool loop reaches threshold_met == true.
   // mpl-phase-controller blocks mpl-decompose if null.
   ambiguity_score: null,         // number (0.0~1.0) | null — threshold: <= 0.2
   // F-33: Session budget prediction
