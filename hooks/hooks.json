@@ -119,7 +119,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-session-init.mjs\"",
-            "timeout": 5
+            "timeout": 10
           }
         ]
       }

@@ -260,6 +260,33 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.12.2 — Docs Consistency + MCP Server First-Install Hotfix (2026-04-10~11)
+
+Two-part release. Part 1 (2026-04-10) cleans up stale v2 agent references. Part 2 (2026-04-11) ships a first-install hotfix so the `mpl-server` MCP tools work out of the box on fresh plugin installs.
+
+### Part 1 — Docs Consistency + Stale Agent Cleanup
+
+- 2 stale agent files deleted: `mpl-ambiguity-resolver`, `mpl-test-agent`
+- Agent count corrected 8→7 in `docs/design.md`
+- Deleted-agent references updated across 8 doc files
+- Version bump 0.12.1 → 0.12.2 across `plugin.json`, `marketplace.json`, READMEs, `docs/config-schema.md`
+- `docs/config-schema.md` added to `skills/mpl-version-bump/SKILL.md` checklist
+
+### Part 2 — MCP Server First-Install Hotfix
+
+**Problem**: On fresh plugin install the cached plugin directory (`~/.claude/plugins/cache/mpl/mpl/<version>/`) contains `mcp-server/src/` but not `dist/` or `node_modules/`. The `.mcp.json` declares `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js`, which resolves correctly but the file does not exist — so `/mcp` reports "Failed to reconnect to mpl-server" and agents lose `mpl_score_ambiguity`, `mpl_state_read`, `mpl_state_write`.
+
+**Fix**: `hooks/mpl-session-init.mjs` now runs `ensureMcpServerBuilt()` on every SessionStart. When `dist/index.js` or `node_modules/@modelcontextprotocol` are missing, it spawns a **detached** `npm install && npm run build` inside the plugin's `mcp-server/` directory, writes a `.build-lock` to prevent re-entry (5-min TTL), streams progress to `.build.log`, and emits a one-time `systemMessage` telling the user to reconnect via `/mcp` once the background build finishes. The already-built path is a true no-op — zero filesystem touches.
+
+| File | Change |
+|------|--------|
+| `hooks/mpl-session-init.mjs` | +62 lines: `ensureMcpServerBuilt()`, wired into both the no-rotation and rotation-resume return paths |
+| `hooks/hooks.json` | SessionStart timeout `5s` → `10s` (spawn + lock write headroom) |
+
+**Resolution path for plugin-root**: `PLUGIN_ROOT` is resolved from `import.meta.url` (`dirname(fileURLToPath(...))`), not env var — works identically whether the hook runs from the dev repo (`/Users/.../project/MPL/`) or the marketplace cache (`~/.claude/plugins/cache/mpl/mpl/<version>/`).
+
+---
+
 ## v0.12.1 — v2 Completion: Agent Deletion + Terminology Cleanup (2026-04-04)
 
 Completes the v2 structural transition started in v0.11.0:
