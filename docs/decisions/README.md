@@ -82,5 +82,6 @@ What changes because of this decision. Include:
 
 | ID | Title | Status | Date |
 |----|-------|--------|------|
+| [AD-0001](AD-0001-reject-advisor-tool-integration.md) | Reject Anthropic Advisor Tool integration in MPL | accepted | 2026-04-11 |
 
 <!-- Add a row when a new ADR is created. Keep sorted by ID descending (newest first). -->
