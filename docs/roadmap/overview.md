@@ -260,6 +260,88 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.12.3 — Forensic Repair + HA-03 Restoration + ADR Batch (2026-04-11~12)
+
+Cleanup + restoration release that repairs the structural damage from v0.12.2's incomplete cleanup commit (`4903a8d`) while ratifying three key architectural decisions as Accepted ADRs and producing the first full 4-dimension reconciliation audit of MPL's codebase.
+
+**This release ships no new user-facing features.** It is a structural repair release plus decision-record consolidation, produced after a session audit found that v0.12.2's "stale agent cleanup" left the F-40 Mandatory Independent Verification dispatch path *active-broken* (runtime probe confirmed hard error: `Agent type 'mpl-test-agent' not found`).
+
+### Part 1 — AD-0003 partial revert + dispatch graph cleanup
+
+- **Restored `agents/mpl-test-agent.md`** (155 lines including 28 lines of HA-02 Adversarial Verification content) via `git checkout 4903a8d^ -- agents/mpl-test-agent.md`. Targeted restore — does NOT undo the legitimate doc updates from `4903a8d`, does NOT re-introduce `mpl-ambiguity-resolver.md` (valid MCP migration stands).
+- **F-40 dispatch graph is now clean**. Both dispatch sites (`commands/mpl-run-execute.md:511`, `commands/mpl-run-execute-gates.md:154`) resolve to the restored agent.
+- **Legacy ambiguity-resolver dispatch hints** at `hooks/mpl-phase-controller.mjs:130,141-142,150-151,181` and `hooks/mpl-ambiguity-gate.mjs:6,82,94` and `commands/mpl-run-phase0.md:485-495` rewritten to reference the `mpl_score_ambiguity` MCP-tool inline loop directly, matching runtime reality. Zero functional change.
+- **Validator schema drift** in `hooks/mpl-validate-output.mjs:35,59-64` cleaned up — `mpl-ambiguity-resolver` moved from `VALIDATE_AGENTS` expected list to the deleted-agent negative-assertion set. 16/16 validate-output tests pass post-refactor.
+- **Stale comment** at `hooks/lib/mpl-state.mjs:87` rewritten from "written by orchestrator after mpl-ambiguity-resolver completes" to "written via `mpl_state_write` after the inline `mpl_score_ambiguity` MCP tool loop reaches `threshold_met`".
+
+### Part 2 — HA-03 Probing Hints producer restoration
+
+- **Producer re-homed** to `agents/mpl-decomposer.md` Step 9.5 (new reasoning step). Content restored verbatim from git archaeology at `agents/mpl-phase-seed-generator.md` commit `a60320e^` (v0.12.1 pre-deletion):
+  - Phase domain → hint table (api/db, algorithm, ui-WebView, ui-SSR, infra, general)
+  - Platform constraint table (tauri.conf.json, electron-builder.json, next.config.js)
+  - Fallback rule (omit field when no hints determinable)
+- **Output schema** in decomposer extended with `probing_hints:` array field in the `phases:` block.
+- **HA-03 is now FULLY ACTIVE**. Consumer at `agents/mpl-test-agent.md:140-142` was a silent dead-check before this release — it read a field that no active agent wrote. Producer + consumer are now synchronized.
+
+### Part 3 — HA-02 canonical extraction
+
+- **New file**: `prompts/modules/adversarial-verification-ha02.md` (60 lines) — canonical source for the HA-02 Adversarial Verification prompt block (5 self-rationalization anti-patterns + structured Test/Expected/Actual/Verdict output format + Probing Hints directive).
+- **Synchronized copy** at `agents/mpl-test-agent.md:118-152` now wrapped in `<!-- HA-02 BEGIN v0.12.0 -->` / `<!-- HA-02 END v0.12.0 -->` markers with a sync-rule HTML comment.
+- **Sync discipline**: both copies must change in lockstep. Single-file edits are a policy violation (grep-detectable via the markers).
+- **Purpose**: prepares HA-02 for mechanical inlining into `mpl-phase-runner` if AD-0004 Gate 1 Option B experiment authorizes it — prevents copy-paste drift across future consumers.
+
+### Part 4 — ADR batch (AD-0002, AD-0003, AD-0004 accepted)
+
+Three Accepted ADRs landed:
+
+| ID | Title | Purpose |
+|---|---|---|
+| **AD-0002** | CB cross-boundary features are bound to the cb-testbed ablation experiment | Codifies "experiment beats debate" for CB family. Permanently rejects CB-02/03 restoration on experimental grounds; defers CB-04 pending M3 re-measurement; ratifies #19 AD-05 priority elevation with empirical backing (37% D2 leak at M1=1 M2=ON). |
+| **AD-0003** | v0.12.2 accidental agent deletion — partial revert for mpl-test-agent | Forensic evidence chain for `4903a8d` incomplete cleanup. Decides partial revert for `mpl-test-agent.md` only; ambiguity-resolver deletion ratified as valid MCP migration. Architectural path (Options A/B/C/D) deferred to AD-0004. |
+| **AD-0004** | Test Agent long-term architecture — Option A baseline with conditional Option B experiment | Recommended path: keep Option A (status quo post-revert) as operational baseline, with a single decision gate (Option B empirical test) that can promote B if inline role-switching recovers L2/L3 detection. Options C and D explicitly deferred as premature. |
+
+AD-0005 slot reserved for PR-02/03/04 architectural deadlock (requires separate debate session).
+
+### Part 5 — 4-dimension reconciliation audit
+
+- **`~/project/wiki/scratch/2026-04-12/mpl-reconciliation-audit.md`** (635 lines) — produced via 4 sequential Explore agent dispatches with `file:line` evidence for every claim. No `docs/*.md` or `wiki/**/*.md` cited as authority.
+- **Dimension 1** (Agent Registry): 8 active agents, 11 dispatch sites all valid, 3 MCP tools, zero dangling runtime refs post-repair.
+- **Dimension 2** (Feature × Implementation Matrix): 24 features verdicted. HA-03 ACTIVE after restoration, HA-05 upgraded NEVER MERGED → PARTIAL after unlabeled survivor at `agents/mpl-phase0-analyzer.md:280-326` was found. PR-02/PR-04 remain LOST (AD-0005 reserved).
+- **Dimension 3** (Experimental Evidence Integration): cb-phase-a1 findings mapped per feature. M2 dominance (Δ=-2.17) validates CB-06. C2/C3 = 0 structural blindness validates HA-02/HA-03 restoration. 37% leak → AD-05 priority elevation confirmed. Load-bearing caveat: F-40 runtime effectiveness unmeasured (macOS `timeout` bug in cb-testbed).
+- **Dimension 4** (Architecture + Phase Internal Structure): triangulation collapse analysis (3 intended observers → 2 current), 4 restoration paths evaluated, Option A + conditional B recommended.
+- **Decision matrix §8** with 4 action classes; 5 items executed in v0.12.3, others tracked as next-session work (fresh-session F-40 probe, #25 advisory cleanup, AD-0005 debate, Option B experiment).
+
+### Part 6 — GitHub backlog infrastructure
+
+- **qmd MCP server** added to `.mcp.json` — second MCP server alongside `mpl-server`, provides local markdown search over 162 documents across 11 collections. Closes #24.
+- **Issue #26 created and closed**: HA-03 producer restoration tracker.
+- **Issue #25 created (open)**: advisory_result / advisory_passed vestigial field removal — implementation follow-up to #13 Option B resolution.
+- **Issue #19 priority ELEVATED** with empirical evidence (37% D2 leak table, L1/L2/L3 hierarchy, cb-phase-a1 report citation). Title rewritten to `[feature] AD-05: Hard 3 parameter-level verification — closes 37% M2 leak`.
+- **Issue #13 closed** (Option B: remove advisory vestigial fields).
+- **Issue #20 closed won't-fix** (AD-06 feedback loop rejected on same empirical grounds as #13).
+
+### Files changed (primary)
+
+| Category | Files |
+|---|---|
+| Restored | `agents/mpl-test-agent.md` (155 lines via targeted git checkout) |
+| Modified | `agents/mpl-decomposer.md` (+35 lines HA-03 Step 9.5), `agents/mpl-test-agent.md` (sync markers), `hooks/mpl-phase-controller.mjs`, `hooks/mpl-ambiguity-gate.mjs`, `hooks/mpl-validate-output.mjs`, `hooks/__tests__/mpl-validate-output.test.mjs`, `hooks/lib/mpl-state.mjs`, `commands/mpl-run-phase0.md`, `docs/design.md` (§4 footnote), `.mcp.json` |
+| New ADRs | `docs/decisions/AD-0002-cb-features-bound-to-ablation-experiment.md`, `docs/decisions/AD-0003-v012.2-accidental-agent-deletion.md`, `docs/decisions/AD-0004-test-agent-long-term-architecture.md` |
+| New module | `prompts/modules/adversarial-verification-ha02.md` |
+| Version bump | `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `mcp-server/package.json`, `mcp-server/package-lock.json`, `README.md`, `README_ko.md`, `docs/design.md` title, `docs/config-schema.md` version field |
+
+**Breaking changes**: NONE. The partial revert re-enables a previously active-broken code path; the cleanup commits are zero-functional-change refactors; the ADRs are documentation.
+
+**Known carry-over work to v0.12.4 or later**:
+- Fresh-session F-40 runtime probe (cannot be verified from the same session that performed the revert)
+- `#25` advisory_result vestigial field removal (implementation of #13 Option B decision)
+- `AD-0005` PR-02/03/04 architectural deadlock (requires separate Pro/Con/Mutant debate session)
+- `AD-0004` Gate 1 Option B experiment (requires cb-testbed-equivalent environment + M3 macOS `timeout` fix)
+- `#19` AD-05 Hard 3 parameter-level verification implementation (blocked on #14 AD-01 + #15 AD-02 prerequisites)
+- HA-05 auto-injection half restoration (conditional on AD-0004 path decision)
+
+---
+
 ## v0.12.2 — Docs Consistency + MCP Server First-Install Hotfix (2026-04-10~11)
 
 Two-part release. Part 1 (2026-04-10) cleans up stale v2 agent references. Part 2 (2026-04-11) ships a first-install hotfix so the `mpl-server` MCP tools work out of the box on fresh plugin installs.
