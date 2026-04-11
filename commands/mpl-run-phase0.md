@@ -482,18 +482,37 @@ Task(subagent_type="mpl-interviewer", model=model_phase1, prompt=`
 `)
 → save pivot-points.md + user_responses_summary
 
-// Stage 2: Ambiguity Resolution + Requirements (mpl-ambiguity-resolver)
-// MUST be a separate Task — mpl-interviewer does NOT perform this.
-// Scoring MUST use mpl_score_ambiguity MCP tool (not self-scoring).
-Task(subagent_type="mpl-ambiguity-resolver", model=model_stage2, prompt=`
-  interview_depth: ${interview_depth}
-  information_density: ${information_density}
-  pivot_points: read .mpl/pivot-points.md
-  user_responses_summary: from Stage 1 output
-  provided_specs: ${provided_specs}
-  project_type: ${field_classification}
-`)
-→ save requirements-light.md or requirements-{hash}.md + ambiguity score
+// Stage 2: Ambiguity Resolution + Requirements (orchestrator-driven loop via MCP)
+// mpl-interviewer does NOT perform this. There is no Stage 2 subagent — the
+// orchestrator drives the Socratic loop inline using the mpl_score_ambiguity
+// MCP tool, which returns a computed score + weakest_dimension + suggested_question.
+//
+// Loop (orchestrator inline, no subagent dispatch):
+//   1. Call mpl_score_ambiguity({
+//        cwd,
+//        pivot_points,       // read from .mpl/pivot-points.md
+//        user_responses,     // from Stage 1 output + any prior iterations
+//        spec_analysis,      // optional
+//        codebase_context,   // optional
+//        current_choices,    // optional
+//      })
+//   2. Read { ambiguity_score, threshold_met, weakest_dimension, suggested_question }.
+//   3. If threshold_met == false:
+//        - Ask the user the suggested_question (targets the weakest dimension)
+//        - Append response to user_responses
+//        - Goto 1
+//   4. When threshold_met == true:
+//        - Persist ambiguity_score via mpl_state_write
+//        - Save requirements-light.md or requirements-{hash}.md
+//        - Proceed to Decomposition
+//
+// Inputs available to the loop:
+//   interview_depth        = ${interview_depth}
+//   information_density    = ${information_density}
+//   pivot_points           = .mpl/pivot-points.md
+//   user_responses_summary = from Stage 1 output
+//   provided_specs         = ${provided_specs}
+//   project_type           = ${field_classification}
 
 // After Stage 2 completes, record ambiguity_score to state:
 // The orchestrator MUST extract ambiguity_score from Stage 2 output and write to state.

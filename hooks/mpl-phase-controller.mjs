@@ -127,7 +127,7 @@ async function main() {
 
     case 'mpl-decompose': {
       // GATE: ambiguity_score MUST exist AND meet threshold before decomposition proceeds.
-      // Stage 2 (mpl-ambiguity-resolver) writes ambiguity_score to state via mpl_score_ambiguity MCP tool.
+      // Stage 2 (Ambiguity Resolution) writes ambiguity_score to state via the mpl_score_ambiguity MCP tool.
       const ambiguityScore = state.ambiguity_score;
       const hasScore = ambiguityScore !== null && ambiguityScore !== undefined;
       const threshold = 0.2;
@@ -138,8 +138,8 @@ async function main() {
         console.log(JSON.stringify({
           continue: true,
           stopReason: '[MPL] ⛔ Decomposition BLOCKED: ambiguity_score not found in state. ' +
-            'Reverting to Stage 2 (mpl-ambiguity-resolver). ' +
-            'Run Task(subagent_type="mpl-ambiguity-resolver") to resolve ambiguity and record score via mpl_score_ambiguity MCP tool.'
+            'Reverting to Stage 2 Ambiguity Resolution. ' +
+            'Call mpl_score_ambiguity MCP tool with pivot_points + user_responses, then persist the result via mpl_state_write.'
         }));
       } else if (ambiguityScore > threshold) {
         // Block decomposition — score exceeds threshold, re-run ambiguity resolution
@@ -147,8 +147,8 @@ async function main() {
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] ⛔ Decomposition BLOCKED: ambiguity_score=${ambiguityScore} exceeds threshold ${threshold}. ` +
-            'Reverting to Stage 2 (mpl-ambiguity-resolver) for additional Socratic resolution. ' +
-            'Run Task(subagent_type="mpl-ambiguity-resolver") to continue resolving weakest dimensions.'
+            'Reverting to Stage 2 Ambiguity Resolution for additional Socratic resolution. ' +
+            'Re-call mpl_score_ambiguity MCP tool with updated user_responses targeting the weakest dimension.'
         }));
       } else {
         // Score exists and meets threshold — proceed
@@ -178,7 +178,7 @@ async function main() {
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] Stage 2: Ambiguity Resolution in progress.${scoreInfo} Target: <=${ambThreshold}. ` +
-            'Run Task(subagent_type="mpl-ambiguity-resolver") and use mpl_score_ambiguity MCP tool to measure progress.'
+            'Drive the Socratic loop inline: call mpl_score_ambiguity MCP tool after each user response and persist via mpl_state_write.'
         }));
       }
       break;

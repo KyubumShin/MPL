@@ -3,8 +3,9 @@
  * MPL Ambiguity Gate Hook (PreToolUse)
  *
  * Blocks Task(subagent_type="mpl-decomposer") if ambiguity_score is missing
- * or exceeds the threshold (0.2). Forces Stage 2 (mpl-ambiguity-resolver)
- * to complete before decomposition can proceed.
+ * or exceeds the threshold (0.2). Forces Stage 2 Ambiguity Resolution
+ * (orchestrator drives mpl_score_ambiguity MCP tool loop inline) to
+ * complete before decomposition can proceed.
  *
  * Matcher: Task|Agent (same as mpl-validate-output)
  * When ambiguity gate fails: continue=false (blocks the tool call)
@@ -79,7 +80,7 @@ async function main() {
     console.log(JSON.stringify({
       continue: false,
       reason: '[MPL] ⛔ Decomposer BLOCKED: ambiguity_score not found in state. ' +
-        'Run Stage 2 first: Task(subagent_type="mpl-ambiguity-resolver") with mpl_score_ambiguity MCP tool. ' +
+        'Run Stage 2 first: call mpl_score_ambiguity MCP tool with pivot_points + user_responses and persist score via mpl_state_write. ' +
         'Phase reverted to mpl-ambiguity-resolve.'
     }));
     return;
@@ -91,7 +92,7 @@ async function main() {
     console.log(JSON.stringify({
       continue: false,
       reason: `[MPL] ⛔ Decomposer BLOCKED: ambiguity_score=${score} exceeds threshold ${AMBIGUITY_THRESHOLD}. ` +
-        'Run Stage 2 again: Task(subagent_type="mpl-ambiguity-resolver") to resolve weakest dimensions. ' +
+        'Run Stage 2 again: re-call mpl_score_ambiguity MCP tool with updated user_responses targeting the weakest dimension. ' +
         'Phase reverted to mpl-ambiguity-resolve.'
     }));
     return;
