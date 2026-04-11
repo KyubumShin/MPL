@@ -80,6 +80,34 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - **H-items (Human)**: require human judgment (UI appearance, UX flow, naming quality)
       Mark severity for H-items. Minimize H-items; prefer A/S whenever possible.
 
+    Step 9.5: Generate Probing Hints (HA-03, v0.12.0)
+      For each phase, generate optional adversarial testing hints that the Test Agent (mpl-test-agent) consumes to produce at least one adversarial test per hint. Hints come from two sources:
+
+      (1) Phase domain → hint table:
+
+          | Phase Domain | Probing Hints |
+          |-------------|---------------|
+          | api / db    | "동시 요청 시 상태 충돌 테스트", "트랜잭션 격리 수준 검증" |
+          | algorithm   | "빈 입력/null 입력 경계값 테스트", "중복 호출 멱등성 검증" |
+          | ui (WebView)| "WebView 환경에서 브라우저 네이티브 API(prompt/confirm/alert) 사용 여부" |
+          | ui (SSR)    | "SSR 환경에서 window/document 직접 접근 여부" |
+          | infra       | "리소스 해제 누락(고아 연산) 테스트" |
+          | general     | At least one relevant probing hint based on phase scope |
+
+      (2) Platform constraint hints (from Phase 0 `target_platform` detection):
+
+          | Platform Config | Auto-Generated Hint |
+          |----------------|---------------------|
+          | `tauri.conf.json` exists | "Tauri WebView에서 window.prompt/confirm/alert 차단 — 커스텀 다이얼로그 확인" |
+          | `electron-builder.json` exists | "Renderer 프로세스에서 Node.js native API 직접 호출 여부" |
+          | `next.config.js` exists | "SSR 컴포넌트에서 window/document 직접 접근 여부" |
+
+      Fallback rule: if no relevant hints can be determined, omit the field (not an error).
+
+      Output location: write into each phase's `probing_hints` array in the output schema below.
+      Consumer: `agents/mpl-test-agent.md:140-142` reads this field to generate adversarial tests.
+      Empirical motivation: `cb-phase-a1` report §5.3 — C2 = 0 and C3 = 0 across all runs establishes that tests are structurally blind to L2 parameter and L3 schema defects. Probing hints are MPL's mechanism for adversarially targeting that blind spot at the decomposition layer.
+
     Step 10: Risk assessment (pre-mortem)
       - For each phase: most likely failure cause?
       - For each PP: trace compliance. Where could drift occur?
@@ -152,6 +180,13 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         estimated_todos: number
         estimated_files: number
         risk_notes: [string]
+
+        probing_hints:              # v0.12.0 HA-03: optional adversarial testing hints for Test Agent
+          - string                  # e.g., "동시 요청 시 상태 충돌 테스트"
+          # Optional. Omit the field entirely when no relevant hints can be determined.
+          # Consumer: agents/mpl-test-agent.md:140-142 — produces >=1 adversarial test per hint.
+          # Sources: (1) phase_domain → hint table, (2) Phase 0 target_platform detection.
+          # See Reasoning_Steps Step 9.5 for the domain + platform tables.
 
     execution_tiers:
       - tier: number
