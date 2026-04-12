@@ -631,7 +631,21 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
 
 12. More phases -> current_phase = "mpl-phase-running", continue 4.1
     → **Budget Check (F-33)**: See Step 4.3 extension — check session budget before starting next Phase.
-13. All done -> proceed to Step 4.5 (Gate System)
+13. All done → **MANDATORY Gate System entry (Floor guarantee)**:
+    ```
+    // This is NOT optional. ALL phases, regardless of PP-proximity, MUST pass
+    // Hard 1 + Hard 2 + Hard 3 (Floor Definition, mpl-run-execute-gates.md:16).
+    // Do NOT substitute a manual "npm run build" — the Gate protocol includes
+    // L2 value-path verification (AD-05), contract diff, regression suite,
+    // and structured violation reporting that a single build command cannot replace.
+
+    writeState(cwd, { current_phase: "phase3-gate" })
+    announce: "[MPL] All phases complete. Entering mandatory Gate System (Hard 1/2/3)."
+
+    // Load the gate protocol — this is the orchestrator reading the file,
+    // not a soft suggestion. If you skip this, the pipeline is invalid.
+    → Load `mpl-run-execute-gates.md` and execute Step 4.5 through completion.
+    ```
 
 #### Step 4.3 Extension: Budget Check (F-33)
 
@@ -795,9 +809,11 @@ if budget.recommendation == "pause_now":
 **Note**: `predictBudget()` requires `.mpl/context-usage.json` to be fresh (<30s). This file is written by the HUD statusline on each render cycle. If HUD is not active, predictBudget returns fail-open (recommendation: "continue").
 
 
-> **Steps 4.5 (Gate System) through 4.7 (Partial Rollback) and Step 4.8 Graceful Pause Protocol have been moved to `mpl-run-execute-gates.md`.**
-> This includes: Hard 1-3 Gates, Advisory Gate, Fix Loop with Convergence Detection, Reflexion, Partial Rollback, and Graceful Pause.
->
-> Load `mpl-run-execute-gates.md` when entering Step 4.5 or when any gate fails.
+**⚠️ MANDATORY PROTOCOL LOADING — NOT OPTIONAL:**
+
+Steps 4.5 (Gate System) through 4.8 (Graceful Pause) are in `mpl-run-execute-gates.md`.
+This includes: Hard 1-3 Gates, Fix Loop with Convergence Detection, Reflexion, Partial Rollback, and Graceful Pause.
+
+**You MUST `Read("commands/mpl-run-execute-gates.md")` when entering Step 4.5.** Skipping this — even for Far/non_pp proximity — violates the Floor guarantee. A manual `npm run build` is NOT a substitute for the Gate protocol (it misses Hard 2 regression suite, Hard 3 L1/L2 contract verification, structured violation reporting, and fix loop recovery).
 
 ---
