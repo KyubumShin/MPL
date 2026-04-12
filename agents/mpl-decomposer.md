@@ -147,6 +147,28 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       Consumer: `agents/mpl-test-agent.md:140-142` reads this field to generate adversarial tests.
       Empirical motivation: `cb-phase-a1` report §5.3 — C2 = 0 and C3 = 0 across all runs establishes that tests are structurally blind to L2 parameter and L3 schema defects. Probing hints are MPL's mechanism for adversarially targeting that blind spot at the decomposition layer.
 
+    Step 9.6.1: Pattern Risk Enumeration (AD-0005, v0.13.0, EXPERIMENTAL)
+      For each phase, enumerate known security anti-patterns that grep can detect in the phase's `impact.create` + `impact.modify` file list. Emit `risk_patterns[]` entries.
+
+      Default security patterns (always applied regardless of domain):
+        | Pattern ID | grep regex | Severity | Target langs |
+        |-----------|-----------|----------|-------------|
+        | sec-eval | `\beval\(` | EXPERIMENTAL | js, ts, py |
+        | sec-api-key | `(api_key\|apikey\|secret)\s*[:=]\s*["'][^"']{8,}` | EXPERIMENTAL | * |
+        | sec-sql-concat | `["']\s*\+\s*\w+.*(?:SELECT\|INSERT\|UPDATE\|DELETE\|FROM\|WHERE)` | EXPERIMENTAL | js, ts, py, java |
+        | sec-innerhtml | `\.innerHTML\s*=` | EXPERIMENTAL | js, ts |
+        | sec-weak-crypto | `Math\.random\(\)` | EXPERIMENTAL | js, ts |
+
+      Enumeration rule:
+      1. For each phase, check if any impact file matches a target language for any default pattern.
+      2. If yes, include matching patterns in `risk_patterns[]`.
+      3. If no impact files match any pattern's target languages, emit empty list `risk_patterns: []`.
+      4. The decomposer MAY add project-specific patterns beyond the defaults if the codebase analysis reveals domain-specific risks (e.g., Django `raw()` SQL for Python web projects). These are also `severity: EXPERIMENTAL`.
+
+      Consumer: `commands/mpl-run-decompose.md` Step 3 post-processing injects matching patterns into `verification_plan.a_items[]` as `type: "grep"` entries. `commands/mpl-run-execute-gates.md` Hard 1 Step 0 independently cross-checks at gate-time.
+
+      EXPERIMENTAL semantics: pattern matches are recorded as metrics only. They do NOT affect pipeline pass/fail until the CB testbed benchmark promotes to HARD per AD-0005 pre-registered threshold (≥3/5 detection rate).
+
     Step 10: Risk assessment (pre-mortem)
       - For each phase: most likely failure cause?
       - For each PP: trace compliance. Where could drift occur?
@@ -234,6 +256,15 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         estimated_todos: number
         estimated_files: number
         risk_notes: [string]
+
+        risk_patterns:              # v0.13.0 AD-0005 EXPERIMENTAL: security anti-pattern detection
+          - pattern_id: string      # e.g., "sec-eval", "sec-api-key"
+            grep_pattern: string    # regex for grep/Bash execution
+            severity: string        # "EXPERIMENTAL" (non-blocking metric only; promote to "HARD" after AD-0005 benchmark)
+            target_langs: [string]  # ["js", "ts", "py", "*"]
+          # REQUIRED field. Empty list [] allowed for phases with no matching target languages.
+          # Consumer: mpl-run-decompose.md Step 3 post-processing → a_items injection.
+          # See Reasoning_Steps Step 9.6.1 for the default pattern table and enumeration rule.
 
         probing_hints:              # v0.12.0 HA-03: optional adversarial testing hints for Test Agent
           - string                  # e.g., "동시 요청 시 상태 충돌 테스트"

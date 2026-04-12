@@ -26,6 +26,44 @@ After all phases complete, apply the Gate system before finalization.
 
 Binary pass/fail. All build tools, linters, and type checkers must succeed.
 
+**Step 0: Pattern Risk Check (AD-0005, EXPERIMENTAL)**
+
+Independent gate-time cross-check of security patterns against ALL changed files (not just per-phase impact files). Runs the same `default_risk_patterns` from decomposition post-processing, but against `git diff --name-only` to catch files that the decomposer may have missed.
+
+```
+// AD-0005 EXPERIMENTAL: non-blocking metric recording only.
+// Exit code is IGNORED during EXPERIMENTAL phase.
+// When promoted to HARD, non-zero exit → Hard 1 FAIL.
+
+changed_files = Bash("git diff --name-only HEAD~$(state.phases.completed || 1) 2>/dev/null || git diff --name-only --cached").split("\n").filter(f => f.trim())
+
+patterns = [
+  { id: "sec-eval",        regex: "\\beval\\(",                                                     langs: [".js",".ts",".py"] },
+  { id: "sec-api-key",     regex: "(api_key|apikey|secret)\\s*[:=]\\s*[\"'][^\"']{8,}",             langs: ["*"] },
+  { id: "sec-sql-concat",  regex: "[\"']\\s*\\+\\s*\\w+.*(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)",  langs: [".js",".ts",".py",".java"] },
+  { id: "sec-innerhtml",   regex: "\\.innerHTML\\s*=",                                              langs: [".js",".ts"] },
+  { id: "sec-weak-crypto", regex: "Math\\.random\\(\\)",                                            langs: [".js",".ts"] }
+]
+
+matches = []
+for each p in patterns:
+  target_files = changed_files.filter(f => p.langs.includes("*") or p.langs.some(ext => f.endsWith(ext)))
+  if target_files.length > 0:
+    result = Bash("grep -rnE '" + p.regex + "' " + target_files.join(" ") + " 2>/dev/null || true")
+    if result.stdout.trim():
+      matches.push({ pattern_id: p.id, files: target_files, output: result.stdout.trim() })
+
+// Metric recording (EXPERIMENTAL)
+if matches.length > 0:
+  metric = { timestamp: now_iso(), patterns_matched: matches.length, details: matches }
+  Bash("echo '" + JSON.stringify(metric) + "' >> .mpl/mml/pattern-metrics.jsonl")
+  announce: "[MPL] Hard 1 Step 0 (EXPERIMENTAL): {matches.length} security pattern matches found. Metrics recorded. (non-blocking)"
+
+// EXPERIMENTAL: do NOT fail Hard 1 on pattern matches.
+// When severity promoted to HARD: uncomment the line below.
+// if matches.length > 0: → Hard 1 FAIL
+```
+
 **Step 1: Lint Auto-Detection and Execution**
 
 ```

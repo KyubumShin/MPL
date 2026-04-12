@@ -175,6 +175,45 @@ success_criteria:
     ```
 
     Report: `[MPL] AD-01: {N} contract files written to .mpl/contracts/`
+2b. **Inject default risk patterns (AD-0005, v0.13.0, EXPERIMENTAL)**:
+    Apply `default_risk_patterns` to each phase's `verification_plan.a_items[]`. This step ensures security patterns are checked even if the decomposer omits them from `risk_patterns[]`.
+
+    ```
+    default_risk_patterns = [
+      { pattern_id: "sec-eval",        grep_pattern: "\\beval\\(",                                                      target_langs: ["js","ts","py"] },
+      { pattern_id: "sec-api-key",     grep_pattern: "(api_key|apikey|secret)\\s*[:=]\\s*[\"'][^\"']{8,}",              target_langs: ["*"] },
+      { pattern_id: "sec-sql-concat",  grep_pattern: "[\"']\\s*\\+\\s*\\w+.*(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)",   target_langs: ["js","ts","py","java"] },
+      { pattern_id: "sec-innerhtml",   grep_pattern: "\\.innerHTML\\s*=",                                               target_langs: ["js","ts"] },
+      { pattern_id: "sec-weak-crypto", grep_pattern: "Math\\.random\\(\\)",                                             target_langs: ["js","ts"] }
+    ]
+
+    for each phase in decomposition.phases:
+      phase_langs = detect_languages(phase.impact.create + phase.impact.modify)
+
+      for each rp in default_risk_patterns:
+        if rp.target_langs includes "*" or any(rp.target_langs intersect phase_langs):
+          // Inject as A-item grep criterion
+          phase.verification_plan.a_items.push({
+            criterion: "AD-0005 EXPERIMENTAL: " + rp.pattern_id,
+            type: "grep",
+            command: "grep -rnE '" + rp.grep_pattern + "' " + join(phase.impact_files(), " "),
+            severity: "EXPERIMENTAL"  // non-blocking, metric only
+          })
+
+      // Also merge any decomposer-generated risk_patterns (project-specific)
+      for each rp in phase.risk_patterns:
+        if rp not already in a_items:
+          phase.verification_plan.a_items.push({
+            criterion: "AD-0005 EXPERIMENTAL: " + rp.pattern_id,
+            type: "grep",
+            command: "grep -rnE '" + rp.grep_pattern + "' " + join(phase.impact_files(), " "),
+            severity: "EXPERIMENTAL"
+          })
+
+    pattern_count = count injected a_items across all phases
+    ```
+
+    Report: `[MPL] AD-0005: {pattern_count} EXPERIMENTAL pattern checks injected across {phase_count} phases`
 3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
 5. Update MPL state with `phase_details` (all phases as `"pending"`)
