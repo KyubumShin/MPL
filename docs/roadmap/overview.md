@@ -260,6 +260,29 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.13.1 — Post-Smoke-Test Hotfixes: Gate Enforcement + Ambiguity Retry + F-40 Dispatch (2026-04-12)
+
+Patch release capturing 4 bug fixes discovered during the first live pipeline smoke test on specpill (Far/non_pp, 5 UI phases). All fixes address flow control bugs where the orchestrator bypassed or skipped mandatory pipeline stages.
+
+### Fix 1 — Ambiguity Gate Retry Protocol (`ac0a371`)
+
+- Decomposer blocked by ambiguity gate but no auto re-entry to Stage 2. Added Step 3.0 retry protocol: 3 retries with score re-evaluation + force-pass on exhaustion. Prevents permanent stall at `mpl-ambiguity-resolve`.
+
+### Fix 2 — MCP Scoring Session Reuse + Model Upgrade (`b2e6ef2`)
+
+- `mpl_score_ambiguity` created a new MCP session per call (no `sessionId` reuse), causing unnecessary overhead. Added `sessionId` cache. Also upgraded scoring model from haiku to opus for accuracy.
+
+### Fix 3 — Mandatory Gate System Entry (`73a6dca`)
+
+- Gate System (Hard 1/2/3) skipped entirely for Far/non_pp — orchestrator ran manual `npm run build` instead of loading `commands/mpl-run-execute-gates.md`. Added mandatory gate entry with explicit state write + ⚠️ framing after all phases complete.
+
+### Fix 4 — Hard 1 Zero-Check + F-40 Test Agent Dispatch (`8b8833f`)
+
+- Hard 1 auto-passed with zero lint/build tools detected (should FAIL). Added zero-check defensive FAIL.
+- F-40 Test Agent dispatched 0 times across 5 UI phases despite being mandatory. Added "NEVER SKIP" enforcement in execute protocol.
+
+---
+
 ## v0.13.0 — Complete v0.13.0 Feature Set: AD Chain + E2E Awareness + Strategy Generation (2026-04-12)
 
 Minor version bump consolidating the full v0.13.0 feature set from the 2026-04-12 session. Includes 3 post-v0.12.4 features that complete the v0.13.0 roadmap targets.
@@ -913,6 +936,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ⚠ **Partial** (HA-01/02/03/04 ACTIVE; HA-05 PARTIAL — platform detection survives at `agents/mpl-phase0-analyzer.md:280-326`, auto-injection of `phase_seed.yaml constraints` field + 5-item self-verification checklist LOST. Gated on AD-0004 path per 2026-04-12 audit §8.B #3.) |
 | ~~**v0.12.4**~~ | ~~Contract Coverage + AD-05 L2 Verification + PR-02 EXPERIMENTAL + Advisory Cleanup + AD-0005 Debate~~ | ✅ **Implemented** |
 | ~~**v0.13.0**~~ | ~~AD-03/04/07 + HA-06 E2E Awareness + Full v0.13.0 feature set~~ | ✅ **Implemented** |
+| ~~**v0.13.1**~~ | ~~Post-smoke-test hotfixes: ambiguity retry, gate enforcement, F-40 dispatch, Hard 1 zero-check~~ | ✅ **Implemented** |
 | **v1.0.0** | v2 Phase 3: Always-On Judge (codex-plugin-cc) + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
 | **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |

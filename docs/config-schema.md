@@ -2,7 +2,7 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.13.0
+> **Version**: v0.13.1
 > **Last updated**: 2026-04-12
 
 ---

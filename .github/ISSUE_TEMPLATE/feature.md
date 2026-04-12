@@ -45,6 +45,6 @@ Label checklist before submitting:
   - stage:{triage|phase0|decompose|execute|finalize|resume} (if pipeline-specific)
   - gate:{hard1|hard2|hard3|advisory} (if gate-specific)
   - pp:{near|mid|far} (if proximity-specific)
-  - version:{v0.12.3|v0.13.0|v1.0.0|vBacklog}
+  - version:{v0.13.1|v1.0.0|vBacklog}
   - breaking-change / needs-pp (if applicable)
 -->
