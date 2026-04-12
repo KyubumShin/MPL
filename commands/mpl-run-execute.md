@@ -64,16 +64,18 @@ if config.phase_seed?.enabled != false:
   prior_summaries = all completed phase state-summary.md files
   phase0_relevant = extract_relevant_phase0(phase_definition, phase0_artifacts)
 
-  // Load boundary contracts (SEED-01)
-  contract_files = null
-  if phase_definition.interface_contract?.contract_files:
-    contract_files = {}
-    for each cf in phase_definition.interface_contract.contract_files:
-      contract_files[cf] = Read(cf)
-    if phase_definition.interface_contract.adjacent_contracts?.inbound:
-      contract_files["inbound"] = Read(phase_definition.interface_contract.adjacent_contracts.inbound)
-    if phase_definition.interface_contract.adjacent_contracts?.outbound:
-      contract_files["outbound"] = Read(phase_definition.interface_contract.adjacent_contracts.outbound)
+  // Load boundary contracts (SEED-01 + AD-01)
+  // AD-01 (v0.13.0): interface_contract.contract_files is REQUIRED on every phase.
+  // Missing field is a hard error (decomposer bug) — no optional chaining.
+  if phase_definition.interface_contract.contract_files is None:
+    ABORT: "Phase {phase_definition.id} missing required interface_contract.contract_files. Re-run decomposition."
+  contract_files = {}
+  for each cf in phase_definition.interface_contract.contract_files:
+    contract_files[cf.path] = Read(cf.path)
+  if phase_definition.interface_contract.adjacent_contracts?.inbound:
+    contract_files["inbound"] = Read(phase_definition.interface_contract.adjacent_contracts.inbound)
+  if phase_definition.interface_contract.adjacent_contracts?.outbound:
+    contract_files["outbound"] = Read(phase_definition.interface_contract.adjacent_contracts.outbound)
 
   // Inline seed generation (orchestrator generates directly)
   seed = {

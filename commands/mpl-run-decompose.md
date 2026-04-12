@@ -50,8 +50,10 @@ Task(subagent_type="mpl-decomposer", model="opus",
      phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
      phase_lang (F-39, optional: rust|go|python|typescript|java),
      scope, impact (create/modify/affected_tests/affected_config),
-     interface_contract (requires/produces), success_criteria (typed: command/test/file_exists/grep/qmd_verified/description),
+     interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/qmd_verified/description),
      estimated_complexity (S/M/L).
+
+     **AD-01 (v0.13.0) — contract_files is REQUIRED** for every phase under `interface_contract.contract_files`. Enumerate one entry per cross-layer boundary between impact files (path, boundary_id, caller, callee, framework_rules, params key-type map, returns key-type map). Empty list `[]` only for phases with zero cross-layer boundaries (pure infra/docs). Omission is a validation error. See `agents/mpl-decomposer.md` Step 6.5 for the enumeration procedure and full sub-schema.
      Also: architecture_anchor (tech_stack, directory_pattern, naming_convention), shared_resources.
 
      ## PP-Proximity Classification Rules
@@ -132,6 +134,47 @@ success_criteria:
 
 1. Parse YAML, validate phase count and pp_proximity assignments
 2. Save to `.mpl/mpl/decomposition.yaml`
+2a. **Write contract files (CB-08 L0 / AD-01, v0.13.0)**:
+    Validate that every phase has `interface_contract.contract_files` present (empty list allowed, omission is a hard error — abort with "[MPL] Decomposer output missing required interface_contract.contract_files on phase {id}").
+
+    ```
+    mkdir(".mpl/contracts")
+    any_contract_written = false
+    for each phase in decomposition.phases:
+      if phase.interface_contract.contract_files is None:
+        ABORT: "Decomposer output missing required interface_contract.contract_files on phase {phase.id}"
+      for each cf in phase.interface_contract.contract_files:
+        contract_json = {
+          "boundary_id": cf.boundary_id,
+          "caller": cf.caller,
+          "callee": cf.callee,
+          "framework_rules": cf.framework_rules,
+          "params": cf.params,
+          "returns": cf.returns,
+          "boundaries": [{
+            "boundary_id": cf.boundary_id,
+            "caller": cf.caller,
+            "callee": cf.callee,
+            "framework_rules": cf.framework_rules,
+            "params": cf.params,
+            "returns": cf.returns
+          }]
+        }
+        Write(cf.path, JSON.stringify(contract_json, null, 2))
+        any_contract_written = true
+
+    if not any_contract_written:
+      // Whole project has zero cross-layer boundaries. Write a placeholder so
+      // Hard 3 (AD-02) sees a non-empty contracts/ directory and passes with
+      // zero violations rather than FAILing on missing directory.
+      Write(".mpl/contracts/_no-boundaries.json", JSON.stringify({
+        "boundary_id": "_no-boundaries",
+        "note": "Decomposer found no cross-layer boundaries in this project.",
+        "boundaries": []
+      }, null, 2))
+    ```
+
+    Report: `[MPL] AD-01: {N} contract files written to .mpl/contracts/`
 3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
 5. Update MPL state with `phase_details` (all phases as `"pending"`)

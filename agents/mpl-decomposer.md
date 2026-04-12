@@ -23,6 +23,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
     5. **Interface contracts**: Each phase declares `requires` (preconditions from prior phases) and `produces` (outputs for later phases).
 
+    5a. **Contract files mandatory (AD-01, v0.13.0)**: Each phase MUST declare `interface_contract.contract_files` — a REQUIRED field that enumerates every cross-layer boundary between the phase's impact files. Empty array `[]` is allowed only when a phase legitimately has no cross-layer boundaries (pure infra, docs, tooling). Omission of the field is a validation error. See Step 6.5 for the enumeration rule. The orchestrator (`mpl-run-decompose.md` Step 3 post-processing) Writes each declared contract to `.mpl/contracts/{path}.json`; Hard 3 (`mpl-run-execute-gates.md`) mechanically verifies the resulting files and FAILS when the directory is missing. Empirical motivation: cb-phase-a1 C2 = 0 / C3 = 0 across all runs — without mandatory contracts, Hard 3 auto-passed on shared omission defects.
+
     6. **PP respect**: No phase may violate a CONFIRMED Pivot Point. Note conflicts and adjust.
 
     7. **Success criteria types**: command, test, file_exists, grep, description. Must be machine-verifiable.
@@ -55,6 +57,43 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     Step 6: Define interface contracts
       - Specify requires/produces for each phase.
       - A phase with no produces is likely unnecessary (delete or merge).
+
+    Step 6.5: Enumerate contract files (AD-01, v0.13.0)
+      For each phase, enumerate every cross-layer boundary between its impact files and emit a `contract_files[]` entry per boundary. A boundary is any edge where one file calls into another file across a layer gap (ui→api, api→db, algorithm→api, worker→queue, sidecar→host, etc.). Same-layer intra-module calls do NOT count.
+
+      Enumeration procedure:
+      1. For each phase, walk `impact.create` + `impact.modify` file lists.
+      2. For each file-pair (a, b) in that list, test whether (a, b) constitutes a cross-layer boundary using the domain inference from Step 7 (db|api|ui|algorithm|…). If `phase_domain(a) != phase_domain(b)`, they cross a layer boundary.
+      3. If the phase crosses into a DIFFERENT phase's impact files (declared via `interface_contract.requires`/`produces`), that is also a boundary — emit a contract file at the caller side.
+      4. For each detected boundary, emit:
+
+         ```yaml
+         contract_files:
+           - path: ".mpl/contracts/{phase_id}-{slug}.json"
+             boundary_id: "{stable_identifier}"
+             caller:
+               file: "src/ui/LoginForm.tsx"
+               symbol: "submitLogin"
+             callee:
+               file: "src/api/auth.ts"
+               symbol: "login"
+             framework_rules:
+               naming: "camelCase_to_snake_case"   # or "snake_case", "camelCase", "none"
+             params:                                # key-type pairs, sentinel-s0 SSOT
+               email: "string"
+               password: "string"
+             returns:
+               token: "string"
+               user_id: "integer"
+         ```
+
+      5. **No boundaries found**: emit an empty list `contract_files: []`. The field must still be present. Pure infra/docs/tooling phases are the only legitimate case for empty.
+
+      6. **Do NOT invent boundaries**: if you cannot identify a plausible caller/callee pair from the impact files, the phase has no boundaries — empty list, not a fabricated one. Hallucinated contracts are worse than missing ones (sentinel-s0 will flag key mismatches at runtime).
+
+      Empirical motivation: cb-phase-a1 §5 showed contract presence dominance (Δ = -2.17) as the strongest L2 defense; cb-phase-a1 C2 = 0 / C3 = 0 showed that missing contracts let Hard 3 auto-pass on shared omission defects. Making contract_files mandatory at decomposition is the structural fix.
+
+      Consumer: `commands/mpl-run-decompose.md` Step 3 post-processing Writes each declared contract to disk; `commands/mpl-run-execute-gates.md` Hard 3 mechanically verifies; `hooks/mpl-sentinel-s0.mjs` uses `params`/`returns` as SSOT for seed key validation.
 
     Step 7: Domain classification
       Assign `phase_domain` by primary file pattern:
@@ -157,6 +196,21 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
             - type: string
               name: string
               spec: string
+          contract_files:         # REQUIRED (AD-01, v0.13.0). Empty list [] allowed only for phases with zero cross-layer boundaries. Omission is a validation error. See Reasoning_Steps Step 6.5 for enumeration rule.
+            - path: string        # e.g., ".mpl/contracts/phase-2-login.json"
+              boundary_id: string # stable identifier, e.g., "login_ui_to_api"
+              caller:
+                file: string
+                symbol: string
+              callee:
+                file: string
+                symbol: string
+              framework_rules:
+                naming: string    # "camelCase_to_snake_case" | "snake_case" | "camelCase" | "none"
+              params:              # key-type pairs; SSOT for mpl-sentinel-s0 seed validation
+                # key_name: "type_string"
+              returns:
+                # key_name: "type_string"
 
         success_criteria:
           - type: "command" | "test" | "file_exists" | "grep" | "description"
