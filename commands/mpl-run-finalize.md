@@ -234,6 +234,56 @@ Execute 4-Tier Memory protocol:
    - Classification tags: type_mismatch, dependency_conflict, test_flake, api_contract_violation, etc.
    - If exceeding 100 entries, delete oldest entries first (FIFO)
 
+4a. **Harvest Fix Loop reflection tags (AD-03, v0.13.0)**:
+    Glob Fix Loop reflection files and extract their structured pattern tags
+    into `procedural.jsonl`. These tags are already enum-typed (F-27 §4.6.1
+    template) — no LLM parsing needed, mechanical extraction only.
+
+    ```
+    reflection_files = Glob(".mpl/mml/phases/*/reflections/attempt-*.md")
+
+    for each file in reflection_files:
+      content = Read(file)
+      // Extract the "Pattern classification tag: {tag}" line from §4 Learning
+      tag_match = content.match(/Pattern classification tag:\s*(\w+)/)
+      if not tag_match: continue
+
+      tag = tag_match[1]
+      // Extract phase_id and attempt_id from path
+      // Pattern: .mpl/mml/phases/{phase_id}/reflections/attempt-{N}.md
+      phase_id = extract_phase_id(file.path)
+      attempt_id = extract_attempt_id(file.path)
+
+      // Dedupe: skip if this exact entry already exists (idempotent across re-runs)
+      existing = Read(".mpl/memory/procedural.jsonl") or ""
+      dedup_key = phase_id + ":" + attempt_id + ":" + tag
+      if dedup_key in existing: continue
+
+      // Extract root cause summary (§2 Root Cause, first line only)
+      root_cause_match = content.match(/### 2\. Root Cause\n(.+)/)
+      root_cause = root_cause_match ? root_cause_match[1].trim() : ""
+
+      // Append to procedural.jsonl
+      entry = {
+        "source": "fix_loop_reflection",
+        "tag": tag,
+        "phase_id": phase_id,
+        "attempt": attempt_id,
+        "root_cause": root_cause,
+        "file": file.path,
+        "pipeline_id": state.pipeline_id,
+        "timestamp": now_iso()
+      }
+      Bash("echo '" + JSON.stringify(entry) + "' >> .mpl/memory/procedural.jsonl")
+
+    harvested_count = count of entries appended
+    announce: "[MPL] AD-03: {harvested_count} Fix Loop reflection tags harvested to procedural.jsonl"
+    ```
+
+    Consumer: next run's Phase 0 memory load via 4-tier routing (F-25) — the
+    `procedural.jsonl` entries surface as "known failure patterns for this
+    project" during Seed generation, preventing repeat mistakes.
+
 5. **Update state.json memory field**: Update memory statistics
 
 ```
