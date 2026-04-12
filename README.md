@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.12.4
+# MPL (Micro-Phase Loop) v0.13.0
 
 **Prevention over cure. Specification over debugging.**
 

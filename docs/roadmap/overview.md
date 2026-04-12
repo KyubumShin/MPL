@@ -260,6 +260,32 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.13.0 — Complete v0.13.0 Feature Set: AD Chain + E2E Awareness + Strategy Generation (2026-04-12)
+
+Minor version bump consolidating the full v0.13.0 feature set from the 2026-04-12 session. Includes 3 post-v0.12.4 features that complete the v0.13.0 roadmap targets.
+
+### Post-v0.12.4 additions (AD-03 / AD-04 / AD-07 / HA-06)
+
+- **AD-03** (`9fdfff7`): Fix Loop reflection tag harvesting — `commands/mpl-run-finalize.md` Step 5.2.6 item 4a globs `attempt-*.md` reflection files, extracts pattern classification tags, appends to `procedural.jsonl`. Mechanical regex extraction, no LLM. Closes #17.
+- **AD-04** (`0ad09d8`): PP-file modification sentinel hook — new `hooks/mpl-sentinel-pp-file.mjs` PostToolUse hook watches Edit/Write against `pivot-points.md` file references. Non-blocking additionalContext injection. Session-cached PP list. 6 tests. Closes #18.
+- **AD-07** (`e288cad`): Fix Loop strategy generation on stagnation — new Step 4.6.2 in execute-gates. Orchestrator reads prior reflections + phase0 artifacts → synthesizes `strategy_override` JSON (alternative_approach + must_not_do + phase0_hint). Replaces hardcoded generic suggestions. Closes #21.
+- **HA-06** (`c4c6bcc`): Interview-driven E2E awareness (tool-agnostic) — Phase 0 detects E2E infra (playwright/cypress/custom/puppeteer/selenium), orchestrator asks user if E2E needed (only when detected, zero overhead otherwise), decomposer generates E2E S-items. No Playwright dependency. Closes #23.
+
+### v0.13.0 complete feature list
+
+All v0.13.0 targets resolved:
+- #14 AD-01 Contract Coverage ✅ (v0.12.4)
+- #15 AD-02 Hard 3 Auto-Pass Removal ✅ (v0.12.4)
+- #17 AD-03 Reflection Tag Harvest ✅
+- #18 AD-04 PP-File Sentinel ✅
+- #19 AD-05 L2 Value-Path Verification ✅ (v0.12.4)
+- #21 AD-07 Fix Loop Strategy ✅
+- #23 HA-06 E2E Awareness ✅
+
+**Open issues: 5** (all backlog: #2, #3, #5, #12, #22).
+
+---
+
 ## v0.12.4 — Contract Coverage + AD-05 L2 Verification + Pattern Detection (2026-04-12)
 
 Feature release that closes the Hard 3 structural gap identified by cb-phase-a1 (37% D2 leak at M1=1/M2=ON) and introduces the first EXPERIMENTAL pattern detection pipeline. Also completes Advisory Gate vestigial cleanup and resolves the PR-02/03/04 architectural deadlock via 3-agent debate.
@@ -886,7 +912,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**v0.11.0**~~ | ~~v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8~~ | ✅ **Implemented** |
 | ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ⚠ **Partial** (HA-01/02/03/04 ACTIVE; HA-05 PARTIAL — platform detection survives at `agents/mpl-phase0-analyzer.md:280-326`, auto-injection of `phase_seed.yaml constraints` field + 5-item self-verification checklist LOST. Gated on AD-0004 path per 2026-04-12 audit §8.B #3.) |
 | ~~**v0.12.4**~~ | ~~Contract Coverage + AD-05 L2 Verification + PR-02 EXPERIMENTAL + Advisory Cleanup + AD-0005 Debate~~ | ✅ **Implemented** |
-| **v0.13.0** | HA-06: Finalize Step 5.0 Playwright E2E Smoke (re-homed from Advisory Gate) | 🟠 Planned |
+| ~~**v0.13.0**~~ | ~~AD-03/04/07 + HA-06 E2E Awareness + Full v0.13.0 feature set~~ | ✅ **Implemented** |
 | **v1.0.0** | v2 Phase 3: Always-On Judge (codex-plugin-cc) + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
 | **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |
