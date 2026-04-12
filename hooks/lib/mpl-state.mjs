@@ -14,6 +14,18 @@ const STATE_DIR = '.mpl';
 const STATE_FILE = 'state.json';
 
 /**
+ * Valid pipeline phase names (v0.13.1).
+ * writeState() warns on unrecognized current_phase values.
+ */
+const VALID_PHASES = new Set([
+  'mpl-init', 'mpl-ambiguity-resolve', 'mpl-decompose',
+  'phase1a-research', 'phase1b-plan',
+  'phase2-sprint', 'phase3-gate', 'phase4-fix', 'phase5-finalize',
+  'small-plan', 'small-sprint', 'small-verify',
+  'completed'
+]);
+
+/**
  * Default state schema (design doc section 12.2)
  */
 const DEFAULT_STATE = {
@@ -127,6 +139,11 @@ export function writeState(cwd, patch) {
   const stateDir = join(cwd, STATE_DIR);
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
+  }
+
+  // Validate phase name if being set
+  if (patch.current_phase && !VALID_PHASES.has(patch.current_phase)) {
+    console.error(`[MPL] WARNING: Unrecognized current_phase "${patch.current_phase}". Valid: ${[...VALID_PHASES].join(', ')}`);
   }
 
   const current = readState(cwd) || { ...DEFAULT_STATE };

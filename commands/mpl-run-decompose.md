@@ -285,13 +285,13 @@ success_criteria:
 3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
 5. Update MPL state with `phase_details` (all phases as `"pending"`)
-6. Update pipeline state: `current_phase: "mpl-phase-running"`
+6. Update pipeline state: `current_phase: "phase2-sprint"`
 7. Process `risk_assessment` from decomposer output:
    - If `go_no_go == "NOT_READY"`:
      AskUserQuestion: "Decomposer assessed NOT_READY. HIGH risks: {risks}."
      Options: "Proceed despite risk" | "Cancel"
      - "Proceed": proceed with caveats logged
-     - "Cancel": mpl-failed
+     - "Cancel": writeState(cwd, { current_phase: "phase5-finalize" }), MPL status = "cancelled"
    - If `go_no_go == "RE_INTERVIEW"` (T-11, v4.0):
      announce: "[MPL] Decomposer detected feasibility issue requiring clarification."
      for each question in risk_assessment.re_interview_questions:
@@ -300,7 +300,7 @@ success_criteria:
        - "Relax PP": return to Step 1 Stage 2 with mode: "feasibility_resolution" + question context
        - "Change approach": return to Step 3 with adjusted constraints
        - "Accept risk": proceed, log caveat to risk-assessment.md
-       - "Cancel": mpl-failed
+       - "Cancel": writeState(cwd, { current_phase: "phase5-finalize" }), MPL status = "cancelled"
    - If `go_no_go == "READY_WITH_CAVEATS"`:
      Report HIGH risks to user (informational, non-blocking)
    - Save risk_assessment to `.mpl/mpl/risk-assessment.md`

@@ -29,11 +29,10 @@ RULE 5 (MPL): State Summary is the ONLY knowledge transfer between phases. No im
 ## State Machine
 
 ```
-mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
-                                   |                      |
-                            mpl-circuit-break      mpl-finalize -> completed
-                                   |
-                               mpl-failed
+mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize → completed
+                              ↑    ↑            │
+                              │    └── phase4-fix
+                              └─── (next phase) ┘
 ```
 
 ## Key Files

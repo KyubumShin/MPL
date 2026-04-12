@@ -5,7 +5,7 @@ description: MPL Finalize Protocol - E2E, Learnings, Commits, PR, Metrics
 # MPL Finalize: Step 5 (E2E & Finalize)
 
 This file contains Step 5 (E2E & Finalize) -- the main finalization protocol.
-Load this when `current_phase` is `mpl-finalize` or when resuming a session.
+Load this when `current_phase` is `phase5-finalize` or when resuming a session.
 
 > **See also:** `mpl-run-finalize-resume.md` (Resume Protocol, Budget Pause, Discovery Processing, Related Skills).
 

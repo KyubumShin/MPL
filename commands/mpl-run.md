@@ -21,14 +21,20 @@ You are now operating as the MPL orchestrator in MPL mode. Follow this protocol 
 ## State Machine
 
 ```
-mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
-                                   |                      |
-                            mpl-circuit-break      mpl-finalize -> completed
-                                   |
-                               mpl-failed
+mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize → completed
+                              ↑    ↑            │
+                              │    └── phase4-fix
+                              └─── (next phase) ┘
 ```
 
-Retry: Phase Runner handles retries internally based on PP-proximity level. Orchestrator receives `"complete"` or `"circuit_break"` only. Circuit break transitions directly to `mpl-failed`.
+States: `mpl-init`, `mpl-ambiguity-resolve`, `mpl-decompose`, `phase2-sprint`, `phase3-gate`, `phase4-fix`, `phase5-finalize`, `completed`. Small pipeline variants: `small-sprint`, `small-verify`.
+
+- `phase2-sprint`: Phase execution loop. Orchestrator stays here while dispatching Phase Runners.
+- `phase3-gate`: Gate System (Hard 1/2/3). Entered after ALL phases complete.
+- `phase4-fix`: Fix loop on gate failure. Re-enters `phase3-gate` after fix, or transitions to `phase5-finalize` on circuit break / stagnation.
+- `phase5-finalize`: Finalization (learnings, commit, PR). Reached from either gate pass or circuit break.
+
+Retry: Phase Runner handles retries internally based on PP-proximity level. Orchestrator receives `"complete"` or `"circuit_break"` only. Circuit break transitions to `phase5-finalize` (partial completion).
 
 ---
 
@@ -39,7 +45,7 @@ Retry: Phase Runner handles retries internally based on PP-proximity level. Orch
 ```json
 {
   "run_mode": "mpl",
-  "current_phase": "mpl-phase-running",
+  "current_phase": "phase2-sprint",
   "tool_mode": "full",
   "started_at": "2026-03-02T10:00:00Z"
 }
@@ -153,8 +159,8 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 |-------|---------------|-----------|
 | Pre-Execution | `mpl-init`, before decomposition | `MPL/commands/mpl-run-phase0.md` |
 | Decomposition | `mpl-decompose` | `MPL/commands/mpl-run-decompose.md` |
-| Execution | `mpl-phase-running`, `mpl-phase-complete`, `mpl-circuit-break` | `MPL/commands/mpl-run-execute.md` |
-| Finalize / Resume | `mpl-finalize`, `completed`, or session resume | `MPL/commands/mpl-run-finalize.md` |
+| Execution | `phase2-sprint`, `phase3-gate`, `phase4-fix` | `MPL/commands/mpl-run-execute.md` |
+| Finalize / Resume | `phase5-finalize`, `completed`, or session resume | `MPL/commands/mpl-run-finalize.md` |
 
 ### Protocol Files Summary
 

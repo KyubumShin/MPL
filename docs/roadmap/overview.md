@@ -1135,7 +1135,7 @@ User hint override: `"mpl bugfix"` → force tier to frugal, `"mpl small"` → f
 [Frugal] ──circuit break──→ [Standard] ──circuit break──→ [Frontier]
                               │                              │
                               ├─ Preserve completed TODOs    ├─ Preserve completed phases
-                              ├─ Restructure failed TODOs    ├─ Failed phase → mpl-failed
+                              ├─ Restructure failed TODOs    ├─ Failed phase → phase5-finalize
                               │  as single Phase             │
                               └─ PP extraction (light)       └─ Full PP + Phase 0
 ```

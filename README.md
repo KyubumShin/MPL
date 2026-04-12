@@ -204,7 +204,7 @@ When a phase fails after 3 retries, it doesn't crash — it **circuit breaks**:
 1. Preserve PASS TODOs (verified work is never discarded)
 2. Rollback FAIL TODO files to pre-phase state
 3. Attempt tier escalation before giving up (see [The Router](#the-router))
-4. If all tiers exhausted, transition to `mpl-failed`
+4. If all tiers exhausted, transition to `phase5-finalize` (partial completion)
 
 Circuit break leads directly to pipeline failure. MPL reports what succeeded and what failed — partial progress is always preserved.
 
@@ -257,7 +257,7 @@ When a Hat level fails, it doesn't give up — it grows:
 [Light] ──circuit break──→ [Standard] ──circuit break──→ [Full]
                                 │                              │
                                 ├─ Completed TODOs preserved   ├─ Completed phases preserved
-                                └─ Failed TODO → single phase  └─ Failed phase → mpl-failed
+                                └─ Failed TODO → single phase  └─ Failed phase → phase5-finalize
 ```
 
 Keyword hints still work as manual overrides: `"mpl bugfix"` → light, `"mpl small"` → standard.

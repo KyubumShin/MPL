@@ -79,7 +79,7 @@ export function symbolExistsInContent(symbolName, content) {
  * Find the phase directory for the current phase.
  * Checks .mpl/mpl/phases/{phase_id}/ for export-manifest.json.
  * @param {string} cwd - Working directory
- * @param {string} currentPhase - Current phase from state (e.g., "mpl-phase-running")
+ * @param {string} currentPhase - Current phase from state (e.g., "phase2-sprint")
  * @returns {string[]} List of phase directory paths that contain export-manifest.json
  */
 export function findManifestPaths(cwd) {

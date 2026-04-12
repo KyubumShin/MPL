@@ -5,7 +5,7 @@ description: MPL Execution Protocol - Phase Execution Loop, Context Assembly, Ga
 # MPL Execution: Step 4 (Phase Execution Loop)
 
 This file contains Step 4 of the MPL orchestration protocol — the core execution engine.
-Load this when `current_phase` is `mpl-phase-running`.
+Load this when `current_phase` is `phase2-sprint`.
 
 > **See also:** `mpl-run-execute-context.md` (Context Assembly details), `mpl-run-execute-gates.md` (Gate System), `mpl-run-execute-parallel.md` (TODO parallel dispatch).
 
@@ -590,7 +590,7 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
    cumulative_pass_rate = result.verification.pass_rate
    // M-5: Populate pass_rate_history for convergence detection
    convergence.pass_rate_history.push(result.verification.pass_rate)
-7. Update pipeline state: current_phase = "mpl-phase-complete"
+7. (Pipeline stays in `phase2-sprint` — no state transition per phase. Only MPL state updates above.)
 8. Profile: Record phase execution profile to .mpl/mpl/profile/phases.jsonl:
    {
      "step": "phase-{N}",
@@ -638,7 +638,7 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
       announce: "[MPL] Regression suite: {regression_suite.total_assertions} assertions accumulated across {regression_suite.accumulated_tests.length} phases"
     ```
 
-12. More phases -> current_phase = "mpl-phase-running", continue 4.1
+12. More phases → continue in `phase2-sprint`, return to 4.1
     → **Budget Check (F-33)**: See Step 4.3 extension — check session budget before starting next Phase.
 13. All done → **MANDATORY Gate System entry (Floor guarantee)**:
     ```
@@ -669,7 +669,7 @@ if budget.recommendation == "pause_now" or budget.recommendation == "pause_after
     return  # exit orchestration loop
 else:
     # Budget sufficient — continue to next Phase
-    current_phase = "mpl-phase-running"
+    # Stay in phase2-sprint — no state change needed
     continue  # return to Step 4.1
 ```
 
@@ -680,16 +680,16 @@ else:
 
 ```
 1. Record: phase_details[N].status = "circuit_break", phases.circuit_breaks++
-2. Update pipeline state: current_phase = "mpl-circuit-break"
+2. Update pipeline state: writeState(cwd, { current_phase: "phase5-finalize" })
 3. **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
    ## Circuit Break: Phase {N} - {name}
    - **Failure**: {failure_summary}
    - **Attempted Fixes**: {attempted_fixes list}
    - **Retries Exhausted**: 3/3
    - **Timestamp**: {ISO timestamp}
-4. Phase retry budget exhausted → circuit break → pipeline failure
-   pipeline = "mpl-failed"
-   Report: "[MPL] Circuit break on Phase {N}. Pipeline failed. Preserving completed work."
+4. Phase retry budget exhausted → circuit break → `phase5-finalize` (partial completion)
+   Update MPL state: status = "failed", failure_phase = N
+   Report: "[MPL] Circuit break on Phase {N}. Pipeline failed. Preserving completed work. Entering finalize."
 ```
 
 ### 4.3.5: Side Interview (Conditional — CRITICAL Only)

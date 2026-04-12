@@ -378,7 +378,7 @@ if convergence_result.status == "regressing":
 Record convergence_status in state: "progressing" | "stagnating" | "regressing"
 ```
 
-Exceeding max iterations → mpl-failed state.
+Exceeding max iterations → `phase5-finalize` (partial completion).
 
 ### 4.6.1: Reflexion-Based Self-Reflection (F-27)
 

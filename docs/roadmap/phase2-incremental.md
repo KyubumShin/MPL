@@ -125,7 +125,7 @@ All TODOs complete
 | Current TODO test failure | Reference Phase 0 artifacts and fix immediately | 2 times (per TODO) |
 | Previous module regression | Analyze regression cause and fix | Included in Phase Runner's 3 retries |
 | Entire phase failure | Phase Runner internal retry | 3 times (per phase) |
-| 3 retry failures | circuit_break → mpl-failed | Pipeline failure (preserve completed work) |
+| 3 retry failures | circuit_break → phase5-finalize | Pipeline failure (preserve completed work) |
 
 ## Phase 5 Entry Condition Tightening → Evolved into 3-Gate Quality System
 
@@ -146,7 +146,7 @@ The concept of tightening Phase 5 entry conditions evolved into the **3-Gate qua
 | Gate | Name | Pass Criteria | On Failure |
 |------|------|----------|--------|
 | Gate 1 (Hard) | Automated tests | pass_rate ≥ 95% | Fix Loop |
-| Gate 2 (Hard) | Phase Runner inline review *(was mpl-code-reviewer)* | PASS verdict | Fix Loop or mpl-failed |
+| Gate 2 (Hard) | Phase Runner inline review *(was mpl-code-reviewer)* | PASS verdict | Fix Loop or phase5-finalize |
 | Gate 3 (Hard) | Agent-as-User (S-items) | All pass + no PP violations | Fix Loop |
 
 In the Fix Loop, **Convergence Detection** operates to monitor the real progress of fixes:

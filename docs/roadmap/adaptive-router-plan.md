@@ -167,7 +167,7 @@ Procedure:
 7. Re-run with Frontier protocol
 
 ### If Frontier also fails
-Apply existing circuit break + mpl-failed protocol (no change)
+Apply existing circuit break → phase5-finalize protocol (no change)
 ```
 
 #### 2-2. Modify `hooks/mpl-phase-controller.mjs`
@@ -178,7 +178,7 @@ Add logic to check escalation availability on circuit break event:
 // On circuit break detection:
 // 1. Check current pipeline_tier
 // 2. If frugal or standard → return escalation message
-// 3. If frontier → existing mpl-failed handling
+// 3. If frontier → existing circuit break → phase5-finalize handling
 ```
 
 #### 2-3. Modify `hooks/lib/mpl-state.mjs`

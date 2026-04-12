@@ -65,15 +65,14 @@ Knowledge transfer between phases occurs through **registered channels only**. U
 ### 3.1 State Machine
 
 ```
-mpl-init -> mpl-decompose -> mpl-phase-running <-> mpl-phase-complete
-                                   |                      |
-                            mpl-circuit-break      mpl-finalize -> completed
-                                   |
-                               mpl-failed
+mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize → completed
+                              ↑    ↑            │
+                              │    └── phase4-fix
+                              └─── (next phase) ┘
 ```
 
 - **Retry**: Phase Runner retries internally based on PP-proximity (PP-core 3, PP-adjacent 2, Non-PP 1). The orchestrator receives only `"complete"` or `"circuit_break"`.
-- **Circuit break**: Transitions directly to `mpl-failed` state. Completed phases are preserved.
+- **Circuit break**: Transitions to `phase5-finalize` (partial completion). Completed phases are preserved.
 
 ### 3.2 Full Flow Summary Table
 
@@ -217,7 +216,7 @@ The core execution unit of the pipeline. Executes each phase in order.
 
 **4.3.6 Context Cleanup (Sliding Window)** — After each phase completes, applies a sliding window retention policy: the most recent N phases (default: 3, configurable via `context_cleanup_window`) retain detailed data in orchestrator memory, while older phases are compressed to State Summary only. Token impact: ~60-90K for 3 retained phases (≈7-10% of 900K budget).
 
-**4.4 Circuit Break** — When circuit break occurs, the pipeline transitions to `mpl-failed`. Completed phases are preserved; the failure report includes what succeeded and what failed.
+**4.4 Circuit Break** — When circuit break occurs, the pipeline transitions to `phase5-finalize` (partial completion). Completed phases are preserved; the failure report includes what succeeded and what failed.
 
 **4.5 Gate System (3 Hard)** — After all phases complete, must pass 3 Hard Gates to proceed to finalization (see §5 Quality System for details).
 
@@ -924,7 +923,7 @@ Bugfix: MCP server path resolution in `.mcp.json`.
 | Decomposer | ~662 lines | 186 lines | reduction | Verification planner + pre-execution analyzer absorbed |
 | Interviewer | ~509 lines | 355 lines | absorption | Ambiguity resolver merged |
 | Cluster Ralph | Active | Removed | removal | Replaced by Hat model PP-proximity |
-| Redecomposition | max 2 redecompositions | Removed (circuit break → mpl-failed) | removal | Phase-level retry only principle |
+| Redecomposition | max 2 redecompositions | Removed (circuit break → phase5-finalize) | removal | Phase-level retry only principle |
 | Reflexion | 5-stage template | 4-stage template | simplification | Divergence Point removed |
 
 **Affected files:** 50 files (agents, commands, hooks, skills, docs, mcp-server)
