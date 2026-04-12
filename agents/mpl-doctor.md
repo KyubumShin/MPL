@@ -99,10 +99,8 @@ disallowedTools: Write, Edit, Task
     - If `.mpl/config.json` exists, validate all fields:
       max_fix_loops (number),
       gate1_strategy (string), convergence (object),
-      cluster_ralph.enabled (boolean), cluster_ralph.max_fix_attempts (number),
-      coverage_thresholds.lines (number), coverage_thresholds.branches (number),
       auto_pr.enabled (boolean), context_cleanup_window (number)
-    - Reference: `docs/config-schema.md` for complete field spec
+    - Reference: `docs/config-schema.md` for complete field spec (authoritative)
     - WARN if missing optional fields
     - FAIL if invalid types
 
