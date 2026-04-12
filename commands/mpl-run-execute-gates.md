@@ -151,8 +151,15 @@ for each { cmd, name } in build_commands:
     announce: "[MPL] Hard 1: {name} passed"
 ```
 
-Hard 1 passes when: all lint tools + type check + all build tools succeed.
-Report: `[MPL] Hard 1: Build + Lint + Type PASSED.`
+// Defensive check: if NO verification ran at all, fail rather than auto-pass.
+// Same principle as AD-02 for Hard 3 — missing precondition ≠ free pass.
+total_checks = lint_commands.length + build_commands.length + (diagnostics ? 1 : 0)
+if total_checks == 0:
+  announce: "[MPL] Hard 1 FAIL: No lint, type check, or build tool detected. At minimum, the project must have one of: package.json with build script, tsconfig.json, Cargo.toml, pyproject.toml, go.mod. Cannot verify code quality with zero tools."
+  → enter fix loop (target: add build/lint configuration)
+
+Hard 1 passes when: all lint tools + type check + all build tools succeed AND at least one check ran.
+Report: `[MPL] Hard 1: Build + Lint + Type PASSED ({total_checks} checks).`
 
 #### Hard 2: Full Test Suite + Regression ($0, mechanical, binary)
 

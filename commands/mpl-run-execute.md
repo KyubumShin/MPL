@@ -471,8 +471,17 @@ phase_model = determine_model(phase):
 
 ### 4.2.2: Test Agent — Mandatory Independent Verification (F-40)
 
-**ENFORCEMENT (B-01, v0.6.2): This step is NOT optional. The orchestrator MUST execute this check
-after EVERY Phase Runner completion. Skipping this step is the #1 cause of "0 tests" pipelines.**
+**⚠️ MANDATORY — NEVER SKIP, EVEN FOR Far/non_pp PROXIMITY:**
+
+This step MUST execute after EVERY Phase Runner completion. There are ZERO exceptions.
+The F-40 independence property is the structural defense against the 37% D2 leak
+(cb-phase-a1). Without Test Agent dispatch, the pipeline has no adversarial verification
+and the "Gates: H1 ✓ H2 ✓ H3 ✓" report is meaningless — tests were written by the
+same session that wrote the code (self-rationalization bias, HC#3).
+
+If you are about to skip this step for ANY reason (complexity, time, proximity), STOP.
+The skip is the bug. AD-0003 restored mpl-test-agent specifically because this dispatch
+was broken. AD-0004 Option A baseline depends on F-40 running on every mandatory-domain phase.
 
 After Phase Runner completes with status `"complete"`, the Test Agent is dispatched as a **mandatory gate** based on phase_domain rules.
 
