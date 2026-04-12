@@ -260,6 +260,80 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.12.4 — Contract Coverage + AD-05 L2 Verification + Pattern Detection (2026-04-12)
+
+Feature release that closes the Hard 3 structural gap identified by cb-phase-a1 (37% D2 leak at M1=1/M2=ON) and introduces the first EXPERIMENTAL pattern detection pipeline. Also completes Advisory Gate vestigial cleanup and resolves the PR-02/03/04 architectural deadlock via 3-agent debate.
+
+### Part 1 — AD-01/AD-02: Contract Coverage Mandatory + Hard 3 Fail-on-Missing (`35bf332`)
+
+- **`contract_files` required** in decomposer schema (`agents/mpl-decomposer.md` Rule 5a, Step 6.5). Every phase must enumerate cross-layer boundaries.
+- Orchestrator Writes contract JSON to `.mpl/contracts/` during decomposition post-processing (`commands/mpl-run-decompose.md` Step 3 item 2a).
+- **Hard 3 auto-pass removed** — missing `.mpl/contracts/` directory is now a FAIL, not a silent pass. This was the exact chain that let C2 (0/15) and C3 (0/13) shared omission defects through.
+- Closes #14, #15.
+
+### Part 2 — AD-05: L2 Parameter Value-Path Verification (`ae9e019`)
+
+- Hard 3 extended from L1 key-set diff to L1 + L2 value-path check (`commands/mpl-run-execute-gates.md` Step 5).
+- For each contract param, grep verifies the param name appears at the caller's actual call site (±3 lines of callee invocation).
+- Targets the 37% D2 leak: contract key exists on both sides (L1 passes) but caller never passes the parameter.
+- Violation types: `l2_param_not_passed`, `l2_callee_not_invoked`.
+- Closes #19 (priority elevated from cb-phase-a1 empirical evidence).
+
+### Part 3 — AD-0005: PR-02/03/04 Pattern Placement Decision (`000e24e`)
+
+- 3-agent debate (Pro/Con/Mutant) converged 3:0 after 2 rounds.
+- **PR-02 Security Pattern → EXPERIMENTAL**: decomposition-time artifact (Step 9.6.1 `risk_patterns[]`) + Hard 1 Step 0 cross-check. Non-blocking metric recording. HARD promotion gated on CB testbed ≥3/5 detection.
+- **PR-03 UI Hardcoding → DROP**: count-based threshold incompatible with binary 3H architecture.
+- **PR-04 Resource Lifecycle → LOST**: pair detection needs separate AD for `pair_pattern` mechanism.
+- Mutant reframing: "which gate?" → "which pipeline stage?" — decomposition-time artifact following AD-01 `contract_files` precedent.
+
+### Part 4 — PR-02 EXPERIMENTAL Implementation (`db6d37d`)
+
+- `agents/mpl-decomposer.md` Step 9.6.1 + `risk_patterns[]` schema field.
+- `commands/mpl-run-decompose.md` Step 3 item 2b: `default_risk_patterns` (5 security rules: eval, API keys, SQL concat, innerHTML, weak crypto).
+- `commands/mpl-run-execute-gates.md` Hard 1 Step 0 "Pattern Risk Check" (non-blocking, metrics to `.mpl/mml/pattern-metrics.jsonl`).
+- Closes #27.
+
+### Part 5 — Advisory Gate Vestigial Cleanup (`f5709f0`)
+
+- Removed `advisory_result`/`advisory_passed` from runtime state, MCP schema, phase-controller HUD, execute-gates protocol.
+- "3H+1A" → "3H" everywhere in current-state docs. Historical changelog entries preserved.
+- Closes #25.
+
+### Part 6 — Cleanup + Corrections
+
+- `2d78c07`: Removed `coverage_thresholds`/`cluster_ralph` phantom validation from `agents/mpl-doctor.md` Category 8 (closes #10, #11).
+- `443be37`: Corrected HA-05 status from "✅ Implemented" to "⚠ Partial" in v0.12.0 version history row.
+- #23 (HA-06): Re-homed from Advisory Gate to finalize Step 5.0 E2E Test after #25 removed the gate. Issue body + labels updated.
+
+### Commits (7 + version bump)
+
+```
+f5709f0  cleanup(gates): remove vestigial advisory_result / advisory_passed fields
+443be37  docs(roadmap): correct HA-05 status to PARTIAL in v0.12.0 version history
+2d78c07  cleanup(doctor): remove unused cluster_ralph / coverage_thresholds validation
+35bf332  feat(contracts): mandatory contract_files + Hard 3 fail-on-missing (AD-01/AD-02)
+000e24e  docs: add AD-0005 — PR-02/03/04 mechanical pattern placement (3-agent debate)
+db6d37d  feat(patterns): PR-02 EXPERIMENTAL security pattern detection (AD-0005)
+ae9e019  feat(hard3): L2 parameter value-path verification — closes 37% D2 leak (#19)
+```
+
+### Issues closed this release
+
+| # | Title | Commit |
+|---|---|---|
+| #10 | coverage_thresholds cleanup | `2d78c07` |
+| #11 | cluster_ralph cleanup | `2d78c07` |
+| #14 | AD-01 Contract Coverage Mandatory | `35bf332` |
+| #15 | AD-02 Hard 3 Auto-Pass Removal | `35bf332` |
+| #19 | AD-05 Hard 3 parameter-level verification | `ae9e019` |
+| #25 | Advisory vestigial field removal | `f5709f0` |
+| #27 | PR-02 EXPERIMENTAL pattern detection | `db6d37d` |
+
+**Breaking changes:** Hard 3 no longer auto-passes on missing `.mpl/contracts/`. Existing projects must have the decomposer generate `contract_files` for each phase (AD-01). Projects with zero boundaries get a `_no-boundaries.json` placeholder.
+
+---
+
 ## v0.12.3 — Forensic Repair + HA-03 Restoration + ADR Batch (2026-04-11~12)
 
 Cleanup + restoration release that repairs the structural damage from v0.12.2's incomplete cleanup commit (`4903a8d`) while ratifying three key architectural decisions as Accepted ADRs and producing the first full 4-dimension reconciliation audit of MPL's codebase.
@@ -811,7 +885,8 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**v0.11.1**~~ | ~~MCP Server dependency recovery in mpl-setup~~ | ✅ **Implemented** |
 | ~~**v0.11.0**~~ | ~~v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8~~ | ✅ **Implemented** |
 | ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ⚠ **Partial** (HA-01/02/03/04 ACTIVE; HA-05 PARTIAL — platform detection survives at `agents/mpl-phase0-analyzer.md:280-326`, auto-injection of `phase_seed.yaml constraints` field + 5-item self-verification checklist LOST. Gated on AD-0004 path per 2026-04-12 audit §8.B #3.) |
-| **v0.13.0** | HA-06: Advisory Gate Playwright E2E Smoke (조건부) | 🟠 Planned |
+| ~~**v0.12.4**~~ | ~~Contract Coverage + AD-05 L2 Verification + PR-02 EXPERIMENTAL + Advisory Cleanup + AD-0005 Debate~~ | ✅ **Implemented** |
+| **v0.13.0** | HA-06: Finalize Step 5.0 Playwright E2E Smoke (re-homed from Advisory Gate) | 🟠 Planned |
 | **v1.0.0** | v2 Phase 3: Always-On Judge (codex-plugin-cc) + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
 | **v1.1.0** | T-08 Trend Retro + P-04 Skill Audit | 🟡 Post-v2 |
