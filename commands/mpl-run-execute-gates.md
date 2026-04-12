@@ -238,27 +238,90 @@ for each contract_file in contract_files:
     normalized_caller = apply_naming_rules(caller_keys, boundary.framework_rules)
     normalized_callee = apply_naming_rules(callee_keys, boundary.framework_rules)
 
-    // 4. Compare — any mismatch is a HARD FAIL
+    // 4. L1 Compare — any key-set mismatch is a HARD FAIL
     mismatches = diff(normalized_caller, normalized_callee)
     for each mismatch:
       violations.push({
         contract: contract_file,
-        boundary_id: boundary.id,
+        boundary_id: boundary.boundary_id,
         type: mismatch.type,  // "missing_param", "name_mismatch", "type_mismatch"
         caller: mismatch.caller_value,
         callee: mismatch.callee_value
       })
 
+    // 5. L2 Parameter Value-Path Check (AD-05, v0.13.0)
+    //
+    // Closes the 37% D2 leak at M1=1/M2=ON (cb-phase-a1 §5):
+    // contract key exists AND callee signature has it, but caller never
+    // actually passes it through at the call site. L1 (key-set diff)
+    // misses this because both sides "have" the key — the gap is in the
+    // call expression, not the declaration.
+    //
+    // Heuristic: for each contract param, grep the caller file for the
+    // callee symbol invocation AND the param name co-occurring. If the
+    // param name does not appear near any call to the callee symbol,
+    // it is a L2 violation (declared but not threaded through).
+    //
+    // False-positive tolerance: acceptable at Hard 3 level. Phase Runner
+    // can defend with "param passed via alias/destructuring" in the fix
+    // loop. False negatives (renamed params) are a known limitation —
+    // the naming convention normalization in step 3 partially mitigates.
+
+    if boundary.params:
+      callee_fn_name = boundary.callee.symbol.split("(")[0].split(".").pop()
+      caller_file_content = Read(boundary.caller.file)
+
+      for each param_name in Object.keys(boundary.params):
+        // Search for callee invocation that includes the param name
+        // Pattern: callee_fn_name followed by ( ... param_name ... )
+        // Uses a loose heuristic: param_name appearing on same line or
+        // within 3 lines of a call to callee_fn_name in the caller file.
+        call_lines = Grep(callee_fn_name + "\\s*\\(", boundary.caller.file)
+
+        if call_lines.length == 0:
+          // No call to callee found in caller file — L1 should have caught
+          // this, but flag as L2 for completeness
+          violations.push({
+            contract: contract_file,
+            boundary_id: boundary.boundary_id,
+            type: "l2_callee_not_invoked",
+            param: param_name,
+            detail: callee_fn_name + " not called in " + boundary.caller.file
+          })
+          break  // no point checking other params if callee isn't called
+
+        // Check if param_name appears within ±3 lines of any call site
+        param_found_at_call = false
+        for each call_line in call_lines:
+          line_num = call_line.line_number
+          context = Read(boundary.caller.file, offset=max(1, line_num-3), limit=7)
+          if param_name in context or apply_naming_rules(param_name, boundary.framework_rules) in context:
+            param_found_at_call = true
+            break
+
+        if not param_found_at_call:
+          violations.push({
+            contract: contract_file,
+            boundary_id: boundary.boundary_id,
+            type: "l2_param_not_passed",
+            param: param_name,
+            param_type: boundary.params[param_name],
+            detail: param_name + " declared in contract but not found at any " + callee_fn_name + "() call site in " + boundary.caller.file
+          })
+
+l1_violations = violations.filter(v => v.type in ["missing_param", "name_mismatch", "type_mismatch"])
+l2_violations = violations.filter(v => v.type in ["l2_param_not_passed", "l2_callee_not_invoked"])
+
 if violations.length > 0:
-  Write(".mpl/mpl/hard3-violations.md", format_violations(violations))
-  announce: "[MPL] Hard 3 FAIL: {violations.length} contract violations. Report: .mpl/mpl/hard3-violations.md"
+  Write(".mpl/mpl/hard3-violations.md", format_violations(violations, { group_by: "type" }))
+  announce: "[MPL] Hard 3 FAIL: {l1_violations.length} L1 key-set + {l2_violations.length} L2 value-path violations. Report: .mpl/mpl/hard3-violations.md"
   → enter fix loop
 else:
-  announce: "[MPL] Hard 3: All {contract_files.length} contracts verified."
+  announce: "[MPL] Hard 3: All {contract_files.length} contracts verified (L1 key-set + L2 value-path)."
 ```
 
-Hard 3 passes when: zero contract violations.
-Report: `[MPL] Hard 3: L1/L2 Contract Diff PASSED.`
+Hard 3 passes when: zero L1 key-set violations AND zero L2 value-path violations.
+Report: `[MPL] Hard 3: L1 Key-Set + L2 Value-Path PASSED. ({contract_files.length} contracts, {total_params_checked} params verified)`
 
 ---
 
