@@ -1,10 +1,10 @@
 ---
-description: MPL Execute Protocol - 3 Hard Gate + 1 Advisory, Fix Loop, Convergence Detection
+description: MPL Execute Protocol - 3 Hard Gates, Fix Loop, Convergence Detection
 ---
 
 # MPL Execution: Gate System (Steps 4.5-4.8)
 
-3 Hard Gates (mechanical, $0, binary pass/fail) + 1 Advisory Gate (LLM, non-blocking).
+3 Hard Gates (mechanical, $0, binary pass/fail).
 Load this when entering Step 4.5 (after all phases complete) or when a gate fails.
 
 See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-context.md` (context assembly), `mpl-run-execute-parallel.md` (parallel dispatch).
@@ -15,9 +15,6 @@ See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-context.md` (contex
 
 **ALL phases, regardless of PP-proximity level, must pass Hard 1 + Hard 2 + Hard 3.**
 This is the Floor — the minimum quality bar that cannot be lowered.
-
-Advisory Gate is applied for PP-core and PP-adjacent phases only.
-Non-PP phases pass with Floor alone.
 
 ---
 
@@ -214,65 +211,12 @@ else:
 Hard 3 passes when: zero contract violations.
 Report: `[MPL] Hard 3: L1/L2 Contract Diff PASSED.`
 
-#### Advisory: Code Review + PP Compliance (LLM, non-blocking)
-
-**Non-blocking.** Advisory results are informational — they never trigger the fix loop.
-Applied only for PP-core and PP-adjacent phases. Non-PP phases skip Advisory.
-
-```
-if current_phase.pp_proximity == "non_pp":
-  announce: "[MPL] Advisory: Skipped (Non-PP phase)."
-  → proceed to finalization
-
-// Code Review
-review_result = (orchestrator inline review):
-  """
-  ## Review Scope
-  All files changed during pipeline execution.
-  ### Pivot Points
-  {pivot_points}
-  ### Phase Decisions
-  {all PDs from completed phases}
-  ### PP/PD Compliance Checklist
-  {auto-generated checklist from PPs and PDs:
-    - [ ] PP-N: {description}
-    - [ ] PD-N: {description} (Phase {N})
-  }
-  ### Interface Contracts
-  {all phase interface_contracts}
-  ### Changed Files
-  {list all created/modified files across all phases}
-
-  Review all changes. Check every PP/PD checklist item against the code.
-  """
-
-// PP Compliance
-pp_result = verify PP compliance:
-  - Check all CONFIRMED PPs are satisfied (no violations)
-  - Check PROVISIONAL PPs for drift (flag deviations)
-  - H-item severity routing:
-    - HIGH H-items → present via AskUserQuestion (blocking)
-    - MED/LOW H-items → append to .mpl/mpl/deferred-review.md (deferred)
-
-// Advisory output (informational)
-Write(".mpl/mpl/advisory-report.md", format_advisory(review_result, pp_result))
-
-if pp_result.high_h_items.length > 0:
-  // HIGH H-items are the only advisory items that block
-  for each item in pp_result.high_h_items:
-    AskUserQuestion("HIGH H-item requires resolution: {item.description}")
-
-announce: "[MPL] Advisory: Review={review_result.verdict}, PP={pp_result.status}, H-items={pp_result.h_item_count} (HIGH:{pp_result.high_h_items.length})"
-```
-
-Report: `[MPL] Advisory: {verdict}. See .mpl/mpl/advisory-report.md`
-
 ---
 
 **Gate Summary Report**:
 
 All 3 Hard Gates pass → proceed to Step 5 (E2E & Finalize).
-Report: `[MPL] Gates: Hard 1 (Build) PASS → Hard 2 (Tests) {pass_rate}% → Hard 3 (Contracts) PASS → Advisory: {verdict}.`
+Report: `[MPL] Gates: Hard 1 (Build) PASS → Hard 2 (Tests) {pass_rate}% → Hard 3 (Contracts) PASS.`
 
 **RUNBOOK Update**: Append to `.mpl/mpl/RUNBOOK.md`:
 ```markdown
@@ -280,7 +224,6 @@ Report: `[MPL] Gates: Hard 1 (Build) PASS → Hard 2 (Tests) {pass_rate}% → Ha
 - **Hard 1 (Build+Lint+Type)**: {pass/fail}
 - **Hard 2 (Tests+Regression)**: {pass_rate}%
 - **Hard 3 (Contract Diff)**: {pass/fail}
-- **Advisory (Review+PP)**: {verdict} (H-items: {count})
 - **Overall**: {all_hard_pass ? "PASSED" : "FAILED — entering fix loop"}
 - **Timestamp**: {ISO timestamp}
 ```

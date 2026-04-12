@@ -69,7 +69,6 @@ function checkPlanStatus(cwd) {
  */
 function checkGateResults(state) {
   const gates = state.gate_results || {};
-  // Hard gates are mandatory; advisory is informational only
   const hardResults = [gates.hard1_passed, gates.hard2_passed, gates.hard3_passed];
 
   const required = hardResults.filter(r => r !== null && r !== undefined);
@@ -83,7 +82,6 @@ function checkGateResults(state) {
       hard1: gates.hard1_passed,
       hard2: gates.hard2_passed,
       hard3: gates.hard3_passed,
-      advisory: gates.advisory_passed,
     }
   };
 }
@@ -300,11 +298,11 @@ async function main() {
         writeState(cwd, {
           current_phase: 'phase4-fix',
           fix_loop_count: currentFixCount,
-          gate_results: { hard1_passed: null, hard2_passed: null, hard3_passed: null, advisory_passed: null }
+          gate_results: { hard1_passed: null, hard2_passed: null, hard3_passed: null }
         });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Quality Gate failed. Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}, Adv=${gateResults.details.advisory}. Transitioning to Phase 4: Fix Loop.`
+          stopReason: `[MPL] Quality Gate failed. Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}. Transitioning to Phase 4: Fix Loop.`
         }));
       } else {
         // Gates not yet evaluated

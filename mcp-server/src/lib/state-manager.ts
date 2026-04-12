@@ -28,7 +28,6 @@ export interface MplState {
     hard1_passed: boolean | null;
     hard2_passed: boolean | null;
     hard3_passed: boolean | null;
-    advisory_result: string | null;
   };
   fix_loop_count: number;
   max_fix_loops: number;
@@ -72,7 +71,6 @@ const DEFAULT_STATE: MplState = {
     hard1_passed: null,
     hard2_passed: null,
     hard3_passed: null,
-    advisory_result: null,
   },
   fix_loop_count: 0,
   max_fix_loops: 10,

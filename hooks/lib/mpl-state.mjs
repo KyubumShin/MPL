@@ -36,8 +36,7 @@ const DEFAULT_STATE = {
   gate_results: {
     hard1_passed: null,
     hard2_passed: null,
-    hard3_passed: null,
-    advisory_passed: null
+    hard3_passed: null
   },
   fix_loop_count: 0,
   max_fix_loops: 10,

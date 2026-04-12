@@ -13,7 +13,7 @@ The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent stru
 | Pipeline Steps | 5 steps (Step 0~5) | 9+ steps (Step 0~6 + sub-steps) |
 | Agents | 5 | 7 |
 | Pre-Analysis | None | Triage + Phase 0 Enhanced |
-| Quality System | Simple verification | Build-Test-Fix + 3 Hard Gates + 1 Advisory + A/S/H classification + Convergence Detection |
+| Quality System | Simple verification | Build-Test-Fix + 3 Hard Gates + A/S/H classification + Convergence Detection |
 | Caching | None | Phase 0 artifact caching |
 | Token Profiling | None | Per-phase token/time profiling |
 
@@ -109,9 +109,9 @@ Analyzes the **information density** of the user prompt to determine interview d
 
 | PP-Proximity | Condition | Pipeline Behavior |
 |-------------|-----------|-------------------|
-| `pp_core` | Task directly implements a Pivot Point | Full interview + all gates |
-| `pp_adjacent` | Task relates to PP but not a direct implementation | Abbreviated interview + hard gates only |
-| `non_pp` | Task is unrelated to any PP (refactoring, chores) | Minimal interview + advisory gates |
+| `pp_core` | Task directly implements a Pivot Point | Full interview + all hard gates |
+| `pp_adjacent` | Task relates to PP but not a direct implementation | Abbreviated interview + hard gates |
+| `non_pp` | Task is unrelated to any PP (refactoring, chores) | Minimal interview + hard gates |
 
 #### Step 1: PP Interview + PP Confirmation
 
@@ -219,7 +219,7 @@ The core execution unit of the pipeline. Executes each phase in order.
 
 **4.4 Circuit Break** — When circuit break occurs, the pipeline transitions to `mpl-failed`. Completed phases are preserved; the failure report includes what succeeded and what failed.
 
-**4.5 Gate System (3 Hard + 1 Advisory)** — After all phases complete, must pass 3 Hard Gates plus 1 Advisory gate to proceed to finalization (see §5 Quality System for details).
+**4.5 Gate System (3 Hard)** — After all phases complete, must pass 3 Hard Gates to proceed to finalization (see §5 Quality System for details).
 
 **4.6 Fix Loop** — On gate failure, enters the fix loop. Monitors progress with Convergence Detection; changes strategy on stagnation, immediately circuit breaks on regression (see §5.4 for details).
 
@@ -330,20 +330,19 @@ TODO implementation ──→ Test relevant module ──→ Pass? ──→ Nex
 - At phase end: all tests from current + previous phases are run cumulatively to prevent regressions
 - On failure, references Phase 0 artifacts (error-spec, type-policy, api-contracts)
 
-### 5.2 Gate System (3 Hard + 1 Advisory)
+### 5.2 Gate System (3 Hard)
 
-After all phase executions complete, must pass through 3 Hard Gates plus 1 Advisory gate:
+After all phase executions complete, must pass through 3 Hard Gates:
 
 | Gate | Name | Type | Owner | Pass Criteria | On Failure |
 |------|------|------|------|----------|--------|
 | Hard 1 | Build + Type Check | Hard | (orchestrator) | 0 build errors, 0 type errors | Enter Fix Loop |
 | Hard 2 | Automated Testing | Hard | (orchestrator) | pass_rate ≥ 95% | Enter Fix Loop |
 | Hard 3 | PP Compliance | Hard | (orchestrator + Human) | No PP violations + H-items resolved | Enter Fix Loop |
-| Advisory | Cross-Boundary Check | Advisory | (orchestrator) | Boundary contract consistency | Warnings logged, non-blocking |
 
-Hard 1 performs project-wide build and type checking (consolidates previous Gate 0.5). Hard 2 runs the full test suite including S-items and regression suite (consolidates previous Gate 1 + Gate 1.5). Hard 3 validates PP compliance holistically and confirms H-items with the user (consolidates previous Gate 3). The Advisory gate checks cross-boundary contract consistency (evolved from Gate 0.7).
+Hard 1 performs project-wide build and type checking (consolidates previous Gate 0.5). Hard 2 runs the full test suite including S-items and regression suite (consolidates previous Gate 1 + Gate 1.5). Hard 3 validates PP compliance holistically and confirms H-items with the user (consolidates previous Gate 3).
 
-> **Historical note (pre-v0.11.0):** The previous 5-Gate system (Gate 0.5, 0.7, 1, 1.5, 2, 3) included a separate Code Review gate (Gate 2) handled by `mpl-code-reviewer`. In v0.11.0, code review responsibilities are absorbed into Phase Runner's Build-Test-Fix cycle, and the Gate 1.5 metrics gate and Gate 2 code review gate are removed as separate stages.
+> **Historical notes:** The pre-v0.11.0 5-Gate system (Gate 0.5, 0.7, 1, 1.5, 2, 3) included a separate Code Review gate (Gate 2) handled by `mpl-code-reviewer`. In v0.11.0, code review responsibilities are absorbed into Phase Runner's Build-Test-Fix cycle; Gate 1.5 metrics and Gate 2 code review are removed as separate stages. v0.11.0 also introduced an Advisory Gate (Cross-Boundary Check, Review+PP Compliance) as a non-blocking observational layer. Per #13 Option B + AD-0002, the Advisory Gate was removed in v0.12.3 — empirical cb-phase-a1 results showed L2/L3 defects are structurally beyond any non-blocking advisory layer; Hard 3 parameter-level verification (#19 AD-05) is the correct response for the 37% residual leak.
 
 ### 5.3 A/S/H Verification Classification
 
