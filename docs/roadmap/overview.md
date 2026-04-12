@@ -810,7 +810,7 @@ v3.7 fundamentally redesigns the interview pipeline. It transitions from the exi
 | ~~**0.10.2**~~ | ~~T-11 Skill Quality Polish: Description trigger hints (3-tier) + deprecated stub + setup split~~ | ✅ **Implemented** |
 | ~~**v0.11.1**~~ | ~~MCP Server dependency recovery in mpl-setup~~ | ✅ **Implemented** |
 | ~~**v0.11.0**~~ | ~~v2 Phase 2: Gate 3H+1A + Hat+Floor + Agent 17→8~~ | ✅ **Implemented** |
-| ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ✅ **Implemented** |
+| ~~**v0.12.0**~~ | ~~HA-01~05: Adversarial Verification + Platform MND + Probing Hints + Warnings + Synthesis-First~~ | ⚠ **Partial** (HA-01/02/03/04 ACTIVE; HA-05 PARTIAL — platform detection survives at `agents/mpl-phase0-analyzer.md:280-326`, auto-injection of `phase_seed.yaml constraints` field + 5-item self-verification checklist LOST. Gated on AD-0004 path per 2026-04-12 audit §8.B #3.) |
 | **v0.13.0** | HA-06: Advisory Gate Playwright E2E Smoke (조건부) | 🟠 Planned |
 | **v1.0.0** | v2 Phase 3: Always-On Judge (codex-plugin-cc) + Runner/Test 분리 + L2 | 🟠 Planned |
 | **v1.0.1** | T-06 Doc Sync (Finalize 확장) | 🟡 Post-v2 |
