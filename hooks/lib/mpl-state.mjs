@@ -361,12 +361,12 @@ export function checkConvergence(state) {
       return {
         status: 'stagnating',
         delta: improvement,
-        suggestion: 'Fix loop is not making progress. Try a different strategy: change implementation approach or consult Phase 0 artifacts.'
+        suggestion: 'Fix loop stagnating. AD-07 strategy override will be generated from prior reflections + phase0 artifacts. See .mpl/mpl/phases/{phase}/strategy-override.json after generation.'
       };
     }
 
     if (improvement < min_improvement) {
-      return { status: 'stagnating', delta: improvement, suggestion: 'Improvement is below threshold. Consider changing fix strategy.' };
+      return { status: 'stagnating', delta: improvement, suggestion: 'Below improvement threshold. AD-07 strategy override will synthesize alternative approach from reflection history.' };
     }
   }
 

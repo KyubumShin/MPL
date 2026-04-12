@@ -361,8 +361,8 @@ push pass_rate to convergence.pass_rate_history
 convergence_result = checkConvergence(state)
 
 if convergence_result.status == "stagnating":
-  -> Change strategy: provide different fix approach hints to worker
-  -> If still stagnating after strategy change: circuit break
+  -> Generate context-aware strategy override (AD-07, v0.13.0)
+  -> If still stagnating after strategy-informed retry: circuit break
 
 if convergence_result.status == "regressing":
   -> Immediate circuit break
@@ -420,6 +420,53 @@ load_previous_reflections(phase):
   - Load all .mpl/mpl/phases/{phase_id}/reflections/attempt-*.md
   - Max 3 (token budget ~1500)
   - Pass previous failed approaches as "things not to do" list
+```
+
+### 4.6.2: Strategy Generation on Stagnation (AD-07, v0.13.0)
+
+When `checkConvergence` returns `stagnating`, the Orchestrator generates a concrete strategy override from available context before the next retry.
+
+```
+if convergence_result.status == "stagnating":
+
+  // 1. Gather context
+  reflections = Glob(".mpl/mpl/phases/{current_phase}/reflections/attempt-*.md")
+  prior_attempts = reflections.map(f => Read(f))  // max 3, most recent first
+  phase0_contracts = Read(".mpl/mpl/phase0/api-contracts.md") or ""
+  phase0_errors = Read(".mpl/mpl/phase0/error-spec.md") or ""
+  gate_failures = Read(".mpl/mpl/hard3-violations.md") or Read last Hard 1/2 error output
+
+  // 2. Synthesize strategy (Orchestrator inline — NOT a separate agent)
+  strategy_override = {
+    alternative_approach: string,  // "Use X pattern instead of Y"
+    must_not_do: [string],         // "Do NOT retry Z — failed in attempt 2"
+    phase0_hint: string,           // relevant constraint from phase0 artifacts
+    source_reflections: [attempt_ids]
+  }
+
+  // 3. Write for Phase Runner consumption
+  Write(".mpl/mpl/phases/{current_phase}/strategy-override.json",
+        JSON.stringify(strategy_override, null, 2))
+
+  announce: "[MPL] AD-07: Strategy override generated. Try: {alternative_approach}. Avoid: {must_not_do.length} items."
+
+  // 4. Fallback: no actionable patterns → generic re-approach
+  if prior_attempts.length == 0 or no actionable patterns:
+    strategy_override = {
+      alternative_approach: "Re-read Phase 0 artifacts. Re-approach from first principles.",
+      must_not_do: [],
+      phase0_hint: "Check api-contracts.md and error-spec.md.",
+      source_reflections: []
+    }
+```
+
+**Phase Seed integration**: `commands/mpl-run-execute.md` Step 4.0.5 loads `strategy-override.json` when regenerating seed for a fix-loop retry:
+
+```
+if exists(".mpl/mpl/phases/{phase.id}/strategy-override.json"):
+  strategy = JSON.parse(Read(".mpl/mpl/phases/{phase.id}/strategy-override.json"))
+  seed.strategy_override = strategy
+  // Runner prompt: "MUST NOT DO: {must_not_do}" + "TRY INSTEAD: {alternative_approach}"
 ```
 
 **RUNBOOK Update**: After each fix attempt, append to `.mpl/mpl/RUNBOOK.md`:
