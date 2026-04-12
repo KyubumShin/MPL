@@ -193,7 +193,44 @@ Task(subagent_type="mpl-phase0-analyzer", model="sonnet",
 
 1. Review subagent's summary (artifact files are already saved)
 2. Report: `[MPL] Phase 0 Enhanced complete. Grade: {grade}. Artifacts: {count}/4. Cache: {HIT|MISS|PARTIAL}.`
-3. Proceed to Step 3 (Phase Decomposition)
+3. **E2E awareness check (HA-06, v0.13.0)**: if Phase 0 summary reports `e2e_infra.detected: true`:
+
+   ```
+   if phase0_summary.e2e_infra?.detected:
+     e2e_tool = phase0_summary.e2e_infra.tool
+     e2e_config = phase0_summary.e2e_infra.config_file
+
+     AskUserQuestion(
+       question: "E2E 테스트 인프라가 감지되었습니다 ({e2e_tool}, {e2e_config}). 이번 작업의 결과를 E2E로 검증해야 하나요?",
+       header: "E2E 검증",
+       options: [
+         { label: "예 — 기존 도구 사용",
+           description: phase0_summary.e2e_infra.run_command
+             ? "감지된 명령어: " + phase0_summary.e2e_infra.run_command
+             : "E2E 실행 명령어를 지정해주세요" },
+         { label: "예 — 다른 방법 지정",
+           description: "직접 E2E 실행 명령어를 입력합니다" },
+         { label: "아니오",
+           description: "이번 작업은 E2E 불필요" }
+       ]
+     )
+
+     if answer starts with "예":
+       e2e_command = phase0_summary.e2e_infra.run_command or user_input
+       writeState(cwd, { e2e_required: true, e2e_command: e2e_command })
+       announce: "[MPL] HA-06: E2E 검증 활성화 ({e2e_tool}). 명령어: {e2e_command}"
+     else:
+       writeState(cwd, { e2e_required: false })
+   else:
+     // No E2E infra detected — skip question entirely. Zero overhead.
+     pass
+   ```
+
+   The `e2e_required` + `e2e_command` state fields are consumed by the decomposer
+   (generates S-items for E2E phases) and Step 5.0 E2E Test (executes the command
+   in the existing fallback chain).
+
+4. Proceed to Step 3 (Phase Decomposition)
 
 > **Fallback**: If mpl-phase0-analyzer agent fails, orchestrator performs analysis directly (see detailed spec below).
 > In that case, tool calls accumulate in orchestrator context, increasing compaction risk.

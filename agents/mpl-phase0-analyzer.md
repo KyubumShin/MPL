@@ -325,6 +325,34 @@ disallowedTools: Edit, Task
     without external lookups. If a constraint is uncertain, mark confidence as "low" and
     let Phase Runner verify during Build-Test-Fix.
 
+    ### Phase 3.5: E2E Infrastructure Detection (HA-06, v0.13.0)
+
+    Detect existing E2E testing infrastructure in the project. This feeds into
+    the orchestrator's interview-driven E2E awareness question — if E2E infra
+    is detected, the orchestrator asks the user whether E2E verification is
+    needed for this task. If not detected, the question is never asked.
+
+    ```
+    e2e_infra = { detected: false, tool: null, config_file: null, run_command: null }
+
+    // Detection priority order (first match wins)
+    if exists("playwright.config.ts") or exists("playwright.config.js"):
+      e2e_infra = { detected: true, tool: "playwright", config_file: "playwright.config.*", run_command: "npx playwright test" }
+    elif exists("cypress.config.ts") or exists("cypress.config.js") or exists("cypress/"):
+      e2e_infra = { detected: true, tool: "cypress", config_file: "cypress.config.*", run_command: "npx cypress run" }
+    elif exists("e2e/") or exists("tests/e2e/") or exists("test/e2e/"):
+      e2e_infra = { detected: true, tool: "custom", config_file: "e2e/", run_command: null }
+    elif Grep("puppeteer", "package.json"):
+      e2e_infra = { detected: true, tool: "puppeteer", config_file: "package.json", run_command: null }
+    elif Grep("selenium", "package.json") or Grep("selenium", "requirements.txt"):
+      e2e_infra = { detected: true, tool: "selenium", config_file: null, run_command: null }
+    elif Grep("pytest.*e2e|e2e.*pytest", "pyproject.toml"):
+      e2e_infra = { detected: true, tool: "pytest-e2e", config_file: "pyproject.toml", run_command: "pytest tests/e2e/" }
+    ```
+
+    Include `e2e_infra` in the summary output. Consumer: `commands/mpl-run-phase0-analysis.md`
+    post-processing → orchestrator E2E question (only when `detected: true`).
+
     ### Phase 4: Validation
 
     For each generated artifact:

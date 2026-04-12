@@ -56,6 +56,15 @@ Task(subagent_type="mpl-decomposer", model="opus",
      **AD-01 (v0.13.0) — contract_files is REQUIRED** for every phase under `interface_contract.contract_files`. Enumerate one entry per cross-layer boundary between impact files (path, boundary_id, caller, callee, framework_rules, params key-type map, returns key-type map). Empty list `[]` only for phases with zero cross-layer boundaries (pure infra/docs). Omission is a validation error. See `agents/mpl-decomposer.md` Step 6.5 for the enumeration procedure and full sub-schema.
      Also: architecture_anchor (tech_stack, directory_pattern, naming_convention), shared_resources.
 
+     **HA-06 (v0.13.0) — E2E verification**: if pipeline state has `e2e_required: true`, include an E2E S-item in the LAST phase's `verification_plan.s_items[]`:
+     ```yaml
+     s_items:
+       - criterion: "E2E smoke test passes"
+         test_command: "{state.e2e_command}"
+         expected_exit: 0
+     ```
+     This ensures Step 5.0 E2E Test has a concrete S-item to execute.
+
      ## PP-Proximity Classification Rules
      Assign `pp_proximity` to each phase:
      - **pp_core**: phase impact files overlap with files referenced in pivot-points.md
