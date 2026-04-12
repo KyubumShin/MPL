@@ -9,6 +9,11 @@
 
 const MAX_RETRIES = 2;
 
+// Session reuse: cache sessionId from first query() call.
+// Subsequent calls in the same MCP server lifetime reuse the session,
+// enabling prompt prefix caching (pivot_points + scoring prompt stay cached).
+let cachedSessionId: string | null = null;
+
 export interface DimensionScore {
   score: number;
   justification: string;
@@ -112,22 +117,31 @@ export async function scoreDimensions(input: {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const queryOptions: Record<string, unknown> = {
+        model: 'opus',
+        maxTurns: 1,
+        systemPrompt: 'You are a JSON-only scoring assistant. Output only valid JSON.',
+        allowedTools: [], // No tools needed — pure text completion
+      };
+
+      // Reuse session for prompt cache efficiency
+      if (cachedSessionId) {
+        queryOptions.sessionId = cachedSessionId;
+      }
+
       const q = queryFn({
         prompt: fullPrompt,
-        options: {
-          model: 'haiku',
-          maxTurns: 1,
-          systemPrompt: 'You are a JSON-only scoring assistant. Output only valid JSON.',
-          allowedTools: [], // No tools needed — pure text completion
-        },
+        options: queryOptions,
       });
 
-      // Collect response text from SDK events
+      // Collect response text and sessionId from SDK events
       let responseText = '';
       for await (const event of q) {
         if (event.type === 'result' && event.subtype === 'success') {
-          // SDKResultSuccess has a `result` field
           responseText = (event as { result: string }).result;
+          // Capture sessionId for reuse
+          const sessionId = (event as { sessionId?: string }).sessionId;
+          if (sessionId) cachedSessionId = sessionId;
         } else if (event.type === 'assistant') {
           // SDKAssistantMessage — extract text from BetaMessage content blocks
           const msg = event.message as { content?: Array<{ type: string; text?: string }> };
@@ -138,6 +152,10 @@ export async function scoreDimensions(input: {
               }
             }
           }
+        } else if ((event as { sessionId?: string }).sessionId) {
+          // Capture sessionId from any event that carries it
+          const sessionId = (event as { sessionId?: string }).sessionId;
+          if (sessionId) cachedSessionId = sessionId;
         }
       }
 
