@@ -269,7 +269,17 @@ Classify pp_proximity from score (or override with user hint):
 
 ```
 proximity_hint = state.proximity_hint  // from keyword-detector (may be null)
-{ score, breakdown } = calculatePipelineScore(scan_results)
+
+// Load hat weights from config (with state override if available)
+config = loadConfig(cwd)
+stateHat = state?.hat || {}
+weights = {
+  file_scope: stateHat.file_scope_weight ?? config.hat?.file_scope_weight ?? 0.35,
+  test_complexity: stateHat.test_complexity_weight ?? config.hat?.test_complexity_weight ?? 0.25,
+  dependency_depth: stateHat.dependency_depth_weight ?? config.hat?.dependency_depth_weight ?? 0.25,
+  risk_signal: stateHat.risk_signal_weight ?? config.hat?.risk_signal_weight ?? 0.15,
+}
+{ score, breakdown } = calculatePipelineScore(scan_results, weights)
 { proximity, source } = classifyProximity(score, proximity_hint)
 
 Write pp_proximity to state:

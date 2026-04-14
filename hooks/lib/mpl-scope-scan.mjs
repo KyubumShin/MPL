@@ -18,25 +18,49 @@
  */
 
 /**
+ * Default weights for pipeline score calculation.
+ * Can be overridden via config (hat section) or per-task interview.
+ */
+const DEFAULT_WEIGHTS = {
+  file_scope: 0.35,
+  test_complexity: 0.25,
+  dependency_depth: 0.25,
+  risk_signal: 0.15,
+};
+
+/**
  * Calculate pipeline score from scan results
  * @param {object} scan - Quick Scope Scan results
  * @param {number} scan.affected_files - Estimated number of affected files
  * @param {number} scan.test_scenarios - Number of test scenarios needed
  * @param {number} scan.import_depth - Max import chain depth
  * @param {number} scan.risk_signal - Risk signal from keywords (0.0~1.0)
+ * @param {object|null} weights - Optional weight overrides { file_scope, test_complexity, dependency_depth, risk_signal }
  * @returns {{ score: number, breakdown: object }}
  */
-export function calculatePipelineScore(scan) {
+export function calculatePipelineScore(scan, weights = null) {
   const fileScope = Math.min((scan.affected_files || 0) / 10, 1.0);
   const testComplexity = Math.min((scan.test_scenarios || 0) / 8, 1.0);
   const dependencyDepth = Math.min((scan.import_depth || 0) / 5, 1.0);
   const riskSignal = Math.min(Math.max(scan.risk_signal || 0, 0), 1.0);
 
+  // Use provided weights with fallback to defaults
+  let w = { ...DEFAULT_WEIGHTS, ...(weights || {}) };
+
+  // Normalize if weights don't sum to 1.0
+  const sum = w.file_scope + w.test_complexity + w.dependency_depth + w.risk_signal;
+  if (Math.abs(sum - 1.0) > 0.001) {
+    w.file_scope /= sum;
+    w.test_complexity /= sum;
+    w.dependency_depth /= sum;
+    w.risk_signal /= sum;
+  }
+
   const score =
-    fileScope * 0.35 +
-    testComplexity * 0.25 +
-    dependencyDepth * 0.25 +
-    riskSignal * 0.15;
+    fileScope * w.file_scope +
+    testComplexity * w.test_complexity +
+    dependencyDepth * w.dependency_depth +
+    riskSignal * w.risk_signal;
 
   return {
     score: Math.round(score * 1000) / 1000,

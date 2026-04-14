@@ -31,6 +31,11 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+// Import profile parser for pass_rate sync (#31) and test-agent check (#32)
+const { parseJsonl } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-profile.mjs')).href
+);
+
 /**
  * Check PLAN.md checkbox completion status
  */
@@ -86,6 +91,30 @@ function checkGateResults(state) {
       advisory: gates.advisory_passed,
     }
   };
+}
+
+/**
+ * Sync pass_rate values from phases.jsonl to convergence.pass_rate_history in state.
+ * Fixes #31: pass_rate was never recorded because orchestrator didn't call writeState.
+ */
+function syncPassRateHistory(cwd, state) {
+  const phasesJsonlPath = join(cwd, '.mpl', 'mpl', 'profile', 'phases.jsonl');
+  const entries = parseJsonl(phasesJsonlPath);
+  const passRates = entries
+    .map(e => e.pass_rate)
+    .filter(r => r != null && typeof r === 'number');
+
+  if (passRates.length === 0) return;
+
+  const existing = state.convergence?.pass_rate_history;
+  const currentLen = Array.isArray(existing) ? existing.length : 0;
+
+  if (passRates.length > currentLen) {
+    // deepMerge replaces arrays wholesale, so build the full array here
+    writeState(cwd, {
+      convergence: { pass_rate_history: passRates }
+    });
+  }
 }
 
 async function main() {
@@ -264,12 +293,37 @@ async function main() {
       const { total, completed, failed } = planStatus;
       const remaining = total - completed - failed;
 
+      // #30 fix: sync PLAN.md status to sprint_status in state.json
+      writeState(cwd, {
+        sprint_status: {
+          total_todos: total,
+          completed_todos: completed,
+          failed_todos: failed,
+          in_progress_todos: remaining
+        }
+      });
+
       if (remaining === 0) {
+        // #31 fix: sync pass_rate from phases.jsonl before transition
+        syncPassRateHistory(cwd, state);
+
+        // #32 fix: warn if no test-agent entries found (F-40 enforcement)
+        let testAgentWarning = '';
+        const phasesJsonlPath = join(cwd, '.mpl', 'mpl', 'profile', 'phases.jsonl');
+        const profileEntries = parseJsonl(phasesJsonlPath);
+        const hasTestAgent = profileEntries.some(e =>
+          e.name?.includes('test-agent') || e.name?.includes('mpl-test-agent')
+        );
+        if (!hasTestAgent && profileEntries.length > 0) {
+          testAgentWarning = ' WARNING (F-40): No test-agent dispatch detected in phase profiles. ' +
+            'Mandatory domains (ui, api, algorithm, db, ai) require mpl-test-agent dispatch before Gate.';
+        }
+
         // All TODOs resolved (completed or failed) → Phase 3
         writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to Phase 3: Quality Gate.`
+          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to Phase 3: Quality Gate.${testAgentWarning}`
         }));
       } else {
         console.log(JSON.stringify({
@@ -281,6 +335,9 @@ async function main() {
     }
 
     case 'phase3-gate': {
+      // #31 fix: sync pass_rate before gate evaluation
+      syncPassRateHistory(cwd, state);
+
       // Check gate results
       const gateResults = checkGateResults(state);
 
@@ -317,6 +374,9 @@ async function main() {
     }
 
     case 'phase4-fix': {
+      // #31 fix: sync pass_rate before convergence check
+      syncPassRateHistory(cwd, state);
+
       const fixCount = state.fix_loop_count || 0;
       const maxFix = state.max_fix_loops || 10;
 
@@ -348,10 +408,23 @@ async function main() {
     }
 
     case 'phase5-finalize': {
-      // Finalize: do NOT auto-transition to completed here.
-      // The orchestrator must complete finalization tasks (extract learnings, commit)
-      // and then manually set current_phase to 'completed' via writeState.
-      const finalized = state.finalize_done === true;
+      // #29 fix: auto-detect finalization completion
+      // If all 3 hard gates passed AND RUNBOOK has "Gate Results" section,
+      // the pipeline has effectively completed — set finalize_done automatically.
+      let finalized = state.finalize_done === true;
+      if (!finalized) {
+        const gateCheck = checkGateResults(state);
+        if (gateCheck.allPassed) {
+          const runbookPath = join(cwd, '.mpl', 'mpl', 'RUNBOOK.md');
+          if (existsSync(runbookPath)) {
+            const runbookContent = readFileSync(runbookPath, 'utf-8');
+            if (runbookContent.includes('## Gate Results')) {
+              writeState(cwd, { finalize_done: true });
+              finalized = true;
+            }
+          }
+        }
+      }
       if (finalized) {
         writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
@@ -467,4 +540,4 @@ main().catch(() => {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 });
 
-export { checkPlanStatus, checkGateResults };
+export { checkPlanStatus, checkGateResults, syncPassRateHistory };

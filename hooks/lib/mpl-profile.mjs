@@ -59,6 +59,9 @@ export function analyzeProfile(cwd) {
     context_tokens: e.estimated_tokens?.context ?? 0,
     output_tokens: e.estimated_tokens?.output ?? 0,
     duration_ms: e.duration_ms ?? 0,
+    phase_proximity: e.phase_proximity || 'unknown',
+    runner_model: e.runner_model || 'unknown',
+    fix_retries: e.fix_retries ?? 0,
   }));
 
   // Totals

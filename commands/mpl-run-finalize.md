@@ -211,6 +211,19 @@ Ensure .mpl/memory/ directory exists.
 Report: "[MPL] Learnings distilled: {new_entries} new patterns added to memory."
 ```
 
+### 5.3: Complete Pipeline
+
+**CRITICAL — this step MUST NOT be skipped.**
+
+After all finalization tasks complete (E2E, verification, learnings, metrics):
+
+```
+writeState(cwd, { finalize_done: true })
+```
+
+This sets `finalize_done = true` in state.json, allowing the phase controller to transition to `completed`.
+Without this step, the pipeline hangs in `phase5-finalize` indefinitely.
+
 ### 5.2.6: 4-Tier Memory Update (F-25)
 
 Execute 4-Tier Memory protocol:

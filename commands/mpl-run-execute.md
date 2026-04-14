@@ -467,6 +467,11 @@ phase_model = determine_model(phase):
   return "sonnet"
 ```
 
+After model selection, record the chosen model in state for profile tracking:
+```
+writeState(cwd, { last_runner_model: phase_model })
+```
+
 ### 4.2.2: Test Agent — Mandatory Independent Verification (F-40)
 
 **ENFORCEMENT (B-01, v0.6.2): This step is NOT optional. The orchestrator MUST execute this check

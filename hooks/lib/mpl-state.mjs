@@ -27,6 +27,7 @@ const DEFAULT_STATE = {
   current_phase: 'phase1-plan',
   started_at: null,
   finalize_done: false,      // Set to true when Step 5 finalization completes
+  last_runner_model: null,   // F-22: Last model used by phase runner
   sprint_status: {
     total_todos: 0,
     completed_todos: 0,
@@ -84,6 +85,12 @@ const DEFAULT_STATE = {
       med_to_high: 0,           // Planner said MED, user upgraded to HIGH
       low_to_high: 0            // Planner said LOW, user upgraded to HIGH
     }
+  },
+  hat: {                           // Per-task weight overrides (from config or future interview)
+    file_scope_weight: null,       // null = use config default (0.35)
+    test_complexity_weight: null,  // null = use config default (0.25)
+    dependency_depth_weight: null, // null = use config default (0.25)
+    risk_signal_weight: null,      // null = use config default (0.15)
   },
   // Stage 2 ambiguity score — written by orchestrator after mpl-ambiguity-resolver completes.
   // mpl-phase-controller blocks mpl-decompose if null.

@@ -502,6 +502,38 @@ Breaking changes: NONE. Phase Runner has Legacy fallback when Seed absent. Rollb
 
 ---
 
+## v0.13.0 — Bug Fixes + Hat Weight Wiring + AD-08 Stage 1 Measurement (2026-04-14)
+
+### Summary
+
+5 bug fixes from ygg-exp8 smoke test + 2 features (#12, #22). Strategy: mechanical enforcement in hooks over protocol text.
+
+### Bug Fixes
+
+| Issue | Title | Fix |
+|-------|-------|-----|
+| #30 | sprint_status TODO tracking at zero | Phase controller syncs checkPlanStatus → state.json sprint_status |
+| #31 | pass_rate never recorded | syncPassRateHistory() reads phases.jsonl, writes convergence.pass_rate_history |
+| #32 | Test Agent never dispatched (F-40) | Advisory warning in phase2→phase3 transition when no test-agent profiles found |
+| #29 | finalize_done stays false | Auto-complete heuristic (all gates pass + RUNBOOK Gate Results) + explicit Step 5.3 |
+| #33 | Decomposer stuck 13min | Context budget rule (max 15 tool uses) in agent + protocol |
+
+### Features
+
+| Issue | Title | Changes |
+|-------|-------|---------|
+| #12 | Hat weight wiring (config→score) | `calculatePipelineScore(scan, weights)` accepts optional weights; config `hat.*_weight` fields wired; vestigial field names aligned to code dimensions |
+| #22 | AD-08 Stage 1 measurement | `logPhaseProfile` records `phase_proximity`, `runner_model`, `fix_retries`; `analyzeProfile` parses new fields; `last_runner_model` in state |
+
+### AD-08 Stage 1 Baseline
+
+Phase Runner already defaults to `model: sonnet`. Non-PP phases use Sonnet by default.
+Stage 1 measurement infrastructure is now in place. Data collection begins with next pipeline run.
+
+**Stage gate for Stage 2**: Analyze `phases.jsonl` data from multiple runs. If non_pp phases with `runner_model: "sonnet"` achieve `hard3_pass_rate >= 0.90` over 10+ runs, Stage 2 (pp_adjacent → Sonnet) can proceed.
+
+---
+
 ## v4.1 — MCP Server Tier 1: Deterministic Scoring + Active State (2026-03-22)
 
 ### Summary

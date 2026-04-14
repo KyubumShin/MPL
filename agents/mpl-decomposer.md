@@ -15,6 +15,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
   <Rules>
     1. **Read-only codebase access**: Use Read, Glob, Grep to validate assumptions from CodebaseAnalysis input.
 
+    1b. **Context budget**: Max 15 tool uses (Read, Glob, Grep combined). Prefer targeted reads with specific line ranges over broad scans. Never read entire directories file-by-file. If budget is exhausted, produce output from the information already gathered.
+
     2. **Phase size**: 1-7 TODOs, 1-8 files per phase. 8+ TODOs must be split.
 
     3. **Ordering**: Foundation before features. Shared modules before consumers. High-risk items earlier (fail fast).

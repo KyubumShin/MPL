@@ -44,6 +44,12 @@ Task(subagent_type="mpl-decomposer", model="opus",
      CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
+
+     ## Budget Constraint
+     You have a context budget of 15 tool uses (Read, Glob, Grep combined).
+     Prioritize: (1) CodebaseAnalysis JSON (already provided above), (2) key interface files referenced in Pivot Points, (3) test infrastructure files.
+     Do NOT exhaustively read every file in large codebases. Rely on CodebaseAnalysis + targeted Grep.
+
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
      pp_proximity (pp_core|pp_adjacent|non_pp — see classification rules below),
      phase_subdomain (F-39, optional: tech-stack e.g. react, prisma, langchain),

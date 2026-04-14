@@ -155,6 +155,9 @@ function logPhaseProfile(cwd, state, agentType, estimatedTokens) {
       micro_fixes: 0,
       estimated_tokens: { context: 0, output: estimatedTokens, total: estimatedTokens },
       compaction_count: state.compaction_count || 0,
+      phase_proximity: state.pp_proximity || 'unknown',
+      runner_model: state.last_runner_model || 'sonnet',
+      fix_retries: state.fix_loop_count || 0,
       timestamp: new Date().toISOString(),
     };
     appendFileSync(join(profileDir, 'phases.jsonl'), JSON.stringify(phaseRecord) + '\n');

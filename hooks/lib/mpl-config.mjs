@@ -36,6 +36,12 @@ const DEFAULTS = {
     stagnation_window: 3,
     min_improvement: 0.05,
     regression_threshold: -0.1
+  },
+  hat: {
+    file_scope_weight: 0.35,
+    test_complexity_weight: 0.25,
+    dependency_depth_weight: 0.25,
+    risk_signal_weight: 0.15,
   }
 };
 

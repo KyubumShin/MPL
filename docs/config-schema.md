@@ -42,10 +42,12 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `hat.default_level` | `"light"` \| `"standard"` \| `"full"` | `"auto"` | Override Hat level (auto = PP-proximity scoring) | `mpl-run-phase0.md` |
-| `hat.pp_weight` | number | `0.40` | Weight for PP impact in pp_proximity formula | `mpl-run-phase0.md` |
-| `hat.scope_weight` | number | `0.25` | Weight for file scope in pp_proximity formula | `mpl-run-phase0.md` |
-| `hat.contract_weight` | number | `0.20` | Weight for contract change in pp_proximity formula | `mpl-run-phase0.md` |
-| `hat.risk_weight` | number | `0.15` | Weight for risk signal in pp_proximity formula | `mpl-run-phase0.md` |
+| `hat.file_scope_weight` | number | `0.35` | Weight for file scope dimension in `calculatePipelineScore` | `mpl-scope-scan.mjs` |
+| `hat.test_complexity_weight` | number | `0.25` | Weight for test complexity dimension | `mpl-scope-scan.mjs` |
+| `hat.dependency_depth_weight` | number | `0.25` | Weight for dependency depth dimension | `mpl-scope-scan.mjs` |
+| `hat.risk_signal_weight` | number | `0.15` | Weight for risk signal dimension | `mpl-scope-scan.mjs` |
+
+> **v0.13.0 naming change**: Previous field names (`pp_weight`, `scope_weight`, `contract_weight`, `risk_weight`) were vestigial — nothing read them. New names align with `calculatePipelineScore()` dimensions in `hooks/lib/mpl-scope-scan.mjs`. Weights must sum to 1.0; they are auto-normalized if not.
 
 ## Browser QA (Gate 1.7, T-03)
 
@@ -123,10 +125,10 @@ Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
   "context_cleanup_window": 3,
   "hat": {
     "default_level": "auto",
-    "pp_weight": 0.40,
-    "scope_weight": 0.25,
-    "contract_weight": 0.20,
-    "risk_weight": 0.15
+    "file_scope_weight": 0.35,
+    "test_complexity_weight": 0.25,
+    "dependency_depth_weight": 0.25,
+    "risk_signal_weight": 0.15
   },
   "auto_pr": {
     "enabled": false,
