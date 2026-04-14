@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.13.1 Design Document
+# MPL (Micro-Phase Loop) v0.14.0 Design Document
 
 ## 1. Overview
 
@@ -473,6 +473,40 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.14.0 — Chain-Scoped Seed + Discovery Pipeline Foundation (#34 Stage 1) (2026-04-14)
+
+Infrastructure for #34 Decomposer/Seed/Runner refactor. All features feature-flagged off by default — existing pipeline behavior unchanged until opted in per-project via `.mpl/config.json`.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Seed Generator | inline orchestrator (per-phase, mechanical extraction) | subagent `mpl-seed-generator` (opus, chain-scoped) | Agent (new) | greenfield discovery-driven domain requires LLM design per chain, not per phase — cache warm + chain consistency |
+| Chain concept | N/A (phases independent) | `.mpl/mpl/chain-assignment.yaml` groups connected phases; model selection by size rule | Protocol + schema | chain-scoped opus vs isolated sonnet — #22 AD-08 absorbed |
+| Phase 0 artifact | per-phase hints scattered | `design-intent.yaml` (rationale/probing_hints/acceptance_criteria) 1회 선언 | Phase 0 output | feeds Seed Generator input, consolidates natural-language design intent |
+| Context monitor | ad-hoc state flags | `hooks/mpl-context-monitor.mjs` PostToolUse token + dispatch tracking, threshold events | Hook (new) | mechanical-verification for baton-pass trigger (Stage 2), measure-only in Stage 1 |
+| Discovery scanner | N/A | `hooks/mpl-discovery-scanner.mjs` filters Runner discovery-candidates against Phase 0 / chain-seed / decomposition | Hook (new) | 4-stage discovery pipeline: Runner flag → Hook filter → Test Agent verify → Discovery Agent judge (Stage 2) |
+| AD-0004 Option C | Reviewer role rejected (design clarity + cost) | Discovery Agent spec defined (Stage 2 ready); cost resolved via conditional dispatch | ADR addendum | 3 rejection reasons: (1) design clarity ✅, (2) runtime cost ✅, (3) empirical evidence ⚠️ Gate-measured |
+
+**Chain Size Model Selection Rule (new):**
+- chain size ≥ 2 → opus (chain-scoped, baton-pass: true)
+- chain size = 1 + pp_core → opus (complexity exception, baton-pass: false)
+- chain size = 1 + non-pp → sonnet (isolated, gate-sufficient, baton-pass: false)
+
+**Affected files:**
+- New agents: `agents/mpl-seed-generator.md`
+- New hooks: `hooks/mpl-context-monitor.mjs`, `hooks/mpl-discovery-scanner.mjs`
+- New schemas: `docs/schemas/chain-assignment.md`, `docs/schemas/chain-seed.md`, `docs/schemas/design-intent.md`
+- Modified: `commands/mpl-run-decompose.md` (Step 3-G), `commands/mpl-run-execute.md` (Section 4.0.5.A)
+- Config: `docs/config-schema.md` +4 sections (chain_seed, context_monitor, test_wait, discovery)
+- Hooks: `hooks/hooks.json` (2 PostToolUse registrations)
+- ADR: `docs/decisions/AD-0004-test-agent-long-term-architecture.md` (Addendum)
+- Related: #22 (AD-08 Sonnet unification) closed — absorbed via chain size rule
+
+**Breaking changes:** NONE. All features gated on `.mpl/config.json` flags, defaults preserve v0.13.1 behavior.
+
+**Next (Stage 2):** Runner opus chain + baton-pass + Discovery Agent, gated on Gate 1 measurement (2 weeks).
+
+Full spec: `~/project/decision/2026-04-14-issue-34-full-adoption-v3.md` + GitHub issue #34.
 
 ### v0.6.7 — 1M Context Parameter Tuning (2026-03-24)
 
