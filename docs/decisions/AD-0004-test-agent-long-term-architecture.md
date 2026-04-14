@@ -3,7 +3,8 @@ id: AD-0004
 title: Test Agent long-term architecture — Option A baseline with conditional Option B experiment
 status: accepted
 date: 2026-04-12
-related: ["#19", "AD-0001", "AD-0002", "AD-0003"]
+updated: 2026-04-14
+related: ["#19", "#34", "AD-0001", "AD-0002", "AD-0003"]
 ---
 
 ## Context
@@ -131,3 +132,63 @@ These actions are valuable under A, and under B if it wins the gate:
 - **F-40 protocol**: `commands/mpl-run-execute.md:470-546` (mandatory-domain dispatch rules)
 - **Related issues**: #19 AD-05 Hard 3 parameter-level verification (Option D dependency), #14 AD-01 Contract Coverage Mandatory (prerequisite for #19), #15 AD-02 Hard 3 Auto-Pass Removal (prerequisite for #19 execution)
 - **Planned follow-ups**: Gate 1 experiment design (separate issue, not yet filed), HA-02 snippet extraction (audit §8.A #4, separate commit), Hard 3 retrospective measurement (audit §8.C #4)
+
+---
+
+## Addendum (2026-04-14): Option C Reviewer 부활 경로 확보 via #34 Discovery Agent
+
+이슈 #34 (Decomposer/Seed/Runner refactor) 설계 과정에서 **Option C의 Reviewer role이 Discovery Agent로 재설계**되며 원 거부 사유 2건이 모두 해소됨.
+
+### 원 거부 사유와 해소
+
+| 원 거부 사유 | 해소 여부 | 방법 |
+|------------|----------|------|
+| (1) "Reviewer role has no existing specification. What context does it see? What does it output? How are conflicts resolved?" | ✅ 해소 | Discovery Agent spec 명시 (Input: discovery-pending + handoff + test-results + chain-seed + phase0. Output: verdict {false_positive, minor_drift, architectural_discovery} + optional discovery-patch.yaml. Authority: runner reset + re-seed 권고, Write/Edit/Bash 금지) |
+| (2) "Runtime cost: ~20-28K per dispatch, ~300K per 9-phase pipeline" | ✅ 해소 | 조건부 호출로 구조 변경 — Hook(`mpl-discovery-scanner.mjs`)이 1차 mechanical filter, `discovery-pending.yaml` non-empty일 때만 Discovery Agent 호출. 평균 chain당 0-1회 호출 예상, pipeline당 0-40K로 감소 |
+| (3) "No empirical evidence that 3-role beats 2-role" | ⚠️ 측정 필요 | #34 Stage Gate에서 수집 예정 (Gate 1: Hook filter precision, Gate 2: Discovery Agent verdict 분포 + runner reset 빈도) |
+
+### Option C Reviewer → Discovery Agent 매핑
+
+| 속성 | Option C Reviewer (원안) | Discovery Agent (신규) |
+|------|----------------------|---------------------|
+| Model | opus | opus (동일) |
+| 본래 역할 | "cross-check against Pivot Points" | architectural discovery judgment (확장: PP + chain-seed + Phase 0 declarative metadata 전반) |
+| 호출 빈도 | 매 mandatory phase (sequential) | 조건부 (Hook 필터 통과 시만) |
+| Input 정의 | ❌ 미정 | ✅ 명시 |
+| Output 정의 | ❌ 미정 | ✅ 명시 (3-verdict taxonomy) |
+| Conflict resolution | ❌ 미정 | ✅ 권한 명시 (runner reset trigger, team-lead이 집행) |
+
+### 현 ADR 상태 변경 (partial)
+
+- **Section "Explicitly not decided by this ADR" → "Reviewer role 운명"**:
+  - 기존: "If B wins, Reviewer stays unimplemented. If B fails, Reviewer design becomes a separate ADR"
+  - 변경: **Reviewer design은 #34 Discovery Agent로 실현 경로 확보**. Option B experiment는 여전히 Gate 1에서 진행되나, Reviewer 경로는 더 이상 설계 blocker 없음. Gate 1 (B) 결과와 독립적으로 Discovery Agent는 #34 Stage 2에서 구현 예정.
+- **Section "Do NOT do yet" #2 → "Do not commit to Option C's Reviewer design"**:
+  - 기존: "without (a) design clarity and (b) evidence that 3-role beats 2-role"
+  - 변경: **(a) design clarity 확보 완료** (Discovery Agent spec). (b) evidence는 #34 Gate 1/2에서 측정. 구현 착수 가능 시점: Gate 1 통과 후.
+
+### 역할 관계 (HA-02 분리)
+
+기존 Option A (status quo):
+- Test Agent (sonnet) = adversarial tester + 기본 검증 (둘 다)
+
+Option C via Discovery Agent:
+- Test Agent (sonnet) = **기본 검증 + adversarial edge case test 실행만**
+- Discovery Agent (opus) = **architectural cross-check + semantic judgment**
+- 역할 분리 확대 → 각 단일 책임 → `[[mechanical-verification]]` 정합 강화
+
+### 이슈 #34와의 연결
+
+#34 addendum (2026-04-14 late) "Chain-Scoped Seed + 4-Role Architecture" 참조:
+- Runner (opus, chain-scoped)
+- Seed Generator (opus, chain 시작 1회 + exceptional)
+- Test Agent (sonnet, per-phase) ← Option A 유지
+- **Discovery Agent (opus, conditional)** ← Option C Reviewer 부활
+
+#34 Stage 1에서는 Hook + Seed + Phase 0 infra, Stage 2에서 Discovery Agent + Runner baton-pass 구현.
+
+### 이 Addendum이 갱신하지 않는 것
+
+- Option A 상태 자체는 baseline으로 유지. Option B experiment (Gate 1) 스케줄 변경 없음.
+- 본 ADR의 핵심 판단("Option A baseline with conditional Option B experiment")은 단기 기준 그대로.
+- 중장기(Stage 2 이후)는 #34 구현 진행에 따라 별도 ADR (`AD-00XX-four-role-architecture` 신설 예정)로 승격 가능.

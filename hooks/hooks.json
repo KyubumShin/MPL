@@ -111,6 +111,26 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-context-monitor.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-discovery-scanner.mjs\"",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "Stop": [

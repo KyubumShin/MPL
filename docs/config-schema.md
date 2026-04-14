@@ -36,6 +36,46 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 |-------|------|---------|-------------|--------|
 | `phase_seed.enabled` | boolean | `true` (pp_core) | Enable Phase Seed generation for deterministic TODO structure | `mpl-run-execute.md` |
 
+## Chain-Scoped Seed (#34, Stage 1)
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `chain_seed.enabled` | boolean | `false` | Enable chain-scoped Seed Generator (Stage 1 feature flag) | `commands/mpl-run-execute.md` |
+| `chain_seed.max_chain_size` | number | `5` | Maximum phases per chain (enforced in chain-assignment derivation) | `docs/schemas/chain-assignment.md` |
+| `chain_seed.discovery_regen_enabled` | boolean | `true` | Allow Seed Generator re-invocation on Discovery Agent architectural verdict | `agents/mpl-discovery-agent.md` |
+
+## Context Monitor (#34, Stage 1)
+
+Token-counter + tool_call tracking for baton-pass trigger.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `context_monitor.enabled` | boolean | `true` | Enable PostToolUse token tracking on Task/Agent | `hooks/mpl-context-monitor.mjs` |
+| `context_monitor.mode` | `"measure"` \| `"enforce"` | `"measure"` | Stage 1 = measure-only (no baton-pass trigger). Stage 2 = enforce | `hooks/mpl-context-monitor.mjs` |
+| `context_monitor.context_window_tokens` | number | `1_000_000` | Context window size for %% calc (opus 4.6 1M default; lower for non-extended models) | `hooks/mpl-context-monitor.mjs` |
+| `context_monitor.baton_threshold_pct` | number | `60` | Token %% threshold for `baton_pass_now` at phase boundary | `hooks/mpl-context-monitor.mjs` |
+| `context_monitor.force_threshold_pct` | number | `80` | Token %% threshold for `forced_baton_pass` | `hooks/mpl-context-monitor.mjs` |
+| `context_monitor.dispatch_warn` | number | `30` | Warn when Task/Agent dispatches within single chain exceed this (internal tool uses inside subagents not counted) | `hooks/mpl-context-monitor.mjs` |
+
+## Test Wait Policy (#34, Stage 2)
+
+Runner waits for Test Agent result vs terminates based on cache TTL.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `test_wait.cache_mode` | `"default"` \| `"extended"` | `"default"` | Prompt cache TTL mode (default=5min, extended=1h) | `commands/mpl-run-execute.md` |
+| `test_wait.threshold_default_sec` | number | `270` | Runner waits if test_duration < this (default cache, 4.5min safety margin) | `commands/mpl-run-execute.md` |
+| `test_wait.threshold_extended_sec` | number | `3300` | Runner waits if test_duration < this (extended cache, 55min margin) | `commands/mpl-run-execute.md` |
+| `test_wait.pipelining_enabled` | boolean | `false` | Allow Runner to proceed to next phase while Test Agent verifies prev (non_pp opt-in) | `commands/mpl-run-execute.md` |
+
+## Discovery Pipeline (#34, Stage 2)
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `discovery.scanner_enabled` | boolean | `true` | Enable Hook mechanical filter (Stage 4.2) | `hooks/mpl-discovery-scanner.mjs` |
+| `discovery.agent_enabled` | boolean | `false` | Enable Discovery Agent opus dispatch on filter hits (Stage 2 feature flag) | `agents/mpl-discovery-agent.md` |
+| `discovery.false_positive_threshold_pct` | number | `30` | Alert if Discovery Agent false_positive rate exceeds this (Gate 2 metric) | `agents/mpl-discovery-agent.md` |
+
 ## Hat Model (PP-Proximity, v0.11.0)
 
 | Field | Type | Default | Description | Source |

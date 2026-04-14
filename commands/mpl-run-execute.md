@@ -57,7 +57,74 @@ For each phase in order:
 
 ### 4.0.5: Phase Seed Generation
 
-Generate Phase Seed just-in-time, immediately before context assembly:
+**Mode Selection (#34 Stage 1)**:
+
+```
+if config.chain_seed?.enabled == true:
+  // Chain-scoped Seed mode (#34)
+  -> Section 4.0.5.A below
+else:
+  // Legacy per-phase inline seed (current default)
+  -> Section 4.0.5.B below
+```
+
+### 4.0.5.A: Chain-Scoped Seed Dispatch (#34)
+
+**Runs once per chain** (at chain start), not per phase. Phase Runner consumes `chain-seed.yaml` + prev handoffs for all phases in the chain.
+
+```
+chain_id = resolve_chain_for_phase(phase.id, ".mpl/mpl/chain-assignment.yaml")
+chain_dir = ".mpl/mpl/chains/{chain_id}"
+chain_seed_path = chain_dir + "/chain-seed.yaml"
+
+if not exists(chain_seed_path):
+  // First phase of this chain → dispatch Seed Generator opus
+  chain_node = readChainAssignment()[chain_id]
+  decomposition_subset = extract_chain_edges_and_nodes(chain_node, decomposition)
+  design_intent = Read(".mpl/mpl/phase0/design-intent.yaml")
+  pp_relevant = extract_pps_for_chain(chain_node)
+  phase0_filtered = filter_phase0_for_chain(chain_node)
+  prev_handoffs = read_prior_chain_handoffs(chain_node.blocks_on)
+
+  result = Task(subagent_type="mpl-seed-generator", model="opus",
+    prompt="""
+    You are the Chain-Scoped Seed Generator for MPL #34.
+    Design ALL phases in this chain with one opus call.
+
+    ## Inputs
+    ### Chain node
+    {chain_node}
+    ### Decomposition subset
+    {decomposition_subset}
+    ### Design intent
+    {design_intent}
+    ### Pivot Points
+    {pp_relevant}
+    ### Phase 0 artifacts (filtered)
+    {phase0_filtered}
+    ### Prev chain handoffs
+    {prev_handoffs}
+
+    ## Task
+    Emit chain-seed.yaml per docs/schemas/chain-seed.md.
+    Every phase in this chain must have a complete entry.
+    """)
+
+  Write(chain_seed_path, result.yaml)
+  announce: "[MPL] #34: chain-seed generated for {chain_id} ({len(chain.phases)} phases, Seed opus call)"
+
+// Load the chain-seed and extract current phase's entry
+chain_seed = readYaml(chain_seed_path)
+seed = chain_seed.phases[phase.id]
+context.phase_seed = seed
+context.chain_id = chain_id
+context.chain_seed_ref = chain_seed_path
+announce: "[MPL] #34: phase {phase.id} using chain-seed from {chain_id} (no opus call)"
+```
+
+**Discovery-triggered re-generation**: handled in Stage 2. Stage 1 does not regenerate mid-chain.
+
+### 4.0.5.B: Legacy Per-Phase Seed (default when chain_seed.enabled == false)
 
 ```
 if config.phase_seed?.enabled != false:

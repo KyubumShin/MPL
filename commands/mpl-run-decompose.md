@@ -475,3 +475,82 @@ gap_analysis = Read(".mpl/mpl/pre-execution-analysis.md")
 > **Note**: Step 3-C (Critic Simulation) has been absorbed into the Decomposer's `risk_assessment` output section (Step 3). The Decomposer now performs pre-mortem analysis as part of its reasoning (Step 9), eliminating a separate opus agent call. Risk handling is done in Step 3's post-processing (item 7).
 
 ---
+
+## Step 3-G: Chain Derivation (#34 Stage 1)
+
+**Gated**: Runs only if `.mpl/config.json` has `chain_seed.enabled: true` (default `false` in Stage 1).
+
+After decomposition is saved (Step 3) and validated (Step 3-F, 3-B), derive chain structure from phase edges and proximity. Output: `.mpl/mpl/chain-assignment.yaml`.
+
+**Schema**: `docs/schemas/chain-assignment.md`
+
+```
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+config = readConfig(cwd)
+if config.chain_seed?.enabled != true:
+  skip Step 3-G (Stage 1 default-off)
+  proceed to Step 3-B completion
+
+max_chain_size = config.chain_seed.max_chain_size || 5
+
+// Build adjacency from phase edges (from interface_contract.requires/produces or
+// execution_tiers + depends_on). Contract/data edges = strong; sequence/resource = weak.
+adjacency = build_strong_adjacency(decomposition.phases)
+
+// Group connected pp_core phases into chains (topological order preserved).
+// Each connected component of strong edges forms a chain (split if > max_chain_size).
+chains = []
+visited = set()
+for phase in phases_topological_order:
+  if phase in visited: continue
+  component = connected_strong_component(phase, adjacency)
+  visited.update(component)
+  if len(component) > max_chain_size:
+    // split at weak edge boundaries
+    component = split_at_weak_edges(component, max_chain_size)
+  chains.append(component)
+
+// Assign model per Chain Size Model Selection Rule:
+//   size >= 2              -> opus, baton_pass: true
+//   size == 1 + pp_core    -> opus, baton_pass: false
+//   size == 1 + non-pp     -> sonnet, baton_pass: false
+//   size == 1 + pp_adjacent -> sonnet (default) unless gate weakness flagged -> opus
+for chain in chains:
+  size = len(chain.phases)
+  dominant_proximity = most_common_proximity(chain.phases)
+  if size >= 2:
+    chain.model = "opus"
+    chain.baton_pass = true
+  elif dominant_proximity == "pp_core":
+    chain.model = "opus"
+    chain.baton_pass = false
+  else:
+    chain.model = "sonnet"
+    chain.baton_pass = false
+
+// Derive inter-chain blocks_on from cross-chain edges
+//   any decomposition edge A→B where chain(A) != chain(B) adds chain(A) to chain(B).blocks_on
+phase_to_chain = { p: c.id for c in chains for p in c.phases }
+for chain in chains:
+  chain.blocks_on = []
+for edge in decomposition.edges:  // or interface_contract.requires relations
+  src_chain = phase_to_chain[edge.from]
+  dst_chain = phase_to_chain[edge.to]
+  if src_chain != dst_chain and src_chain not in phase_to_chain[edge.to].blocks_on:
+    chains[dst_chain].blocks_on.append(src_chain)
+// dedup + preserve topological order
+
+// Validation
+for phase in decomposition.phases:
+  assert phase appears in exactly one chain (exhaustive + disjoint)
+for chain in chains:
+  assert chain.phases ordered topologically per decomposition edges
+  assert len(chain.phases) <= max_chain_size
+
+Write(".mpl/mpl/chain-assignment.yaml", chains)
+Report: "[MPL] #34: {len(chains)} chains derived. Opus: {N_opus}, Sonnet: {N_sonnet}. Baton-pass enabled: {N_baton}."
+```
+
+**Gated note**: Stage 1 default keeps `chain_seed.enabled: false`, so existing pipeline behavior is unchanged. Enable per-project via `.mpl/config.json` when ready to measure.
+
+---
