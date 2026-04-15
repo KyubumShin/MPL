@@ -56,8 +56,14 @@ Before modifying state, capture current progress snapshot:
 Write to `.mpl/state.json`:
 ```
 current_phase: "cancelled"
+session_status: "cancelled"
 + cancellation snapshot fields above
 ```
+
+**Do not touch any other file** (see Safety Rules below). If a later session re-inits
+the pipeline via the `mpl` keyword, `cleanPipelineScope` archives the entire
+`.mpl/mpl/` subtree to `.mpl/archive/{pipeline_id}/mpl/` before cleanup (v0.14.1 #37),
+so artifacts remain recoverable even if the user loses track.
 
 ### Step 5: Confirm to User
 
@@ -83,14 +89,26 @@ To start fresh: /mpl:mpl-cancel --force
 
 When invoked with `--force` argument:
 
-1. Delete `.mpl/state.json`
-2. Keep `.mpl/mpl/decomposition.yaml` (useful reference)
-3. Keep `docs/learnings/` (knowledge preservation)
-4. Report: "MPL state cleared. decomposition.yaml preserved. Start fresh with 'mpl' keyword."
+1. Archive `.mpl/state.json` to `.mpl/archive/{pipeline_id}/` (do not delete outright)
+2. Reset `.mpl/state.json` to empty / removed state so the next `mpl` keyword starts fresh
+3. Keep every `.mpl/mpl/**` artifact in place (decomposition.yaml, RUNBOOK.md, phase-decisions.md, phase0/, phases/, chains/, profile/, etc.)
+4. Keep `docs/learnings/`, `.mpl/memory/`, `.mpl/cache/` (knowledge preservation)
+5. Report: "MPL state cleared. All sprint artifacts preserved under .mpl/mpl/ and archived state at .mpl/archive/{pipeline_id}/. Start fresh with 'mpl' keyword."
 
-## Safety Rules
+## Safety Rules (v0.14.1 #37)
 
-- NEVER delete `.mpl/mpl/decomposition.yaml` in normal cancel (only --force deletes state, never plan)
-- NEVER delete `docs/learnings/` (knowledge is always preserved)
-- ALWAYS record cancellation reason and timestamp
-- ALWAYS show resume instructions
+Cancel is a **preservation** operation, not a destruction. Every failure mode should
+leave artifacts recoverable from disk or git.
+
+- **NEVER** delete, move, or overwrite ANY file under `.mpl/mpl/**` in any cancel mode.
+  That includes `decomposition.yaml`, `RUNBOOK.md`, `phase-decisions.md`, `phase0/`,
+  `phases/`, `checkpoints/`, `chains/`, `profile/`. Normal cancel must only update
+  `.mpl/state.json`; `--force` archives state.json but still preserves `.mpl/mpl/`.
+- **NEVER** delete `docs/learnings/`, `.mpl/memory/`, `.mpl/cache/`, `.mpl/pivot-points.md`,
+  or `.mpl/discoveries.md`. These live beyond pipeline scope.
+- **NEVER** touch `.mpl/contracts/*.json` — they are referenced by git-tracked code.
+- **ALWAYS** record cancellation reason, `cancelled_at` timestamp, and `resume_point`.
+- **ALWAYS** show resume instructions (`/mpl:mpl-resume`) in the confirmation report.
+- **Regression guard**: If a future change adds a delete/mv call to this skill, it MUST
+  come with an integration test asserting `before_files == after_files` for `.mpl/mpl/**`
+  across a simulated cancel (issue #37 recommendation C).

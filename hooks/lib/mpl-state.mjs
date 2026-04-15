@@ -5,7 +5,7 @@
  * Based on design document section 12.2
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, rmSync, cpSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { loadConfig } from './mpl-config.mjs';
@@ -100,7 +100,8 @@ const DEFAULT_STATE = {
   // mpl-phase-controller blocks mpl-decompose if null.
   ambiguity_score: null,         // number (0.0~1.0) | null — threshold: <= 0.2
   // F-33: Session budget prediction
-  session_status: null,          // null | "active" | "paused_budget"
+  // #35 (v0.14.1): "paused_checkpoint" added for orchestrator verbal pause (self-pause on checkpoint report)
+  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint"
   pause_reason: null,            // human-readable pause reason
   resume_from_phase: null,       // phase ID to resume from
   pause_timestamp: null,         // ISO timestamp of pause
@@ -239,7 +240,7 @@ function archivePreviousRun(cwd) {
   try {
     mkdirSync(archiveDir, { recursive: true });
 
-    // Archive key files (best-effort, skip missing)
+    // Archive key single files (best-effort, skip missing)
     const toArchive = [
       ['state.json', '.mpl/state.json'],
       ['PLAN.md', '.mpl/PLAN.md'],
@@ -255,6 +256,23 @@ function archivePreviousRun(cwd) {
       }
     }
 
+    // v0.14.1 #37: Deep-archive .mpl/mpl/ subtree before cleanPipelineScope wipes it.
+    // Previously only state.json + PLAN.md were archived, so decomposition.yaml,
+    // RUNBOOK.md, phase-decisions.md, phase0/, phases/ were lost on any re-init.
+    // This now preserves every pipeline work artifact under archive/{pipeline_id}/mpl/.
+    const mplSubtree = join(cwd, '.mpl', 'mpl');
+    if (existsSync(mplSubtree)) {
+      try {
+        cpSync(mplSubtree, join(archiveDir, 'mpl'), {
+          recursive: true,
+          errorOnExist: false,
+          force: true
+        });
+      } catch {
+        // Non-fatal: metadata below still lets users see that the run existed
+      }
+    }
+
     // Write archive metadata
     writeFileSync(
       join(archiveDir, 'meta.json'),
@@ -264,6 +282,7 @@ function archivePreviousRun(cwd) {
         final_phase: prevState.current_phase,
         phases_completed: prevState.phases_completed || 0,
         gate_results: prevState.gate_results,
+        session_status: prevState.session_status || null,
       }, null, 2) + '\n'
     );
   } catch {

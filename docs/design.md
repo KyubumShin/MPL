@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.14.0 Design Document
+# MPL (Micro-Phase Loop) v0.14.1 Design Document
 
 ## 1. Overview
 
@@ -473,6 +473,30 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.14.1 — Resume Workflow Data Integrity Patch (#35/#36/#37) (2026-04-15)
+
+Hotfix for resume/cancel workflow data-loss chain surfaced by Yggdrasil Phase 0 experiment (2026-04-15). No new features; state channel + hook + cancel skill hardening only.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Verbal checkpoint pause | orchestrator emitted carryover text without touching `state.json` → `/mpl:mpl-resume` rejected the state as "active" | New `session_status: "paused_checkpoint"` enum + mandatory `writeState` block before any verbal checkpoint report (`commands/mpl-run-execute.md` §4.8.5) | Protocol (new §) | #35: resume prev flow broken in Yggdrasil Phase 0 — verbal pauses are first-class now |
+| Resume drift detection | `current_phase` active + state `completed_todos` out of sync with disk phase artifacts → resume refused | `skills/mpl-resume/SKILL.md` Step 1 detects drift (disk phase count > state count) and resyncs via `paused_checkpoint` before resuming | Skill behavior | #35: backwards-compat for states left by older orchestrators without mandatory self-pause write |
+| Keyword-detector state wipe | `/mpl:mpl-resume`/`cancel`/`status`/`doctor`/… triggered hook which called `initState`, wiping the cancellation snapshot | Non-initializing MPL slash commands detected in `hooks/mpl-keyword-detector.mjs` and short-circuited with `suppressOutput: true` — state.json untouched | Hook guard | #36: slash commands manage existing state by design; reset on such entry points is always a bug |
+| Reset recovery hint | fresh init silently overwrote cancelled/paused prior pipeline | Keyword detector inspects previous `session_status`; if `cancelled/paused_budget/paused_checkpoint`, the `[MAGIC KEYWORD: MPL]` announcement includes `.mpl/archive/{pipeline_id}/` path + `/mpl:mpl-resume` suggestion | Hook UX | #36: reset was irrecoverable in practice because users didn't know the archive existed |
+| `cleanPipelineScope` archive depth | only `state.json` + `PLAN.md` archived before wipe → `.mpl/mpl/decomposition.yaml`, `RUNBOOK.md`, `phase-decisions.md`, `phase0/`, `phases/` lost on re-init | `archivePreviousRun` now deep-copies the entire `.mpl/mpl/` subtree to `.mpl/archive/{pipeline_id}/mpl/` before `cleanPipelineScope` deletes the live copies | Library behavior | #37: cancellation was effectively destroying sprint artifacts even though cancel skill itself did not delete — root cause was the archive had no depth |
+| Cancel skill safety rules | generic note "never delete decomposition.yaml" | Enumerated preserve list covering `.mpl/mpl/**`, `.mpl/memory/`, `.mpl/cache/`, `.mpl/contracts/`, `.mpl/pivot-points.md`, `.mpl/discoveries.md`, `docs/learnings/` + regression-guard note for future edits | Skill docs | #37: future contributors get an explicit contract, not folklore |
+| `--force` cancel behavior | deleted `state.json` outright | archives to `.mpl/archive/{pipeline_id}/` then resets (never raw delete) | Skill behavior | #37: even `--force` should remain recoverable |
+
+**Affected files:**
+- Modified: `hooks/lib/mpl-state.mjs` (session_status enum comment, `archivePreviousRun` deep copy, `cpSync` import)
+- Modified: `hooks/mpl-keyword-detector.mjs` (slash-command guard, pre-reset recovery hint)
+- Modified: `commands/mpl-run-execute.md` (new §4.8.5 Orchestrator Self-Pause Protocol)
+- Modified: `commands/mpl-run-finalize-resume.md` (F-33 block handles both `paused_budget` and `paused_checkpoint`)
+- Modified: `skills/mpl-resume/SKILL.md` (Step 1 drift detection + new pause enum)
+- Modified: `skills/mpl-cancel/SKILL.md` (safety rules, `--force` semantics, snapshot note)
+
+**Breaking changes:** NONE. New `paused_checkpoint` enum is additive; existing `paused_budget` and `null`/`"active"` flows untouched. Archive schema gains optional `mpl/` subtree — old archives without it remain readable.
 
 ### v0.14.0 — Chain-Scoped Seed + Discovery Pipeline Foundation (#34 Stage 1) (2026-04-14)
 

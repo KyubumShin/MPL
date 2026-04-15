@@ -13,17 +13,43 @@ Resume a previously cancelled or interrupted MPL pipeline from the last checkpoi
 Read `.mpl/state.json`:
 - If no state file → "No MPL pipeline to resume. Start with 'mpl' keyword."
 - If current_phase = "completed" → "Pipeline already completed. Start new with 'mpl'."
-- If current_phase is active (phase1-5) → "Pipeline is already active. Use /mpl:mpl-status to check progress."
+- If current_phase is active (phase1-5) AND no drift detected → "Pipeline is already active. Use /mpl:mpl-status to check progress."
 
 Expected states for resume:
 - `current_phase = "cancelled"` with `resume_point` field (manual cancel)
-- `session_status = "paused_budget"` (automatic context rotation via F-38)
+- `session_status = "paused_budget"` (automatic context rotation via F-33)
+- `session_status = "paused_checkpoint"` (orchestrator verbal self-pause, v0.14.1 #35)
+- **Drift recovery** (v0.14.1 #35): `current_phase` still active but disk artifacts show completed phases beyond `sprint_status.completed_todos`
 
-For `paused_budget` state:
-- The pipeline was NOT cancelled — it was paused due to context window limits
+For `paused_budget` or `paused_checkpoint` state:
+- The pipeline was NOT cancelled — it was paused (budget limit OR orchestrator self-pause)
 - `current_phase` still reflects the active phase at pause time
-- Resume from `current_phase` directly (no need for `resume_point` field)
-- Clear `session_status` and `pause_reason` on resume
+- Resume from `resume_from_phase` (set at pause time) or `current_phase` if unset
+- Clear `session_status`, `pause_reason`, `pause_timestamp`, `budget_at_pause` on resume
+
+**Drift Detection (v0.14.1, #35)**:
+
+```
+disk_phases = Glob(".mpl/mpl/phases/phase-*/state-summary.md")
+disk_max_n = max(extract_phase_number(p) for p in disk_phases) if disk_phases else 0
+state_completed = state.sprint_status.completed_todos or 0
+
+if state.current_phase in ACTIVE_PHASES and state.session_status in (null, "active"):
+  if disk_max_n > state_completed:
+    # Drift detected: orchestrator emitted a verbal pause without writing state
+    announce: "[MPL] Drift detected: disk shows {disk_max_n} phases, state has {state_completed}."
+    announce: "[MPL] Resyncing state before resume (v0.14.1 #35 backwards-compat)."
+    writeState(cwd, {
+      session_status: "paused_checkpoint",
+      pause_reason: "drift_recovery",
+      resume_from_phase: "phase-{disk_max_n + 1}",
+      pause_timestamp: new Date().toISOString(),
+      sprint_status: { ...state.sprint_status, completed_todos: disk_max_n }
+    })
+    # Fall through to normal paused_checkpoint resume
+  else:
+    reject: "Pipeline is already active. Use /mpl:mpl-status to check progress."
+```
 
 ### Step 2: Restore Context
 

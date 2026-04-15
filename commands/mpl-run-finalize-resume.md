@@ -47,9 +47,11 @@ On session start:
 #### F-33: Budget Pause Resume
 
 ```python
-if state.session_status == "paused_budget":
-    print(f"[MPL] Resuming from budget pause (paused at {state.pause_timestamp})")
-    print(f"[MPL] Previous session: context {state.budget_at_pause.context_pct}% remaining")
+if state.session_status in ("paused_budget", "paused_checkpoint"):
+    pause_kind = "budget" if state.session_status == "paused_budget" else "checkpoint (orchestrator self-pause)"
+    print(f"[MPL] Resuming from {pause_kind} pause (paused at {state.pause_timestamp})")
+    if state.session_status == "paused_budget":
+        print(f"[MPL] Previous session: context {state.budget_at_pause.context_pct}% remaining")
 
     # Clear pause state
     writeState(cwd, {
@@ -60,13 +62,15 @@ if state.session_status == "paused_budget":
         # resume_from_phase is preserved — used by Step 6's existing logic
     })
 
-    # Clear handoff signal
+    # Clear handoff signal (paused_budget only; paused_checkpoint doesn't write one)
     rm -f ".mpl/signals/session-handoff.json"
 
     # Proceed to existing Resume logic (based on resume_from_phase)
 ```
 
 This processing runs **before** the existing Resume logic, cleans up `session_status`, then the existing Phase restoration logic uses `resume_from_phase` to perform normal continuation.
+
+v0.14.1 (#35) added `paused_checkpoint` handling: orchestrator verbal pauses (checkpoint report + carryover) write the same pause fields as F-33, so the same resume path clears them.
 
 #### Watcher-Based Auto-Resume (F-33, v3.9)
 

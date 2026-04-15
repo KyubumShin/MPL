@@ -12,7 +12,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -91,6 +91,16 @@ async function main() {
 
     const prompt = extractPrompt(input);
     if (!prompt) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // v0.14.1 #36: Non-initializing MPL slash commands must NOT reset state.json.
+    // These commands read or transform existing state — they never start a new pipeline.
+    // (Init commands NOT in this list: `/mpl:mpl`, `/mpl:mpl-small`, `/mpl:mpl-bugfix`)
+    const SLASH_NO_INIT = /^\s*\/mpl:mpl-(resume|cancel|status|doctor|setup|version-bump|pivot|gap-analysis|compound)\b/i;
+    if (SLASH_NO_INIT.test(prompt)) {
+      // Let the slash command skill manage state. Keep state.json untouched.
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -176,6 +186,27 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
     if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(cleanPrompt)) ppHint = 'near';
     else if (/\bmpl[\s-]*(small|quick|light)\b/i.test(cleanPrompt)) ppHint = 'mid';
 
+    // v0.14.1 #36: Capture prior pipeline state BEFORE initState overwrites it.
+    // If the previous run was cancelled or paused, surface the recovery path in the
+    // announcement so the user notices that a resume option existed.
+    let priorStateHint = '';
+    try {
+      const prevStatePath = join(cwd, '.mpl', 'state.json');
+      if (existsSync(prevStatePath)) {
+        const prev = JSON.parse(readFileSync(prevStatePath, 'utf-8'));
+        const pausedLike = prev.session_status === 'cancelled'
+          || prev.session_status === 'paused_budget'
+          || prev.session_status === 'paused_checkpoint'
+          || prev.current_phase === 'cancelled';
+        if (pausedLike && prev.pipeline_id) {
+          const what = prev.session_status || prev.current_phase || 'unknown';
+          priorStateHint = `\n\n⚠️ Previous pipeline "${prev.pipeline_id}" was "${what}". Archived to .mpl/archive/${prev.pipeline_id}/.\n   If you meant to recover it, cancel this run and type \`/mpl:mpl-resume\` instead.`;
+        }
+      }
+    } catch {
+      // Non-fatal — recovery hint is best-effort
+    }
+
     // Initialize MPL state — always single entry point
     const featureName = extractFeatureName(prompt);
     initState(cwd, featureName, 'auto', ppHint);
@@ -185,7 +216,7 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
     const message = `[MAGIC KEYWORD: MPL]
 
 MPL Pipeline activated${hintDesc}. State initialized at .mpl/state.json (run_mode: "auto").
-Triage will determine pp_proximity (near/mid/far) via Quick Scope Scan.
+Triage will determine pp_proximity (near/mid/far) via Quick Scope Scan.${priorStateHint}
 
 You MUST invoke the skill using the Skill tool:
 

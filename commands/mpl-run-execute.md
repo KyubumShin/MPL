@@ -884,6 +884,35 @@ if budget.recommendation == "pause_now":
 
 **Note**: `predictBudget()` requires `.mpl/context-usage.json` to be fresh (<30s). This file is written by the HUD statusline on each render cycle. If HUD is not active, predictBudget returns fail-open (recommendation: "continue").
 
+### 4.8.5: Orchestrator Self-Pause Protocol (v0.14.1, #35)
+
+If the orchestrator decides to emit a **verbal checkpoint report** (summary + carryover notes + resume instructions) without the HUD-driven F-33 Budget Pause — for example, when the LLM itself judges the remaining context insufficient and defers to the user — it **MUST write pause state before emitting the report**. Verbal pauses without state write caused `/mpl:mpl-resume` to be rejected in the Yggdrasil Phase 0 experiment (2026-04-15) because `session_status` remained `null` while `current_phase` stayed on an active orchestration step like `phase2-sprint`.
+
+```
+// Whenever the orchestrator is about to output a "Session Checkpoint" style report
+// (progress summary, carryover, resume hint) outside of F-33 Budget Pause:
+writeState(cwd, {
+  session_status: "paused_checkpoint",
+  pause_reason: "orchestrator_self_pause",
+  resume_from_phase: next_phase_id,    // the phase to resume from
+  pause_timestamp: new Date().toISOString(),
+  sprint_status: {
+    ...state.sprint_status,
+    completed_todos: count_completed_phase_artifacts(cwd)  // disk-based truth
+  }
+})
+
+// Append to RUNBOOK (F-10)
+append to ".mpl/mpl/RUNBOOK.md":
+  "## Verbal Checkpoint Pause\nPaused at {timestamp}. Resume from {next_phase_id}. Reason: orchestrator_self_pause."
+
+// Then emit the checkpoint report to the user
+```
+
+**Invariant**: No verbal checkpoint report may be output while `session_status` is still `"active"` or `null`. If the orchestrator finds itself about to emit such a report, it must run the block above first. `/mpl:mpl-resume` treats `"paused_checkpoint"` the same as `"paused_budget"` (clears pause state, resumes from `resume_from_phase`).
+
+`count_completed_phase_artifacts(cwd)` = number of `.mpl/mpl/phases/phase-N/state-summary.md` files present on disk. This keeps `completed_todos` aligned with reality even when earlier updates missed a phase boundary (the second half of #35's drift).
+
 
 **⚠️ MANDATORY PROTOCOL LOADING — NOT OPTIONAL:**
 
