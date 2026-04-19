@@ -118,7 +118,7 @@ load_error_files(current_phase):
 
 If error files exist for the current phase, include them in the Phase Runner context so the runner has full error history without relying on compacted conversation memory.
 
-> **QMD Integration**: When entering the fix loop, if error files exist, pass their path to QMD for precise diagnosis.
+> **Error context loading**: When entering the fix loop, if error files exist, load them via `Read` so the fix agent has precise diagnosis context.
 
 #### Phase 0 Artifacts Loading
 

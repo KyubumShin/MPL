@@ -41,25 +41,12 @@ Task(subagent_type="mpl-codebase-analyzer", model="sonnet",
      """)
 ```
 
-#### Scout Call Branch (QMD Integration)
+#### Scout Call
 
-Branch the codebase analysis prompt based on qmd_mode:
-
-**QMD-First Mode** (`qmd_mode == "qmd_first"`):
-```
-// Orchestrator performs codebase analysis directly using available tools:
-// 1. qmd_deep_search("project entry points and main modules") → identify key files
-// 2. qmd_deep_search("test infrastructure and framework") → understand test structure
-// 3. qmd_vector_search("external dependencies and integrations") → understand dependencies
-// 4. Cross-verify each QMD result with Grep (Search-then-Verify)
-// 5. Glob("**/*.{ts,tsx,py,go,rs}") → full file structure
-// Output: JSON (search_mode: "qmd_first", each finding includes verification)
-```
-
-**Grep-Only Mode** (`qmd_mode == "grep_only"`):
-Use Grep/Glob directly for codebase analysis.
-
-> **Fallback:** If QMD tool calls fail (MCP server unresponsive, etc.), automatically fall back to Grep-Only mode.
+Orchestrator performs codebase analysis directly using available tools:
+- `Grep` for entry points, test infrastructure, external dependency imports
+- `Glob("**/*.{ts,tsx,py,go,rs}")` for full file structure
+- `Read` on key files identified by the grep results
 
 ### After Receiving Output
 
@@ -529,7 +516,6 @@ generate_cache_key(codebase_analysis):
     structure_hash:   hash(codebase_analysis.directories),
     deps_hash:        hash(codebase_analysis.external_deps),
     source_files_hash: hash(content of source files touching public API),
-    qmd_mode: qmd_mode,  // "qmd_first" | "grep_only"
   }
   return sha256(JSON.stringify(inputs))
 ```

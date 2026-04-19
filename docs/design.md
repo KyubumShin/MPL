@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.15.2 Design Document
+# MPL (Micro-Phase Loop) v0.15.3 Design Document
 
 ## 1. Overview
 
@@ -35,7 +35,7 @@ Execution begins only after phase decomposition. The decomposition artifact (`de
 
 Each phase has machine-verifiable success criteria. Subjective "done" declarations are not permitted; only evidence-based verification (command exit codes, test results, file existence, grep patterns) is accepted.
 
-> **QMD Semantic Search Policy:** QMD search results are used only for discovery purposes. To be accepted as verification evidence, they must pass grep cross-validation (Search-then-Verify). Results that pass cross-validation have evidence type `qmd_verified` and are treated equivalently to grep.
+> **Verification Evidence Policy (v0.14.2+):** Only machine-verifiable evidence is accepted — command exit codes, test results, file existence, and grep patterns. Earlier releases allowed `qmd_verified` (QMD semantic search + grep cross-check); that type was retired when QMD integration was removed.
 
 ### Principle 4: Bounded Retries
 
@@ -174,7 +174,7 @@ Token profiling also begins at this step. Phase 0 token usage is recorded in `.m
 - Scope and rationale
 - Impact scope (created/modified/tested/configuration files)
 - Interface contract (requires/produces)
-- Success criteria (typed: command/test/file_exists/grep/qmd_verified/description)
+- Success criteria (typed: command/test/file_exists/grep/description)
 - Estimated complexity (S/M/L)
 - A/S/H verification classification (inline, previously handled by separate mpl-verification-planner agent)
 
@@ -473,6 +473,35 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.15.3 — QMD Removal Actual Completion (2026-04-19)
+
+v0.14.2 was labeled "QMD Reference Removal" but the actual removal was incomplete — 121 QMD references remained across 14 files (agents/mpl-doctor.md Category 11 live, skills/mpl-setup/SKILL.md Step 3g + Step 7 live, commands referencing qmd_mode/qmd_verified/QMD-First branch, .mcp.json qmd server registered, etc.). The discrepancy was caught during v0.15.2 release verification; v0.15.3 completes the removal.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Deleted files | `hooks/lib/mpl-qmd-verifier.mjs` (215 lines), `skills/mpl-setup/references/qmd-setup.md` (86 lines) | removed | cleanup | Promised by v0.14.2, never executed |
+| `.mcp.json` | qmd MCP server registered alongside mpl-server | qmd entry removed | cleanup | QMD MCP was never used by MPL in active code |
+| `.mpl/config.json` | `qmd: { enabled, collections, mcp_configured }` block | removed | cleanup | Dead config |
+| `.claude/settings.local.json` | `qmd --version`, `qmd status:*`, `mcp__qmd__query` permissions | removed | cleanup | No qmd commands to permit |
+| `hooks/mpl-auto-permit.mjs` | `'qmd '` in SAFE_BASH_PREFIXES | removed | cleanup | Dead allowlist |
+| `agents/mpl-doctor.md` | Category 11 "QMD Search Engine" with detection + install fallback logic | removed; Documentation renumbered from 12→11; Measurement Integrity Audit renumbered from 13→12 | cleanup | Live category was still recommending QMD installation |
+| `skills/mpl-setup/SKILL.md` | Step 3g (QMD install/register/MCP integrate), Step 7 (QMD setup wizard), 37 total references including Tool Availability report, config save, detection | Steps removed; Step 7b renumbered to Step 7 | cleanup | Dead code — live wizard was still offering QMD |
+| `commands/mpl-run-phase0.md` | "QMD Mode Detection" sub-step + `qmd_mode` state write | removed | cleanup | qmd_mode was never consumed by any downstream step |
+| `commands/mpl-run-phase0-analysis.md` | Scout Call Branch with QMD-First Mode + Grep-Only Mode branching, `qmd_mode` in cache key | replaced with direct orchestrator scout using Grep/Glob/Read | cleanup | Branch always took grep path in practice |
+| `commands/mpl-run-decompose.md` | `qmd_verified` success criteria type documentation (17 lines), success_criteria type list | removed from schema docs and type list | cleanup | `qmd_verified` was never used in any decomposition.yaml |
+| `commands/mpl-run-execute-context.md` | "QMD Integration" note for error file diagnosis | replaced with generic error context loading note | cleanup | No QMD integration existed |
+| `docs/standalone.md` | "QMD Fallback Policy" section with QMD-tool-to-Grep fallback table | section removed | cleanup | No QMD means no fallback table needed |
+| `docs/design.md` | live body references to QMD Semantic Search Policy + qmd_verified type + "stale QMD" in Trajectory-Based Retry | rewritten to historical-only framing | cleanup | Body was still describing active QMD feature |
+| `docs/config-schema.md` | `tool_mode` description "MCP uses QMD server" | "LSP tier activation when available" | cleanup | Misleading after QMD removal |
+| `README.md` | "Detects available tools (LSP, AST, QMD)" in Setup wizard description + active-framing QMD row in External Influences | "LSP, AST" only; QMD row marked historical | cleanup | Setup no longer touches QMD |
+| `docs/roadmap/pending-features.md` | "Optional MCP integrations (QMD, Chrome MCP)" in philosophy alignment criteria | "Chrome MCP, Playwright MCP" | cleanup | Active design principle, needs correction |
+
+**Deleted files:** `hooks/lib/mpl-qmd-verifier.mjs`, `skills/mpl-setup/references/qmd-setup.md`
+**Modified files (13):** `.mcp.json`, `.mpl/config.json`, `.claude/settings.local.json`, `hooks/mpl-auto-permit.mjs`, `agents/mpl-doctor.md`, `skills/mpl-setup/SKILL.md`, `commands/mpl-run-phase0.md`, `commands/mpl-run-phase0-analysis.md`, `commands/mpl-run-decompose.md`, `commands/mpl-run-execute-context.md`, `docs/standalone.md`, `docs/config-schema.md`, `README.md`, `docs/roadmap/pending-features.md`, `docs/design.md`
+**Preserved (historical context):** v0.14.2 version history entry, `docs/REFERENCES.md` QMD external-influence row (marked historical), past design specs in `docs/roadmap/pending-features.md` (search_mode/qmd_first blocks describing removed features)
+
+**Breaking changes:** NONE. QMD was already optional with grep fallback; every live code path that mentioned QMD had an equivalent grep path. Projects that had `.mpl/config.json` with a `qmd` block will see the field silently ignored (no error).
 
 ### v0.15.2 — E2E Scenario Enforcement (AD-0008) (2026-04-19)
 
@@ -820,7 +849,7 @@ Scout agent now logs its full search trajectory, enabling post-mortem analysis o
 |---------|-----|-------------|------|
 | Search Trajectory Logging | P-03 | Scout output includes `search_trajectory` array logging every tool call (tool, query, results, selected, note) | Agent output extension |
 | Trajectory Persistence | P-03 | Orchestrator saves trajectory to `.mpl/mpl/phases/{phase}/search-trajectory.json` for both Phase 0 and fix loop scouts | Protocol extension |
-| Trajectory-Based Retry | P-03 | Fix loop analyzes trajectory on 0-finding scout results to determine retry strategy (wrong pattern, stale QMD, scope too narrow) | Protocol extension |
+| Trajectory-Based Retry | P-03 | Fix loop analyzes trajectory on 0-finding scout results to determine retry strategy (wrong pattern, scope too narrow) | Protocol extension |
 | Validation | P-03 | `search_trajectory` added to mpl-scout expected sections in validate-output hook | Hook extension |
 
 **Affected files:**

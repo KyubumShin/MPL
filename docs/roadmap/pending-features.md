@@ -313,6 +313,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 | 0.15.0 | **Measurement Integrity (AD-0006)** — gate-recorder.mjs hook으로 state.gate_results machine evidence 기록, finalize RUNBOOK 파싱 완전 제거 → state.json SSOT, launch smoke deterministic detection, Anti-rationalization 4파일 (Decompose 3-G, F-40, Gate 집계, Phase 0 Enhanced), mpl-doctor audit Category 13 a-g | ✅ |
 | 0.15.1 | **Test-Agent Enforcement (AD-0007)** — Decomposer schema에 test_agent_required + test_agent_rationale REQUIRED, hooks/mpl-require-test-agent.mjs PostToolUse block, F-40 Zero-Test Block을 field-driven으로 교체, .mpl/config/test-agent-override.json escape hatch, doctor audit [g] 강화 | ✅ |
 | 0.15.2 | **E2E Scenario Enforcement (AD-0008)** — 2-stage 산출물: Phase 0 Enhanced Step 3.5가 core-scenarios.yaml HITL 도출, Decomposer Step 7.5가 e2e-scenarios.yaml 조합. phase-e2e-infra 자동 삽입. gate-recorder 확장으로 e2e_results 기록. hooks/mpl-require-e2e.mjs가 finalize_done 쓰기 block. HITL AskUserQuestion 실패 처리 (retry/override/hold). doctor audit [h] | ✅ |
+| 0.15.3 | **QMD Removal Actual Completion** — v0.14.2가 선언만 했던 QMD 제거를 실제 수행. 파일 2개 삭제(qmd-verifier.mjs, qmd-setup.md), 13개 활성 파일 편집: .mcp.json qmd 엔트리 제거, mpl-doctor Category 11 삭제(12→11), mpl-setup Step 3g/7 삭제, qmd_verified/qmd_mode/QMD-First 분기 제거, standalone QMD Fallback Policy 섹션 제거. 역사 기록(v0.14.2 history, REFERENCES.md 외부 출처)은 유지. | ✅ |
 
 > **v0.9.0 코드베이스 스캔 결과 (2026-03-29)**: PR-01~05 전부 구현 확인. F-E2E-1(3-tier fallback), F-E2E-1b(Rule 12 few-shot), F-E2E-1c(GUI app mandatory Step 3-B) 모두 구현 확인. B-03(Step 4.55 Cross-Layer) 존재하지만 의사코드 수준 → CB-05로 대체 예정.
 
@@ -1017,7 +1018,7 @@ When confirming each candidate, review the following:
 3. **Standalone compatibility** — Does it operate gracefully without external dependencies (Playwright, OpenAI API, etc.)?
    - **Platform dependencies** (Claude Agent SDK, MCP SDK): `^` range allowed — shares lifecycle with Claude Code platform
    - **Runtime prerequisites** (Node.js, git): accepted as essential dev environment tools
-   - **Optional MCP integrations** (QMD, Chrome MCP): graceful fallback required
+   - **Optional MCP integrations** (Chrome MCP, Playwright MCP): graceful fallback required
    - **Third-party packages**: prohibited by default. If unavoidable, exact pin + security audit required
    - **Background**: litellm supply chain attack (2025, BerriAI/litellm#24512) — agent toolchain dependency became a credential stealer vector
 4. **Existing pipeline impact** — Does it not compromise the stability of the existing 9-step pipeline?

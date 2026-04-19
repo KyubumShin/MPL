@@ -82,20 +82,6 @@ writeState(cwd, { tool_mode: tool_mode })
 Announce: "[MPL] Tool mode: {tool_mode}. LSP: {active_tools.lsp}, ast_grep: {active_tools.ast_grep}."
 ```
 
-#### QMD Mode Detection (New)
-
-Immediately after tool_mode detection, check QMD availability:
-
-```pseudocode
-qmd_available = check_tool_exists("qmd_search") OR check_tool_exists("qmd_deep_search")
-qmd_mode = qmd_available ? "qmd_first" : "grep_only"
-
-writeState(cwd, { qmd_mode: qmd_mode })  // persist to .mpl/state.json
-profile.qmd_mode = qmd_mode               // also record in profile for metrics
-```
-
-qmd_mode is used in subsequent Scout calls and cache key generation.
-
 All subsequent Phase 0 steps check `tool_mode` before using LSP/ast_grep tools.
 If tool_mode is "standalone" or "partial", use the fallbacks defined in `docs/standalone.md`.
 
@@ -642,7 +628,7 @@ Write(".mpl/mpl/interview-snapshot.md"):
 > With this snapshot, recovery is possible after compaction via `Read(".mpl/mpl/interview-snapshot.md")`.
 
 > **Step 2 (Codebase Analysis), Step 2.4 (Architecture Decisions), and Step 2.5 (Phase 0 Enhanced) have been moved to `mpl-run-phase0-analysis.md`.**
-> This includes: 6-Module analysis, QMD integration, cache check, complexity detection, API contract extraction, example pattern analysis, type policy, error specification, validation, cache save, and token profiling.
+> This includes: 6-Module analysis, cache check, complexity detection, API contract extraction, example pattern analysis, type policy, error specification, validation, cache save, and token profiling.
 >
 > Load `mpl-run-phase0-analysis.md` when entering Step 2.
 

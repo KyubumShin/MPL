@@ -2,7 +2,7 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.15.2
+> **Version**: v0.15.3
 > **Last updated**: 2026-04-19
 
 ---
@@ -14,7 +14,7 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 | `max_fix_loops` | number | `10` | Maximum Fix Loop iterations before pipeline failure | `mpl-run-execute-gates.md` |
 | `gate1_strategy` | `"auto"` \| `"docker"` \| `"native"` \| `"skip"` | `"auto"` | Gate 1 test execution strategy | `mpl-run-execute-gates.md` |
 | `hitl_timeout_seconds` | number | `30` | HITL (Human-in-the-Loop) response wait time in seconds | `design.md` |
-| `tool_mode` | `"standalone"` \| `"mcp"` | `"standalone"` | Tool mode — standalone uses native Claude Code tools, MCP uses QMD server | `docs/standalone.md` |
+| `tool_mode` | `"standalone"` \| `"full"` \| `"partial"` | `"standalone"` | Tool mode — standalone uses native Claude Code tools; full/partial activate LSP tier when available | `docs/standalone.md` |
 
 ## Context & Memory
 

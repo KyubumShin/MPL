@@ -124,25 +124,12 @@ disallowedTools: Write, Edit, Task
       - WARN: "MCP Server not available. Scoring uses in-prompt fallback (less deterministic)."
     - Expected tools: mpl_score_ambiguity, mpl_state_read, mpl_state_write
 
-    ### Category 11: QMD Search Engine
-    - Check `which qmd` and `qmd --version`
-    - If installed:
-      - Run `qmd status` to check index health
-      - Check collections are registered: `qmd collection list`
-      - Check embedding coverage: look for "need vectors" count
-      - Verify MCP config exists in Claude settings
-      - PASS if installed + collections registered + embeddings complete
-      - WARN if installed but no collections or missing embeddings
-    - If not installed:
-      - WARN: "QMD not installed. Scout uses grep fallback. Install: npm install -g @tobilu/qmd && run /mpl:mpl-setup"
-    - Not a FAIL — QMD is optional (grep fallback works)
-
-    ### Category 12: Documentation
+    ### Category 11: Documentation
     - Check `MPL/README.md` exists
     - Check `MPL/docs/design.md` exists
     - WARN if missing (functional but undocumented)
 
-    ### Category 13: Measurement Integrity Audit (AD-0006, v0.15.0)
+    ### Category 12: Measurement Integrity Audit (AD-0006, v0.15.0)
     This category runs only when invoked as `mpl-doctor audit` (not default). Validates that a **completed** pipeline produced machine-evidence gate records and that Anti-rationalization guardrails held. Run against `.mpl/state.json` and `.mpl/mpl/` of a finalized run.
 
     **Preconditions**: `.mpl/state.json.current_phase == "completed"` AND `.mpl/state.json.finalize_done == true`. Otherwise report "NOT APPLICABLE (pipeline not finalized)" and skip.
@@ -234,8 +221,8 @@ disallowedTools: Write, Edit, Task
     | 8 | Configuration | {PASS|WARN|FAIL} | {brief} |
     | 9 | Node.js | {PASS|WARN|FAIL} | {version} |
     | 10 | MCP Server | {PASS|WARN|FAIL} | {tools or "not available"} |
-    | 11 | QMD Search | {PASS|WARN} | {version or "not installed"} |
-    | 12 | Documentation | {PASS|WARN|FAIL} | {brief} |
+    | 11 | Documentation | {PASS|WARN|FAIL} | {brief} |
+    | 12 | Measurement Integrity Audit | {PASS|WARN|FAIL} | AD-0006/0007/0008 (audit mode only) |
 
     ## Tool Availability Detail
 
@@ -246,9 +233,6 @@ disallowedTools: Write, Edit, Task
     | LSP | lsp_find_references | {PASS|N/A} | Grep import tracking |
     | LSP | lsp_diagnostics | {PASS|N/A} | Bash build/typecheck |
     | LSP | ast_grep_search | {PASS|N/A} | Grep regex patterns |
-    | QMD | qmd_deep_search | {PASS|N/A} | Grep + Glob |
-    | QMD | qmd_search (BM25) | {PASS|N/A} | Grep keyword search |
-    | QMD | qmd_vector_search | {PASS|N/A} | Not available |
     | LSP | {language}-server | {PASS|N/A} | ast_grep + Grep |
 
     ## Recommendations

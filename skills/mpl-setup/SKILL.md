@@ -140,105 +140,10 @@ Merge with existing settings — never replace the file:
       "Bash(gh pr*)",
       "Bash(node*)",
       "Bash(which *)",
-      "Bash(qmd *)",
       "Bash(cat*)"
     ]
   }
 }
-```
-
-### Step 3g: QMD Search Engine (Optional, Recommended)
-
-QMD is a local hybrid search engine that replaces grep-heavy exploration with BM25 + semantic + LLM reranking. It enables MPL Scout to recall past analysis results and search the codebase semantically instead of string-matching.
-
-#### Detection
-
-```
-qmd_available = Bash("which qmd 2>/dev/null && qmd --version")
-```
-
-#### Auto-Install (if not present)
-
-```
-if NOT qmd_available:
-  AskUserQuestion: "Would you like to install the QMD search engine? It significantly improves the Scout agent's exploration quality and speed."
-    - "Install (recommended)" → proceed to install
-    - "Skip" → skip, set qmd_available = false
-
-  if user chose install:
-    1. Check Node.js >= 22:
-       node_version = Bash("node --version")
-       if node_version < 22:
-         Report: "QMD requires Node.js >= 22. Current: {node_version}. Skipping QMD setup."
-         skip QMD setup
-
-    2. Check macOS SQLite:
-       if platform == "darwin":
-         Bash("brew list sqlite 2>/dev/null || brew install sqlite")
-
-    3. Install QMD:
-       Bash("npm install -g @tobilu/qmd")
-       // ~1.9GB of GGUF models auto-download on first use
-
-    4. Verify:
-       Bash("qmd --version")
-       if fails: Report warning and skip QMD setup
-```
-
-#### Collection Registration
-
-```
-if qmd_available:
-  // Register project source and MPL artifacts as collections
-  project_root = CWD
-
-  1. Register source code:
-     Bash("qmd collection add {project_root}/src --name project-src --mask '**/*.{ts,tsx,js,jsx,py,go,rs}'")
-     // If src/ doesn't exist, try project root with appropriate mask
-
-  2. Register MPL artifacts (past analysis, learnings):
-     if exists(".mpl/"):
-       Bash("qmd collection add {project_root}/.mpl --name mpl-artifacts --mask '**/*.{md,json}'")
-
-  3. Register test files:
-     Bash("qmd collection add {project_root} --name project-tests --mask '**/*.{test,spec}.{ts,tsx,js,jsx,py}'")
-     // Skip if no test files found
-
-  4. Generate embeddings:
-     Bash("qmd embed")
-     // First run downloads models (~1.9GB), takes 2-5 minutes
-     // Subsequent runs are fast (delta only)
-
-  5. Verify:
-     Bash("qmd status")
-```
-
-#### MCP Integration
-
-```
-if qmd_available:
-  // Configure QMD as MCP server — use SETTINGS_TARGET from Step 1b
-  settings_file = SETTINGS_TARGET
-
-  ensure mcpServers.qmd exists:
-    {
-      "command": "qmd",
-      "args": ["mcp"]
-    }
-
-  // For long-running sessions, recommend daemon mode:
-  Report: "QMD MCP configured. For faster searches, run: qmd mcp --http --daemon"
-```
-
-#### Save QMD Config
-
-```
-Write to .mpl/config.json:
-  "qmd": {
-    "enabled": true,
-    "collections": ["project-src", "mpl-artifacts", "project-tests"],
-    "mcp_configured": true
-  }
 ```
 
 ### Step 4: Tool Detection (Standalone Check)
@@ -325,7 +230,6 @@ Status:     {HEALTHY|REPAIRED|ISSUES_REMAIN}
 Tool Availability:
   Built-in (Tier 1) : OK (Read, Write, Edit, Bash, Glob, Grep)
   LSP Tools (Tier 2) : {OK|N/A — standalone fallback active}
-  QMD Search (Tier 2b): {OK v{version}|N/A — grep fallback active}
   LSP Servers (Tier 3):
     {language}: {OK|N/A}
     ...
@@ -344,18 +248,6 @@ Standalone Mode Active:
   LSP tools are unavailable. Grep/Glob/Bash fallbacks are active.
   All pipeline features remain functional.
   For enhanced analysis, ensure a language server is running for your project.
-{/if}
-
-{if qmd_available}
-QMD Search Engine:
-  Version:      {qmd_version}
-  Collections:  {collection_count} registered ({total_docs} documents)
-  Embeddings:   {embedded_count}/{total_docs} embedded
-  MCP:          {configured|not configured}
-{else}
-QMD Search Engine: Not installed
-  Install QMD for semantic codebase search and past-analysis recall.
-  Run: npm install -g @tobilu/qmd
 {/if}
 
 {if mcp_available}
@@ -380,14 +272,7 @@ Quick Start:
   Run "/mpl:mpl-doctor" to re-check health
 ```
 
-### Step 7: QMD Search Engine Setup
-
-AskUserQuestion: "Would you like to use the QMD semantic search engine? It speeds up the Scout agent's codebase exploration by 50-60%."
-  - "Install and use (recommended)" → Install QMD + register collections + enable (run Step 3g)
-  - "Already installed — activate only" → Skip install, register collections + enable
-  - "Do not use" → Set qmd.enabled = false, Scout uses Grep fallback
-
-### Step 7b: Context Rotation Backend (Auto-Resume)
+### Step 7: Context Rotation Backend (Auto-Resume)
 
 Context rotation enables MPL to automatically continue when context window fills up, by sending `/clear` via terminal control and auto-resuming.
 

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.15.2
+# MPL (Micro-Phase Loop) v0.15.3
 
 **Prevention over cure. Specification over debugging.**
 
@@ -101,7 +101,7 @@ claude --plugin-dir ./MPL
 
 The setup wizard automatically:
 - Creates runtime directories (`.mpl/`)
-- Detects available tools (LSP, AST, QMD)
+- Detects available tools (LSP, AST)
 - Configures standalone fallbacks if needed
 - Optionally enables the HUD statusline
 
@@ -507,8 +507,8 @@ MPL draws inspiration from various external projects and articles.
 |------|--------|----------------|
 | **Pipeline Router** | [Ouroboros (Q00)](https://github.com/Q00/ouroboros) — PAL Router 3-tier cost model | Adaptive Pipeline Router (F-20, F-21, F-22) |
 | **Test Design** | SG-Loop (integrated in UAM) — experiment-based verification design, Phase 0 specification philosophy *(influenced by Hoyeon's test design philosophy)* | Phase 0 Enhanced (7 experiments → 4-step specification) |
-| **Session Memory** | [QMD (Tobi Lütke)](https://github.com/tobi/qmd) — local hybrid search (BM25+vector+reranking) | Scout QMD integration (F-25) |
-| **Grep Is Dead** | [ArtemXTech](https://x.com/ArtemXTech/status/2028330693659332615) — /recall pattern, cross-session context persistence | Scout 2-layer search strategy |
+| **Session Memory** | [QMD (Tobi Lütke)](https://github.com/tobi/qmd) — local hybrid search (BM25+vector+reranking) *(historical influence; QMD integration removed in v0.14.2/v0.15.3)* | Originally Scout QMD integration; Scout functionality absorbed by orchestrator in v2 with grep-based search |
+| **Grep Is Dead** | [ArtemXTech](https://x.com/ArtemXTech/status/2028330693659332615) — /recall pattern, cross-session context persistence *(historical)* | Originally Scout 2-layer search; Scout removed in v2 |
 | **Long-Horizon Tasks** | [Codex docs pattern](https://www.linkedin.com/posts/gb-jeong_run-long-horizon-tasks-with-codex-activity-7435825294554484736-hBEX) — 4-Document mapping | RUNBOOK.md (F-10) |
 | **Agent Design** | [Seeing like an Agent (Thariq, Anthropic)](https://x.com/trq212/status/2027463795355095314) — self-directed search, progressive disclosure | F-23, F-24, F-16 |
 | **Software Factory** | [gstack (Garry Tan)](https://github.com/garrytan/gstack) — 25-skill sprint lifecycle, design-first approach, cross-model review | Temp roadmap: Safety Guard, Cross-Model Review, Ship Pipeline |

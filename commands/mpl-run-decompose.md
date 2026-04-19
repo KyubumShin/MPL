@@ -109,7 +109,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
      phase_lang (F-39, optional: rust|go|python|typescript|java),
      scope, impact (create/modify/affected_tests/affected_config),
-     interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/qmd_verified/description),
+     interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/description),
      estimated_complexity (S/M/L).
 
      **AD-01 (v0.13.0) — contract_files is REQUIRED** for every phase under `interface_contract.contract_files`. Enumerate one entry per cross-layer boundary between impact files (path, boundary_id, caller, callee, framework_rules, params key-type map, returns key-type map). Empty list `[]` only for phases with zero cross-layer boundaries (pure infra/docs). Omission is a validation error. See `agents/mpl-decomposer.md` Step 6.5 for the enumeration procedure and full sub-schema.
@@ -179,26 +179,6 @@ Add the following instructions to the mpl-decomposer agent:
 > - `phase_subdomain`: tech stack (e.g. react, nextjs, prisma, langchain). Detected from project files/dependencies.
 > - `phase_task_type`: work type (greenfield|refactor|migration|bugfix|performance|security). Detected from Phase characteristics.
 > - `phase_lang`: target language (rust|go|python|typescript|java). Detected from file extensions.
-
-#### qmd_verified Success Criteria Type
-
-`qmd_verified` is a success criterion that combines QMD semantic search + Grep cross-verification. When Phase Runner encounters this type:
-
-1. Perform QMD semantic search with `query` (explore candidate files)
-2. Cross-verify candidate files with `grep_pattern`
-3. Grep match success → PASS, failure → FAIL
-4. If QMD unavailable, fall back to `grep_pattern` only
-
-```yaml
-# decomposition.yaml example
-success_criteria:
-  - type: qmd_verified
-    query: "authentication middleware exports"
-    grep_pattern: "export.*(auth|session|middleware)"
-    description: "Verify the auth module exports the correct interface"
-```
-
-> **Fallback guarantee:** If QMD is unavailable, regular grep verification is performed using only the `grep_pattern` field. Therefore, `qmd_verified` criteria must always include `grep_pattern`.
 
 ### After Receiving Output
 
@@ -456,7 +436,7 @@ codebase_analysis = Read(".mpl/mpl/codebase-analysis.json")
 gap_analysis = Read(".mpl/mpl/pre-execution-analysis.md")
 
 // For each phase, classify success_criteria into A/S/H items:
-//   A (Automated): type is command, test, file_exists, grep, qmd_verified
+//   A (Automated): type is command, test, file_exists, grep
 //   S (Semi-automated): type is description but has verifiable pattern
 //   H (Human): type is description with subjective/UX judgment needed
 //

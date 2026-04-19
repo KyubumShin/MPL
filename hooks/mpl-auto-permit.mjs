@@ -76,7 +76,6 @@ const SAFE_BASH_PREFIXES = [
   'mkdir ', 'touch ', 'cp ',
   'git checkout -b', 'git switch',
   'gh ',
-  'qmd ',
   'cd ',
   'date', 'whoami', 'env',
 ];
