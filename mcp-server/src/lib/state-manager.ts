@@ -53,6 +53,15 @@ export interface MplState {
   user_contract_set: boolean;
   user_contract_path: string | null;
   user_contract_iterations: number;
+  // 0.16 Tier C — E2E recovery circuit breaker + last diagnosis snapshot
+  e2e_recovery: {
+    iter: number;
+    max_iter: number;
+    last_classification: 'A' | 'B' | 'C' | 'D' | null;
+    last_diagnosis: Record<string, unknown> | null;
+    halted: boolean;
+    halt_reason: string | null;
+  };
   [key: string]: unknown;
 }
 
@@ -99,6 +108,14 @@ const DEFAULT_STATE: MplState = {
   user_contract_set: false,
   user_contract_path: null,
   user_contract_iterations: 0,
+  e2e_recovery: {
+    iter: 0,
+    max_iter: 2,
+    last_classification: null,
+    last_diagnosis: null,
+    halted: false,
+    halt_reason: null,
+  },
 };
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
