@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.15.3 Design Document
+# MPL (Micro-Phase Loop) v0.16.0 Design Document
 
 ## 1. Overview
 
@@ -473,6 +473,47 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.16.0 — 3-Tier User Contract Architecture (2026-04-20)
+
+ygg-exp11 (v0.14.1, 2026-04-17) surfaced three structural gaps: (a) user-feature capture rate = 0/12 specified features, (b) 42 of 80 E2E scenarios committed as `skip` without recovery, (c) phase-runner : test-agent dispatch ratio = 83 : 1 (writer = verifier violation). A 3:0 converged debate (`~/project/decision/2026-04-19-mpl-0.16-implementation-plan.md`) produced the 3-tier contract architecture that landed in this release **with zero new agent files** — all new LLM calls are MCP tools or orchestrator-inline, preserving the 8-agent consolidation invariant from v0.11.0.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Tier A' UC spec file | Feature scope implicit; spec-only interview | `.mpl/requirements/user-contract.md` (YAML shape, `user_cases[*].user_delta` first-class field) | feature | Split mutable UC scope from immutable PP; make user-delta a structured output |
+| Tier A' classifier | (none — spec-only) | MCP tool `mpl_classify_feature_scope` (opus, session auth, PROMPT_VERSION frozen) + Phase 0 Step 1.5 inline loop max 4 iterations | feature | Mirror the mpl_score_ambiguity pattern — no new agent file; orchestrator drives AskUserQuestion |
+| Tier B decomposer field | phases had no UC linkage | Phase-level `covers: [UC-NN \| "internal"]` REQUIRED (Rule 6a). `internal` escape with configurable ratio warn (`internal_todo_warn_threshold` default 0.4) | feature | UC → phase → TODO → test traceability; blocks phases that don't serve a declared UC |
+| Tier B guard hook | — | `hooks/mpl-require-covers.mjs` (PreToolUse on decomposition.yaml write) | feature | Mechanical block of missing/invalid covers; legacy graceful-skip mode accepts `["internal"]` everywhere |
+| PP immutability guard | — | `hooks/mpl-validate-pp-schema.mjs` blocks `.mpl/pivot-points.md` writes that introduce UC keys (`user_cases:`, `user_delta:`, UC-NN ids, etc.) | feature | PP = immutable / UC = mutable; file-level boundary enforced by hook |
+| Tier C E2E annotation spec | no schema | `docs/schemas/e2e-contract.md` defines `@contract(UC-NN)` + `@skip_reason` across TS/Py/Go/Rust; standard skip values (ENV_API_DOWN / FLAKY_NETWORK / DEPENDENCY_MISSING / RATE_LIMIT / OS_INCOMPATIBLE); impl-skip forbidden | feature | Maps UCs onto test-level annotations for coverage diff |
+| Tier C coverage gate | `mpl-require-e2e` only verified scenario pass/fail at `finalize_done` | Same hook extended with UC-coverage diff. Uncovered `included` UCs → **strict default Hard fail** at finalize_done write. Opt-out: `.mpl/config.json { e2e_contract_strict: false }` → warn only | feature | Q10 confirmed: strict-by-default + opt-out (not warn-default) |
+| Finalize auto-recovery | single HITL 3-option fallback on any E2E fail | New Step 5.0.4 inline loop: `mpl_diagnose_e2e_failure` → dispatch per A/B/C/D → rerun scenarios → increment iter. Circuit breaker `max_iter=2` → HITL fallback only after budget exhausted. `last_diagnosis` persisted in state for inline resume (Q9) | feature | Replaces blind HITL with structured classification; reserves HITL for genuinely unrecoverable cases |
+| Diagnostician | — | MCP tool `mpl_diagnose_e2e_failure` (opus, PROMPT_VERSION frozen). Classifies A=spec gap / B=test bug / C=missing capability / D=flake. Returns fix_strategy + optional append_phases hints + confidence. Neutral fallback defaults to D to avoid false appends | feature | 0-agent-file design; Stage 4 data-driven decision on promotion after exp12 |
+| Decomposer APPEND-MODE | no append entrypoint | Rule 9: when dispatch prompt begins with `APPEND-MODE:`, keep all existing phases verbatim and append 1-3 new phases from `append_phases` hints. New phase ids use `{anchor}b/c`, inherit `covers:[UC-N]` + `test_agent_required:true`, execution_tiers updated inline. Emits full decomposition.yaml (no diff) | feature | Required by Classification A auto-recovery |
+| Playwright trace capture | no trace | Finalize Step 5.0.3 auto-wraps Playwright `test_command` with `--trace on --trace-dir .mpl/e2e-traces/<scenario_id>`. Records `trace_path` in state.e2e_results. Diagnostician reads up to 4KB when building trace_excerpt. `.gitignore` guidance | feature | Feeds the diagnostician with real failure context |
+| State schema | — | New fields: `user_contract_set`, `user_contract_path`, `user_contract_iterations`, `e2e_recovery: {iter, max_iter, last_classification, last_diagnosis, halted, halt_reason}` | feature | Supports both Tier A' gating (ambiguity-gate additive check) and S3 circuit breaker |
+| Ambiguity gate wiring | only `ambiguity_score` ≤ 0.2 gated decomposer | Now also requires `user_contract_set=true`. Legacy opt-out: `.mpl/config.json { user_contract_required: false }` | feature | Closes the last pipe — Step 1.5 must complete before decomposition |
+| MCP tool registration | 3 tools | +2 tools: `mpl_classify_feature_scope`, `mpl_diagnose_e2e_failure`. `mcp-server/package.json` now has `npm test` (build + node --test against dist) with 25 unit tests | feature | Same pattern as existing scoring tool |
+| `mpl-interviewer.md` stale refs | 3 lines referenced the deleted `mpl-ambiguity-resolver` agent (v0.12.2 MCP migration leftover) | Rewrote to reference orchestrator inline loop via `mpl_score_ambiguity` MCP tool | cleanup | Documentation drift identified by user during 0.16 planning |
+| exp12 measurement spec | — | New `docs/roadmap/0.16-exp12-plan.md` — 5 primary metrics with baseline (ygg-exp11) vs target, Q8 auxiliary-LLM labeling protocol for B/D agreement rate, Stage 4 promotion/sunset decision framework | docs | Gates whether `mpl_diagnose_e2e_failure` promotes to agent file, stays MCP, or sunsets |
+
+**Affected files (runtime):**
+- `agents/mpl-decomposer.md`, `agents/mpl-interviewer.md`
+- `commands/mpl-run-phase0.md`, `commands/mpl-run-finalize.md`, `commands/mpl-run.md`
+- `hooks/mpl-require-e2e.mjs`, `hooks/mpl-validate-pp-schema.mjs` (new), `hooks/mpl-require-covers.mjs` (new), `hooks/mpl-ambiguity-gate.mjs`, `hooks/hooks.json`
+- `mcp-server/src/index.ts`, `mcp-server/src/lib/state-manager.ts`, `mcp-server/src/lib/feature-classifier.ts` (new), `mcp-server/src/lib/e2e-diagnoser.ts` (new), `mcp-server/src/tools/feature-scope.ts` (new), `mcp-server/src/tools/e2e-diagnose.ts` (new), `mcp-server/package.json`
+- `docs/schemas/user-contract.md` (new), `docs/schemas/e2e-contract.md` (new), `docs/roadmap/0.16-exp12-plan.md` (new)
+
+**Breaking changes:** NONE for existing runtime. Legacy projects (pre-0.16 `.mpl/` layouts) automatically enter graceful-skip mode for Step 1.5 and covers-gate until the user opts in.
+
+**Opt-outs:**
+- `.mpl/config.json { "user_contract_required": false }` — ambiguity-gate does not block decomposer on `user_contract_set`
+- `.mpl/config.json { "e2e_contract_strict": false }` — Tier C coverage diff degrades from block to warn
+- `.mpl/config.json { "internal_todo_warn_threshold": N }` — override the 0.4 default for the internal-TODO ratio warn
+
+**PR history:** Stage 1 #45 (merged `7ac8b93`) + Stage 2 #46→#48 (rebased after base deletion, merged `14c922d`) + Stage 3 #47→#49 (rebased, merged `708f58a`).
+
+**Follow-up (Stage 4, conditional):** exp12 on Yggdrasil spec → Q8 agreement-rate labeling → 4-agent debate on promoting / keeping / sunsetting `mpl_diagnose_e2e_failure`.
 
 ### v0.15.3 — QMD Removal Actual Completion (2026-04-19)
 
