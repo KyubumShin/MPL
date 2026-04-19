@@ -27,6 +27,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
     6. **PP respect**: No phase may violate a CONFIRMED Pivot Point. Note conflicts and adjust.
 
+    6a. **UC coverage mandatory (0.16 Tier B)**: Each phase MUST declare `covers: [UC-NN]` — a REQUIRED field that enumerates which user_cases from `.mpl/requirements/user-contract.md` this phase advances. UC-NN entries MUST exist as `included` in user-contract.md. Single literal `["internal"]` is the only escape, reserved for pure plumbing/refactor/infra phases with no user-visible behavior. When `.mpl/requirements/user-contract.md` is absent (legacy graceful-skip mode), `covers: ["internal"]` is accepted everywhere. The hook `mpl-require-covers.mjs` blocks the write when the field is missing or empty, and warns when the ratio of `internal`-only phases exceeds `internal_todo_warn_threshold` (default 0.4).
+
     7. **Success criteria types**: command, test, file_exists, grep, description. Must be machine-verifiable.
 
     8. **Vertical slice for multi-layer projects**: If 2+ layers detected (frontend/backend/DB/IPC), decompose by feature, not by layer. Each phase implements ONE feature across ALL layers. Scaffold/infrastructure phases remain horizontal.
@@ -233,6 +235,16 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         pp_proximity: string        # pp_core|pp_adjacent|non_pp
         scope: string               # 1-2 sentence scope
         rationale: string           # why this position
+
+        covers:                     # 0.16 Tier B: which UCs this phase advances (REQUIRED)
+          - string                  # UC-NN id from .mpl/requirements/user-contract.md, or "internal"
+          # Consumer: Test Agent expands E2E scenarios per UC; Hook `mpl-require-covers.mjs`
+          # blocks decomposition writes when this field is missing or empty.
+          # Escape: single literal "internal" for pure plumbing/refactor/infra phases with
+          # no user-visible behavior. When >`internal_todo_warn_threshold` (default 0.4) of
+          # phases carry `covers: [internal]`, the hook emits a warn (not block).
+          # If no user-contract.md exists (legacy project, graceful skip mode), the hook
+          # accepts any non-empty covers (including `["internal"]`) and only warns on ratio.
 
         impact:
           create:
