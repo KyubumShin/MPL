@@ -545,6 +545,125 @@ PP States: **CONFIRMED** (hard constraint, auto-reject on conflict) / **PROVISIO
 
 ---
 
+## Step 1.5: User Contract Interview (orchestrator inline + MCP) [0.16 Tier A']
+
+**Purpose**: Capture the mutable user feature scope (UCs) into
+`.mpl/requirements/user-contract.md`, strictly separated from the immutable
+Pivot Points. This step directly addresses ygg-exp11's "user-feature 포착 0건"
+gap by making user delta a first-class output.
+
+**Pattern**: Same as Stage 2 Ambiguity Resolution — orchestrator drives the
+loop inline; no subagent dispatch. The orchestrator calls
+`mpl_classify_feature_scope` MCP tool and interleaves `AskUserQuestion` between
+iterations. Max 4 iterations.
+
+**Activation**: After Step 1 (PP Discovery) completes and `pivot-points.md` is
+written, BEFORE Step 1-B.
+
+**Skip condition**: Legacy projects (pre-0.16) with no `.mpl/requirements/`
+directory — the orchestrator skips Step 1.5 and writes a graceful-skip
+`user-contract.md` containing `user_cases: []` and spec-auto-extracted
+`scenarios`. The user can re-run Step 1.5 manually via `/mpl:mpl` in a later
+session.
+
+### Orchestrator Loop (inline, no subagent)
+
+```
+// Preconditions: .mpl/pivot-points.md exists and is CONFIRMED
+Read .mpl/pivot-points.md
+Read the spec/PRD text (from user or spec file)
+
+iteration = 1
+max_iterations = 4
+accumulated_user_responses = ""  // concatenated as "round N: Q: .. A: .."
+prev_contract = null             // set on iteration 2+ if .mpl/requirements/user-contract.md exists
+
+loop:
+  // 1. Call the classifier MCP tool
+  result = mpl_classify_feature_scope({
+    cwd,
+    spec_text,
+    pivot_points: <contents of .mpl/pivot-points.md>,
+    user_responses: accumulated_user_responses,
+    prev_contract,
+    round: iteration,
+  })
+
+  // 2. Check convergence
+  if result.convergence == true:
+    break
+
+  // 3. Ask the user the classifier's next_question
+  if result.next_question == null:
+    // Classifier says not converged but no question — treat as unrecoverable,
+    // write a best-effort contract and break
+    break
+
+  answer = AskUserQuestion({
+    question: formatQuestion(result.next_question),
+    header: shortHeaderFor(result.next_question.kind),
+    options: optionsFrom(result.next_question.payload),
+  })
+
+  accumulated_user_responses += `\nround ${iteration}: Q: ${formatQuestion(result.next_question)} A: ${answer}`
+  iteration += 1
+
+  if iteration > max_iterations:
+    break
+
+// 4. Persist
+Write .mpl/requirements/user-contract.md from result (YAML per
+  docs/schemas/user-contract.md)
+
+mpl_state_write({
+  user_contract_set: true,
+  user_contract_path: ".mpl/requirements/user-contract.md",
+  user_contract_iterations: iteration,
+})
+
+Announce: `[MPL] Step 1.5 complete. user_cases=${result.user_cases.length} deferred=${result.deferred.length} cut=${result.cut.length} scenarios=${result.scenarios.length} iterations=${iteration}.`
+```
+
+### `formatQuestion` / `optionsFrom` (orchestrator helpers)
+
+These are orchestrator-local formatting rules, NOT embedded in the MCP tool.
+
+- `formatQuestion(nq)`: `nq.payload.question` if provided, else a template derived from `nq.kind`:
+  - `clarify` → `"Clarify: ${payload.focus || 'the UC scope'}"`
+  - `priority` → `"Priority ordering for: ${payload.uc_ids?.join(', ')}"`
+  - `conflict` → `"PP conflict on ${payload.uc_id} vs ${payload.pp_id} — how to resolve?"`
+- `optionsFrom(payload)`: if `payload.options` is an array of `{label, description}`, pass through;
+  otherwise provide 3-4 generated options per kind (see `agents/mpl-interviewer.md` Hypothesis-as-Options pattern).
+  ALWAYS append a catch-all `"Other (enter manually)"` option.
+
+### Convergence Fallback
+
+If iteration == max_iterations and convergence == false:
+1. Write the current (incomplete) classification as user-contract.md with a top-level
+   frontmatter field `schema_version: 1` and `converged: false`.
+2. Record unresolved items as `ambiguity_hints[]` so Stage 2 Ambiguity Resolution
+   can pick them up.
+3. Announce: `[MPL] Step 1.5 stopped at max_iterations=4 without convergence. ${result.ambiguity_hints.length} unresolved hints forwarded to Stage 2.`
+
+### Downstream Consumers
+
+| Output | Consumer | Usage |
+|--------|----------|-------|
+| `.mpl/requirements/user-contract.md` | Decomposer (Step 3), Test Agent, Hooks | UC list + scenarios + skip_allowed |
+| `user_contract_set` in state | `mpl-phase-controller` hook | Gate before decomposer dispatch |
+| `scenarios[*]` | Test Agent (Step 3-B) | E2E scenario seeds |
+| `pp_conflict[]` | Step 1-D PP Confirmation | Re-question for UC-dropped vs uc_reshaped vs pp_reaffirmed |
+| `ambiguity_hints[]` | Stage 2 Ambiguity Resolution (Step 2) | Targeted questions |
+
+### Field Boundary Guards
+
+- `mpl-validate-pp-schema.mjs` (0.16 S1-3) blocks any Write/Edit on
+  `.mpl/pivot-points.md` that introduces UC-scoped schema.
+- `mpl-require-covers.mjs` (0.16 S1-5) blocks decomposition.yaml writes that
+  don't reference UC ids from user-contract.md (or use the `"internal"` escape).
+
+---
+
 ## Step 1-B: Pre-Execution Analysis (Gap + Tradeoff)
 
 After PPs are confirmed, run unified pre-execution analysis to identify gaps AND assess risks in a single agent call.

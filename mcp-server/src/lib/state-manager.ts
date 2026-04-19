@@ -49,6 +49,10 @@ export interface MplState {
   resume_from_phase: string | null;
   pause_timestamp: string | null;
   budget_at_pause: Record<string, unknown> | null;
+  // 0.16 Tier A' — user contract tracking
+  user_contract_set: boolean;
+  user_contract_path: string | null;
+  user_contract_iterations: number;
   [key: string]: unknown;
 }
 
@@ -92,6 +96,9 @@ const DEFAULT_STATE: MplState = {
   resume_from_phase: null,
   pause_timestamp: null,
   budget_at_pause: null,
+  user_contract_set: false,
+  user_contract_path: null,
+  user_contract_iterations: 0,
 };
 
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {

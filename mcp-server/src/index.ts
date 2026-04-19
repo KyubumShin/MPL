@@ -3,9 +3,11 @@
  * MPL MCP Server — Tier 1: Deterministic Scoring + Active State Access
  *
  * Tools:
- *   mpl_score_ambiguity  — 5D ambiguity scoring via LLM API (temp 0.1) + code computation
- *   mpl_state_read       — Read pipeline state (active agent access)
- *   mpl_state_write      — Update pipeline state (atomic, deep-merge)
+ *   mpl_score_ambiguity         — 5D ambiguity scoring via LLM API (temp 0.1) + code computation
+ *   mpl_state_read              — Read pipeline state (active agent access)
+ *   mpl_state_write             — Update pipeline state (atomic, deep-merge)
+ *   mpl_classify_feature_scope  — 0.16 Tier A': classify user cases (included/deferred/cut) +
+ *                                 scenarios + PP conflict ledger (called inline during Phase 0 Step 1.5)
  *
  * Transport: stdio (Claude Code standard)
  */
@@ -19,6 +21,10 @@ import {
 
 import { scoreAmbiguityTool, handleScoreAmbiguity } from './tools/scoring.js';
 import { stateReadTool, handleStateRead, stateWriteTool, handleStateWrite } from './tools/state.js';
+import {
+  classifyFeatureScopeTool,
+  handleClassifyFeatureScope,
+} from './tools/feature-scope.js';
 
 const server = new Server(
   { name: 'mpl-server', version: '0.6.6' },
@@ -27,7 +33,7 @@ const server = new Server(
 
 // Register tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [scoreAmbiguityTool, stateReadTool, stateWriteTool],
+  tools: [scoreAmbiguityTool, stateReadTool, stateWriteTool, classifyFeatureScopeTool],
 }));
 
 // Handle tool calls
@@ -43,6 +49,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case 'mpl_state_write':
       return handleStateWrite(args as Parameters<typeof handleStateWrite>[0]);
+
+    case 'mpl_classify_feature_scope':
+      return handleClassifyFeatureScope(
+        args as Parameters<typeof handleClassifyFeatureScope>[0],
+      );
 
     default:
       return {

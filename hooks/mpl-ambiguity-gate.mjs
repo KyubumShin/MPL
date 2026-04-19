@@ -14,6 +14,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { existsSync, readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,22 @@ const __dirname = dirname(__filename);
 const { isMplActive, readState, writeState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
+
+/**
+ * 0.16 Tier A' opt-out: legacy projects can disable the user-contract
+ * gate via .mpl/config.json { "user_contract_required": false }. Default true.
+ */
+function isUserContractRequired(cwd) {
+  try {
+    const cfgPath = join(cwd, '.mpl', 'config.json');
+    if (!existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+    if (cfg && cfg.user_contract_required === false) return false;
+  } catch {
+    // fall through
+  }
+  return true;
+}
 
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
@@ -67,6 +84,24 @@ async function main() {
     console.log(JSON.stringify({
       continue: false,
       reason: '[MPL] ⛔ Decomposer BLOCKED: Cannot read MPL state. Ensure .mpl/state.json exists.'
+    }));
+    return;
+  }
+
+  // 0.16 Tier A': Step 1.5 User Contract Interview must complete before decomposition.
+  // Gate is additive to ambiguity score — BOTH must pass. Legacy projects that pre-date
+  // 0.16 can opt out via .mpl/config.json { "user_contract_required": false }.
+  const contractRequired = isUserContractRequired(cwd);
+  const contractSet = state.user_contract_set === true;
+  if (contractRequired && !contractSet) {
+    writeState(cwd, { current_phase: 'mpl-init' });
+    console.log(JSON.stringify({
+      continue: false,
+      reason: '[MPL] ⛔ Decomposer BLOCKED: user_contract_set is false. ' +
+        'Run Phase 0 Step 1.5 first: orchestrator inline loop calling mpl_classify_feature_scope MCP tool ' +
+        'to produce .mpl/requirements/user-contract.md, then mpl_state_write({user_contract_set:true}). ' +
+        'See commands/mpl-run-phase0.md Step 1.5. ' +
+        'To opt out in legacy projects: set user_contract_required=false in .mpl/config.json.'
     }));
     return;
   }

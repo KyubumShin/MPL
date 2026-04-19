@@ -166,7 +166,7 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 
 | File | Steps | Contents | ~Tokens |
 |------|-------|----------|---------|
-| `mpl-run-phase0.md` | -1 ~ 1-E | LSP Warm-up, Triage, PP Interview, Pre-Execution Analysis | ~6K |
+| `mpl-run-phase0.md` | -1 ~ 1-E | LSP Warm-up, Triage, PP Interview, **Step 1.5 User Contract Interview (0.16)**, Pre-Execution Analysis | ~7K |
 | `mpl-run-phase0-analysis.md` | 2 ~ 2.5 | Codebase Analysis, Architecture Decisions, Phase 0 Enhanced | ~8K |
 | `mpl-run-phase0-memory.md` | 0.1.5b-c | 4-Tier Adaptive Memory, Routing Pattern Loading | ~2K |
 | `mpl-run-decompose.md` | 3 ~ 3-B | Phase Decomposition, Verification Planning (Critic absorbed into Decomposer) | ~3K |
