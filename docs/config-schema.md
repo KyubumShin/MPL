@@ -2,7 +2,7 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.15.0
+> **Version**: v0.15.1
 > **Last updated**: 2026-04-19
 
 ---
@@ -75,6 +75,32 @@ Runner waits for Test Agent result vs terminates based on cache TTL.
 | `discovery.scanner_enabled` | boolean | `true` | Enable Hook mechanical filter (Stage 4.2) | `hooks/mpl-discovery-scanner.mjs` |
 | `discovery.agent_enabled` | boolean | `false` | Enable Discovery Agent opus dispatch on filter hits (Stage 2 feature flag). **⚠️ Stage 2 미구현: `agents/mpl-discovery-agent.md` 파일 부재. `true` 설정 시 dangling reference — dispatch 실패.** | `agents/mpl-discovery-agent.md` |
 | `discovery.false_positive_threshold_pct` | number | `30` | Alert if Discovery Agent false_positive rate exceeds this (Gate 2 metric). **⚠️ Stage 2 미구현.** | `agents/mpl-discovery-agent.md` |
+
+## Test Agent Override (AD-0007, v0.15.1)
+
+File: `.mpl/config/test-agent-override.json` (separate from `.mpl/config.json` to make the bypass highly visible).
+
+Schema:
+```json
+{
+  "phase-3": "trivial doc edit — no runtime surface",
+  "phase-5": "manual QA completed 2026-04-20 by kbshin",
+  "*": "project-wide bypass (anti-pattern, flagged by doctor audit)"
+}
+```
+
+Semantics:
+- Each key is either a phase id (`phase-N`) or the blanket key `"*"`.
+- Each value is a **user-supplied reason string** — required. Empty reasons are rejected by `hooks/mpl-require-test-agent.mjs`.
+- Presence of a matching key bypasses the AD-0007 block for that phase. The hook logs the reason but does not validate its content.
+- `"*"` is accepted (user has final say) but flagged by `mpl-doctor audit [g]` as a blanket bypass — use only for short-lived experiments where test-agent overhead is prohibitive.
+
+| Condition | Hook behaviour |
+|---|---|
+| `test_agent_required: true` in decomposition AND no dispatch record AND no override | **BLOCK** phase-runner completion advancement |
+| `test_agent_required: false` with explicit rationale | Allow, no dispatch needed |
+| `test_agent_required` missing (legacy decomposition) | Default to `true` — require dispatch |
+| Override exists for phase-id | Allow regardless of dispatch |
 
 ## Hat Model (PP-Proximity, v0.11.0)
 

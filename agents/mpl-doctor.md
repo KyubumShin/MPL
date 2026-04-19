@@ -171,7 +171,15 @@ disallowedTools: Write, Edit, Task
       - `profile/phases.jsonl` must include at least one `mpl-seed-generator` dispatch
       FAIL if enabled=true but any of the three conditions missing. WARN if enabled=false and no chain artifacts (expected).
 
-    - **[g] test_agent dispatch 기록** — if decomposition has any phase with `phase_domain ∈ {ui, api, algorithm, db, ai}`, `state.test_agent_dispatched` must have at least one entry. FAIL if zero (AD-0004 gap repeat). WARN if dispatched_count < mandatory_domain_count (partial coverage).
+    - **[g] test_agent dispatch coverage (AD-0007, v0.15.1)** — enforce the enforcement:
+      - Count `required = decomposition.phases[].filter(p => p.test_agent_required != false)`
+      - Count `dispatched = Object.keys(state.test_agent_dispatched)` intersecting required ids
+      - Count `overridden = Object.keys(.mpl/config/test-agent-override.json or {})`
+      - FAIL if `required - dispatched - overridden > 0` (AD-0007 block should have caught these)
+      - WARN if `"*"` blanket override is active (anti-pattern)
+      - WARN if any override reason string has length < 20 (e.g., `"trivial"`, `"skip"` — low-quality bypass)
+      - WARN if any phase has `test_agent_required: false` without a `test_agent_rationale` (schema violation; gate-recorder allowed it through but doctor flags it)
+      - FAIL if `required > 0 AND dispatched == 0` (AD-0004 empirical gap — the original exp11 pattern)
 
     **Output format for Category 13**:
     ```

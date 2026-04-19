@@ -273,6 +273,25 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
           # Sources: (1) phase_domain → hint table, (2) Phase 0 target_platform detection.
           # See Reasoning_Steps Step 9.5 for the domain + platform tables.
 
+        # AD-0007 (v0.15.1): F-40 dispatch contract per-phase.
+        # REQUIRED on every phase. `hooks/mpl-require-test-agent.mjs` blocks pipeline
+        # advancement past a phase-runner completion when test_agent_required is true
+        # (or missing — absence defaults to true) and no mpl-test-agent dispatch is
+        # recorded in state.test_agent_dispatched[phase_id].
+        test_agent_required: boolean
+          # Default: true for ANY phase that touches code paths. Only set false for:
+          #   - pure documentation edits (docs/*.md only, no src changes)
+          #   - migration-script-only phases (idempotent scripts with no new API surface)
+          #   - infra/config phases that don't introduce runnable behaviour
+          # In exp11 (2026-04-17) 63 of 63 code-bearing phases skipped test-agent;
+          # the one dispatch found 5 gaps immediately. Default to true.
+        test_agent_rationale: string
+          # REQUIRED when test_agent_required is false. Explain why an independent
+          # test-author is unnecessary. Blanket "trivial" or "no time" strings are
+          # anti-patterns — the hook accepts but flags them in Category 13 audit.
+          # When test_agent_required is true, this can be omitted OR used to pre-brief
+          # the test-agent dispatch (e.g., "focus on boundary invariants of X").
+
     execution_tiers:
       - tier: number
         phases: [string]

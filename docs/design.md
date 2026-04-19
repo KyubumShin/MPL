@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.15.0 Design Document
+# MPL (Micro-Phase Loop) v0.15.1 Design Document
 
 ## 1. Overview
 
@@ -473,6 +473,29 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.15.1 — Test-Agent Enforcement (AD-0007) (2026-04-19)
+
+ygg-exp11 (Opus 4.7) produced 83 phase-runner dispatches and 1 test-agent dispatch across 63 code-bearing phases (1.6% coverage). The single dispatch found 5 gaps immediately, confirming AD-0004's "code author ≠ test author" design rationale is empirically valid when the dispatch actually happens. v0.15.0's F-40 policy was structurally self-disabling: `pass_rate < 100%` trigger depended on phase-runner's self-test, which always reported 100%. v0.15.1 adds hook-level enforcement.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Decomposer output schema | `probing_hints[]` optional | adds REQUIRED `test_agent_required: bool` + `test_agent_rationale: string` per phase; default `true` for any code-bearing phase | Schema | Make F-40 dispatch decision explicit at decomposition time |
+| F-40 dispatch enforcement | orchestrator prompt + Anti-rationalization only | `hooks/mpl-require-test-agent.mjs` (PostToolUse on Task\|Agent) blocks phase-runner completion advancement when `test_agent_required=true` AND `state.test_agent_dispatched[phase_id]` missing AND no override | Hook (new) | Prompt-level enforcement insufficient (exp11 skipped 62/63) |
+| Zero-Test Block | phase_domain∈{ui,api,algorithm,db,ai} trigger | field-driven `test_agent_required` trigger; legacy domain fallback retained for pre-v0.15.1 decompositions | Skill behaviour | Field-based is explicit, per-phase, bypass-resistant |
+| Override mechanism | none | `.mpl/config/test-agent-override.json` with explicit per-phase user reason; blanket `"*"` accepted but flagged by doctor audit | Config | User has final say; anti-patterns surfaced mechanically |
+| doctor audit `[g]` | "at least one test-agent dispatch" | coverage ratio: required minus dispatched minus overridden must equal 0; warns on blanket override and short reason strings | Agent | Enforce the enforcement itself |
+
+**Affected files:**
+- New hook: `hooks/mpl-require-test-agent.mjs`
+- New decision doc: `docs/decisions/AD-0007-test-agent-enforcement.md`
+- Modified: `hooks/hooks.json` (new PostToolUse entry), `agents/mpl-decomposer.md` (schema), `commands/mpl-run-execute-gates.md` (Zero-Test Block replacement), `docs/config-schema.md` (override schema section), `agents/mpl-doctor.md` (Category 13 [g] refinement)
+
+**Breaking changes:** Decomposer output gains two REQUIRED fields. Legacy decompositions without these fields are treated as `test_agent_required: true` (safe default) and flow through the legacy domain-trigger fallback. Re-decomposing with v0.15.1 Decomposer is recommended but not forced.
+
+**Cost impact:** Full enforcement on exp11's 63 code phases would add ~4.4M tokens (+122% over exp11 orchestrator total). Mitigations: Decomposer marks trivial/migration phases `false` with rationale; override config bypasses user-verified cases; test-agent uses sonnet so per-dispatch cost is proportionally lower than opus phase-runner.
+
+**Evidence grounding:** exp11 profile (`~/playground/ygg-exp11/.mpl/mpl/profile/phases.jsonl`: 83 phase-runner, 1 test-agent), exp11 evaluation (`~/project/harness_lab/analysis/mpl-exp11-opus47-evaluation.md`), design discussion (`~/project/wiki/scratch/2026-04-19/mpl-test-agent-enforcement.md`).
 
 ### v0.15.0 — Measurement Integrity (AD-0006) (2026-04-19)
 
