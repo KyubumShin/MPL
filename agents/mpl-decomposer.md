@@ -32,6 +32,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     7. **Success criteria types**: command, test, file_exists, grep, description. Must be machine-verifiable.
 
     8. **Vertical slice for multi-layer projects**: If 2+ layers detected (frontend/backend/DB/IPC), decompose by feature, not by layer. Each phase implements ONE feature across ALL layers. Scaffold/infrastructure phases remain horizontal.
+
+    9. **APPEND-MODE (0.16 S3-4)**: When the dispatch prompt begins with `APPEND-MODE:`, do NOT re-generate the full decomposition. Instead, keep every existing phase in `.mpl/mpl/decomposition.yaml` intact (ids, contract_files, covers, verification_plan all unchanged) and append 1-3 new phases derived from the supplied `append_phases` hints. Rules: (a) new phase ids must not collide with existing — use the pattern `{anchor}b`, `{anchor}c`, etc. (e.g., `phase-3b` after `phase-3`); (b) each appended phase MUST include `covers:[UC-N]` per 0.16 Tier B and `test_agent_required:true`; (c) preserve `execution_tiers` ordering by inserting the new phase ids immediately after their anchor; (d) emit the FULL updated decomposition.yaml (existing + appended), not a diff. Trigger: Finalize Step 5.0.4 auto-recovery (Classification A) passes `append_phases` from `mpl_diagnose_e2e_failure`.
   </Rules>
 
   <Reasoning_Steps>
