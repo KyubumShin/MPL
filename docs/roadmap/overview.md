@@ -260,6 +260,18 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ---
 
+## v0.14.2 — QMD Reference Removal (2026-04-15)
+
+4/11 제거 결정에 따라 MPL 전체에서 QMD 참조를 완전히 제거. 17개 파일 편집 + 2개 파일 삭제.
+
+- **Doctor**: Category 11 (QMD Search Engine) 제거, 12→11 카테고리
+- **Setup**: Step 3g (QMD 설치/등록), Step 7 (QMD 설정 위저드) 제거
+- **Protocol**: `qmd_verified` 성공 기준 타입, Phase 0 QMD 모드 감지, Scout QMD-First 분기 제거
+- **삭제**: `hooks/lib/mpl-qmd-verifier.mjs`, `skills/mpl-setup/references/qmd-setup.md`
+- **런타임 영향**: 없음 (QMD는 optional이었고 grep fallback이 기본)
+
+---
+
 ## v0.13.1 — Post-Smoke-Test Hotfixes: Gate Enforcement + Ambiguity Retry + F-40 Dispatch (2026-04-12)
 
 Patch release capturing 4 bug fixes discovered during the first live pipeline smoke test on specpill (Far/non_pp, 5 UI phases). All fixes address flow control bugs where the orchestrator bypassed or skipped mandatory pipeline stages.
@@ -340,7 +352,7 @@ Feature release that closes the Hard 3 structural gap identified by cb-phase-a1 
 
 - `agents/mpl-decomposer.md` Step 9.6.1 + `risk_patterns[]` schema field.
 - `commands/mpl-run-decompose.md` Step 3 item 2b: `default_risk_patterns` (5 security rules: eval, API keys, SQL concat, innerHTML, weak crypto).
-- `commands/mpl-run-execute-gates.md` Hard 1 Step 0 "Pattern Risk Check" (non-blocking, metrics to `.mpl/mml/pattern-metrics.jsonl`).
+- `commands/mpl-run-execute-gates.md` Hard 1 Step 0 "Pattern Risk Check" (non-blocking, metrics to `.mpl/mpl/pattern-metrics.jsonl`).
 - Closes #27.
 
 ### Part 5 — Advisory Gate Vestigial Cleanup (`f5709f0`)

@@ -44,6 +44,16 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Bash|Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-gate-recorder.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": "Task|Agent",
         "hooks": [
           {

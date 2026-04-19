@@ -1,6 +1,6 @@
 {
   "name": "mpl",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Micro-Phase Loop - Coherence-first autonomous coding pipeline with decomposition, phase execution, and verification",
   "author": {
     "name": "KyubumShin"

@@ -9,7 +9,7 @@
     {
       "name": "mpl",
       "description": "Decomposes tasks into micro-phases with independent plan-execute-verify mini-loops. Orchestrator-Worker separation enforced via hooks.",
-      "version": "0.14.1",
+      "version": "0.15.0",
       "author": {
         "name": "KyubumShin"
       },
@@ -25,5 +25,5 @@
       ]
     }
   ],
-  "version": "0.14.1"
+  "version": "0.15.0"
 }

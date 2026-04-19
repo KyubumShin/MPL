@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.14.1
-> **Last updated**: 2026-04-15
+> **Version**: v0.15.0
+> **Last updated**: 2026-04-19
 
 ---
 
@@ -42,7 +42,7 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 |-------|------|---------|-------------|--------|
 | `chain_seed.enabled` | boolean | `false` | Enable chain-scoped Seed Generator (Stage 1 feature flag) | `commands/mpl-run-execute.md` |
 | `chain_seed.max_chain_size` | number | `5` | Maximum phases per chain (enforced in chain-assignment derivation) | `docs/schemas/chain-assignment.md` |
-| `chain_seed.discovery_regen_enabled` | boolean | `true` | Allow Seed Generator re-invocation on Discovery Agent architectural verdict | `agents/mpl-discovery-agent.md` |
+| `chain_seed.discovery_regen_enabled` | boolean | `true` | Allow Seed Generator re-invocation on Discovery Agent architectural verdict. **⚠️ Stage 2 예정: `agents/mpl-discovery-agent.md` 파일 미구현. true 설정 시 실제 dispatch 불가.** | `agents/mpl-discovery-agent.md` |
 
 ## Context Monitor (#34, Stage 1)
 
@@ -73,8 +73,8 @@ Runner waits for Test Agent result vs terminates based on cache TTL.
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `discovery.scanner_enabled` | boolean | `true` | Enable Hook mechanical filter (Stage 4.2) | `hooks/mpl-discovery-scanner.mjs` |
-| `discovery.agent_enabled` | boolean | `false` | Enable Discovery Agent opus dispatch on filter hits (Stage 2 feature flag) | `agents/mpl-discovery-agent.md` |
-| `discovery.false_positive_threshold_pct` | number | `30` | Alert if Discovery Agent false_positive rate exceeds this (Gate 2 metric) | `agents/mpl-discovery-agent.md` |
+| `discovery.agent_enabled` | boolean | `false` | Enable Discovery Agent opus dispatch on filter hits (Stage 2 feature flag). **⚠️ Stage 2 미구현: `agents/mpl-discovery-agent.md` 파일 부재. `true` 설정 시 dangling reference — dispatch 실패.** | `agents/mpl-discovery-agent.md` |
+| `discovery.false_positive_threshold_pct` | number | `30` | Alert if Discovery Agent false_positive rate exceeds this (Gate 2 metric). **⚠️ Stage 2 미구현.** | `agents/mpl-discovery-agent.md` |
 
 ## Hat Model (PP-Proximity, v0.11.0)
 

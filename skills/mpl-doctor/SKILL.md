@@ -19,13 +19,20 @@ Record the MPL root path for all subsequent checks.
 
 ### Step 2: Run Diagnostics
 
-Delegate to the `mpl-doctor` agent with the MPL root path:
+Invocation mode decides which categories run:
+
+- `/mpl:mpl-doctor` (default) → Categories 1-12 (installation health)
+- `/mpl:mpl-doctor audit` → Categories 1-12 + **Category 13 Measurement Integrity Audit** (AD-0006, v0.15.0). Requires a finalized pipeline (`.mpl/state.json.finalize_done == true`); otherwise Category 13 returns "NOT APPLICABLE".
+
+Delegate to the `mpl-doctor` agent:
 
 ```
+audit_mode = (arguments include "audit") ? "yes" : "no"
+
 Task(
   subagent_type="mpl-doctor",
   model="haiku",
-  prompt="Run full MPL diagnostics on the plugin at {MPL_ROOT}. Check all 12 categories: plugin structure, hooks, agents (17), skills (11), commands (11), runtime state, tool availability, configuration, Node.js, MCP server (check node_modules!), QMD search, documentation. The project working directory is {CWD}."
+  prompt=f"Run MPL diagnostics on the plugin at {MPL_ROOT}. Check Categories 1-12 (installation health). audit_mode={audit_mode}. If audit_mode=yes AND .mpl/state.json.finalize_done==true, ALSO run Category 13 Measurement Integrity Audit (AD-0006 [a]-[g] checks) against the completed pipeline. Working dir: {CWD}."
 )
 ```
 

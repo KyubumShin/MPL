@@ -144,6 +144,23 @@ announce: "[MPL] {decisions_needed.length} architecture decisions recorded."
 
 These decisions are included in Decomposer input and every Phase Seed's constraints.
 
+### Common Rationalizations (AD-0006, #42 Phase 0 Agent Dispatch)
+
+exp9, exp10, exp11 세 실험 모두에서 `mpl-phase0-analyzer` 와 `mpl-codebase-analyzer` dispatch가 0회 관측됐다. 단, **greenfield (빈 codebase) 경우 codebase-analyzer skip은 정당**하다. phase0-analyzer는 Complex grade일 때 반드시 dispatch돼야 한다.
+
+| Rationalization | Why it's wrong |
+|---|---|
+| "이미 분석했으니 agent 불필요" | 당신(orchestrator)의 분석은 **자가 검토**. Phase 0 agents는 haiku 모델 + 별도 context로 **독립 관점**을 제공하는 것이 존재 이유. orchestrator가 inline 수행하면 AD-0003이 test-agent를 복원한 것과 같은 blind spot 문제가 발생. |
+| "greenfield라 분석할 게 없음" | **codebase-analyzer**는 납득 (코드 없음) 이지만 **phase0-analyzer는 다르다**. Phase 0 Enhanced는 scaffolding 결정/tech stack 선정/complexity grading을 다룬다 — greenfield에도 이것은 필요. Complex grade면 dispatch 의무. |
+| "api-contracts.md, type-policy.md 등 아티팩트를 내가 더 빨리 쓸 수 있음" | 속도 ≠ 품질. phase0-analyzer는 4개 아티팩트 세트를 일관된 schema로 생성하도록 프롬프트됨. orchestrator inline은 형식 drift가 발생. |
+| "Phase 0 Enhanced 전체를 skip하고 바로 decompose로 가도 됨" | complexity grade 자체가 decomposition의 입력. Enhanced skip은 decomposer에 "Simple이다"라고 거짓말하는 것과 동등. |
+
+### Red Flags — 즉시 정지
+
+- `.mpl/mpl/phase0/` 디렉토리에 api-contracts.md/type-policy.md/examples.md 등을 orchestrator가 직접 Write하고 있다면 → **정지**. `Task(subagent_type="mpl-phase0-analyzer")` dispatch가 선행돼야 한다.
+- `state.sprint_status.phase0_complete` 또는 `profile/phases.jsonl`에 `mpl-phase0-analyzer` 기록이 없는 채 Step 3 (decompose)로 진입하려 한다면 → **정지**.
+- complexity grade가 "Complex"로 판정됐는데 phase0-analyzer dispatch를 생략한다면 → **AD-0003이 test-agent에 대해 한 경고와 동일 — structural skip bug**.
+
 ## Step 2.5: Phase 0 Enhanced (Subagent Delegation) [F-36]
 
 > **v3.3 Change**: Changed from orchestrator directly measuring complexity + 4-step analysis
@@ -230,7 +247,61 @@ Task(subagent_type="mpl-phase0-analyzer", model="sonnet",
    (generates S-items for E2E phases) and Step 5.0 E2E Test (executes the command
    in the existing fallback chain).
 
-4. Proceed to Step 3 (Phase Decomposition)
+4. **Verification Command Capture (AD-0006, v0.15.0)**: establish the verification contract for gate-recorder hook consumption.
+
+   ```
+   verify_script = ".mpl/verify.sh"
+   verify_commands = state.verification_commands || []
+
+   # Path A (Primary): project-provided verify.sh script
+   if exists(verify_script):
+     announce: "[MPL] AD-0006: .mpl/verify.sh detected. gate-recorder hook will match its output."
+     # Record marker so doctor audit can confirm the setup
+     writeState(cwd, {
+       verification_strategy: "verify_script",
+       verification_commands: []   # hook infers from verify.sh output
+     })
+
+   # Path B (Fallback): heuristic matching by gate-recorder
+   # gate-recorder classifies common tool commands (pnpm lint/test/build,
+   # cargo test/clippy, playwright, etc.) automatically. No orchestrator action
+   # needed for stacks covered by the heuristic.
+
+   # Path C (Best-effort): Phase 0 interview for explicit commands
+   # Trigger only when Phase 0 Enhanced grade is Complex AND no verify.sh exists.
+   if phase0_summary.complexity?.grade == "Complex" and not exists(verify_script):
+     AskUserQuestion(
+       question: "프로젝트의 gate 검증 명령어를 알려주세요. (또는 .mpl/verify.sh 작성 권장)",
+       header: "검증 명령어 수집",
+       options: [
+         { label: "기본 heuristic 사용",
+           description: "pnpm lint/test/build, cargo test/clippy 등 자동 매칭 — 대부분 프로젝트에 충분" },
+         { label: "명령어 직접 지정",
+           description: "lint/test/build/e2e 명령을 각각 입력" },
+         { label: ".mpl/verify.sh 작성 예정",
+           description: "파이프라인 시작 후 사용자가 verify.sh 작성 → gate-recorder가 감지" }
+       ]
+     )
+     if answer starts with "명령어 직접":
+       # Collect gate-by-gate via free-text follow-up, then:
+       writeState(cwd, {
+         verification_strategy: "explicit",
+         verification_commands: [
+           { gate: "hard1_baseline", command: "<lint+build+typecheck>" },
+           { gate: "hard2_coverage", command: "<test runner>" },
+           { gate: "hard3_resilience", command: "<e2e or contract>" }
+         ]
+       })
+     else:
+       writeState(cwd, { verification_strategy: "heuristic", verification_commands: [] })
+   ```
+
+   **Design note**: `hooks/mpl-gate-recorder.mjs` writes `state.gate_results[gate_name]` structurally
+   regardless of which path was chosen. verify.sh is only documentation of project intent;
+   the hook fires on every Bash completion whose command matches a known gate pattern.
+   SSOT stays `state.gate_results` per AD-0006.
+
+5. Proceed to Step 3 (Phase Decomposition)
 
 > **Fallback**: If mpl-phase0-analyzer agent fails, orchestrator performs analysis directly (see detailed spec below).
 > In that case, tool calls accumulate in orchestrator context, increasing compaction risk.

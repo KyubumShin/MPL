@@ -56,7 +56,7 @@ for each p in patterns:
 // Metric recording (EXPERIMENTAL)
 if matches.length > 0:
   metric = { timestamp: now_iso(), patterns_matched: matches.length, details: matches }
-  Bash("echo '" + JSON.stringify(metric) + "' >> .mpl/mml/pattern-metrics.jsonl")
+  Bash("echo '" + JSON.stringify(metric) + "' >> .mpl/mpl/pattern-metrics.jsonl")
   announce: "[MPL] Hard 1 Step 0 (EXPERIMENTAL): {matches.length} security pattern matches found. Metrics recorded. (non-blocking)"
 
 // EXPERIMENTAL: do NOT fail Hard 1 on pattern matches.
@@ -178,6 +178,23 @@ Run the full test suite **including accumulated regression tests**:
   ```
 - Combined pass_rate (current + regression) must be >= 95% to pass
 - If pass_rate < 95%: enter fix loop (see 4.6)
+
+### Common Rationalizations (AD-0006, AD-0004, F-40 Test Agent Dispatch)
+
+exp9 (4.6) 와 exp10 (4.6) 에서 `mpl-test-agent` dispatch가 각각 0회 관측됐고 exp11 (4.7) 에서도 31 phase 중 1회에 그쳤다. F-40 mandatory dispatch를 skip하려는 합리화는 **모두 잘못**이다.
+
+| Rationalization | Why it's wrong |
+|---|---|
+| "phase-runner가 phase 안에서 이미 충분한 테스트를 작성함" | phase-runner는 **코드 작성자**. 같은 에이전트가 자기 코드에 대한 테스트를 작성하면 **shared blind spots** — AD-0003이 test-agent를 복원한 이유가 정확히 이것. code author ≠ test author 원칙이 F-40의 핵심이다. |
+| "mandatory domain 아니니까 skip 가능" | mandatory_domains = ui/api/algorithm/db/ai 다섯. 대부분 실 작업은 이 중 하나 이상에 걸친다. "mandatory 아님" 판단은 phase_domain 필드를 확인한 뒤에만 성립. |
+| "test 파일이 이미 있으니 굳이 dispatch 안 해도 됨" | 존재하는 test 파일이 **code author가 작성한 것**이면 F-40이 제공하는 독립 검증 이점이 없다. test-agent는 interface_contract를 기준으로 **다른 관점**의 테스트를 추가하는 것이 목적. |
+| "토큰 아끼려면 test-agent를 건너뛰는 게 효율적" | 품질 > 효율 (MPL 불변 원칙). test-agent는 sonnet이라 단가 낮음. 거짓 "✅ green" 릴리스로 인한 재작업 비용이 훨씬 크다. |
+| "pass_rate가 100%니까 추가 검증 불필요" | pass_rate 100%는 **code author가 자기 테스트를 돌린 결과**. "자기 테스트를 자기가 돌려서 통과"는 tautology이지 증거가 아니다. |
+
+### Red Flags — 즉시 정지하고 F-40 실행
+
+- mandatory-domain phase가 존재하는데 `state.test_agent_dispatched[phase_id]`가 비어있다면 → **정지**. Task(subagent_type="mpl-test-agent") 블록을 실행.
+- test-agent dispatch 후 응답을 읽지 않고 Hard 2 PASS로 판정하고 있다면 → **정지**. test-agent가 반환한 실제 결과 파싱 후 판정.
 
 **Zero-Test Block:**
 ```

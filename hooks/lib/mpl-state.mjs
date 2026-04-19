@@ -45,11 +45,24 @@ const DEFAULT_STATE = {
     in_progress_todos: 0,
     failed_todos: 0
   },
+  // AD-0006: structured gate evidence recorded by mpl-gate-recorder.mjs hook.
+  // Legacy keys (hard1_passed, etc.) are still read by some older code paths;
+  // gate-recorder writes the new structured entries under hard1_baseline, etc.
   gate_results: {
     hard1_passed: null,
     hard2_passed: null,
-    hard3_passed: null
+    hard3_passed: null,
+    hard1_baseline: null,   // { command, exit_code, stdout_tail, timestamp }
+    hard2_coverage: null,
+    hard3_resilience: null
   },
+  // AD-0006 (AD-0004 bridge): test-agent dispatch record per phase.
+  // Populated by mpl-gate-recorder.mjs hook on Task|Agent(mpl-test-agent) completion.
+  test_agent_dispatched: {},
+  // AD-0006: verification contract captured by Phase 0 Enhanced Step 4.
+  // "verify_script" | "explicit" | "heuristic" | null (pre-Phase-0 default).
+  verification_strategy: null,
+  verification_commands: [],   // optional explicit per-gate commands (Path C)
   fix_loop_count: 0,
   max_fix_loops: 10,
   compaction_count: 0,

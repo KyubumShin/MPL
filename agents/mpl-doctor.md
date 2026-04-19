@@ -141,6 +141,50 @@ disallowedTools: Write, Edit, Task
     - Check `MPL/README.md` exists
     - Check `MPL/docs/design.md` exists
     - WARN if missing (functional but undocumented)
+
+    ### Category 13: Measurement Integrity Audit (AD-0006, v0.15.0)
+    This category runs only when invoked as `mpl-doctor audit` (not default). Validates that a **completed** pipeline produced machine-evidence gate records and that Anti-rationalization guardrails held. Run against `.mpl/state.json` and `.mpl/mpl/` of a finalized run.
+
+    **Preconditions**: `.mpl/state.json.current_phase == "completed"` AND `.mpl/state.json.finalize_done == true`. Otherwise report "NOT APPLICABLE (pipeline not finalized)" and skip.
+
+    **Checks** (jq expressions, all mechanical):
+
+    - **[a] gate_results non-null** — every hard{1,2,3}_{baseline,coverage,resilience} entry has a `{command, exit_code, stdout_tail, timestamp}` object.
+      `jq -e '[.gate_results.hard1_baseline, .gate_results.hard2_coverage, .gate_results.hard3_resilience] | map(. != null) | all' state.json`
+      FAIL if any null. Evidence: which gate is null.
+
+    - **[b] finalize ↔ exit_code 일치** — if any gate entry has `exit_code != 0`, the finalize report / RUNBOOK must NOT contain "✅ clean" / "all green" / "PASS" for that gate. Grep finalize output vs state.
+      FAIL on mismatch. Evidence: the contradicting string + location.
+
+    - **[c] launch_smoke 포함** — if `package.json.scripts.{start,dev,serve}` OR `Cargo.toml` has `[[bin]]`/`default-run` OR `pyproject.toml` has `[project.scripts]`, then some phase's `verification_plan.s_items[]` must contain a `launch_smoke` criterion.
+      `jq -e '.phases[].verification_plan | tostring | test("launch_smoke|smoke|launch")' decomposition.yaml`
+      WARN (not FAIL) if missing — project may legitimately have no runtime entry.
+
+    - **[d] self-report vs 실측 drift** — for each gate with `exit_code != 0`, re-run the recorded `command` and compare. If rerun now passes (exit 0), WARN "post-hoc fix applied". If rerun still fails, FAIL "self-report claimed PASS but actual exit != 0" (extremely rare once gate-recorder is in place — indicates bypass).
+
+    - **[e] null 상태 PASS 단정 0건** — search finalize output / PR body / RUNBOOK for `"✅"` or `"PASS"` string proximate to a gate name whose `state.gate_results[name] == null`.
+      FAIL on any match. Evidence: the offending snippet + state null keys.
+
+    - **[f] chain_seed 활성화 검증** — if `.mpl/config.json.chain_seed.enabled == true`:
+      - `.mpl/mpl/chain-assignment.yaml` must exist (decompose Step 3-G fired)
+      - `.mpl/mpl/chains/{id}/chain-seed.yaml` must exist for at least one non-`no-chain` chain
+      - `profile/phases.jsonl` must include at least one `mpl-seed-generator` dispatch
+      FAIL if enabled=true but any of the three conditions missing. WARN if enabled=false and no chain artifacts (expected).
+
+    - **[g] test_agent dispatch 기록** — if decomposition has any phase with `phase_domain ∈ {ui, api, algorithm, db, ai}`, `state.test_agent_dispatched` must have at least one entry. FAIL if zero (AD-0004 gap repeat). WARN if dispatched_count < mandatory_domain_count (partial coverage).
+
+    **Output format for Category 13**:
+    ```
+    ### Measurement Integrity Audit
+    [a] gate_results non-null:      ✓ 3/3     or ✗ missing: hard3_resilience
+    [b] finalize ↔ exit_code:       ✓         or ✗ "✅ clean" found but hard1_baseline.exit_code=1
+    [c] launch_smoke present:       ✓         or ⚠️ project has runtime entry but no launch_smoke s-item
+    [d] self-report drift:          ✓         or ⚠️ 1 gate post-hoc fixed
+    [e] null state PASS claim:      ✓ 0건     or ✗ 2건: hard3 PASS claimed but state.hard3_resilience=null
+    [f] chain_seed integrity:       ✓         or ✗ enabled=true but chain-assignment.yaml missing
+    [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} mandatory-domain phases
+    Result: PASS (7/7) / FAIL (X/7) / WARN (Y/7)
+    ```
   </Diagnostic_Categories>
 
   <Output_Schema>

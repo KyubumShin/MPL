@@ -124,6 +124,8 @@ Task(subagent_type="mpl-decomposer", model="opus",
      ```
      This ensures Step 5.0 E2E Test has a concrete S-item to execute.
 
+     **AD-0006 (v0.15.0) — Launch smoke deterministic detection**: if any phase touches a runtime entry point detected mechanically from the project manifest, include a `launch_smoke` S-item on that phase. Detection triggers (pure file existence, no model judgment): `package.json` has `scripts.start`, `scripts.dev`, or `scripts.serve` · `Cargo.toml` has `[[bin]]` OR `[package].default-run` · `pyproject.toml` has `[project.scripts]` · project root has a `Dockerfile` ENTRYPOINT. Emit the matching smoke: `tauri dev --no-open` + liveness for Tauri, `<bin> --help` exit 0 for CLI, startup + `curl /health` for servers, `docker run --rm <image> --help` for containers. This closes the exp9 `cargo test` pass → `cargo run` abort class of failures (MPL#38).
+
      ## PP-Proximity Classification Rules
      Assign `pp_proximity` to each phase:
      - **pp_core**: phase impact files overlap with files referenced in pivot-points.md
@@ -479,6 +481,24 @@ gap_analysis = Read(".mpl/mpl/pre-execution-analysis.md")
 ## Step 3-G: Chain Derivation (#34 Stage 1)
 
 **Gated**: Runs only if `.mpl/config.json` has `chain_seed.enabled: true` (default `false` in Stage 1).
+
+### Common Rationalizations (AD-0006, #41)
+
+exp10 (2026-04-16) 에서 `chain_seed.enabled: true`가 명시됐음에도 Step 3-G가 silent skip되어 `chain-assignment.yaml` 미생성 → `chains/no-chain/` fallback이 관측됐다. 다음 합리화는 **모두 잘못**이다. Step에 진입하기 전 반드시 점검하라.
+
+| Rationalization | Why it's wrong |
+|---|---|
+| "Stage 1 default-off이니까 skip해도 됨" | default-off는 config 미설정 시의 기본값. 사용자가 `enabled: true`로 명시했다면 skip은 **사용자 의사 위반**이다. |
+| "chain 없이 no-chain fallback으로도 phase-runner가 잘 돌아감" | no-chain은 **성능 저하 모드**. opus seed generator의 chain-scoped 이점(baton-pass, 재사용 캐시)을 전부 잃는다. chain_seed=true 실험의 측정 의미가 사라진다. |
+| "decomposition.yaml의 depends_on 필드가 이미 의존성을 담고 있음" | chain-assignment.yaml은 phase 간 **data-flow edge 그래프** — depends_on과 다른 레이어다. 양쪽 모두 필요. |
+| "chain derivation 알고리즘이 복잡해 보이니 스펙 뒤에서 다루자" | 이 섹션 아래에 전체 알고리즘이 명시돼 있다. 읽지 않고 스킵하는 것은 **directive 위반**이다. |
+
+### Red Flags — 즉시 정지하고 재실행
+
+- `.mpl/config.json`에 `chain_seed.enabled: true` 존재 → Step 3-G를 건너뛰고 Step 4로 진입하려 한다면 **정지**. config를 다시 Read하고 chain derivation 블록을 실행하라.
+- Step 4.0.5 진입 시점에 `.mpl/mpl/chain-assignment.yaml`이 없다면 → Step 3-G가 실행되지 않은 것. Step 3-G로 **되돌아가서 실행**하라.
+- `announce: "[MPL] skip Step 3-G"` 출력이 config.enabled=true와 함께 나타난다면 → **fatal inconsistency**. 즉시 user에게 에스컬레이션.
+
 
 After decomposition is saved (Step 3) and validated (Step 3-F, 3-B), derive chain structure from phase edges and proximity. Output: `.mpl/mpl/chain-assignment.yaml`.
 

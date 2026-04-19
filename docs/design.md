@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.14.1 Design Document
+# MPL (Micro-Phase Loop) v0.15.0 Design Document
 
 ## 1. Overview
 
@@ -253,9 +253,9 @@ MPL supports natural resume through per-phase state persistence. When a session 
 
 ## 4. Agent Catalog
 
-MPL uses 7 specialized agents in the active catalog (v0.12.2: consolidated from 15 — see v0.11.0 changelog for details). Each agent has clear role boundaries and tool restrictions.
+MPL uses 9 specialized agents in the active catalog (v0.14.1: consolidated from 15 in v0.11.0, restored mpl-test-agent in AD-0003, added mpl-seed-generator in #34). Each agent has clear role boundaries and tool restrictions.
 
-> **Tree / catalog mismatch (2026-04-12)**: after the AD-0003 partial revert, `agents/` contains 8 files. `mpl-test-agent.md` is present in the tree (restored to undo the accidental v0.12.2 deletion) but **not yet catalogued here** because its long-term architectural role — separate agent (option A) vs inlined into `mpl-phase-runner` (option B) vs redesigned 3-role triangulation (option C) vs dropped in favor of mechanical Hard 3 (option D) — is deferred to the reconciliation audit. Once the audit decides, this section will be updated to match. See `docs/decisions/AD-0003-v012.2-accidental-agent-deletion.md`.
+> **AD-0004 status (2026-04-16)**: `mpl-test-agent` is restored and catalogued (AD-0003). Its dispatch site exists at `mpl-run-execute.md:511` and `mpl-run-execute-gates.md:154` but runtime dispatch was 0 in both exp9 and exp10 — empirical measurement gap remains. `mpl-seed-generator` was added in #34 (v0.14.0) for chain-scoped seed; dispatch gated by `chain_seed.enabled` config which failed to activate in exp10 (#41).
 
 ### Pre-Execution Agents (Analysis/Planning)
 
@@ -473,6 +473,54 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.15.0 — Measurement Integrity (AD-0006) (2026-04-19)
+
+Eliminates the self-report vs runtime reality gap exposed by exp9 (4.6), exp10 (4.6), and exp11 (4.7). Orchestrator `"✅ all green"` claims were shown to diverge from independent `pnpm lint` exit codes (1 → 17 → 53 errors across three experiments while state.json.gate_results stayed null throughout). v0.15.0 introduces a machine-evidence channel, RUNBOOK.md parsing removal, launch smoke deterministic detection, and Anti-rationalization guardrails on four critical skip sites.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| gate_results write path | initialized to null by phase-controller, never populated | `hooks/mpl-gate-recorder.mjs` (PostToolUse Bash\|Task\|Agent) writes `{command, exit_code, stdout_tail, timestamp}` per gate; heuristic classifies pnpm/cargo/playwright/tsc/eslint commands framework-agnostically | Hook (new) | #38/#39: structural channel for machine evidence |
+| finalize gate source | `Read(".mpl/mpl/RUNBOOK.md") → extract "3 Hard Gate Quality Results"` (self-report parsing) | `state.json.gate_results` SSOT via `format_gate_summary()`; null → NOT EVALUATED, exit != 0 → PARTIAL (exit N), exit 0 → PASS | Skill behaviour | AD-0006: RUNBOOK is natural-language echo chamber; only exit codes count |
+| sprint_status drift | `completed_todos: 0/0` even after 14 phases complete (exp10) | gate-recorder hook increments `completed_todos` from disk truth (count of phase-N/state-summary.md) on every phase-runner completion | Hook branch | #35 drift subset |
+| test_agent_dispatched field | not tracked | new `state.test_agent_dispatched[phase_id] = {timestamp, prompt_len, response_len}` populated on Task(mpl-test-agent) completion | Schema + hook | AD-0004 empirical gap closure |
+| Launch smoke detection | Decomposer produced zero launch_smoke s-items across 14 phases (exp10) | `commands/mpl-run-decompose.md` Step 3 emits launch_smoke when `package.json.scripts.{start,dev,serve}`, `Cargo.toml` has `[[bin]]`/`default-run`, `pyproject.toml` has `[project.scripts]`, or Dockerfile ENTRYPOINT exists — deterministic file-existence detection, no model judgment | Prompt contract | #38: cargo test pass → cargo run abort class |
+| Verification contract | implicit — orchestrator decided ad hoc how to verify | Three explicit paths in Phase 0 Enhanced Step 4: (A) `.mpl/verify.sh` primary, (B) heuristic fallback handled by gate-recorder, (C) Phase 0 interview when Complex AND no verify.sh. `state.verification_strategy` records which path is active | Skill + schema | AD-0006: framework-agnostic externalisation |
+| Anti-rationalization guardrails | orchestrator silent-skipped Step 3-G (chain derivation), F-40 (test-agent), Phase 0 Enhanced (analyzer), and gate self-report across three experiments | "Common Rationalizations" + "Red Flags" sections added to `mpl-run-decompose.md` Step 3-G, `mpl-run-execute-gates.md` (F-40), `mpl-run-finalize.md` (Gate 집계), `mpl-run-phase0-analysis.md` Step 2.5 | Prompt contract | #44 (agent-skills pattern): persuasion layer orthogonal to hook enforcement |
+| mpl-doctor audit mode | installation health only (Categories 1-12) | `/mpl:mpl-doctor audit` adds Category 13 Measurement Integrity Audit: `[a]` gate_results non-null, `[b]` finalize ↔ exit code, `[c]` launch_smoke, `[d]` self-report drift, `[e]` null PASS claim, `[f]` chain_seed integrity, `[g]` test_agent coverage | Agent (new category) | AD-0006 observability of the fix itself |
+| Path typos + catalog drift | `.mpl/mml/pattern-metrics.jsonl`, `.mpl/mml/phases/*/reflections/`; design.md "7 specialized agents"; "3H+1A Gate" in three files (Advisory removed in v0.12.3); discovery.agent_enabled with no agent file warning | `.mpl/mpl/` unified; "9 specialized agents" with AD-0004 status note; "3 Hard Gate" unified; config-schema.md has "⚠️ Stage 2 미구현 — dangling reference" warnings on `discovery.agent_enabled`/`_regen_enabled`/`false_positive_threshold_pct` | Cosmetic + doc | Tree/documentation drift cleanup |
+
+**Affected files:**
+- New hook: `hooks/mpl-gate-recorder.mjs`
+- Modified hook registration: `hooks/hooks.json` (PostToolUse Bash|Task|Agent matcher)
+- Modified schema: `hooks/lib/mpl-state.mjs` (gate_results structured keys, test_agent_dispatched, verification_strategy, verification_commands)
+- Modified commands: `mpl-run-decompose.md` (launch smoke + Anti-rationalization), `mpl-run-execute-gates.md` (Anti-rationalization, mml→mpl), `mpl-run-finalize.md` (channel switch + Anti-rationalization, mml→mpl, 3H+1A→3 Hard Gate), `mpl-run-phase0-analysis.md` (Step 4 verification contract + Anti-rationalization), `mpl-run-execute-parallel.md` + `mpl-run-execute-context.md` (3H+1A→3 Hard Gate)
+- Modified agents: `mpl-doctor.md` (Category 13)
+- Modified skills: `mpl-doctor/SKILL.md` (audit mode), `docs/config-schema.md` (Stage 2 warnings, version), `docs/design.md` (agent count, AD-0004 status), `docs/roadmap/overview.md` (mml→mpl)
+- New decision doc: `docs/decisions/AD-0006-v0.15.0-measurement-integrity.md` (accepted 2026-04-19)
+
+**Breaking changes:** minor — finalize no longer falls back to RUNBOOK.md natural-language parsing when `state.gate_results` is null. Pipelines pre-v0.15.0 that never populated gate_results will now finalize with every gate marked "NOT EVALUATED" instead of a fabricated "✅". This is the intended correction. Legacy `hard1_passed/hard2_passed/hard3_passed` boolean fields remain in the schema for backwards compatibility but are no longer read by finalize.
+
+**Evidence grounding:** exp9 (`wiki/scratch/2026-04-15/resume.md`), exp10 (`playground/ygg-exp10/observations/dispatch-log.jsonl` + `harness_lab/analysis/yggdrasil-exp10-harness-chain-report.md`), exp11 (`playground/ygg-exp11/.mpl/mpl/profile/phases.jsonl`), 4-perspective debate (2026-04-15), agent-skills repo analysis (`wiki/scratch/2026-04-16/agent-skills-repo-analysis.md`).
+
+### v0.14.2 — QMD Reference Removal (2026-04-15)
+
+Remove all QMD (Quick Markdown Search) references per 2026-04-11 removal decision. QMD was "a solution without a problem" — 260KB wiki / 1M context = ~3%, making search unnecessary.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Doctor categories | 12 categories (Category 11: QMD Search Engine) | 11 categories (QMD category removed, Documentation renumbered to 11) | cleanup | QMD removed per 4/11 decision — doctor was still recommending installation |
+| Setup wizard | Step 3g (QMD install/register/MCP) + Step 7 (QMD setup) | Steps removed; Step 7b renumbered to Step 7 | cleanup | Dead code — QMD setup ran but results were never used |
+| Success criteria type | `command/test/file_exists/grep/qmd_verified/description` | `command/test/file_exists/grep/description` | cleanup | `qmd_verified` type was defined but never used in any decomposition.yaml |
+| Phase 0 QMD mode | `qmd_mode` detection + QMD-First Scout branch + cache key inclusion | Removed; grep-only is the sole mode | cleanup | QMD Scout integration was designed but never activated |
+| Standalone fallback | QMD Fallback Policy section in docs/standalone.md | Section removed | cleanup | No QMD means no fallback needed |
+| QMD verifier module | `hooks/lib/mpl-qmd-verifier.mjs` (215 lines, Search-then-Verify cache) | File deleted | cleanup | No imports from any other file; entirely unused |
+| QMD setup reference | `skills/mpl-setup/references/qmd-setup.md` (86 lines) | File deleted | cleanup | Referenced only from removed Step 3g |
+| Auto-permit allowlist | `'qmd '` in SAFE_BASH_PREFIXES | Entry removed | cleanup | No qmd commands to permit |
+
+**Affected files:** `agents/mpl-doctor.md`, `skills/mpl-setup/SKILL.md`, `skills/mpl-doctor/SKILL.md`, `commands/mpl-run-phase0.md`, `commands/mpl-run-phase0-analysis.md`, `commands/mpl-run-decompose.md`, `commands/mpl-run-execute-context.md`, `docs/design.md`, `docs/standalone.md`, `docs/REFERENCES.md`, `docs/config-schema.md`, `docs/roadmap/pending-features.md`, `README.md`, `hooks/mpl-auto-permit.mjs`
+**Deleted files:** `hooks/lib/mpl-qmd-verifier.mjs`, `skills/mpl-setup/references/qmd-setup.md`
+**Breaking changes:** NONE. QMD was optional with grep fallback; all paths now use grep directly.
 
 ### v0.14.1 — Resume Workflow Data Integrity Patch (#35/#36/#37) (2026-04-15)
 

@@ -240,7 +240,7 @@ Execute 4-Tier Memory protocol:
     template) — no LLM parsing needed, mechanical extraction only.
 
     ```
-    reflection_files = Glob(".mpl/mml/phases/*/reflections/attempt-*.md")
+    reflection_files = Glob(".mpl/mpl/phases/*/reflections/attempt-*.md")
 
     for each file in reflection_files:
       content = Read(file)
@@ -250,7 +250,7 @@ Execute 4-Tier Memory protocol:
 
       tag = tag_match[1]
       // Extract phase_id and attempt_id from path
-      // Pattern: .mpl/mml/phases/{phase_id}/reflections/attempt-{N}.md
+      // Pattern: .mpl/mpl/phases/{phase_id}/reflections/attempt-{N}.md
       phase_id = extract_phase_id(file.path)
       attempt_id = extract_attempt_id(file.path)
 
@@ -393,8 +393,12 @@ user's original prompt contains "PR", "pull request", or "ship".
 
 ```
 if config.auto_pr?.enabled or task_prompt_mentions_pr:
-  // Gather PR context
-  gate_results = Read(".mpl/mpl/RUNBOOK.md") → extract "3H+1A Gate Quality Results" section
+  // Gather PR context — AD-0006: state.json SSOT only, no RUNBOOK parsing.
+  // gate-recorder hook populates state.gate_results[hard1_baseline/hard2_coverage/hard3_resilience]
+  // with {command, exit_code, stdout_tail, timestamp}. Orchestrator self-report ("all green")
+  // is NOT evidence — only exit_code == 0 counts as PASS.
+  state = readState(cwd)
+  gate_results = format_gate_summary(state.gate_results)
   deferred = Read(".mpl/mpl/deferred-review.md") or "None"
   pp_summary = Read(".mpl/pivot-points.md") → first 3 PPs
 
@@ -419,6 +423,61 @@ if config.auto_pr?.enabled or task_prompt_mentions_pr:
 else:
   announce: "[MPL] Step 5.3b: PR creation skipped (not enabled in config or prompt)"
 ```
+
+### Common Rationalizations (AD-0006, #38/#39 Gate 집계)
+
+exp9 (4.6), exp10 (4.6), exp11 (4.7) 모두에서 orchestrator가 `gate_results: null`인 상태로 "✅ all green"을 발행했다. 독립 `pnpm lint` 실측은 각각 exit 1 (1→17→53 errors, 악화 추세). 다음 합리화는 **모두 잘못**이다.
+
+| Rationalization | Why it's wrong |
+|---|---|
+| "phase-runner가 'all tests passed'라고 보고했으니 Hard 2 ✅" | self-report는 **증거가 아니다**. exit code가 `state.gate_results.hard2_coverage.exit_code`에 기록되지 않았다면 pass 여부를 모른다. RUNBOOK.md의 자연어 서술도 증거 아님. |
+| "RUNBOOK에 적힌 gate 결과를 취합하면 됨" | RUNBOOK은 orchestrator의 **자가 서술**. 동일 세션이 쓴 문서를 취합하는 것은 echo chamber. AD-0006은 `state.json.gate_results` machine evidence만 인정하도록 명시. |
+| "warning은 있지만 error 없으니 clean" | exit 1 + warnings는 **NOT clean**. exp9에서 "26 warnings만 있고 pass"라고 주장했으나 실제로는 `exit 1` — "warning ok" 합리화가 정확히 실패한 지점. |
+| "Phase-runner 결과의 stdout 꼬리가 녹색이면 PASS로 판정 가능" | stdout 색/아이콘은 UI 요소일 뿐. `{exit_code: 0}`만이 PASS 증거. |
+| "format_gate_summary가 NOT EVALUATED를 뱉으면 그냥 공란으로 두자" | NOT EVALUATED를 공란 처리하면 **미검증 gate가 PASS로 보이게 된다** — 정확히 이 세 실험에서 발생한 거짓 보고 패턴. NOT EVALUATED는 반드시 표기. |
+
+### Red Flags — 즉시 정지
+
+- Finalize 보고서에 "✅ clean" / "all green"을 쓰려고 하는데 `state.gate_results.{hard1_baseline, hard2_coverage, hard3_resilience}` 중 하나라도 `null`이거나 `exit_code != 0`이면 → **정지**. "PARTIAL" 또는 "NOT EVALUATED"로 다시 쓰라.
+- PR 본문의 Quality Gate Results 섹션에 `format_gate_summary()` 출력 대신 직접 작성한 문구를 넣으려 한다면 → **정지**. SSOT 위반.
+- `state.gate_results.hard1_baseline.exit_code == 1` 인데 `three_gate_results.hard1_status: "PASS"`를 기록하려 한다면 → **fatal inconsistency**. 자기 모순이다.
+
+**`format_gate_summary(gate_results)` contract (AD-0006)** — builds a Markdown table
+purely from `state.json.gate_results` without parsing RUNBOOK.md. This is the single
+canonical path for gate status in finalize output.
+
+```
+function format_gate_summary(gr):
+  gates = [
+    ["Hard 1 Baseline", gr.hard1_baseline],
+    ["Hard 2 Coverage", gr.hard2_coverage],
+    ["Hard 3 Resilience", gr.hard3_resilience],
+  ]
+  lines = ["| Gate | Status | Command | Exit | Evidence |",
+           "|---|---|---|---|---|"]
+  for name, entry in gates:
+    if entry is null:
+      status = "NOT EVALUATED"
+      cmd = exit = tail = "—"
+    elif entry.exit_code == 0:
+      status = "PASS"
+      cmd = entry.command
+      exit = 0
+      tail = entry.stdout_tail[0:60] + "…"
+    else:
+      status = f"PARTIAL (exit {entry.exit_code})"
+      cmd = entry.command
+      exit = entry.exit_code
+      tail = entry.stdout_tail[0:60] + "…"
+    lines.append(f"| {name} | {status} | `{cmd}` | {exit} | `{tail}` |")
+  return "\n".join(lines)
+```
+
+**Rules enforced by this function (AD-0006)**:
+- "✅ clean" / "all green" strings are **forbidden** when any `entry.exit_code != 0`.
+- `null` entry → "NOT EVALUATED" (never "PASS" by absence).
+- The `three_gate_results` metrics block at Step 5.4 is also derived from
+  `state.gate_results`, not from RUNBOOK parsing.
 
 Config example (`.mpl/config.json`):
 ```json
@@ -456,9 +515,11 @@ Save to `.mpl/mpl/metrics.json`:
   "tradeoff_analysis": { "aggregate_risk": "LOW", "irreversible_count": 0 },
   "critic_assessment": "READY",
   "three_gate_results": {
-    "hard1_pass_rate": 100,
-    "hard2_verdict": "PASS",
-    "hard3_pass": true
+    // AD-0006: derived from state.gate_results (machine evidence, not self-report).
+    // hard{1,2,3}_status ∈ { "PASS" (exit 0), "PARTIAL" (exit != 0), "NOT_EVALUATED" (null) }
+    "hard1_status": "PASS", "hard1_exit_code": 0, "hard1_command": "pnpm lint && pnpm build",
+    "hard2_status": "PASS", "hard2_exit_code": 0, "hard2_command": "pnpm test --run",
+    "hard3_status": "NOT_EVALUATED", "hard3_exit_code": null, "hard3_command": null
   },
   "verification_plan": { "a_items": 0, "s_items": 0, "h_items": 0 },
   "triage": { "interview_depth": "full", "prompt_density": 3 }

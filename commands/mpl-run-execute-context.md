@@ -7,7 +7,7 @@ description: MPL Execute Protocol - Context Assembly, Memory Loading, Checkpoint
 This file contains the detailed Context Assembly protocol for MPL Phase Execution.
 Load this when entering Step 4.1 during phase execution.
 
-See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-gates.md` (3H+1A Gate system), `mpl-run-execute-parallel.md` (parallel dispatch).
+See also: `mpl-run-execute.md` (core loop), `mpl-run-execute-gates.md` (3 Hard Gate system), `mpl-run-execute-parallel.md` (parallel dispatch).
 
 ---
 
