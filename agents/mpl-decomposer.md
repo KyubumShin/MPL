@@ -106,6 +106,43 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       - `algorithm`: optimization, data structures, complex logic
       - `general`: mixed or uncategorized
 
+    Step 7.5: E2E Scenario Composition (AD-0008, v0.15.2)
+      Read `.mpl/mpl/core-scenarios.yaml` (written by Phase 0 Enhanced Step 2.5.3).
+      If the file is missing OR empty, SKIP this step (pipeline proceeds without
+      AD-0008 enforcement; doctor audit [h] will flag as WARN).
+
+      Otherwise, derive `e2e_scenarios[]` by composing cores:
+
+      Composition rule:
+        - Each e2e_scenario MUST compose ≥2 core scenarios spanning ≥2 phases
+        - Exception: a single core qualifies when its flow has ≥3 steps AND
+          touches ≥2 phase impact files (complex-enough single-feature
+          integration test)
+        - required: true when composed_from contains any core with must_work=true
+        - test_command MUST be executable (e.g., "pnpm playwright test e2e/
+          scenario-1.spec.ts"), NEVER a placeholder like "TODO(integration-ci)"
+          or "manual verification"
+
+      Infrastructure detection:
+        - Scan provided-specs + decomposition for existing E2E stack:
+          playwright in package.json, cypress, wdio, existing e2e/ directory
+        - If NONE found, insert a new phase at tier-1:
+          id: "phase-e2e-infra"
+          name: "E2E Infrastructure Setup"
+          phase_domain: "test"
+          pp_proximity: "non_pp"
+          test_agent_required: false
+          test_agent_rationale: "Tooling setup — no code path to verify"
+          success_criteria:
+            - "playwright config 존재, smoke run 성공"
+            - "e2e/ 디렉토리 구조 준비"
+          impact: ["playwright.config.ts", "e2e/smoke.spec.ts", "package.json"]
+        - This guarantees scenario test_command fields are executable at finalize.
+
+      After composition, emit `e2e_scenarios[]` in the top-level output; the
+      post-decompose step (commands/mpl-run-decompose.md Step 3-H) extracts and
+      writes `.mpl/mpl/e2e-scenarios.yaml`.
+
     Step 8: PP-proximity classification
       For each phase, assign `pp_proximity`:
       - `pp_core`: directly implements a CONFIRMED PP
@@ -298,6 +335,31 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
         parallel: boolean
 
     decomposition_rationale: string
+
+    # AD-0008 (v0.15.2): E2E scenario composition from core scenarios.
+    # REQUIRED top-level field when .mpl/mpl/core-scenarios.yaml exists.
+    # Written to .mpl/mpl/e2e-scenarios.yaml by the post-decompose step
+    # (commands/mpl-run-decompose.md Step 3-H). Gate-recorder matches Bash
+    # commands against test_command to populate state.e2e_results;
+    # hooks/mpl-require-e2e.mjs blocks finalize_done=true until every required
+    # scenario has a passing entry OR an override.
+    e2e_scenarios:
+      - id: "E2E-N"                    # stable id (E2E-1, E2E-2, ...)
+        composed_from: [string]         # ≥2 core-scenario ids preferred (cross-feature)
+        title: string                   # human-readable composed journey
+        user_story: string              # one sentence from user POV
+        phases_involved: [string]       # phase ids this scenario exercises
+        test_command: string            # EXECUTABLE command, NOT "TODO(ci)" placeholder
+        acceptance_criteria: string     # observable exit-0 criterion
+        required: boolean               # default true when composed_from includes must_work core
+        rationale: string               # why this composition matters
+    # Composition rule (Step 7.5):
+    #   - Each e2e_scenario must compose ≥2 core scenarios spanning ≥2 phases
+    #   - Exception: a single core may become a 1:1 E2E when flow has ≥3 steps
+    #     AND touches ≥2 phase impact files (complex-enough integration)
+    #   - Infrastructure detection: if project lacks e2e runner (no playwright/
+    #     cypress in package.json, no e2e/ directory), INSERT a
+    #     "phase-e2e-infra" phase at tier-1 BEFORE first scenario-exercising phase
 
     risk_assessment:
       risks:

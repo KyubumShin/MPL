@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.15.1
+# MPL (Micro-Phase Loop) v0.15.2
 
 **예방이 치료보다 낫다. 명세가 디버깅보다 낫다.**
 

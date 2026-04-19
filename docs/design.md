@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.15.1 Design Document
+# MPL (Micro-Phase Loop) v0.15.2 Design Document
 
 ## 1. Overview
 
@@ -473,6 +473,30 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.15.2 — E2E Scenario Enforcement (AD-0008) (2026-04-19)
+
+ygg-exp11 observed 42 of 80 E2E specs committed as `TODO(segment-7-integration-ci)` placeholder stubs — scenarios existed as skeletons but never executed. HA-06's single `e2e_command` field captured only a boolean and one smoke command, with no per-scenario content or structural enforcement. v0.15.2 adds two-layer scenario design (Phase 0 Enhanced derives core scenarios from PPs, Decomposer composes them into E2E scenarios) plus hook-level block on `finalize_done` when required scenarios haven't passed.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Scenario source | ad-hoc at final phase | Phase 0 Enhanced Step 2.5.3 HITL-derives `core-scenarios.yaml` (immutable, PP-anchored); Decomposer Step 7.5 composes `e2e-scenarios.yaml` | Skill + schema | PP-invariance extended to core scenarios (AD-0008 R-1) |
+| Scenario storage | implicit in single phase s-item | two separate yamls under `.mpl/mpl/` — core-scenarios.yaml and e2e-scenarios.yaml | Artifact | Matches pivot-points.md (immutable) vs decomposition.yaml (regenerable) split |
+| E2E infra readiness | assumed to exist | Decomposer auto-inserts `phase-e2e-infra` when project lacks E2E runner (playwright/cypress/wdio missing) | Prompt contract | Eliminates TODO placeholder class |
+| Test execution records | single string `e2e_command` | `state.e2e_results[scenario_id] = {command, test_command, exit_code, stdout_tail, timestamp}` populated by gate-recorder on prefix-match | Schema + hook | Per-scenario evidence |
+| Finalize enforcement | non-blocking logging | `hooks/mpl-require-e2e.mjs` (PreToolUse on Write\|Edit state.json) emits block decision when `finalize_done:true` attempted while required scenarios have null / non-zero exit_code / no override | Hook (new) | AD-0007 pattern for E2E layer |
+| HITL failure resolution | none | finalize Step 5.0 emits AskUserQuestion on scenario failure: retry / add override / hold finalize. "Add override" option writes structured entry with reason + test_command_hash + recorded_at to auto-apply on future runs (AD-0008 R-2) | Skill + config | Environment-level learnings persist |
+| Decomposer placeholder guard | no check | Step 3-H FAILs decomposition when any scenario.test_command matches `/TODO|FIXME|manual/i` — re-runs Decomposer with explicit constraint | Prompt contract | Directly targets exp11 42/80 pattern |
+| Doctor audit `[h]` | not present | checks: placeholder detection, test_command file existence, required/passed/overridden coverage, stale overrides (>30 days), weak composition (<80% ≥2 cores) | Agent category | Make enforcement observable |
+
+**Affected files:**
+- New hook: `hooks/mpl-require-e2e.mjs`
+- New decision doc: `docs/decisions/AD-0008-e2e-scenario-enforcement.md`
+- Modified: `hooks/hooks.json` (new PreToolUse entry), `hooks/mpl-gate-recorder.mjs` (e2e scenario match + e2e_results writer), `hooks/lib/mpl-state.mjs` (e2e_results schema field), `agents/mpl-decomposer.md` (Step 7.5 + output schema e2e_scenarios field), `commands/mpl-run-decompose.md` (Step 3-H post-decompose extraction), `commands/mpl-run-phase0-analysis.md` (Step 3.5 Core Scenario Derivation), `commands/mpl-run-finalize.md` (Step 5.0 scenario-loop rewrite), `docs/config-schema.md` (override schema section), `agents/mpl-doctor.md` (Category 13 [h])
+
+**Breaking changes:** Decomposer output gains top-level `e2e_scenarios[]` field (REQUIRED when core-scenarios.yaml present). Legacy decompositions without the field remain usable — Step 5.0 falls back to legacy S-item / smoke paths, doctor audit `[h]` reports WARN. `finalize_done: true` writes are blocked when required scenarios are missing without override — this is the intended new guarantee.
+
+**Evidence grounding:** ygg-exp11 E2E skip observation (42/80), AD-0008 decision doc, design discussion in `~/project/wiki/scratch/2026-04-19/mpl-test-agent-enforcement.md`.
 
 ### v0.15.1 — Test-Agent Enforcement (AD-0007) (2026-04-19)
 

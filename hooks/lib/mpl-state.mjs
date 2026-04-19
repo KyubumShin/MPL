@@ -63,6 +63,11 @@ const DEFAULT_STATE = {
   // "verify_script" | "explicit" | "heuristic" | null (pre-Phase-0 default).
   verification_strategy: null,
   verification_commands: [],   // optional explicit per-gate commands (Path C)
+  // AD-0008 (v0.15.2): E2E scenario execution results.
+  // Keys are scenario ids (E2E-N) from .mpl/mpl/e2e-scenarios.yaml.
+  // Populated by mpl-gate-recorder.mjs when Bash command matches a scenario's
+  // test_command. Consumed by finalize Step 5.0 and mpl-require-e2e.mjs hook.
+  e2e_results: {},
   fix_loop_count: 0,
   max_fix_loops: 10,
   compaction_count: 0,

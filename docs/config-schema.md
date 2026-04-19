@@ -2,7 +2,7 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.15.1
+> **Version**: v0.15.2
 > **Last updated**: 2026-04-19
 
 ---
@@ -101,6 +101,45 @@ Semantics:
 | `test_agent_required: false` with explicit rationale | Allow, no dispatch needed |
 | `test_agent_required` missing (legacy decomposition) | Default to `true` — require dispatch |
 | Override exists for phase-id | Allow regardless of dispatch |
+
+## E2E Scenario Override (AD-0008, v0.15.2)
+
+File: `.mpl/config/e2e-scenario-override.json` (separate from `.mpl/config.json` and from `test-agent-override.json` — visibly scoped per AD).
+
+Two accepted entry shapes:
+
+**Shape A (AD-0008 extended, Recommended)**:
+```json
+{
+  "E2E-3": {
+    "reason": "Playwright가 CI 환경에서만 실행 가능 — 로컬 dev skip",
+    "test_command_hash": "sha1-of-test-command-at-override-time",
+    "recorded_at": "2026-04-20T10:00:00Z",
+    "source": "hitl_failure_resolution"
+  }
+}
+```
+
+**Shape B (Legacy, AD-0007 style)**:
+```json
+{
+  "E2E-4": "reason: environment-only scenario"
+}
+```
+
+Semantics:
+- `hooks/mpl-require-e2e.mjs` + finalize Step 5.0 accept both shapes
+- Shape A's `test_command_hash` is used to invalidate the override if the scenario's `test_command` changes (scenario drift → override no longer trustworthy, user re-prompted)
+- Shape A's `recorded_at` powers doctor audit `[h]` stale warning (>30 days)
+- `source: "hitl_failure_resolution"` written automatically by finalize Step 5.0 when user selects "Override 추가"; user-authored entries may omit or use `"manual"`
+- `"*"` blanket key accepted but flagged by doctor audit
+
+| Condition | Hook behaviour |
+|---|---|
+| E2E-N required AND no state.e2e_results[E2E-N] AND no override | **BLOCK** finalize_done=true write |
+| E2E-N required AND results[E2E-N].exit_code != 0 AND no override | **BLOCK** finalize_done=true write |
+| E2E-N has override with non-empty reason | Allow regardless of results |
+| Override exists but test_command_hash mismatches current scenario | Treat as absent, re-prompt via HITL |
 
 ## Hat Model (PP-Proximity, v0.11.0)
 

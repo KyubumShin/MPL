@@ -247,6 +247,81 @@ Task(subagent_type="mpl-phase0-analyzer", model="sonnet",
    (generates S-items for E2E phases) and Step 5.0 E2E Test (executes the command
    in the existing fallback chain).
 
+   **Note (AD-0008, v0.15.2)**: HA-06's single `e2e_command` is now supplemented
+   by the full `e2e_scenarios[]` contract. Step 2.5.3 below derives the core
+   scenarios that feed Decomposer Step 7.5, which emits the per-scenario
+   test_commands. `e2e_command` remains as a quick smoke (often identical to
+   one scenario's test_command); `e2e_scenarios` provides structured coverage.
+
+3.5. **Core Scenario Derivation (AD-0008, v0.15.2)**: derive must-work user flows from Pivot Points.
+
+   **Runs only if** `.mpl/pivot-points.md` exists AND at least one PP has status
+   CONFIRMED. Otherwise skip (noted in RUNBOOK).
+
+   **Immutability (AD-0008 R-1)**: the output file `.mpl/mpl/core-scenarios.yaml`
+   is immutable after Phase 0 approval — treated identically to pivot-points.md.
+   Only a full Phase 0 re-interview regenerates both files atomically. The
+   `mpl-sentinel-pp-file.mjs` hook extends to block post-approval writes.
+
+   ```
+   confirmed_pps = Read(".mpl/pivot-points.md") → extract CONFIRMED entries
+   core_scenarios = []
+
+   for pp in confirmed_pps:
+     AskUserQuestion(
+       question: "PP-{pp.id} ({pp.title})가 '동작한다'는 것은 어떤 사용자 flow를 의미하나요?",
+       header: "Core — PP-{pp.id}",
+       options: [
+         { label: "단일 core scenario",
+           description: "하나의 flow로 PP 충족 (예: 로그인 성공)" },
+         { label: "복수 core scenarios",
+           description: "여러 분리된 flow로 나뉨 (예: 로그인 + 로그아웃 + 세션 유지)" },
+         { label: "PP는 invariant만, scenario 불필요",
+           description: "테스트 대상 flow가 없는 개념적 PP (예: '외부 의존성 없음')" }
+       ]
+     )
+
+     if answer == "PP는 invariant만":
+       continue   # PP 그대로 두되 core_scenarios에는 미포함
+
+     # Collect flow steps + acceptance via follow-up free-text questions
+     for scenario_idx in 1..answer_count:
+       AskUserQuestion(
+         question: "PP-{pp.id} core scenario {scenario_idx}의 flow를 단계별로 나열해주세요.",
+         header: "Flow 단계",
+         options: [
+           { label: "짧은 flow (3-4 단계)", description: "단순 조작 flow" },
+           { label: "긴 flow (5+ 단계)", description: "복수 화면 또는 상태 전이 포함" },
+           { label: "직접 입력", description: "자유 텍스트로 단계 나열" }
+         ]
+       )
+       # Then collect flow steps + acceptance criteria via free-text
+       core_scenarios.push({
+         id: "CORE-{N}",
+         pp_ref: pp.id,
+         title: <user-provided>,
+         user_story: <user-provided>,
+         flow: [<steps>],
+         must_work: true,
+         acceptance: [<criteria>],
+         source: "phase0_enhanced_hitl"
+       })
+
+   # Write immutable artifact
+   Write(".mpl/mpl/core-scenarios.yaml", serialize({
+     generated_at: now_iso(),
+     generated_by: "phase0_enhanced_hitl",
+     source_pps_hash: sha1(pivot-points.md),
+     core_scenarios: core_scenarios
+   }))
+
+   announce: "[MPL AD-0008] Core scenarios derived: {core_scenarios.length} scenarios from {confirmed_pps.length} PPs. Immutable until next Phase 0 re-interview."
+   ```
+
+   If the user reports zero scenarios (all PPs are invariants-only), still write
+   the file with an empty `core_scenarios: []` — doctor audit `[h]` flags this
+   but does not FAIL (some projects are library-only without user-facing flows).
+
 4. **Verification Command Capture (AD-0006, v0.15.0)**: establish the verification contract for gate-recorder hook consumption.
 
    ```

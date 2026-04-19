@@ -171,6 +171,20 @@ disallowedTools: Write, Edit, Task
       - `profile/phases.jsonl` must include at least one `mpl-seed-generator` dispatch
       FAIL if enabled=true but any of the three conditions missing. WARN if enabled=false and no chain artifacts (expected).
 
+    - **[h] E2E scenario coverage (AD-0008, v0.15.2)**:
+      - `core_scenarios = Read(".mpl/mpl/core-scenarios.yaml").core_scenarios or []`
+      - `e2e_scenarios = Read(".mpl/mpl/e2e-scenarios.yaml").e2e_scenarios or []`
+      - `results = state.e2e_results or {}`
+      - `override = Read(".mpl/config/e2e-scenario-override.json") or {}`
+      - WARN if core_scenarios is empty but PPs have CONFIRMED entries with non-invariant flows (orphaned PP coverage)
+      - FAIL if any e2e_scenario.test_command matches `/TODO|FIXME|manual verification/i` (Decomposer emitted placeholder — Step 3-H validation missed it)
+      - FAIL if any required e2e_scenario.test_command references a file path that doesn't exist on disk (for playwright/cypress specs: `e2e/*.spec.ts` etc.)
+      - FAIL if `required - (passed via results.exit_code==0) - overridden > 0` (AD-0008 enforcement gap)
+      - WARN if `"*"` blanket override present (anti-pattern)
+      - WARN if any override `recorded_at` is >30 days old (stale environment assumption per AD-0008 R-2)
+      - WARN if any override lacks `test_command_hash` AND scenario's current test_command doesn't match the override's recorded form (legacy shape, recommend re-recording)
+      - WARN if `<80%` of e2e_scenarios have `composed_from.length >= 2` (weak cross-feature coverage per AD-0008 composition rule)
+
     - **[g] test_agent dispatch coverage (AD-0007, v0.15.1)** — enforce the enforcement:
       - Count `required = decomposition.phases[].filter(p => p.test_agent_required != false)`
       - Count `dispatched = Object.keys(state.test_agent_dispatched)` intersecting required ids

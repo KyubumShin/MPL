@@ -30,7 +30,7 @@
 
 import { dirname, join, basename } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -112,6 +112,57 @@ function tailOf(text, n = 500) {
 }
 
 /**
+ * AD-0008: parse .mpl/mpl/e2e-scenarios.yaml to find which scenario id (if any)
+ * this Bash command corresponds to. Matches by prefix on the scenario's
+ * test_command — the scenario's command must be a prefix of the actual Bash
+ * command (so "pnpm playwright test e2e/scenario-1.spec.ts" matches
+ * "pnpm playwright test e2e/scenario-1.spec.ts --reporter=json").
+ *
+ * Returns { id: string } or null if no match. Uses naive YAML scanning to
+ * avoid third-party deps.
+ */
+function matchE2eScenario(cwd, command) {
+  if (typeof command !== 'string' || !command.trim()) return null;
+  const path = join(cwd, '.mpl', 'mpl', 'e2e-scenarios.yaml');
+  if (!existsSync(path)) return null;
+
+  let text;
+  try {
+    text = readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
+
+  const cmd = command.trim();
+  let curId = null;
+  let curTestCommand = null;
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+
+    const idMatch = line.match(/^\s*-\s+id:\s*["']?(E2E-[\w-]+)["']?/);
+    if (idMatch) {
+      // Commit previous entry match check happens as we scan; here we reset
+      curId = idMatch[1];
+      curTestCommand = null;
+      continue;
+    }
+    if (!curId) continue;
+
+    const tcMatch = line.match(/^\s+test_command:\s*["']?(.+?)["']?\s*$/);
+    if (tcMatch) {
+      curTestCommand = tcMatch[1].trim();
+      // Prefix match: scenario's command must be a prefix of the actual command
+      if (curTestCommand && cmd.startsWith(curTestCommand)) {
+        return { id: curId, test_command: curTestCommand };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Count phase directories on disk that have a state-summary.md — this is the
  * disk-truth count for `sprint_status.completed_todos` (closes #35 drift).
  */
@@ -180,14 +231,46 @@ try {
   // ---- Branch 1: Bash gate recording -------------------------------------
   if (toolName === 'Bash' || toolName === 'bash') {
     const command = toolInput.command || toolInput.cmd || '';
-    const gateName = classifyGate(command);
-    if (!gateName) {
+
+    const state = readState(cwd);
+    if (!state) {
       ok();
       process.exit(0);
     }
 
-    const state = readState(cwd);
-    if (!state) {
+    // AD-0008: E2E scenario match — orthogonal to gate classification. A
+    // playwright command can simultaneously match a named scenario AND be
+    // classified as hard3_resilience. Record both; finalize consumes e2e_results
+    // per-scenario while gate_results stays at the aggregated gate level.
+    const scenario = matchE2eScenario(cwd, command);
+    if (scenario) {
+      const recordedExit =
+        typeof exitCode === 'number'
+          ? exitCode
+          : /error|failed|✖|exit code 1/i.test(stdout) ? 1 : 0;
+      const priorE2e = state.e2e_results || {};
+      const newE2eEntry = {
+        command: command.slice(0, 500),
+        test_command: scenario.test_command,
+        exit_code: recordedExit,
+        stdout_tail: tailOf(stdout, 500),
+        timestamp: new Date().toISOString(),
+      };
+      const priorE2eEntry = priorE2e[scenario.id];
+      // First failure wins within a run unless a later run fixes it
+      if (
+        !priorE2eEntry ||
+        priorE2eEntry.exit_code === 0 ||
+        recordedExit !== 0
+      ) {
+        writeState(cwd, {
+          e2e_results: { ...priorE2e, [scenario.id]: newE2eEntry },
+        });
+      }
+    }
+
+    const gateName = classifyGate(command);
+    if (!gateName) {
       ok();
       process.exit(0);
     }

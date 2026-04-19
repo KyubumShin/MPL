@@ -478,6 +478,61 @@ gap_analysis = Read(".mpl/mpl/pre-execution-analysis.md")
 
 ---
 
+## Step 3-H: E2E Scenario Extraction (AD-0008, v0.15.2)
+
+**Gated**: Runs only if `.mpl/mpl/core-scenarios.yaml` exists AND contains ≥1 entry.
+
+After Decomposer emits `e2e_scenarios[]` in its output (per Reasoning_Steps Step 7.5), extract this top-level field and write to `.mpl/mpl/e2e-scenarios.yaml`:
+
+```
+decomp_output = <Decomposer result>
+if not exists(".mpl/mpl/core-scenarios.yaml"):
+  announce: "[MPL AD-0008] core-scenarios.yaml not found — skipping Step 3-H. Doctor audit [h] will flag as WARN."
+  proceed to Step 3-G
+
+scenarios = decomp_output.e2e_scenarios or []
+if scenarios.length == 0:
+  announce: "[MPL AD-0008] Decomposer emitted 0 e2e_scenarios despite core-scenarios present. Inspect Decomposer output."
+  # Do not auto-fail; Phase 0 may have declared all PPs as invariants-only.
+
+# Infrastructure phase auto-insertion (Decomposer already handled this in
+# decomposition.yaml output; Step 3-H only extracts e2e_scenarios).
+Write(".mpl/mpl/e2e-scenarios.yaml", serialize({
+  generated_at: now_iso(),
+  generated_by: "mpl-decomposer",
+  derived_from_core: "sha1(.mpl/mpl/core-scenarios.yaml)",
+  e2e_scenarios: scenarios
+}))
+
+# Validation: test_command placeholder check (AD-0008 enforcement)
+for s in scenarios:
+  if s.test_command matches /TODO|FIXME|manual verification/i:
+    Hard-fail decomposition:
+    announce: "[MPL AD-0008] Scenario {s.id} has placeholder test_command '{s.test_command}'. Decomposer must emit executable commands. Re-running Step 3 with constraint."
+    re-run Decomposer with explicit prompt: "No placeholder test_commands."
+
+announce: "[MPL AD-0008] E2E scenarios written: {scenarios.length} scenarios covering {phases_involved union} phases."
+```
+
+### Common Rationalizations (AD-0008)
+
+exp11에서 42/80 E2E가 `TODO(segment-7-integration-ci)` placeholder로 커밋됐다. Decomposer가 이런 합리화를 반복하지 않게 한다.
+
+| Rationalization | Why it's wrong |
+|---|---|
+| "E2E 인프라가 아직 없으니 TODO로 남기고 나중에 채우자" | Step 7.5의 인프라 탐지가 이미 있다. 인프라 없으면 `phase-e2e-infra`를 자동 삽입해 인프라를 먼저 만든 뒤 실행 가능한 test_command를 emit. "나중에"는 `TODO(ci)` 커밋으로 고착된다. |
+| "시나리오 초안만 남기고 test_command는 phase-runner가 채울 것" | Decomposer 출력은 **계약**이다. phase-runner는 그 계약을 구현하는 것이지 재계약하는 것이 아니다. test_command가 비어있거나 placeholder면 계약 위반. |
+| "이 시나리오는 manual verification이 더 적합" | 수동 검증은 AD-0008 PARTIAL + HITL 경로를 통해서만 허용. test_command에 "manual: ..."로 적지 말고 required: false로 낮추고 rationale에 명시. |
+| "core-scenarios에 없는 flow라 E2E에서도 생략" | core에 없으면 cross-feature 조합 대상이 안 될 뿐, 단일 PP의 복잡한 flow(≥3 steps, ≥2 impact files)는 1:1 E2E로 승격 가능. 생략이 default가 아니다. |
+
+### Red Flags — 즉시 정지
+
+- scenario.test_command에 `TODO`/`FIXME`/`manual` 포함 → Step 7.5 재실행
+- core-scenarios.yaml이 존재하는데 e2e_scenarios 배열이 0개 → Decomposer 재호출
+- `phase-e2e-infra` 없이 scenario test_command가 playwright 등을 호출 (인프라 없이 실행 불가) → Step 7.5 infra insertion 재적용
+
+---
+
 ## Step 3-G: Chain Derivation (#34 Stage 1)
 
 **Gated**: Runs only if `.mpl/config.json` has `chain_seed.enabled: true` (default `false` in Stage 1).

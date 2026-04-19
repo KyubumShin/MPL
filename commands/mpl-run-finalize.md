@@ -13,25 +13,89 @@ Load this when `current_phase` is `phase5-finalize` or when resuming a session.
 
 ## Step 5: E2E & Finalize
 
-### 5.0: E2E Test (Final)
+### 5.0: E2E Test (Final) — AD-0008 Scenario Enforcement
 
-After Gate System passes, run final E2E validation using a **2-tier fallback chain** (F-E2E-1, v0.8.3):
+After Gate System passes, run final E2E validation using a **3-tier source hierarchy** (AD-0008 supersedes F-E2E-1):
 
 ```
-1. Collect E2E sources (fallback chain):
-   a. S-items: Read `.mpl/mpl/verification-plan.md` for S-items with domain "e2e"
-   b. Default smoke: `npm test` (or `cargo test` / `pytest` based on tech_stack)
+1. Collect E2E sources (priority order):
+   a. AD-0008 scenarios: Read `.mpl/mpl/e2e-scenarios.yaml` (Decomposer output)
+      — REQUIRED when Phase 0 produced core-scenarios.yaml
+   b. Legacy S-items: `.mpl/mpl/verification-plan.md` domain:"e2e" entries
+      — fallback for pre-v0.15.2 pipelines
+   c. Default smoke: `state.e2e_command` or `npm test` / `cargo test` / `pytest`
+      — minimum guarantee when neither (a) nor (b) present
 
    Resolution:
-     if (a) has E2E scenarios → use (a)
-     else → use (b) as minimal smoke
+     if (a) exists AND has required scenarios → use (a), Step 5.0 PRIMARY
+     elif (b) exists → use (b) (legacy mode)
+     else → use (c) (bare-minimum smoke)
 
-2. Execute collected scenarios sequentially:
-   - Each scenario: run commands[], check exit code
-   - Timeout: 60s per scenario (configurable via .mpl/config.json → e2e_timeout)
-   - On failure: log but continue (non-blocking by default)
+2. Primary execution (AD-0008 path):
 
-3. Report: "[MPL] E2E Test: {passed}/{total} scenarios passed. (source: S-items|smoke)"
+   scenarios = Read(".mpl/mpl/e2e-scenarios.yaml").e2e_scenarios
+   required = scenarios.filter(s => s.required != false)
+   results = state.e2e_results or {}
+   override = Read(".mpl/config/e2e-scenario-override.json") or {}
+
+   for s in required:
+     # Override (AD-0007/AD-0008 shape, either string or {reason,...} object)
+     if override[s.id] or override["*"]:
+       announce: "[MPL AD-0008] {s.id} skipped by override: {reason}"
+       continue
+
+     # Re-run if never executed or prior failure recorded
+     existing = results[s.id]
+     if not existing or existing.exit_code != 0:
+       Bash(s.test_command, timeout=config.e2e_timeout or 60000)
+       # mpl-gate-recorder.mjs writes state.e2e_results[s.id] from this execution
+
+     final = state.e2e_results[s.id]
+     if not final or final.exit_code != 0:
+       # Still failing — HITL AskUserQuestion per AD-0008
+       AskUserQuestion(
+         question: "E2E {s.id} ({s.title}) 실패. 어떻게 처리할까요?",
+         header: "E2E 실패 — {s.id}",
+         options: [
+           { label: "재시도",
+             description: "스크립트 또는 환경 수정 후 같은 test_command로 재실행" },
+           { label: "Override 추가",
+             description: ".mpl/config/e2e-scenario-override.json에 사유와 함께 bypass 등록 (환경 이슈 등). 다음 런부터 자동 적용." },
+           { label: "파이프라인 실패 처리",
+             description: "finalize_done=false 유지. 사용자가 수동으로 scenario 수정 후 finalize 재시도." }
+         ]
+       )
+
+       if choice == "재시도":
+         Bash(s.test_command) again → re-check
+       if choice == "Override 추가":
+         # AD-0008 R-2: persist environment-level learning
+         Read(".mpl/config/e2e-scenario-override.json") or {}
+         Ask follow-up free-text: "override 사유 (20자 이상, 환경/시점 포함)"
+         Write override with shape:
+           {
+             [s.id]: {
+               reason: <user_input>,
+               test_command_hash: sha1(s.test_command),
+               recorded_at: now_iso(),
+               source: "hitl_failure_resolution"
+             }
+           }
+         announce: "[MPL AD-0008] Override added. Future runs auto-skip {s.id} unless test_command changes."
+         continue to next scenario
+       if choice == "파이프라인 실패":
+         announce: "[MPL AD-0008] Finalize held. state.finalize_done remains false. Fix {s.id} then re-run /mpl:mpl-finalize."
+         return from Step 5 WITHOUT setting finalize_done
+
+3. Report:
+   "[MPL AD-0008] E2E Scenarios: {passed}/{required.length} passed, {overridden} overridden, {failed_resolved_via_override} resolved via HITL override."
+
+4. Legacy fallback (when AD-0008 source absent):
+   Existing F-E2E-1 behaviour — S-items or default smoke, non-blocking logging.
+
+Note: `hooks/mpl-require-e2e.mjs` enforces this at the Write/Edit level — any
+attempt to write `finalize_done: true` to state.json while required scenarios
+remain failing without override will be blocked.
 ```
 
 - MED/LOW H-items are NOT re-asked here — they are aggregated in Step 5.1.8 (T-10, v3.9)
