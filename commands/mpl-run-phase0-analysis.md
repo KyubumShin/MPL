@@ -309,6 +309,66 @@ Task(subagent_type="mpl-phase0-analyzer", model="sonnet",
    the file with an empty `core_scenarios: []` — doctor audit `[h]` flags this
    but does not FAIL (some projects are library-only without user-facing flows).
 
+3.6. **Intent Invariants Derivation (#50, 2026-04-20 debate 합의)**: teleological 불변식을 설정한다.
+
+   **목적**: Subagent drift 방지 (MAST FM-1.1/2.2/2.3). Intent는 push 텍스트가 아닌 **mechanical invariant** — G2 Gate에서 기계 검증되는 teleological 검사.
+
+   **Runs only if**: 사용자가 PP 확인 단계를 통과. Simple grade는 생략 가능(기본 empty).
+
+   **Authoring rule (Option C — LLM draft + 사용자 명시 confirm)**:
+   - LLM이 Phase 0 맥락(PP, core_scenarios, user_request) 기반으로 **2-3개 draft 제안**
+   - 사용자는 각 draft에 대해 **edit / delete / confirm 중 하나를 반드시 명시적으로 수행** (기본 수락 금지)
+   - 최종 `statement`는 사용자 확정 문구의 verbatim
+
+   ```
+   # LLM draft 생성 (orchestrator inline, 저비용)
+   invariant_drafts = draft_invariants_from_context({
+     user_request,
+     pivot_points: confirmed_pps,
+     core_scenarios,
+     max_drafts: 3
+   })
+   # 각 draft는 { id: "INV-N", statement, verify (추정 command), applies_to_phases (추정) }
+
+   confirmed_invariants = []
+   for draft in invariant_drafts:
+     AskUserQuestion(
+       question: "불변식 후보 {draft.id}: "{draft.statement}" — 검증: `{draft.verify}` — 적용 phase: {draft.applies_to_phases or '전체'}. 어떻게 처리할까요?",
+       header: "INV-{N}",
+       options: [
+         { label: "Confirm (verbatim)",
+           description: "문구와 verify 명령어를 그대로 채택" },
+         { label: "Edit — 문구 수정",
+           description: "statement 또는 verify 를 사용자가 재입력" },
+         { label: "Delete — 이 불변식 제외",
+           description: "해당 draft를 버림" }
+       ]
+     )
+     if answer == "Confirm":
+       confirmed_invariants.push(draft)
+     elif answer == "Edit":
+       # 추가 free-text prompt로 statement / verify / applies_to_phases 재수집
+       confirmed_invariants.push({ id: draft.id, statement: <user>, verify: <user>, applies_to_phases: <user> })
+     # Delete: 아무것도 push 안 함
+
+   # 빈 배열 허용 — 모두 delete 시 invariants: []
+   ```
+
+   **결과 저장**: `.mpl/mpl/phase0/design-intent.yaml` 파일이 존재하면 해당 파일의 최상위 `invariants:` 필드를 갱신. 존재하지 않으면 최소 구조로 새로 작성:
+
+   ```yaml
+   design_intent: {}   # per-phase design intent는 별도 단계에서 채워짐
+   invariants:
+     - id: INV-1
+       statement: "..."
+       verify: "..."
+       applies_to_phases: [...]
+   ```
+
+   announce: `[MPL #50] Intent invariants: {confirmed_invariants.length}개 확정 (draft {invariant_drafts.length}개 중). 빈 배열이면 G2 invariant 검증은 no-op 스킵.`
+
+   **Immutability**: `invariants`는 Phase 0 재실행 전까지 불변. Decomposer/G2/Worker는 verbatim 소비만 허용(번역/재해석 금지).
+
 4. **Verification Command Capture (AD-0006, v0.15.0)**: establish the verification contract for gate-recorder hook consumption.
 
    ```
