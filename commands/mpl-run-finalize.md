@@ -756,8 +756,33 @@ Save to `.mpl/mpl/metrics.json`:
     "hard3_status": "NOT_EVALUATED", "hard3_exit_code": null, "hard3_command": null
   },
   "verification_plan": { "a_items": 0, "s_items": 0, "h_items": 0 },
+  "intent_invariants": {
+    // #50 (2026-04-20 debate 합의): teleological invariant tracking.
+    // Aggregated from each phase's verification record (written by Hard 2, G2).
+    "total_declared": 2,                  // sum of verification_plan.invariants[].length across phases (dedup by id)
+    "total_violations": 0,                // sum of invariant_violation_count across phases (Hard 2 runs)
+    "discovery_from_intent_conflict": 0,  // count of discoveries where type == "invariant_violation"
+    "violated_ids": [],                   // [ "INV-2", ... ] — ids that failed in any phase (empty if clean)
+    "by_phase": {                         // per-phase breakdown for debugging
+      // "phase-1": { declared: 1, violations: 0, discoveries: 0 },
+      // "phase-2": { declared: 1, violations: 0, discoveries: 0 }
+    }
+  },
   "triage": { "interview_depth": "full", "prompt_density": 3 }
 }
+```
+
+**Intent Invariant aggregation rule (#50)**:
+```
+total_declared = sum over phases: count of unique invariant.id in phase.verification_plan.invariants
+total_violations = sum over phases: phase.hard2_result.invariant_violation_count
+discovery_from_intent_conflict = count of state.discoveries where type == "invariant_violation"
+violated_ids = unique set of invariant.id values that had invariant_violation_count > 0 in any phase
+
+# Graceful defaults when no invariants declared
+if total_declared == 0:
+  intent_invariants = { "total_declared": 0, "total_violations": 0, "discovery_from_intent_conflict": 0, "violated_ids": [], "by_phase": {} }
+  # (no-op for bugfix/simple tasks — matches optional field semantics)
 ```
 
 Generate full run profile at `.mpl/mpl/profile/run-summary.json`:

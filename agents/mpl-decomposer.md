@@ -210,6 +210,28 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
 
       EXPERIMENTAL semantics: pattern matches are recorded as metrics only. They do NOT affect pipeline pass/fail until the CB testbed benchmark promotes to HARD per AD-0005 pre-registered threshold (≥3/5 detection rate).
 
+    Step 9.7: Intent Invariants Mapping (#50, 2026-04-20 debate 합의)
+      Read `.mpl/mpl/phase0/design-intent.yaml` top-level `invariants:` array (may be empty or missing — graceful skip).
+      For each phase, filter invariants matching this phase:
+        - `invariant.applies_to_phases` is empty → applies to all phases
+        - `invariant.applies_to_phases` contains this phase's id → apply
+        - otherwise → skip
+
+      For each matching invariant, **verbatim copy** (NO translation/rewording) the tuple
+        `{ id, statement, verify }` into the phase's `verification_plan.invariants[]` slot.
+
+      **배달부 원칙 (debate 합의)**: statement/verify 문자열은 사용자 확정 verbatim.
+      Decomposer는 번역·재해석·요약 금지. 단순히 `applies_to_phases`로 필터링하고 복사할 뿐이다.
+      이 원칙을 어기면 Intent Invariants 전체의 목적(teleological ground truth)이 무너진다.
+
+      If design-intent.yaml does not exist OR invariants field is missing/empty,
+      each phase emits `verification_plan.invariants: []` (G2 invariant 검증은 no-op).
+
+      Consumer: `commands/mpl-run-execute-gates.md` Hard 2 Regression Suite step
+      appends `verify` commands to the accumulated regression execution for phases
+      where `applies_to_phases` matches. Violations increment
+      `invariant_violation_count` (metric per-phase, aggregated at finalize).
+
     Step 10: Risk assessment (pre-mortem)
       - For each phase: most likely failure cause?
       - For each PP: trace compliance. Where could drift occur?
@@ -302,6 +324,15 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
             - criterion: string
               severity: "HIGH" | "MED" | "LOW"
               reason: string         # why automation is insufficient
+          invariants:                 # #50 (2026-04-20): teleological invariants from design-intent.yaml
+            - id: string              # verbatim from design-intent (e.g., INV-1)
+              statement: string       # verbatim user-confirmed why/constraint
+              verify: string          # verbatim bash command or test selector
+            # Verbatim copy from design-intent.yaml filtered by applies_to_phases.
+            # Empty list [] when no invariants apply to this phase (or design-intent has none).
+            # Consumer: commands/mpl-run-execute-gates.md Hard 2 appends `verify` to
+            # regression suite execution. Violations → invariant_violation_count metric.
+            # See Reasoning_Steps Step 9.7.
 
         estimated_complexity: "S" | "M" | "L"
         estimated_todos: number
