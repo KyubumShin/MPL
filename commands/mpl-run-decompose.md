@@ -11,62 +11,41 @@ Load this when transitioning from pre-execution analysis to phase decomposition.
 
 ## Step 3: Phase Decomposition
 
-### 3.0: Ambiguity Gate Retry Protocol (v0.13.0)
+### 3.0: Ambiguity Gate — Delegated to Stage 2 Re-Entry (Issue #51)
 
 The decomposer dispatch is guarded by `hooks/mpl-ambiguity-gate.mjs` (PreToolUse).
-If `ambiguity_score > 0.2`, the gate returns `continue: false` and the dispatch is
-blocked. **The orchestrator MUST handle this gracefully — not stop.**
+When `ambiguity_score > 0.2` (or null) AND `ambiguity_override.active == false`,
+the gate returns `continue: false` and reverts `current_phase` to
+`mpl-ambiguity-resolve`. The router (`mpl-run.md`) maps that phase back to
+`mpl-run-phase0.md` Step 1 Stage 2, so the orchestrator naturally resumes the
+Socratic loop rather than forcing a bypass here.
 
 ```
-max_ambiguity_retries = 3
-ambiguity_retry_count = 0
+// 1. Attempt decomposer dispatch.
+result = try_dispatch_decomposer()
 
-while ambiguity_retry_count < max_ambiguity_retries:
-  // Attempt decomposer dispatch (may be blocked by ambiguity gate)
-  result = try_dispatch_decomposer()
+// 2. If the PreToolUse gate blocked the dispatch, the hook has already set
+//    current_phase := "mpl-ambiguity-resolve". Do NOT fabricate a score and
+//    retry — that manufactures false evidence (AP-GATE-01). Do NOT retry in
+//    a local loop — Stage 2 is the canonical place for clarifying questions
+//    and already implements stagnation detection + override flow (Issue #51).
+if result.blocked_by_ambiguity_gate:
+  announce: "[MPL] Decomposer gated by ambiguity_score=${readState().ambiguity_score}. " +
+            "Re-entering Stage 2 via mpl-run-phase0.md (see router)."
+  return  // Orchestrator re-reads state, follows router to phase0 Step 1 Stage 2,
+          // runs the unlimited interview loop, and re-enters this file once the
+          // loop terminates (threshold_met OR ambiguity_override.active).
 
-  if result.success:
-    break  // Gate passed, decomposer dispatched
-
-  if result.blocked_by_ambiguity_gate:
-    ambiguity_retry_count += 1
-    current_score = readState(cwd).ambiguity_score
-
-    announce: "[MPL] Ambiguity gate blocked decomposer (score={current_score}, threshold=0.2). Re-entering Stage 2 (attempt {ambiguity_retry_count}/{max_ambiguity_retries})."
-
-    // Re-enter Stage 2: ask one targeted question on the weakest dimension
-    weakest_dim = result.weakest_dimension or "Edge Case Coverage"
-    AskUserQuestion(
-      question: "Ambiguity score가 아직 높습니다 (현재: {current_score}). {weakest_dim} 관련 추가 명확화가 필요합니다. 구체적으로 설명해주세요:",
-      header: "Ambiguity 해소",
-      options: [
-        { label: "직접 입력", description: "{weakest_dim}에 대해 자유 텍스트로 답변" },
-        { label: "현재 상태로 진행", description: "ambiguity_score를 강제로 통과시키고 decompose 진행 (위험 수용)" }
-      ]
-    )
-
-    if answer == "현재 상태로 진행":
-      // Force-pass: write score below threshold
-      writeState(cwd, { ambiguity_score: 0.15 })
-      announce: "[MPL] Ambiguity score force-overridden to 0.15 by user request."
-      continue  // retry dispatch
-
-    // User provided additional input → re-score via MCP
-    mpl_score_ambiguity(pivot_points, updated_responses)
-    writeState(cwd, { ambiguity_score: new_score })
-
-    if new_score <= 0.2:
-      announce: "[MPL] Ambiguity resolved (score={new_score}). Retrying decomposer dispatch."
-      continue  // retry dispatch
-    else:
-      announce: "[MPL] Score still above threshold ({new_score}). Will retry."
-      continue
-
-if ambiguity_retry_count >= max_ambiguity_retries:
-  // 3 retries exhausted — force-pass with warning
-  writeState(cwd, { ambiguity_score: 0.19 })
-  announce: "[MPL] Ambiguity gate retry limit reached. Force-passing with score=0.19. Caveats will be logged in risk_assessment."
+// 3. Gate passed. Either ambiguity_score <= 0.2 or ambiguity_override.active is
+//    true. The override path keeps ambiguity_score at its true value so finalize
+//    metrics and risk reports can surface residual ambiguity downstream.
 ```
+
+> **Why no local retry loop any more**: the previous `max_ambiguity_retries=3`
+> with force-pass to `ambiguity_score=0.19` silently manipulated state
+> evidence, contradicting AD-0006 (see AP-GATE-01). Stagnation is now handled
+> inside the Stage 2 loop by surfacing a user choice (continue / halt with
+> override / cancel) rather than by capping attempts.
 
 ### 3.1: Decomposer Dispatch
 

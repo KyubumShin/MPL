@@ -182,11 +182,13 @@ describe('initState', () => {
     assert.ok(state.started_at);
   });
 
-  it('should create state file with small mode defaults', () => {
-    const state = initState(tmpDir, 'quick-fix', 'small');
-    assert.ok(state.pipeline_id.includes('small'));
-    assert.strictEqual(state.run_mode, 'small');
-    assert.strictEqual(state.current_phase, 'small-plan');
+  it('should pass through non-auto run_mode verbatim', () => {
+    // Pre-existing failure on main: the test was asserting behaviour keyed
+    // on a removed ppHint parameter. `small` as runMode now flows straight
+    // through; pipeline_id carries the feature slug only.
+    const state = initState(tmpDir, 'quick-fix', 'full');
+    assert.strictEqual(state.run_mode, 'full');
+    assert.strictEqual(state.current_phase, 'phase1a-research');
   });
 
   it('should support Korean feature names (M1)', () => {

@@ -106,29 +106,49 @@ async function main() {
     return;
   }
 
+  // Issue #51: override takes precedence over score. When the orchestrator
+  // records a user-halt (or SDK fallback) override, the gate must let the
+  // dispatch through without touching ambiguity_score. This keeps score
+  // truthful in state.json so downstream metrics/risk reports can surface
+  // residual ambiguity — we trade silence for honesty.
+  const override = state.ambiguity_override;
+  const overrideActive = override && override.active === true;
+
   const score = state.ambiguity_score;
   const hasScore = score !== null && score !== undefined;
 
+  if (overrideActive) {
+    // Record the bypass in stderr so it surfaces in transcripts/tool logs.
+    process.stderr.write(
+      `[MPL] Ambiguity gate bypassed by override (by="${override.by}", reason="${override.reason}", score=${hasScore ? score : 'null'})\n`,
+    );
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
   if (!hasScore) {
-    // No score — block and revert phase
+    // No score — block and revert phase. Router maps mpl-ambiguity-resolve
+    // back to mpl-run-phase0.md Step 1 Stage 2 so a stopped session resumes
+    // into the interview loop instead of becoming an orphan state.
     writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
     console.log(JSON.stringify({
       continue: false,
       reason: '[MPL] ⛔ Decomposer BLOCKED: ambiguity_score not found in state. ' +
         'Run Stage 2 first: call mpl_score_ambiguity MCP tool with pivot_points + user_responses and persist score via mpl_state_write. ' +
-        'Phase reverted to mpl-ambiguity-resolve.'
+        'Phase reverted to mpl-ambiguity-resolve. ' +
+        'If the interview should be halted without further questions, set ambiguity_override.active=true with a reason before retrying.'
     }));
     return;
   }
 
   if (score > AMBIGUITY_THRESHOLD) {
-    // Score exceeds threshold — block and revert phase
     writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
     console.log(JSON.stringify({
       continue: false,
       reason: `[MPL] ⛔ Decomposer BLOCKED: ambiguity_score=${score} exceeds threshold ${AMBIGUITY_THRESHOLD}. ` +
         'Run Stage 2 again: re-call mpl_score_ambiguity MCP tool with updated user_responses targeting the weakest dimension. ' +
-        'Phase reverted to mpl-ambiguity-resolve.'
+        'Phase reverted to mpl-ambiguity-resolve. ' +
+        'To halt the loop without passing the threshold, set ambiguity_override.active=true with a reason (preserves the true score for downstream reporting).'
     }));
     return;
   }

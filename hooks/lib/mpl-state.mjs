@@ -117,6 +117,23 @@ const DEFAULT_STATE = {
   // the inline mpl_score_ambiguity MCP tool loop reaches threshold_met == true.
   // mpl-phase-controller blocks mpl-decompose if null.
   ambiguity_score: null,         // number (0.0~1.0) | null — threshold: <= 0.2
+  // Issue #51: explicit escape hatch for the ambiguity gate. When `active`,
+  // mpl-ambiguity-gate.mjs lets the decomposer dispatch proceed regardless of
+  // ambiguity_score. The score itself is NEVER mutated as an escape — that
+  // contradicts AD-0006 machine-evidence integrity. Instead the orchestrator
+  // records why the override was taken so finalize metrics and risk reports
+  // can surface residual ambiguity downstream.
+  ambiguity_override: {
+    active: false,               // boolean — true bypasses score check
+    reason: null,                // short human-readable rationale
+    by: null,                    // "user_halt" | "user_force" | "sdk_fallback"
+    set_at: null                 // ISO timestamp
+  },
+  // Issue #51: round-by-round history of ambiguity scoring so the
+  // orchestrator can detect stagnation (same weakest_dimension + tiny delta
+  // across N rounds) without stopping the loop — only notifies the user.
+  // Each entry: { round, score, weakest_dimension, ts }.
+  ambiguity_history: [],
   // F-33: Session budget prediction
   // #35 (v0.14.1): "paused_checkpoint" added for orchestrator verbal pause (self-pause on checkpoint report)
   session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint"
