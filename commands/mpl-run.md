@@ -158,9 +158,12 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 | Stage | current_phase | MUST Read |
 |-------|---------------|-----------|
 | Pre-Execution | `mpl-init`, before decomposition | `MPL/commands/mpl-run-phase0.md` |
+| Re-Interview | `mpl-ambiguity-resolve` | `MPL/commands/mpl-run-phase0.md` (re-enter Step 1 Stage 2) |
 | Decomposition | `mpl-decompose` | `MPL/commands/mpl-run-decompose.md` |
 | Execution | `phase2-sprint`, `phase3-gate`, `phase4-fix` | `MPL/commands/mpl-run-execute.md` |
 | Finalize / Resume | `phase5-finalize`, `completed`, or session resume | `MPL/commands/mpl-run-finalize.md` |
+
+> **Re-Interview note**: `mpl-ambiguity-resolve` is set by `hooks/mpl-ambiguity-gate.mjs` when a decomposer dispatch is blocked by missing/excessive `ambiguity_score`. Load `mpl-run-phase0.md` and resume Step 1 Stage 2 (orchestrator-driven `mpl_score_ambiguity` loop). The prior Stage 1 `pivot-points.md` is treated as immutable — only re-invoke `Task(mpl-interviewer)` when `weakest_dimension` is `pp_conformance` across consecutive rounds, because that is the only signal that PPs themselves may be wrong.
 
 ### Protocol Files Summary
 

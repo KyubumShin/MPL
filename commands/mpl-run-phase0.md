@@ -469,44 +469,130 @@ Task(subagent_type="mpl-interviewer", model=model_phase1, prompt=`
 → save pivot-points.md + user_responses_summary
 
 // Stage 2: Ambiguity Resolution + Requirements (orchestrator-driven loop via MCP)
-// mpl-interviewer does NOT perform this. There is no Stage 2 subagent — the
-// orchestrator drives the Socratic loop inline using the mpl_score_ambiguity
+// mpl-interviewer does NOT perform this by default. There is no Stage 2 subagent —
+// the orchestrator drives the Socratic loop inline using the mpl_score_ambiguity
 // MCP tool, which returns a computed score + weakest_dimension + suggested_question.
 //
-// Loop (orchestrator inline, no subagent dispatch):
-//   1. Call mpl_score_ambiguity({
-//        cwd,
-//        pivot_points,       // read from .mpl/pivot-points.md
-//        user_responses,     // from Stage 1 output + any prior iterations
-//        spec_analysis,      // optional
-//        codebase_context,   // optional
-//        current_choices,    // optional
-//      })
-//   2. Read { ambiguity_score, threshold_met, weakest_dimension, suggested_question }.
-//   3. If threshold_met == false:
-//        - Ask the user the suggested_question (targets the weakest dimension)
-//        - Append response to user_responses
-//        - Goto 1
-//   4. When threshold_met == true:
-//        - Persist ambiguity_score via mpl_state_write
-//        - Save requirements-light.md or requirements-{hash}.md
-//        - Proceed to Decomposition
+// Issue #51: the loop is *unlimited* (no retry cap). It terminates only when
+// the gate passes OR the user explicitly halts. Stagnation is surfaced as a
+// notification, never as automatic termination — the user judges whether
+// continued questioning is productive.
+//
+// Loop (orchestrator inline, no subagent dispatch by default):
+//   round = 0
+//   while true:
+//     round += 1
+//
+//     # 1. Score current responses
+//     r = mpl_score_ambiguity({
+//           cwd,
+//           pivot_points,           // read from .mpl/pivot-points.md
+//           user_responses,         // accumulating plaintext (Stage 1 + prior rounds)
+//           spec_analysis,          // optional
+//           codebase_context,       // optional
+//           current_choices,        // optional
+//         })
+//     # r: { ambiguity_score, threshold_met, weakest_dimension, weakest_dimension_key,
+//     #      suggested_question, dimensions }
+//
+//     # 2. Append to ambiguity_history (bounded — keep only last 10 entries in state)
+//     history = readState(cwd).ambiguity_history or []
+//     history.push({
+//       round, score: r.ambiguity_score, weakest_dimension: r.weakest_dimension_key,
+//       ts: new Date().toISOString()
+//     })
+//     mpl_state_write(cwd, {
+//       ambiguity_history: history.slice(-10),
+//       ambiguity_score: r.ambiguity_score,   // always record latest truth
+//     })
+//
+//     # 3. Pass check
+//     if r.threshold_met:
+//       break                                 // gate will allow decomposer dispatch
+//
+//     # 4. Stagnation detection (S4, Issue #51)
+//     #    Three consecutive rounds where the weakest dimension is identical AND
+//     #    score deltas are < 0.03 indicate the LLM is oscillating. This does NOT
+//     #    terminate the loop — it surfaces a choice so the user can judge.
+//     recent = history.slice(-3)
+//     stagnating = recent.length == 3
+//                  AND recent.every(h => h.weakest_dimension == recent[0].weakest_dimension)
+//                  AND max(recent.map(h => h.score)) - min(recent.map(h => h.score)) < 0.03
+//
+//     if stagnating:
+//       answer = AskUserQuestion({
+//         question: `Score has plateaued around ${recent[0].score} for 3 rounds on
+//                   ${r.weakest_dimension}. Continue questioning, halt with override,
+//                   or cancel the pipeline?`,
+//         header: "Ambiguity score stagnating",
+//         options: [
+//           { label: "Continue",  description: "Ask another clarifying question (loop continues)." },
+//           { label: "Halt (override)",
+//             description: "Accept residual ambiguity. ambiguity_override is set; score stays truthful." },
+//           { label: "Cancel pipeline",
+//             description: "Stop the pipeline. Start fresh via /mpl:mpl after refining the ask." }
+//         ]
+//       })
+//
+//       if answer == "Halt (override)":
+//         reason = AskUserQuestion({ question: "Brief rationale for the override (logged in metrics):" })
+//         mpl_state_write(cwd, {
+//           ambiguity_override: {
+//             active: true, reason: reason, by: "user_halt",
+//             set_at: new Date().toISOString()
+//           }
+//         })
+//         break                             // gate will bypass score check
+//
+//       if answer == "Cancel pipeline":
+//         mpl_state_write(cwd, { current_phase: "cancelled" })
+//         abort                             // orchestrator returns control to user
+//       // "Continue" falls through to normal flow
+//
+//     # 5. PP Conformance re-interview trigger (AP-CHAIN rationale: PPs are immutable,
+//     #    but when pp_conformance is the repeatedly-weakest dimension, the problem is
+//     #    likely the PPs themselves — a single targeted re-dispatch of mpl-interviewer
+//     #    is the only way to repair Stage 1 output).
+//     pp_stuck = recent.length == 3
+//                AND recent.every(h => h.weakest_dimension == "pp_conformance")
+//     if pp_stuck:
+//       announce: "[MPL] pp_conformance weakest for 3 rounds — re-dispatching mpl-interviewer Stage 1."
+//       Task(subagent_type="mpl-interviewer", model=model_phase1, prompt=`
+//         interview_depth: ${interview_depth}
+//         information_density: ${information_density}
+//         user_request: ${user_request}
+//         provided_specs: ${provided_specs}
+//         prior_pivot_points: ${Read(".mpl/pivot-points.md")}
+//         pp_conformance_issues: ${JSON.stringify(r.dimensions.pp_conformance)}
+//         note: "Previous Stage 1 produced PPs that score poorly on pp_conformance.
+//                Refine or replace problematic PPs. Output a new pivot-points.md."
+//       `)
+//       // Stage 1 re-write landed. Continue Stage 2 loop with refreshed PPs.
+//
+//     # 6. Normal: ask the next clarifying question
+//     answer = AskUserQuestion({
+//       question: r.suggested_question,
+//       header: `Ambiguity resolution (round ${round}, weakest: ${r.weakest_dimension})`
+//     })
+//     user_responses += "\n[Round " + round + "] " + answer
+//   # end while
 //
 // Inputs available to the loop:
 //   interview_depth        = ${interview_depth}
 //   information_density    = ${information_density}
 //   pivot_points           = .mpl/pivot-points.md
-//   user_responses_summary = from Stage 1 output
+//   user_responses_summary = from Stage 1 output + accumulated Stage 2 answers
 //   provided_specs         = ${provided_specs}
 //   project_type           = ${field_classification}
 
-// After Stage 2 completes, record ambiguity_score to state:
-// The orchestrator MUST extract ambiguity_score from Stage 2 output and write to state.
-// This is enforced by mpl-phase-controller Stop hook — mpl-decompose phase
-// will be BLOCKED if ambiguity_score is missing from state.
-mpl_state_write(cwd, { ambiguity_score: stage2_result.ambiguity_score })
-// Only then transition to mpl-decompose:
+// After Stage 2 completes (either by threshold_met or by user_halt override),
+// the score is already persisted inside the loop. Transition to decomposition:
 mpl_state_write(cwd, { current_phase: "mpl-decompose" })
+// The decomposer-dispatch PreToolUse gate (mpl-ambiguity-gate.mjs) will allow
+// the dispatch when ambiguity_score <= 0.2 OR ambiguity_override.active.
+// When reached via mpl-ambiguity-resolve re-entry (router maps it back here),
+// this same loop resumes — ambiguity_history persists across resumes so
+// stagnation detection is robust to session boundaries.
 ```
 
 ### Model Routing (F-26)

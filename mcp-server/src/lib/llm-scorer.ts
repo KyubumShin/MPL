@@ -4,15 +4,26 @@
  * Leverages the user's Claude Code session authentication (Max Plan credits).
  * This is the same pattern used by Ouroboros (ClaudeCodeAdapter).
  *
+ * Session reuse: the Agent SDK's `sessionId` is both the continuation token
+ * AND the prompt-cache key — without it the scoring prompt + pivot_points
+ * prefix is re-billed at full input rate on every call. To keep cost bounded
+ * across MCP server restarts and across projects sharing the same MCP
+ * process, session ids are persisted to `~/.mpl/cache/sessions.json` via
+ * `session-cache.ts`, keyed by (cwd, kind) and validated against
+ * pipeline_id + pivot_points hash + TTL.
+ *
  * Fallback: if Agent SDK is unavailable, returns neutral scores.
  */
 
-const MAX_RETRIES = 2;
+import {
+  computeContentHash,
+  lookupSession,
+  persistSession,
+} from './session-cache.js';
+import { readState } from './state-manager.js';
 
-// Session reuse: cache sessionId from first query() call.
-// Subsequent calls in the same MCP server lifetime reuse the session,
-// enabling prompt prefix caching (pivot_points + scoring prompt stay cached).
-let cachedSessionId: string | null = null;
+const MAX_RETRIES = 2;
+const SESSION_KIND = 'ambiguity';
 
 export interface DimensionScore {
   score: number;
@@ -96,6 +107,7 @@ function neutralResult(): ScoringResult {
 }
 
 export async function scoreDimensions(input: {
+  cwd: string;
   pivot_points: string;
   user_responses: string;
   spec_analysis?: string;
@@ -115,6 +127,21 @@ export async function scoreDimensions(input: {
     return neutralResult();
   }
 
+  // Session cache identity: pipeline_id from state + content hash over the
+  // stable scoring prefix (prompt + pivot_points). user_responses is NOT
+  // hashed — it grows across rounds and mismatch would force a fresh
+  // session on every round, defeating the cache.
+  const state = readState(input.cwd);
+  const pipelineId = state?.pipeline_id ?? 'unknown-pipeline';
+  const contentHash = computeContentHash(`${SCORING_PROMPT}\n${input.pivot_points}`);
+
+  const cachedId = lookupSession({
+    cwd: input.cwd,
+    kind: SESSION_KIND,
+    pipeline_id: pipelineId,
+    content_hash: contentHash,
+  });
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const queryOptions: Record<string, unknown> = {
@@ -124,10 +151,9 @@ export async function scoreDimensions(input: {
         allowedTools: [], // No tools needed — pure text completion
       };
 
-      // Reuse session for prompt cache efficiency
-      if (cachedSessionId) {
-        queryOptions.sessionId = cachedSessionId;
-      }
+      // Resume existing session when we have a valid cached id so the
+      // prompt-cache prefix survives across calls.
+      if (cachedId) queryOptions.sessionId = cachedId;
 
       const q = queryFn({
         prompt: fullPrompt,
@@ -136,12 +162,12 @@ export async function scoreDimensions(input: {
 
       // Collect response text and sessionId from SDK events
       let responseText = '';
+      let observedSessionId: string | null = null;
       for await (const event of q) {
         if (event.type === 'result' && event.subtype === 'success') {
           responseText = (event as { result: string }).result;
-          // Capture sessionId for reuse
           const sessionId = (event as { sessionId?: string }).sessionId;
-          if (sessionId) cachedSessionId = sessionId;
+          if (sessionId) observedSessionId = sessionId;
         } else if (event.type === 'assistant') {
           // SDKAssistantMessage — extract text from BetaMessage content blocks
           const msg = event.message as { content?: Array<{ type: string; text?: string }> };
@@ -155,12 +181,25 @@ export async function scoreDimensions(input: {
         } else if ((event as { sessionId?: string }).sessionId) {
           // Capture sessionId from any event that carries it
           const sessionId = (event as { sessionId?: string }).sessionId;
-          if (sessionId) cachedSessionId = sessionId;
+          if (sessionId) observedSessionId = sessionId;
         }
       }
 
       const scores = parseScores(responseText);
-      if (scores) return scores;
+      if (scores) {
+        if (observedSessionId) {
+          // Upsert cache so subsequent rounds hit the prompt cache. The
+          // persist call refreshes last_used_at and bumps turn_count.
+          persistSession({
+            cwd: input.cwd,
+            kind: SESSION_KIND,
+            pipeline_id: pipelineId,
+            content_hash: contentHash,
+            session_id: observedSessionId,
+          });
+        }
+        return scores;
+      }
 
       // Parse failed, retry
     } catch (error) {

@@ -50,6 +50,7 @@ export async function handleScoreAmbiguity(args: {
 }) {
   // 1. Get dimension scores from LLM (temp 0.1)
   const scores = await scoreDimensions({
+    cwd: args.cwd,
     pivot_points: args.pivot_points,
     user_responses: args.user_responses,
     spec_analysis: args.spec_analysis,
