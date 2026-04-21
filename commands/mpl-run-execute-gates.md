@@ -161,9 +161,9 @@ if total_checks == 0:
 Hard 1 passes when: all lint tools + type check + all build tools succeed AND at least one check ran.
 Report: `[MPL] Hard 1: Build + Lint + Type PASSED ({total_checks} checks).`
 
-#### Hard 2: Full Test Suite + Regression ($0, mechanical, binary)
+#### Hard 2: Full Test Suite + Regression + Intent Invariants ($0, mechanical, binary)
 
-Run the full test suite **including accumulated regression tests**:
+Run the full test suite **including accumulated regression tests and Intent Invariants (#50)**:
 - Execute all test commands (pytest, npm test, etc.)
 - **Additionally run regression suite** if `.mpl/regression-suite.json` exists:
   ```
@@ -176,8 +176,41 @@ Run the full test suite **including accumulated regression tests**:
     else:
       announce: "[MPL] Hard 2: Regression suite PASSED ({regression_suite.total_assertions} assertions)"
   ```
-- Combined pass_rate (current + regression) must be >= 95% to pass
-- If pass_rate < 95%: enter fix loop (see 4.6)
+- **Intent Invariants verification (#50, 2026-04-20 debate 합의)**:
+  ```
+  # Verbatim — no translation/interpretation
+  phase_invariants = decomposition.phases[current_phase_id].verification_plan.invariants or []
+  invariant_violation_count = 0
+  invariant_results = []
+
+  for inv in phase_invariants:
+    inv_result = Bash(inv.verify, timeout=60000)
+    passed = (inv_result.exit_code == 0)
+    invariant_results.push({
+      id: inv.id,
+      statement: inv.statement,
+      verify: inv.verify,
+      passed: passed,
+      stderr: inv_result.stderr if not passed else null
+    })
+    if not passed:
+      invariant_violation_count += 1
+
+  # Record metric to phase verification record (consumed by finalize aggregation)
+  writePhaseMetric(current_phase_id, {
+    invariant_violation_count: invariant_violation_count,
+    invariant_results: invariant_results
+  })
+
+  if invariant_violation_count > 0:
+    announce: "[MPL #50] Hard 2: Intent Invariants FAILED ({invariant_violation_count}/{phase_invariants.length} violations). Violated: {invariant_results.filter(!passed).map(.id).join(', ')}"
+    → include invariant violations in fix loop context with statement + stderr
+  else if phase_invariants.length > 0:
+    announce: "[MPL #50] Hard 2: Intent Invariants PASSED ({phase_invariants.length} verified)"
+  # phase_invariants empty → silent no-op (bugfix/simple tasks)
+  ```
+- Combined pass_rate (current tests + regression + invariants) must be >= 95% to pass. **Invariant violations count as hard failures** (not averaged) — any violation blocks Hard 2.
+- If any test/regression/invariant fails: enter fix loop (see 4.6)
 
 ### Common Rationalizations (AD-0006, AD-0004, F-40 Test Agent Dispatch)
 
