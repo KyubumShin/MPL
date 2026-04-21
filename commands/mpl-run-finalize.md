@@ -658,23 +658,30 @@ else:
   announce: "[MPL] Step 5.3b: PR creation skipped (not enabled in config or prompt)"
 ```
 
-### Common Rationalizations (AD-0006, #38/#39 Gate 집계)
+### AP-GATE-01 · "All green" from empty gate_results
 
-exp9 (4.6), exp10 (4.6), exp11 (4.7) 모두에서 orchestrator가 `gate_results: null`인 상태로 "✅ all green"을 발행했다. 독립 `pnpm lint` 실측은 각각 exit 1 (1→17→53 errors, 악화 추세). 다음 합리화는 **모두 잘못**이다.
+When `state.gate_results.{hard1_baseline, hard2_coverage, hard3_resilience}`
+contains a `null` entry or any `exit_code != 0`, yet the finalize report
+declares "✅ clean" / "all green", the report is fabricated. Observed in
+exp9/exp10/exp11: RUNBOOK said green while independent `pnpm lint` returned
+exit 1 with 1, 17, and 53 errors respectively — a worsening trend that the
+self-report concealed.
 
-| Rationalization | Why it's wrong |
-|---|---|
-| "phase-runner가 'all tests passed'라고 보고했으니 Hard 2 ✅" | self-report는 **증거가 아니다**. exit code가 `state.gate_results.hard2_coverage.exit_code`에 기록되지 않았다면 pass 여부를 모른다. RUNBOOK.md의 자연어 서술도 증거 아님. |
-| "RUNBOOK에 적힌 gate 결과를 취합하면 됨" | RUNBOOK은 orchestrator의 **자가 서술**. 동일 세션이 쓴 문서를 취합하는 것은 echo chamber. AD-0006은 `state.json.gate_results` machine evidence만 인정하도록 명시. |
-| "warning은 있지만 error 없으니 clean" | exit 1 + warnings는 **NOT clean**. exp9에서 "26 warnings만 있고 pass"라고 주장했으나 실제로는 `exit 1` — "warning ok" 합리화가 정확히 실패한 지점. |
-| "Phase-runner 결과의 stdout 꼬리가 녹색이면 PASS로 판정 가능" | stdout 색/아이콘은 UI 요소일 뿐. `{exit_code: 0}`만이 PASS 증거. |
-| "format_gate_summary가 NOT EVALUATED를 뱉으면 그냥 공란으로 두자" | NOT EVALUATED를 공란 처리하면 **미검증 gate가 PASS로 보이게 된다** — 정확히 이 세 실험에서 발생한 거짓 보고 패턴. NOT EVALUATED는 반드시 표기. |
+Root cause: machine evidence lives in `state.gate_results` (written by the
+`mpl-gate-recorder` hook); RUNBOOK.md is the orchestrator's own narration of
+the same session and therefore echoes its own claims. AD-0006 made
+`state.json` the single source of truth for gate status precisely to break
+this echo chamber. Warnings with `exit 1` are not clean, green icons in
+stdout tails are UI rather than evidence, and `NOT EVALUATED` is information —
+silently rendering it as whitespace turns an unmeasured gate into an apparent
+PASS.
 
-### Red Flags — 즉시 정지
-
-- Finalize 보고서에 "✅ clean" / "all green"을 쓰려고 하는데 `state.gate_results.{hard1_baseline, hard2_coverage, hard3_resilience}` 중 하나라도 `null`이거나 `exit_code != 0`이면 → **정지**. "PARTIAL" 또는 "NOT EVALUATED"로 다시 쓰라.
-- PR 본문의 Quality Gate Results 섹션에 `format_gate_summary()` 출력 대신 직접 작성한 문구를 넣으려 한다면 → **정지**. SSOT 위반.
-- `state.gate_results.hard1_baseline.exit_code == 1` 인데 `three_gate_results.hard1_status: "PASS"`를 기록하려 한다면 → **fatal inconsistency**. 자기 모순이다.
+Build gate summaries only through `format_gate_summary(state.gate_results)`.
+If any entry is `null` or non-zero exit, the corresponding status must render
+as `NOT EVALUATED` or `PARTIAL (exit N)`, never `PASS` by absence. A
+`three_gate_results.hardN_status: "PASS"` alongside
+`state.gate_results.hardN_baseline.exit_code == 1` is self-contradictory and
+blocks finalize.
 
 **`format_gate_summary(gate_results)` contract (AD-0006)** — builds a Markdown table
 purely from `state.json.gate_results` without parsing RUNBOOK.md. This is the single
