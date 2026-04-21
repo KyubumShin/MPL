@@ -95,15 +95,9 @@ Do NOT proceed with Phase execution without loading the corresponding protocol f
 | Skill | Purpose |
 |-------|---------|
 | `/mpl:mpl` | MPL pipeline — single entry point with auto proximity routing (this skill) |
-| `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to pp_adjacent) |
 | `/mpl:mpl-pivot` | Pivot Points interview (immutable constraints) |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes via pp_proximity) |
-| `/mpl:mpl-compound` | Learning extraction and knowledge distillation (runs inline) |
 | `/mpl:mpl-doctor` | Installation diagnostics and health check |
 | `/mpl:mpl-setup` | Setup wizard - install, configure, repair |
-
-> **F-20 Note**: `mpl-small` and `mpl-bugfix` still work but redirect to `/mpl:mpl` with pp_proximity hints.
-> Use `"mpl bugfix ..."` or `"mpl small ..."` keywords for manual Hat override.

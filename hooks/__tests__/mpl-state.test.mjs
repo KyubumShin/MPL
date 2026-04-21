@@ -183,9 +183,6 @@ describe('initState', () => {
   });
 
   it('should pass through non-auto run_mode verbatim', () => {
-    // Pre-existing failure on main: the test was asserting behaviour keyed
-    // on a removed ppHint parameter. `small` as runMode now flows straight
-    // through; pipeline_id carries the feature slug only.
     const state = initState(tmpDir, 'quick-fix', 'full');
     assert.strictEqual(state.run_mode, 'full');
     assert.strictEqual(state.current_phase, 'phase1a-research');

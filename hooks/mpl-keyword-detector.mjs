@@ -97,8 +97,8 @@ async function main() {
 
     // v0.14.1 #36: Non-initializing MPL slash commands must NOT reset state.json.
     // These commands read or transform existing state — they never start a new pipeline.
-    // (Init commands NOT in this list: `/mpl:mpl`, `/mpl:mpl-small`, `/mpl:mpl-bugfix`)
-    const SLASH_NO_INIT = /^\s*\/mpl:mpl-(resume|cancel|status|doctor|setup|version-bump|pivot|gap-analysis|compound)\b/i;
+    // (Init command NOT in this list: `/mpl:mpl`)
+    const SLASH_NO_INIT = /^\s*\/mpl:mpl-(resume|cancel|status|doctor|setup|version-bump|pivot|gap-analysis)\b/i;
     if (SLASH_NO_INIT.test(prompt)) {
       // Let the slash command skill manage state. Keep state.json untouched.
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -181,10 +181,9 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
       return;
     }
 
-    // Hat model: Extract PP-proximity hint from keywords (bugfix→near, small→mid, null→auto)
-    let ppHint = null;
-    if (/\bmpl[\s-]*(bugfix|fix|bug)\b/i.test(cleanPrompt)) ppHint = 'near';
-    else if (/\bmpl[\s-]*(small|quick|light)\b/i.test(cleanPrompt)) ppHint = 'mid';
+    // Triage (Quick Scope Scan) determines pp_proximity at pipeline entry.
+    // Prior ppHint keyword extraction removed: Triage recalculates and overwrites the hint,
+    // so the keyword-derived value was silent dead code.
 
     // v0.14.1 #36: Capture prior pipeline state BEFORE initState overwrites it.
     // If the previous run was cancelled or paused, surface the recovery path in the
@@ -209,13 +208,12 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
 
     // Initialize MPL state — always single entry point
     const featureName = extractFeatureName(prompt);
-    initState(cwd, featureName, 'auto', ppHint);
+    initState(cwd, featureName, 'auto');
 
     // Always use single 'mpl' skill — Triage determines pp_proximity
-    const hintDesc = ppHint ? ` (hint: ${ppHint})` : '';
     const message = `[MAGIC KEYWORD: MPL]
 
-MPL Pipeline activated${hintDesc}. State initialized at .mpl/state.json (run_mode: "auto").
+MPL Pipeline activated. State initialized at .mpl/state.json (run_mode: "auto").
 Triage will determine pp_proximity (near/mid/far) via Quick Scope Scan.${priorStateHint}
 
 You MUST invoke the skill using the Skill tool:

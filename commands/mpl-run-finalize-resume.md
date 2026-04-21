@@ -145,16 +145,10 @@ for each discovery in result.discoveries:
 | Skill | Purpose |
 |-------|---------|
 | `/mpl:mpl` | Micro-Phase Loop pipeline — single entry point with auto tier routing (F-20) |
-| `/mpl:mpl-small` | **Deprecated** — use `/mpl:mpl` (auto-routes to standard tier) |
 | `/mpl:mpl-pivot` | Pivot Points interview |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-bugfix` | **Deprecated** — use `/mpl:mpl` (auto-routes to near proximity) |
 | `/mpl:mpl-doctor` | Installation diagnostics |
 | `/mpl:mpl-setup` | Setup wizard |
 | `/mpl:mpl-gap-analysis` | Gap analysis for missing requirements |
-
-> **Note (F-20)**: `mpl-small` and `mpl-bugfix` are deprecated. The `/mpl:mpl` skill now auto-detects
-> pp_proximity (near/mid/far) via Quick Scope Scan. Use keyword hints for manual override:
-> `"mpl bugfix"` → near, `"mpl small"` → mid.

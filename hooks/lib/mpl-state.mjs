@@ -347,7 +347,7 @@ export function cleanPipelineScope(cwd) {
   }
 }
 
-export function initState(cwd, featureName, runMode = 'full', ppHint = null) {
+export function initState(cwd, featureName, runMode = 'full') {
   // F-39: Clean pipeline-scoped artifacts before initializing new pipeline
   cleanPipelineScope(cwd);
 
@@ -367,28 +367,21 @@ export function initState(cwd, featureName, runMode = 'full', ppHint = null) {
     .replace(/^-|-$/g, '')
     .slice(0, 40);
 
-  const isNear = ppHint === 'near';
-  const isMid = ppHint === 'mid';
-
-  const maxFixLoops = config.max_fix_loops ?? (isNear ? 3 : isMid ? 5 : 10);
+  const maxFixLoops = config.max_fix_loops ?? 10;
   const convergenceConfig = config.convergence ?? {};
 
-  const ppPrefix = isNear ? 'near-' : isMid ? 'mid-' : '';
   return writeState(cwd, {
     ...DEFAULT_STATE,
-    pipeline_id: `mpl-${ppPrefix}${dateStr}-${slug}`,
+    pipeline_id: `mpl-${dateStr}-${slug}`,
     run_mode: runMode === 'auto' ? 'auto' : runMode,
     pp_proximity: null,            // Set by Triage after Quick Scope Scan
-    current_phase: isNear ? 'phase1a-research' : isMid ? 'small-plan' : 'phase1a-research',
+    current_phase: 'phase1a-research',
     max_fix_loops: maxFixLoops,
     convergence: {
       ...DEFAULT_STATE.convergence,
       ...convergenceConfig
     },
-    research: {
-      ...DEFAULT_STATE.research,
-      mode: isMid ? 'light' : 'full'
-    },
+    research: { ...DEFAULT_STATE.research },
     started_at: now
   });
 }

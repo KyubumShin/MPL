@@ -131,22 +131,28 @@ announce: "[MPL] {decisions_needed.length} architecture decisions recorded."
 
 These decisions are included in Decomposer input and every Phase Seed's constraints.
 
-### Common Rationalizations (AD-0006, #42 Phase 0 Agent Dispatch)
+### AP-PHASE0-01 · Orchestrator-inlined Phase 0 analysis
 
-exp9, exp10, exp11 세 실험 모두에서 `mpl-phase0-analyzer` 와 `mpl-codebase-analyzer` dispatch가 0회 관측됐다. 단, **greenfield (빈 codebase) 경우 codebase-analyzer skip은 정당**하다. phase0-analyzer는 Complex grade일 때 반드시 dispatch돼야 한다.
+When the orchestrator writes `phase0/api-contracts.md`, `type-policy.md`, or
+related artifacts directly instead of dispatching `mpl-phase0-analyzer`,
+Phase 0 becomes self-review: the same session that will decompose the work
+also judges its own complexity. Observed in exp9/exp10/exp11, where analyzer
+dispatch was zero and the complexity grade fed to Decomposer silently defaulted
+to "Simple".
 
-| Rationalization | Why it's wrong |
-|---|---|
-| "이미 분석했으니 agent 불필요" | 당신(orchestrator)의 분석은 **자가 검토**. Phase 0 agents는 haiku 모델 + 별도 context로 **독립 관점**을 제공하는 것이 존재 이유. orchestrator가 inline 수행하면 AD-0003이 test-agent를 복원한 것과 같은 blind spot 문제가 발생. |
-| "greenfield라 분석할 게 없음" | **codebase-analyzer**는 납득 (코드 없음) 이지만 **phase0-analyzer는 다르다**. Phase 0 Enhanced는 scaffolding 결정/tech stack 선정/complexity grading을 다룬다 — greenfield에도 이것은 필요. Complex grade면 dispatch 의무. |
-| "api-contracts.md, type-policy.md 등 아티팩트를 내가 더 빨리 쓸 수 있음" | 속도 ≠ 품질. phase0-analyzer는 4개 아티팩트 세트를 일관된 schema로 생성하도록 프롬프트됨. orchestrator inline은 형식 drift가 발생. |
-| "Phase 0 Enhanced 전체를 skip하고 바로 decompose로 가도 됨" | complexity grade 자체가 decomposition의 입력. Enhanced skip은 decomposer에 "Simple이다"라고 거짓말하는 것과 동등. |
+Root cause: the analyzer runs on a separate context with a haiku model to
+provide an *independent* complexity reading and a schema-consistent artifact
+set. Inline orchestrator generation loses that independence — the same blind-
+spot pattern AD-0003 restored `mpl-test-agent` to address. Format drift is a
+secondary cost; the primary cost is a grade that reflects the orchestrator's
+own optimism, not the codebase.
 
-### Red Flags — 즉시 정지
-
-- `.mpl/mpl/phase0/` 디렉토리에 api-contracts.md/type-policy.md/examples.md 등을 orchestrator가 직접 Write하고 있다면 → **정지**. `Task(subagent_type="mpl-phase0-analyzer")` dispatch가 선행돼야 한다.
-- `state.sprint_status.phase0_complete` 또는 `profile/phases.jsonl`에 `mpl-phase0-analyzer` 기록이 없는 채 Step 3 (decompose)로 진입하려 한다면 → **정지**.
-- complexity grade가 "Complex"로 판정됐는데 phase0-analyzer dispatch를 생략한다면 → **AD-0003이 test-agent에 대해 한 경고와 동일 — structural skip bug**.
+Greenfield repos legitimately skip `mpl-codebase-analyzer` (no code to read),
+but Phase 0 Enhanced still covers scaffolding choices, tech-stack selection,
+and complexity grading — all of which apply to greenfield. Before entering
+Step 3: confirm `profile/phases.jsonl` records a `mpl-phase0-analyzer` entry
+when the grade is Medium or Complex. Absent that, the grade feeding
+Decomposer is your own guess.
 
 ## Step 2.5: Phase 0 Enhanced (Subagent Delegation) [F-36]
 
