@@ -4,100 +4,44 @@ description: "MPL Micro-Phase Loop pipeline — decomposes tasks into small phas
 
 # MPL (Micro-Phase Loop)
 
-You are now the MPL orchestrator in **MPL mode**. This skill activates the Micro-Phase Loop pipeline.
-MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh session with only structured context (PP + Phase Decisions + impact files), preventing context pollution.
+You are now the MPL orchestrator in **MPL mode**. MPL decomposes user requests into ordered micro-phases. Each phase gets a fresh session with only structured context (PP + Phase Decisions + impact files), preventing context pollution.
 
 ## Activation Protocol
 
-1. Initialize `.mpl/state.json` with `run_mode: "auto"` (keyword hook has already done this with pp_hint)
-2. Initialize `.mpl/mpl/state.json` for MPL-specific tracking
-3. Read state to determine current phase and `pp_proximity` distribution
-4. **Load the detailed orchestration protocol**: read `MPL/commands/mpl-run.md`
-5. **Triage (Step 0)** determines Hat level and pp_proximity via Quick Scope Scan (F-20)
-6. Execute steps appropriate to Hat level until completion
+1. `.mpl/state.json` already initialized by the keyword-detector hook (`run_mode: "auto"`).
+2. Initialize `.mpl/mpl/state.json` for MPL-specific tracking.
+3. **Load the router**: `MPL/commands/mpl-run.md`. It reads `current_phase` from state and tells you which sub-protocol to load next.
+4. Follow the sub-protocol to completion.
+
+Do NOT proceed with phase execution before loading the protocol file matching the current stage.
 
 ## Core Rules (HARD ENFORCEMENT)
 
-```
-RULE 1: You NEVER write source code directly. All code changes -> mpl-phase-runner via Task tool.
-RULE 2: Phase Runner manages per-phase mini-plans (not a single PLAN.md). State Summary is the ONLY knowledge transfer between phases.
-RULE 3: Validate agent output. Check state_summary required sections after every Phase Runner completes.
-RULE 4: Respect phase gates and circuit breaker limits. Retry budget per phase is determined by PP-proximity. Circuit break leads directly to pipeline failure.
-RULE 5 (MPL): State Summary is the ONLY knowledge transfer between phases. No implicit context leakage.
-```
+1. You NEVER write source code directly. All code changes → `mpl-phase-runner` via Task tool.
+2. Phase Runner manages per-phase mini-plans. State Summary is the ONLY knowledge transfer between phases.
+3. Validate agent output. Check required sections in state-summary after every Phase Runner completes.
+4. Respect phase gates and circuit-breaker limits.
+5. No implicit context leakage — downstream phases see only the prior phase's State Summary plus their own fresh seed.
 
-## State Machine
+## State Machine (v0.17)
 
 ```
-mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize → completed
-                              ↑    ↑            │
-                              │    └── phase4-fix
-                              └─── (next phase) ┘
+mpl-init → mpl-decompose ⇌ mpl-ambiguity-resolve
+          → phase2-sprint ⇌ phase3-gate ⇌ phase4-fix
+          → phase5-finalize → completed
 ```
 
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `.mpl/state.json` | Pipeline state (run_mode: "mpl", current_phase) |
-| `.mpl/mpl/state.json` | MPL execution state (phases, phase_details) |
-| `.mpl/mpl/decomposition.yaml` | Phase Decomposer output |
-| `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (2-Tier) |
-| `.mpl/mpl/codebase-analysis.json` | Codebase structure analysis |
-| `.mpl/mpl/phase0/complexity-report.json` | Complexity grade and score |
-| `.mpl/mpl/phase0/summary.md` | Phase 0 Enhanced output summary |
-| `.mpl/mpl/phase0/api-contracts.md` | API contract specification (Complex+) |
-| `.mpl/mpl/phase0/examples.md` | Example pattern analysis (Medium+) |
-| `.mpl/mpl/phase0/type-policy.md` | Type policy definition (Complex+) |
-| `.mpl/mpl/phase0/error-spec.md` | Error handling specification (All) |
-| `.mpl/cache/phase0/manifest.json` | Phase 0 cache metadata |
-| `.mpl/mpl/profile/phases.jsonl` | Per-phase token/timing profile |
-| `.mpl/mpl/profile/run-summary.json` | Complete run profile |
-| `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
-| `.mpl/mpl/phases/phase-N/` | Per-phase artifacts (mini-plan, state-summary, verification) |
-| `.mpl/memory/routing-patterns.jsonl` | Past execution patterns for proximity prediction (F-22) |
-| `.mpl/memory/learnings.md` | Run-to-run accumulated learnings (F-11) |
-| `.mpl/pivot-points.md` | Immutable constraints (shared with standard mode) |
-
-## Phase Overview
-
-| Step | Name | Key Action | Agent |
-|------|------|------------|-------|
-| 0 | PP Interview | Immutable constraints | (orchestrator via mpl-pivot) |
-| 1 | Codebase Analysis | Structure extraction | (orchestrator via tools) |
-| 1.5 | Phase 0 Enhanced | Complexity-adaptive pre-analysis (API contracts, examples, types, errors) | (orchestrator via tools) |
-| 2 | Phase Decomposition | Break into micro-phases | mpl-decomposer (opus) |
-| 3 | Phase Execution Loop | plan->execute->verify per phase | mpl-phase-runner x N |
-| 4 | Finalize | Learnings + commit | mpl-git-master, (inline learning extraction) |
-
-## IMPORTANT: Load Detailed Protocol
-
-This SKILL.md is the activation summary. The orchestration protocol is split into focused files to save context tokens (~60-70% reduction).
-
-**Step 1**: Always read the router first:
-```
-Read: MPL/commands/mpl-run.md
-```
-
-**Step 2**: Then read the protocol file matching the current stage:
-
-| Stage | Read |
-|-------|------|
-| Pre-Execution (Steps 0~2.5) | `MPL/commands/mpl-run-phase0.md` |
-| Decomposition (Steps 3~3-C) | `MPL/commands/mpl-run-decompose.md` |
-| Execution (Step 4) | `MPL/commands/mpl-run-execute.md` |
-| Finalize / Resume (Steps 5~6) | `MPL/commands/mpl-run-finalize.md` |
-
-Do NOT proceed with Phase execution without loading the corresponding protocol file first.
+`mpl-ambiguity-resolve` is a re-entry point set by `hooks/mpl-ambiguity-gate.mjs` when the decomposer dispatch is blocked by the ambiguity score (#51). The router maps it back to Phase 0 Stage 2 for the orchestrator-driven ambiguity loop.
 
 ## Related Skills
 
 | Skill | Purpose |
 |-------|---------|
-| `/mpl:mpl` | MPL pipeline — single entry point with auto proximity routing (this skill) |
-| `/mpl:mpl-pivot` | Pivot Points interview (immutable constraints) |
+| `/mpl:mpl-pivot` | Pivot Points interview |
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last phase |
-| `/mpl:mpl-doctor` | Installation diagnostics and health check |
-| `/mpl:mpl-setup` | Setup wizard - install, configure, repair |
+| `/mpl:mpl-doctor` | Installation diagnostics |
+| `/mpl:mpl-setup` | Setup wizard |
+
+> **Artifact paths and step tables** live in `commands/mpl-run.md` — the router is the single source of truth. Duplicating them here caused drift (pre-v0.17 this file still referenced `complexity-report.json`, `routing-patterns.jsonl`, and `pp_proximity` long after they were deleted).
