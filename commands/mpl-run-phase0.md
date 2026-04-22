@@ -509,30 +509,9 @@ Announce: "[MPL #59] Step 2.9 baseline.yaml recorded. git_base_sha=${baseline.gi
 
 ### Schema
 
-```yaml
-# .mpl/mpl/baseline.yaml (immutable after first write)
-created_at: "ISO timestamp"
-pipeline_id: "mpl-{feature}-{date}"
-git:
-  base_sha: "full SHA or null if not a git repo"
-  base_branch: "branch name or null"
-  working_tree_clean: boolean
-artifacts:
-  pivot_points:      { path, sha256 } | null
-  core_scenarios:    { path, sha256 } | null
-  design_intent:     { path, sha256 } | null
-  user_contract:     { path, sha256 } | null
-  codebase_analysis: { path, sha256, skipped: boolean }
-  raw_scan:          { path, sha256 } | null
-ambiguity:
-  final_score: number | null
-  threshold_met: boolean
-  override: { active, reason, by } | null
-  rounds: number
-spec:
-  user_request_hash:  "sha256 of user_request (normalized)"
-  resolved_spec_hash: "sha256 of Stage 1 + Stage 2 accumulated responses (normalized)"
-```
+> See [`commands/schemas/baseline.yaml`](schemas/baseline.yaml) for the full schema with field documentation.
+>
+> **Top-level keys**: `created_at` · `pipeline_id` · `git` (base_sha/base_branch/working_tree_clean) · `artifacts` (per Phase 0 artifact: path + sha256, plus `skipped` for codebase_analysis) · `ambiguity` (final_score/threshold_met/override/rounds) · `spec` (user_request_hash + resolved_spec_hash, both normalized SHA-256).
 
 ### Immutability (write-guard)
 

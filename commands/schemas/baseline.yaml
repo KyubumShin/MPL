@@ -1,0 +1,37 @@
+# Schema: .mpl/mpl/baseline.yaml
+# Written by: commands/mpl-run-phase0.md Step 2.9 (#59) after Stage 2 closes.
+# Immutable: hooks/mpl-baseline-guard.mjs blocks overwrite unless
+#   .mpl/mpl/.baseline-renewal sentinel exists.
+# Consumers: Decomposer (delta target), Seed Generator (cache validation),
+#   4.7 Partial Rollback (git.base_sha reset target), 5.1.5 Scope Drift
+#   Detection, Finalize 5.4 Metrics.
+
+created_at: "ISO timestamp"
+pipeline_id: "mpl-{feature}-{date}"
+
+git:
+  base_sha: "full SHA or null if not a git repo"
+  base_branch: "branch name or null"
+  working_tree_clean: boolean                   # git status --porcelain empty?
+
+artifacts:
+  # Each entry: { path, sha256 } | null (absent) — sha256 normalized SHA-256
+  pivot_points:      { path: ".mpl/pivot-points.md",         sha256: "<hash>" } # null if absent
+  core_scenarios:    { path: ".mpl/mpl/core-scenarios.yaml", sha256: "<hash>" } # null if absent
+  design_intent:     { path: ".mpl/mpl/phase0/design-intent.yaml", sha256: "<hash>" } # null if absent
+  user_contract:     { path: ".mpl/requirements/user-contract.md", sha256: "<hash>" } # null if absent
+  codebase_analysis: { path: ".mpl/mpl/codebase-analysis.json", sha256: "<hash>", skipped: false } # skipped=true for greenfield
+  raw_scan:          { path: ".mpl/mpl/phase0/raw-scan.md",  sha256: "<hash>" } # null if absent
+
+ambiguity:
+  final_score: number                            # null if never scored
+  threshold_met: boolean                         # score <= 0.2 at close
+  override:                                      # null when gate passed naturally
+    active: boolean
+    reason: "user-provided rationale string"
+    by: "user_halt | ci_override"
+  rounds: integer                                # length of ambiguity_history at close
+
+spec:
+  user_request_hash:  "sha256 of user_request (normalized: CRLF→LF + trim)"
+  resolved_spec_hash: "sha256 of Stage 1 + Stage 2 accumulated responses (normalized)"

@@ -1,0 +1,53 @@
+{
+  "_comment": "Schema: .mpl/mpl/metrics.json. Written by commands/mpl-run-finalize.md Step 5.4.",
+  "_consumers": "mpl:mpl-status dashboard, mpl:mpl-doctor audit, external analytics",
+
+  "phases_completed": 4,
+  "phases_failed": 0,
+  "total_retries": 2,
+  "total_micro_fixes": 3,
+  "total_discoveries": 3,
+  "total_pd_count": 8,
+  "total_pd_overrides": 1,
+  "final_pass_rate": 100,
+  "phase5_skipped": true,
+  "phase0_cache_hit": false,
+  "phase0_artifacts_validated": "1/1",
+  "token_profile": {
+    "phase0": 12000,
+    "phases": [10000, 12000, 8000, 5000],
+    "phase5_gate": 500,
+    "finalize": 2000,
+    "total_estimated": 49500
+  },
+  "elapsed_ms": 720000,
+  "final_verification": "all_pass",
+  "side_interviews": { "count": 0, "phases": [] },
+  "convergence_triggers": { "stagnation": 0, "regression": 0 },
+  "gap_analysis": { "missing_requirements": 0, "pitfalls": 0, "constraints": 0 },
+  "tradeoff_analysis": { "aggregate_risk": "LOW", "irreversible_count": 0 },
+  "critic_assessment": "READY",
+
+  "three_gate_results": {
+    "_comment": "AD-0006: derived from state.gate_results (machine evidence, not self-report). status ∈ {PASS (exit 0), PARTIAL (exit != 0), NOT_EVALUATED (null)}",
+    "hard1_status": "PASS", "hard1_exit_code": 0, "hard1_command": "pnpm lint && pnpm build",
+    "hard2_status": "PASS", "hard2_exit_code": 0, "hard2_command": "pnpm test --run",
+    "hard3_status": "NOT_EVALUATED", "hard3_exit_code": null, "hard3_command": null
+  },
+
+  "verification_plan": { "a_items": 0, "s_items": 0, "h_items": 0 },
+
+  "intent_invariants": {
+    "_comment": "#50 (2026-04-20 debate 합의): teleological invariant tracking. Aggregated from each phase's verification record.",
+    "total_declared": 2,
+    "total_violations": 0,
+    "discovery_from_intent_conflict": 0,
+    "violated_ids": [],
+    "by_phase": {
+      "_example": {
+        "phase-1": { "declared": 1, "violations": 0, "discoveries": 0 },
+        "phase-2": { "declared": 1, "violations": 0, "discoveries": 0 }
+      }
+    }
+  }
+}

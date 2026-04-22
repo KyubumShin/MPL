@@ -601,52 +601,13 @@ Config example (`.mpl/config.json`):
 
 ### 5.4: Metrics
 
-Save to `.mpl/mpl/metrics.json`:
-```json
-{
-  "phases_completed": 4, "phases_failed": 0,
-  "total_retries": 2, "total_micro_fixes": 3,
-  "total_discoveries": 3, "total_pd_count": 8, "total_pd_overrides": 1,
-  "final_pass_rate": 100, "phase5_skipped": true,
-  "phase0_cache_hit": false,
-  "phase0_grade": "Complex",
-  "phase0_artifacts_validated": "3/3",
-  "token_profile": {
-    "phase0": 12000,
-    "phases": [10000, 12000, 8000, 5000],
-    "phase5_gate": 500,
-    "finalize": 2000,
-    "total_estimated": 49500
-  },
-  "elapsed_ms": 720000, "final_verification": "all_pass",
-  "side_interviews": { "count": 0, "phases": [] },
-  "convergence_triggers": { "stagnation": 0, "regression": 0 },
-  "gap_analysis": { "missing_requirements": 0, "pitfalls": 0, "constraints": 0 },
-  "tradeoff_analysis": { "aggregate_risk": "LOW", "irreversible_count": 0 },
-  "critic_assessment": "READY",
-  "three_gate_results": {
-    // AD-0006: derived from state.gate_results (machine evidence, not self-report).
-    // hard{1,2,3}_status ∈ { "PASS" (exit 0), "PARTIAL" (exit != 0), "NOT_EVALUATED" (null) }
-    "hard1_status": "PASS", "hard1_exit_code": 0, "hard1_command": "pnpm lint && pnpm build",
-    "hard2_status": "PASS", "hard2_exit_code": 0, "hard2_command": "pnpm test --run",
-    "hard3_status": "NOT_EVALUATED", "hard3_exit_code": null, "hard3_command": null
-  },
-  "verification_plan": { "a_items": 0, "s_items": 0, "h_items": 0 },
-  "intent_invariants": {
-    // #50 (2026-04-20 debate 합의): teleological invariant tracking.
-    // Aggregated from each phase's verification record (written by Hard 2, G2).
-    "total_declared": 2,                  // sum of verification_plan.invariants[].length across phases (dedup by id)
-    "total_violations": 0,                // sum of invariant_violation_count across phases (Hard 2 runs)
-    "discovery_from_intent_conflict": 0,  // count of discoveries where type == "invariant_violation"
-    "violated_ids": [],                   // [ "INV-2", ... ] — ids that failed in any phase (empty if clean)
-    "by_phase": {                         // per-phase breakdown for debugging
-      // "phase-1": { declared: 1, violations: 0, discoveries: 0 },
-      // "phase-2": { declared: 1, violations: 0, discoveries: 0 }
-    }
-  },
-  "triage": { "interview_depth": "full", "prompt_density": 3 }
-}
-```
+Save to `.mpl/mpl/metrics.json`.
+
+> See [`commands/schemas/metrics.json`](schemas/metrics.json) for the full schema with field comments.
+>
+> **Top-level shape**: phase/retry/discovery counters · `token_profile` (phase0/phases/phase5_gate/finalize/total_estimated) · `three_gate_results` (AD-0006 machine evidence derived from state.gate_results) · `intent_invariants` (#50 aggregation: total_declared/total_violations/discovery_from_intent_conflict/violated_ids/by_phase) · `verification_plan` (a/s/h counts) · `gap_analysis`, `tradeoff_analysis`, `side_interviews`, `convergence_triggers`.
+>
+> **v0.17 cleanup**: `phase0_grade` and `triage.interview_depth` fields removed (complexity grade and light/full dual-track deleted in #55/#56/#57).
 
 **Intent Invariant aggregation rule (#50)**:
 ```
@@ -661,23 +622,11 @@ if total_declared == 0:
   # (no-op for bugfix/simple tasks — matches optional field semantics)
 ```
 
-Generate full run profile at `.mpl/mpl/profile/run-summary.json`:
-```json
-{
-  "run_id": "mpl-{timestamp}",
-  "complexity": { "grade": "Complex", "score": 85 },
-  "cache": { "phase0_hit": false, "saved_tokens": 0 },
-  "phases": [
-    { "id": "phase0", "tokens": 12000, "duration_ms": 15000, "cache_hit": false },
-    { "id": "phase-1", "tokens": 10000, "duration_ms": 45000, "pass_rate": 100, "micro_fixes": 0 },
-    { "id": "phase-2", "tokens": 12000, "duration_ms": 60000, "pass_rate": 100, "micro_fixes": 1 },
-    { "id": "phase-3", "tokens": 8000, "duration_ms": 40000, "pass_rate": 100, "micro_fixes": 0 },
-    { "id": "phase-4", "tokens": 5000, "duration_ms": 30000, "pass_rate": 100, "micro_fixes": 0 }
-  ],
-  "phase5_gate": { "final_pass_rate": 100, "decision": "skip", "fix_tokens": 0 },
-  "totals": { "tokens": 49500, "duration_ms": 210000, "micro_fixes": 1, "retries": 0 }
-}
-```
+Generate full run profile at `.mpl/mpl/profile/run-summary.json`.
+
+> See [`commands/schemas/run-summary.json`](schemas/run-summary.json) for the full schema.
+>
+> **Shape**: `run_id` · `complexity` (grade/score) · `cache` (phase0_hit/saved_tokens) · `phases[]` (per-phase tokens/duration_ms/pass_rate/micro_fixes) · `phase5_gate` · `totals`.
 
 Profile data enables:
 1. **Learn optimal token budget by complexity**: derive average tokens per grade from past profiles
