@@ -179,6 +179,7 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 | `mpl-run-finalize.md` | 5 | E2E, Learnings, Commits, PR, Metrics | ~5K |
 | `mpl-run-finalize-resume.md` | 6 | Resume Protocol, Budget Pause Resume, Discovery Processing, Related Skills | ~2K |
 | `commands/references/e2e-recovery.md` (v0.17 #67) | 5.0.4 detail | Automated E2E Recovery Loop full protocol — load on failure | ~2K |
+| `commands/references/prompt-routing.md` (v0.17 #68) | 4.2.1 detail | F-28 domain routing + F-39 4-Layer composition — load at Phase Runner dispatch | ~2K |
 
 ### Sub-File Loading Rules
 
