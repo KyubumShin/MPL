@@ -150,9 +150,8 @@ describe('saveCache', () => {
   it('should save artifacts and manifest', () => {
     const result = saveCache(tempDir, {
       cacheKey: 'test_key_123',
-      complexityGrade: 'Simple',
       artifacts: {
-        'error-spec.md': '# Error Specification\n\n## Errors',
+        'raw-scan.md': '# Raw Scan\n\n## Boundary Pairs',
         'summary.md': '# Phase 0 Summary',
       }
     });
@@ -161,21 +160,21 @@ describe('saveCache', () => {
     assert.equal(result.artifactCount, 2);
 
     const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
-    assert.ok(existsSync(join(cacheDir, 'error-spec.md')));
+    assert.ok(existsSync(join(cacheDir, 'raw-scan.md')));
     assert.ok(existsSync(join(cacheDir, 'summary.md')));
     assert.ok(existsSync(join(cacheDir, 'manifest.json')));
 
     const manifest = JSON.parse(readFileSync(join(cacheDir, 'manifest.json'), 'utf-8'));
     assert.equal(manifest.cache_key, 'test_key_123');
-    assert.equal(manifest.complexity_grade, 'Simple');
-    assert.deepEqual(manifest.artifacts, ['error-spec.md', 'summary.md']);
+    assert.equal(manifest.complexity_grade, undefined);
+    assert.deepEqual(manifest.artifacts, ['raw-scan.md', 'summary.md']);
   });
 
   it('should create cache directory if it does not exist', () => {
     const cacheDir = join(tempDir, '.mpl', 'cache', 'phase0');
     assert.ok(!existsSync(cacheDir));
 
-    saveCache(tempDir, { cacheKey: 'k', complexityGrade: 'Medium', artifacts: { 'a.md': 'content' } });
+    saveCache(tempDir, { cacheKey: 'k', artifacts: { 'a.md': 'content' } });
     assert.ok(existsSync(cacheDir));
   });
 });
@@ -263,7 +262,6 @@ describe('invalidateCache', () => {
   it('should make checkCache return hit=false after invalidation', () => {
     saveCache(tempDir, {
       cacheKey: 'test_key',
-      complexityGrade: 'Simple',
       artifacts: { 'error-spec.md': '# Errors' }
     });
     assert.equal(checkCache(tempDir).hit, true);
@@ -291,7 +289,6 @@ describe('F-05: Partial Cache Invalidation', () => {
       writeFileSync(join(cacheDir, 'manifest.json'), JSON.stringify({
         cache_key: 'test-key',
         timestamp: new Date().toISOString(),
-        complexity_grade: 'Medium',
         artifacts: [],
       }));
 
@@ -307,7 +304,6 @@ describe('F-05: Partial Cache Invalidation', () => {
         cache_key: 'test-key',
         commit_hash: 'deadbeef1234',
         timestamp: new Date().toISOString(),
-        complexity_grade: 'Medium',
         artifacts: [],
       }));
 
@@ -332,8 +328,7 @@ describe('F-05: Partial Cache Invalidation', () => {
 
       const result = partialCacheSave(tempDir, {
         newCacheKey: 'new-key-123',
-        complexityGrade: 'Medium',
-        newArtifacts: { 'examples.md': '# New Examples' },
+          newArtifacts: { 'examples.md': '# New Examples' },
         reusedArtifacts: ['api-contracts.md', 'type-policy.md'],
         originalKey: 'old-key-456',
       });
@@ -355,8 +350,7 @@ describe('F-05: Partial Cache Invalidation', () => {
 
       partialCacheSave(tempDir, {
         newCacheKey: 'key-abc',
-        complexityGrade: 'Simple',
-        newArtifacts: { 'error-spec.md': '# Error Spec' },
+          newArtifacts: { 'error-spec.md': '# Error Spec' },
         reusedArtifacts: ['type-policy.md'],
         originalKey: 'key-old',
       });
@@ -377,8 +371,7 @@ describe('F-05: Partial Cache Invalidation', () => {
 
       partialCacheSave(tempDir, {
         newCacheKey: 'key-xyz',
-        complexityGrade: 'Medium',
-        newArtifacts: { 'examples.md': '# New Examples' },
+          newArtifacts: { 'examples.md': '# New Examples' },
         reusedArtifacts: ['api-contracts.md'],
         originalKey: 'key-prev',
       });
@@ -398,8 +391,7 @@ describe('F-05: Partial Cache Invalidation', () => {
 
       const result = partialCacheSave(tempDir, {
         newCacheKey: 'key-count',
-        complexityGrade: 'Simple',
-        newArtifacts: { 'error-spec.md': '# Errors', 'examples.md': '# Examples' },
+          newArtifacts: { 'error-spec.md': '# Errors', 'examples.md': '# Examples' },
         reusedArtifacts: ['type-policy.md'],
         originalKey: 'key-old',
       });
