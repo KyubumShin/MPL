@@ -104,7 +104,6 @@ Retry: Phase Runner handles retries internally based on PP-proximity level. Orch
 
 | File | Purpose |
 |------|---------|
-| `routing-patterns.jsonl` | Past execution patterns for execution pattern learning (F-22, append-only) |
 | `learnings.md` | Run-to-Run accumulated learnings (F-11) |
 
 ### Session Context Persistence (F-12)

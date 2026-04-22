@@ -890,30 +890,11 @@ Append final section to `.mpl/mpl/RUNBOOK.md`:
 - **Completed At**: {ISO timestamp}
 ```
 
-### 5.6.5: Routing Pattern Recording (F-22)
-
-Record execution result to `.mpl/memory/routing-patterns.jsonl` for future tier prediction:
-
-```
-state = Read(".mpl/state.json")
-mpl_state = Read(".mpl/mpl/state.json")
-
-pattern = {
-  description: state.task or user_request (first 100 chars, summarized),
-  proximity: state.pp_proximity,
-  escalated_from: state.escalation_history.length > 0
-    ? state.escalation_history[0].from
-    : null,
-  result: mpl_state.status,  // "completed" | "partial" | "failed"
-  tokens: mpl_state.totals.total_tokens or profile.totals.tokens,
-  files: count of all created/modified files across phases
-}
-
-appendPattern(cwd, pattern)
-// Uses hooks/lib/mpl-routing-patterns.mjs
-
-Report: "[MPL] Routing pattern recorded: proximity={proximity}, result={result}, tokens={tokens}."
-```
+> **Step 5.6.5 (F-22 Routing Pattern Recording) removed in v0.17 (#60)**:
+> Write side deleted along with the read site (ex-Step 0.1.5a, removed in #55).
+> Jaccard similarity matching on user_request strings was too noisy to drive
+> tier recommendations reliably. `hooks/lib/mpl-routing-patterns.mjs` and
+> `.mpl/memory/routing-patterns.jsonl` are no longer written or consumed.
 
 ### 5.7: Update State
 

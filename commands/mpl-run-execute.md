@@ -521,14 +521,6 @@ If `.mpl/prompts/domains/` directory or the corresponding domain file doesn't ex
 - Use generic prompt (same as existing behavior)
 - Domain prompts are **optional extensions** — no impact on pipeline operation if absent
 
-#### Integration with F-22 Routing Patterns
-
-After execution completes, also record domain information in routing-patterns.jsonl:
-```jsonl
-{"ts":"...","desc":"...","proximity":"non_pp","domain_distribution":{"db":2,"api":3,"test":1},"result":"success","tokens":85000}
-```
-Next run can reference domain distribution of similar tasks for pre-emptive prompt caching.
-
 #### 4-Layer Context Injection into Phase Runner Prompt (F-39)
 
 Add 4-Layer section to Step 4.2 Phase Runner dispatch prompt:
