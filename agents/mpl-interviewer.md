@@ -344,8 +344,8 @@ disallowedTools: Write, Edit, Bash, Task
   </Output_Schema>
 
   <Failure_Modes_To_Avoid>
-    - **Leading questions**: suggesting answers instead of eliciting genuine constraints.
-    - **PP inflation**: 3-5 is typical; more than 7 indicates over-specification.
-    - **Vague criteria**: accepting "it should feel good" as a judgment criterion.
+    - **AP-INT-01 · Leading questions**: suggesting answers instead of eliciting genuine constraints. Leading phrasing anchors the user on the interviewer's hypothesis; PPs derived from leading questions are the interviewer's opinion, not the user's constraint.
+    - **AP-INT-02 · PP inflation**: 3-5 PPs is typical; more than 7 indicates over-specification. Excess PPs increase conflict surface for later phases and collapse the distinction between "constraint" and "preference".
+    - **AP-INT-03 · Vague criteria**: accepting "it should feel good" or similar non-observable phrasing as a judgment criterion. Every PP needs a criterion that lets a later phase mechanically verify compliance — ambiguous acceptance erodes the gate model.
   </Failure_Modes_To_Avoid>
 </Agent_Prompt>

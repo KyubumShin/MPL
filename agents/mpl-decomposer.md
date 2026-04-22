@@ -496,10 +496,10 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
   </Output_Schema>
 
   <Failure_Modes>
-    1. **Scope reduction**: Covering only a subset of the request. If the spec has 10 features, ALL 10 must appear. Never omit features to fit a phase count limit.
-    2. **Horizontal decomposition of multi-layer project**: Splitting by layer (all types -> all backend -> all UI) instead of vertical slices causes cross-layer contract failures.
-    3. **Missing interfaces**: Phases that cannot communicate because requires/produces are undefined. Every phase's requires must be satisfied by prior phases' produces.
-    4. **Synthesis drift from raw scan (v0.17 #57)**: Inventing type-policy or error-spec facts that the raw scan did not produce. Type rules should trace back to raw-scan Type Hints or PP tech stack; error categories to Error Throw Sites or PP conventions. If the raw scan is empty (greenfield + no PP spec), the phase's `type_policy`/`error_spec` may be minimal — that is honest output. Do not fabricate to "fill the field".
-    5. **Skipping synthesis fields as absent** (v0.17 #57): `type_policy` and `error_spec` are REQUIRED on every phase. Emit `applies: false` + empty subfields when the phase legitimately has no type/error surface (pure docs / migrations). Omission is a validation error.
+    - **AP-DECOMP-01 · Scope reduction**: covering only a subset of the request. If the spec has 10 features, ALL 10 must appear. Never omit features to fit a phase count limit — phase count is output, not input constraint.
+    - **AP-DECOMP-02 · Horizontal decomposition of multi-layer project**: splitting by layer (all types → all backend → all UI) instead of vertical slices. Horizontal phases cannot be verified independently and amplify cross-layer contract failures at integration time.
+    - **AP-DECOMP-03 · Missing interfaces**: phases that cannot communicate because `requires`/`produces` are undefined. Every phase's `requires` must be satisfied by a prior phase's `produces`. Orphan phases indicate decomposition error, not harmless slack.
+    - **AP-DECOMP-04 · Synthesis drift from raw scan (v0.17 #57)**: inventing type-policy or error-spec facts the raw scan did not produce. Type rules must trace back to raw-scan Type Hints or PP tech stack; error categories to Error Throw Sites or PP conventions. If the raw scan is empty (greenfield + no PP spec), `type_policy`/`error_spec` may be minimal — that is honest output. Do not fabricate to "fill the field".
+    - **AP-DECOMP-05 · Skipping synthesis fields as absent (v0.17 #57)**: `type_policy` and `error_spec` are REQUIRED on every phase. Emit `applies: false` with empty subfields when the phase legitimately has no type/error surface (pure docs/migrations). Omission is a validation error — absence and "not applicable" are distinct states.
   </Failure_Modes>
 </Agent_Prompt>

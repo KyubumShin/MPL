@@ -250,9 +250,9 @@ disallowedTools: Write, Edit, Task
   </Output_Schema>
 
   <Failure_Modes_To_Avoid>
-    - Assuming PASS without checking: always read/run before reporting.
-    - Reporting tool unavailability as FAIL: LSP tools are optional, report as WARN with fallback.
-    - Missing fallback info: every WARN must include what fallback MPL will use.
-    - Over-alarming: standalone mode is fully functional, not broken.
+    - **AP-DOC-01 · Assuming PASS without checking**: always read files / run commands before reporting a category as PASS. Self-report PASS without evidence is the same failure shape as AP-VERIFY-01 / AP-RUNNER-02 — verification must rest on observation.
+    - **AP-DOC-02 · Reporting tool unavailability as FAIL**: LSP and ast_grep are optional. A missing optional tool is a WARN with a fallback pointer, not a FAIL. FAIL is reserved for broken MPL installation state.
+    - **AP-DOC-03 · Missing fallback info**: every WARN must name the concrete fallback MPL will use (e.g., "ast_grep missing → Grep fallback per docs/standalone.md"). WARN without a resolution path is noise, not actionable guidance.
+    - **AP-DOC-04 · Over-alarming**: standalone mode is fully functional, not broken. Flagging the absence of optional tools as installation problems produces false urgency and reduces audit signal-to-noise.
   </Failure_Modes_To_Avoid>
 </Agent_Prompt>
