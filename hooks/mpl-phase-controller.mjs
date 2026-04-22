@@ -240,14 +240,8 @@ async function main() {
     }
 
     case 'phase2-sprint': {
-      // Triage guard: ensure interview_depth was recorded before execution
-      if (!state.interview_depth) {
-        console.log(JSON.stringify({
-          continue: true,
-          stopReason: '[MPL] Triage guard: interview_depth not recorded in state. Run Triage (Step 0) to set interview_depth (skip/light/full) before proceeding to Sprint.'
-        }));
-        break;
-      }
+      // v0.17 (#55): interview_depth guard removed. Phase 0 no longer has
+      // light/full dual-track — Stage 1 always runs full depth.
 
       // Check PLAN.md completion
       const planStatus = checkPlanStatus(cwd);

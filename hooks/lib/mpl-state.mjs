@@ -32,10 +32,9 @@ const DEFAULT_STATE = {
   pipeline_id: null,
   run_mode: 'full',
   tool_mode: 'full',         // F-04: "full" | "partial" | "standalone"
-  pp_proximity: null,        // Hat model: "near" | "mid" | "far" (set by Triage)
-  pp_score: null,            // Hat model: float 0.0~1.0 (set by Quick Scope Scan)
+  // v0.17 (#55): pp_proximity / pp_score / interview_depth removed.
+  // Phase 0 Triage is deleted; decomposer expresses scope via phase count.
   worktree_history: [],      // History of worktree switches
-  interview_depth: null,     // "skip" | "light" | "full" (set by Triage Step 0.2)
   current_phase: 'phase1-plan',
   started_at: null,
   finalize_done: false,      // Set to true when Step 5 finalization completes
@@ -374,7 +373,6 @@ export function initState(cwd, featureName, runMode = 'full') {
     ...DEFAULT_STATE,
     pipeline_id: `mpl-${dateStr}-${slug}`,
     run_mode: runMode === 'auto' ? 'auto' : runMode,
-    pp_proximity: null,            // Set by Triage after Quick Scope Scan
     current_phase: 'phase1a-research',
     max_fix_loops: maxFixLoops,
     convergence: {
