@@ -111,14 +111,17 @@ export function validateCache(cwd, currentKey) {
 /**
  * Save Phase 0 artifacts to cache.
  *
+ * v0.17 (#56): `complexityGrade` removed. Raw scan has no grade — decomposer
+ * synthesizes complexity directly from raw-scan.md. `complexityGrade` is still
+ * accepted as an ignored parameter for backward-compat with older callers.
+ *
  * @param {string} cwd - Project root directory
  * @param {object} options
  * @param {string} options.cacheKey - Cache key to store
- * @param {string} options.complexityGrade - Complexity grade (Simple/Medium/Complex/Enterprise)
  * @param {object} options.artifacts - Map of filename -> content to cache
  * @returns {{ saved: boolean, cacheDir: string, artifactCount: number }}
  */
-export function saveCache(cwd, { cacheKey, complexityGrade, artifacts }) {
+export function saveCache(cwd, { cacheKey, artifacts }) {
   const cacheDir = join(cwd, CACHE_DIR);
 
   try {
@@ -136,7 +139,6 @@ export function saveCache(cwd, { cacheKey, complexityGrade, artifacts }) {
       cache_key: cacheKey,
       commit_hash: getHeadCommitHash(cwd),
       timestamp: new Date().toISOString(),
-      complexity_grade: complexityGrade,
       artifacts: artifactNames,
     };
     writeFileSync(join(cacheDir, MANIFEST_FILE), JSON.stringify(manifest, null, 2), 'utf-8');
@@ -368,10 +370,9 @@ export function analyzePartialInvalidation(cwd) {
  * @param {Object<string, string>} options.newArtifacts - Newly generated artifacts (filename -> content)
  * @param {string} options.originalKey - Previous cache key
  * @param {string} options.newCacheKey - Newly computed cache key
- * @param {string} options.complexityGrade - Complexity grade
  * @returns {{ saved: boolean, cacheDir: string, artifactCount: number }}
  */
-export function partialCacheSave(cwd, { reusedArtifacts, newArtifacts, originalKey, newCacheKey, complexityGrade }) {
+export function partialCacheSave(cwd, { reusedArtifacts, newArtifacts, originalKey, newCacheKey }) {
   const cacheDir = join(cwd, CACHE_DIR);
 
   try {
@@ -406,7 +407,6 @@ export function partialCacheSave(cwd, { reusedArtifacts, newArtifacts, originalK
       cache_key: newCacheKey,
       commit_hash: getHeadCommitHash(cwd),
       timestamp: new Date().toISOString(),
-      complexity_grade: complexityGrade,
       artifacts: [...new Set(allArtifacts)],
       partial_rerun: true,
       rerun_steps: rerunSteps,
