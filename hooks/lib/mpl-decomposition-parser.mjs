@@ -5,8 +5,8 @@
  * Parses decomposition.yaml to extract per-phase file scopes.
  * Used by mpl-write-guard to enforce phase-scoped file locks.
  *
- * Uses regex-based YAML parsing (consistent with mpl-scope-scan.mjs pattern)
- * rather than a full YAML parser to avoid external dependencies.
+ * Uses regex-based YAML parsing rather than a full YAML parser to avoid
+ * external dependencies.
  */
 
 import { join } from 'path';

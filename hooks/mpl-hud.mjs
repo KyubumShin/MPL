@@ -195,16 +195,6 @@ function formatDuration(startedAt) {
   return `${mins}m`;
 }
 
-function formatProximity(proximity) {
-  if (!proximity) return `${c.gray}--${c.reset}`;
-  const map = {
-    near: `${c.green}Near${c.reset}`,
-    mid: `${c.yellow}Mid${c.reset}`,
-    far: `${c.magenta}Far${c.reset}`,
-  };
-  return map[proximity] || proximity;
-}
-
 function formatPhase(phase) {
   if (!phase) return '--';
   const map = {
@@ -355,8 +345,8 @@ async function main() {
   if (state && state.current_phase !== 'completed' && state.current_phase !== 'cancelled') {
     const parts2 = [];
 
-    // PP-Proximity + Phase
-    parts2.push(`${c.bold}MPL${c.reset} ${formatProximity(state.pp_proximity)}`);
+    // Phase label (v0.17 #55: pp_proximity display removed — no longer tracked)
+    parts2.push(`${c.bold}MPL${c.reset}`);
     parts2.push(formatPhase(state.current_phase));
 
     // TODOs
@@ -391,7 +381,7 @@ async function main() {
       ? `${c.green}${c.bold}✓ Complete${c.reset}`
       : `${c.yellow}Cancelled${c.reset}`;
     console.log(padLine(parts1.join(' | ')));
-    console.log(padLine(`${c.bold}MPL${c.reset} ${status} | ${formatProximity(state.pp_proximity)}`));
+    console.log(padLine(`${c.bold}MPL${c.reset} ${status}`));
   } else {
     // No MPL state — show basic info only
     console.log(padLine(parts1.join(' | ')));

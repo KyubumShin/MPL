@@ -181,9 +181,8 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
       return;
     }
 
-    // Triage (Quick Scope Scan) determines pp_proximity at pipeline entry.
-    // Prior ppHint keyword extraction removed: Triage recalculates and overwrites the hint,
-    // so the keyword-derived value was silent dead code.
+    // v0.17 (#55): Triage / Quick Scope Scan removed. Phase 0 no longer
+    // branches on pp_proximity — decomposer expresses scope via phase count.
 
     // v0.14.1 #36: Capture prior pipeline state BEFORE initState overwrites it.
     // If the previous run was cancelled or paused, surface the recovery path in the
@@ -210,11 +209,10 @@ IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/r
     const featureName = extractFeatureName(prompt);
     initState(cwd, featureName, 'auto');
 
-    // Always use single 'mpl' skill — Triage determines pp_proximity
+    // v0.17 (#55): single-track Phase 0 — no proximity classification
     const message = `[MAGIC KEYWORD: MPL]
 
-MPL Pipeline activated. State initialized at .mpl/state.json (run_mode: "auto").
-Triage will determine pp_proximity (near/mid/far) via Quick Scope Scan.${priorStateHint}
+MPL Pipeline activated. State initialized at .mpl/state.json (run_mode: "auto").${priorStateHint}
 
 You MUST invoke the skill using the Skill tool:
 
@@ -223,7 +221,7 @@ Skill: mpl
 User request:
 ${prompt}
 
-IMPORTANT: Load the MPL orchestration protocol via /mpl:mpl-run command, then begin Triage (Step 0).`;
+IMPORTANT: Load the MPL orchestration protocol via /mpl:mpl-run command, then begin Step 0 Pre-flight.`;
 
     console.log(JSON.stringify({
       continue: true,
