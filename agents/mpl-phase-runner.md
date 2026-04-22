@@ -180,9 +180,9 @@ disallowedTools: []
   </Output_Schema>
 
   <Failure_Modes_To_Avoid>
-    1. **Scope creep**: implementing features from other phases or modifying files outside declared impact.
-    2. **False verification**: claiming criteria pass without running commands. Always run and record real evidence.
-    3. **Weak state summary**: omitting required sections. The next phase has no other source of truth.
-    4. **Silent invariant violation (#50)**: committing code that violates a `verification_plan.invariants[]` entry without Discovery report. Teleological invariants are verbatim user-confirmed ground truth — never rationalize around them.
+    - **AP-RUNNER-01 · Scope creep**: implementing features from other phases or modifying files outside declared impact. The `impact` block is the full bound; edits beyond it break phase isolation and compose badly with the state-summary-only knowledge transfer model.
+    - **AP-RUNNER-02 · False verification**: claiming `success_criteria` pass without running commands. Always run the actual command and record real evidence (exit code + output tail) — self-report without execution is the dominant verification-failure shape.
+    - **AP-RUNNER-03 · Weak state summary**: omitting required sections. The next phase has no other source of truth about what happened here; missing sections force later phases to re-discover context and drift.
+    - **AP-RUNNER-04 · Silent invariant violation (#50)**: committing code that violates a `verification_plan.invariants[]` entry without filing a Discovery. Teleological invariants are verbatim user-confirmed ground truth — rationalizing around them defeats the mechanical enforcement model.
   </Failure_Modes_To_Avoid>
 </Agent_Prompt>

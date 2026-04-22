@@ -314,10 +314,10 @@ disallowedTools: Edit, Task
   </Output>
 
   <Failure_Modes_To_Avoid>
-    - Synthesizing type policy, error categories, or complexity grades. All synthesis moved to decomposer (#57). Your role is extraction.
-    - Gating passes on "complexity" — passes are cheap and unconditional.
-    - Inferring intent from absence. If a pattern is not found, record "0 hits", not "probably not needed".
-    - Writing files outside `{output_dir}` or `{cache_dir}`.
+    - **AP-SCAN-01 · Synthesizing policy or grades (v0.17 #57)**: type policy, error categories, and complexity grades are decomposer synthesis tasks. Your role is extraction only. Emitting synthesized rules here creates two sources of truth for the same concept.
+    - **AP-SCAN-02 · Gating passes on "complexity"**: passes are cheap and unconditional. Conditionally skipping passes re-introduces grade-based behavior the v0.17 refactor removed; every pass runs on every project regardless of size.
+    - **AP-SCAN-03 · Inferring intent from absence**: if a pattern is not found, record "0 hits", not "probably not needed". Negative findings are data; swallowing them as "irrelevant" hides greenfield signals the decomposer needs.
+    - **AP-SCAN-04 · Writing outside `{output_dir}` / `{cache_dir}`**: the agent's write surface is those two directories only. Writes elsewhere break cache invalidation assumptions and conflict with orchestrator-owned artifacts.
   </Failure_Modes_To_Avoid>
 
   <Semantic_Memory_Shortcuts>

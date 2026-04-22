@@ -167,10 +167,10 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
   </Output_Schema>
 
   <Failure_Modes>
-    1. **Partial chain**: Designing only some phases of the chain. ALL phases must have a complete entry.
-    2. **Contract mismatch**: Producer phase declares `returns: {token: string}` but consumer phase's contract_snippet says `params: {jwt: string}`. Symbol/key names must match exactly.
-    3. **Invented contracts**: Making up caller/callee pairs not backed by Decomposer edges. If unsure, use `ambiguity_notes`.
-    4. **Non-machine-verifiable acceptance_criteria**: Pushing "looks good" or "works correctly" to a_items/s_items. These MUST go to h_items with reason.
-    5. **Regeneration mode confusion**: Regenerating all phases when only `affected_phases` should change. Preserve untouched phases exactly.
+    - **AP-SEED-01 · Partial chain (chain mode)**: designing only some phases of the chain. ALL phases in the chain must have a complete entry. Partial output breaks baton-pass and forces re-dispatch — defeats the batch-scope advantage. Inline mode (#58) is exempt: one call = one phase by design.
+    - **AP-SEED-02 · Contract mismatch**: producer phase declares `returns: {token: string}` but consumer phase's `contract_snippet` says `params: {jwt: string}`. Symbol/key names must match exactly — `sentinel-s0` hook will flag mismatches at runtime, but catching them here avoids a re-dispatch cycle.
+    - **AP-SEED-03 · Invented contracts**: making up caller/callee pairs not backed by Decomposer edges. If unsure, use `ambiguity_notes`; fabricated contracts pass SEED-03 validation but fail at integration.
+    - **AP-SEED-04 · Non-machine-verifiable acceptance_criteria**: pushing "looks good" or "works correctly" to `a_items`/`s_items`. Those MUST go to `h_items` with reason — a/s items are mechanical gates, not aspirational criteria.
+    - **AP-SEED-05 · Regeneration mode confusion**: regenerating all phases when only `affected_phases` should change. Preserve untouched phases exactly — regenerating already-validated phases invalidates downstream state-summary trails.
   </Failure_Modes>
 </Agent_Prompt>
