@@ -124,7 +124,14 @@ announce: "[MPL] #34: phase {phase.id} using chain-seed from {chain_id} (no opus
 
 **Discovery-triggered re-generation**: handled in Stage 2. Stage 1 does not regenerate mid-chain.
 
-### 4.0.5.B: Legacy Per-Phase Seed (default when chain_seed.enabled == false)
+### 4.0.5.B: Inline Per-Phase Seed (default when chain_seed.enabled == false)
+
+**v0.17 (#58)**: inline mode now dispatches `mpl-seed-generator` (opus) per phase
+instead of orchestrator-inline field assembly. Chain mode (4.0.5.A) and inline
+mode (4.0.5.B) differ only in scope (multi-phase batch vs single-phase) — both
+produce the same Seed schema through the same agent. This eliminates the
+previous dead-branch problem where the agent was only alive in the default-off
+chain mode.
 
 ```
 if config.phase_seed?.enabled != false:
@@ -144,22 +151,44 @@ if config.phase_seed?.enabled != false:
   if phase_definition.interface_contract.adjacent_contracts?.outbound:
     contract_files["outbound"] = Read(phase_definition.interface_contract.adjacent_contracts.outbound)
 
-  // Inline seed generation (orchestrator generates directly)
-  seed = {
-    goal: phase_definition.goal,
-    acceptance_criteria: phase_definition.acceptance_criteria,
-    todo_structure: derive_todos_from_phase_definition(phase_definition),
-    exit_conditions: phase_definition.success_criteria,
-    contract_snippet: extract_contract_keys(contract_files),
-    phase0_context: phase0_relevant
-  }
+  // Dispatch mpl-seed-generator with mode=inline (single-phase scope)
+  result = Task(subagent_type="mpl-seed-generator", model="opus",
+    prompt="""
+    You are the Inline Seed Generator for MPL (#58, mode=inline).
+    Generate a single phase's seed from the phase definition + contracts.
 
-  save seed to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
-  context.phase_seed = seed
-  announce: "[MPL] Phase Seed generated for {phase.id}: {seed.todo_structure.length} TODOs"
+    ## Mode
+    inline — emit ONE seed for ONE phase. This is NOT a chain batch.
+
+    ## Input
+    - phase_definition: {phase_definition}       # full decomposition.yaml entry for this phase
+    - prior_summaries: {prior_summaries}         # state-summary.md from completed phases
+    - contract_files: {contract_files}           # loaded contract JSON contents
+    - phase0_relevant: {phase0_relevant}         # subset of raw-scan applicable to this phase
+    - baseline: {baseline}                       # .mpl/mpl/baseline.yaml if present (#59 stub)
+    - type_policy: {phase_definition.type_policy}   # from decomposer (#57)
+    - error_spec:  {phase_definition.error_spec}    # from decomposer (#57)
+
+    ## Output
+    Single YAML seed with fields:
+      goal / acceptance_criteria / todo_structure / exit_conditions /
+      contract_snippet / phase0_context
+    Schema is IDENTICAL to chain-scoped seeds (4.0.5.A) — downstream SEED-03
+    validation and SNT-S0 contract-snippet check run unchanged.
+    """
+  )
+
+  save result.seed to .mpl/mpl/phases/{phase.id}/phase-seed.yaml
+  context.phase_seed = result.seed
+  announce: "[MPL] Inline seed generated for {phase.id}: {result.seed.todo_structure.length} TODOs (opus dispatch)"
 else:
-  context.phase_seed = null  // Legacy mode
+  context.phase_seed = null  // Legacy mode (phase_seed.enabled explicitly false)
 ```
+
+**Seed schema parity**: chain-scoped and inline seeds are field-compatible. 4.0.5.1
+Seed validation + 4.1 Context Assembly + 4.2 Phase Runner all consume the same
+shape. Chain mode's advantage is purely batch-scope (one opus call per chain
+rather than per phase) + baton-pass between sibling phases in the same chain.
 
 ### 4.0.5.1: Seed Validation (SEED-03 + SNT-S0, v0.10.0)
 
