@@ -451,11 +451,9 @@ while true:
 
 ---
 
-## Step 2.9: Branch Main State Snapshot
+## Step 2.9: Branch Main State Snapshot (#59)
 
-> **Status**: Stub for issue #59. Full implementation (baseline.yaml schema, write-guard hook, worktree mode option) pending.
-
-Immediately after Stage 2 closes (threshold_met OR override), record the immutable ground-truth snapshot that downstream delta calculation and rollback depend on.
+Immediately after Stage 2 closes (`threshold_met` OR `override`), record the immutable ground-truth snapshot that downstream delta calculation and rollback depend on.
 
 ### User Confirmation Gate
 
@@ -464,53 +462,108 @@ AskUserQuestion({
   question: "Phase 0 완료. 기능이 확정되었습니다. Baseline을 기록하고 decomposition으로 진행할까요?",
   header: "Phase 0 승인",
   options: [
-    { label: "Approve & Snapshot", description: "baseline.yaml 기록, Decomposer 진입" },
+    { label: "Approve & Snapshot", description: "baseline.yaml 기록 후 Decomposer 진입" },
     { label: "Modify PPs",         description: "Stage 1 재진입 (PP 수정)" },
     { label: "Re-interview",       description: "Stage 1 전체 재실행" }
   ]
 })
 ```
 
-"Approve"가 아니면 해당 Stage로 복귀. "Approve"면 아래 snapshot 기록.
+If the answer is not "Approve", return to the chosen Stage. On "Approve", perform the snapshot below.
 
-### Snapshot (v0.17 minimal — full schema pending #59)
+### Snapshot
 
-```yaml
-# .mpl/mpl/baseline.yaml
-created_at: "{ISO timestamp}"
-pipeline_id: "{from state}"
-git:
-  base_sha: "{git rev-parse HEAD}"
-  base_branch: "{git rev-parse --abbrev-ref HEAD}"
-  working_tree_clean: {git status --porcelain empty?}
-artifacts:
-  pivot_points: { path, sha256 }
-  core_scenarios: { path, sha256 }
-  design_intent: { path, sha256 }
-  user_contract: { path, sha256 }
-  codebase_analysis: { path, sha256, skipped: boolean }
-  raw_scan: { path, sha256 }
-ambiguity:
-  final_score: {state.ambiguity_score}
-  threshold_met: {boolean}
-  override: {state.ambiguity_override or null}
-  rounds: {history.length}
-spec:
-  user_request_hash: "{sha256 of user_request}"
-  resolved_spec_hash: "{sha256 of accumulated Stage 1+2 responses}"
-```
-
-**Immutability**: write once. `mpl-sentinel-pp-file.mjs` extends to block overwrite (see #59 for full guard).
-
-**Transition**:
+Use `hooks/lib/mpl-baseline.mjs` helpers:
 
 ```
+import { buildBaseline, writeBaseline, baselineExists } from "hooks/lib/mpl-baseline.mjs"
+
+state = readState(cwd)
+baseline = buildBaseline(cwd, {
+  pipelineId: state.pipeline_id,
+  userRequest: state.user_request,
+  accumulatedResponses: state.stage2_accumulated_responses,
+  ambiguity: {
+    final_score: state.ambiguity_score,
+    threshold_met: state.ambiguity_score !== null && state.ambiguity_score <= 0.2,
+    override: state.ambiguity_override ?? null,
+    rounds: (state.ambiguity_history ?? []).length,
+  },
+  codebaseSkipped: state.codebase_skipped ?? false,
+})
+
+// Re-interview path: if baseline already exists, drop the renewal flag
+// so mpl-baseline-guard permits the overwrite, then delete it after write.
+if baselineExists(cwd):
+  Bash("touch .mpl/mpl/.baseline-renewal")
+writeBaseline(cwd, baseline)
+if existed:
+  Bash("rm -f .mpl/mpl/.baseline-renewal")
+
 mpl_state_write(cwd, {
   current_phase: "mpl-decompose",
-  baseline_snapshot_at: now_iso()
+  baseline_snapshot_at: new Date().toISOString(),
 })
-Announce: "[MPL] Step 2.9 baseline.yaml recorded. Advancing to decomposition."
+Announce: "[MPL #59] Step 2.9 baseline.yaml recorded. git_base_sha=${baseline.git.base_sha.slice(0,7)}, artifacts=${countNonNull(baseline.artifacts)}. Advancing to decomposition."
 ```
+
+### Schema
+
+```yaml
+# .mpl/mpl/baseline.yaml (immutable after first write)
+created_at: "ISO timestamp"
+pipeline_id: "mpl-{feature}-{date}"
+git:
+  base_sha: "full SHA or null if not a git repo"
+  base_branch: "branch name or null"
+  working_tree_clean: boolean
+artifacts:
+  pivot_points:      { path, sha256 } | null
+  core_scenarios:    { path, sha256 } | null
+  design_intent:     { path, sha256 } | null
+  user_contract:     { path, sha256 } | null
+  codebase_analysis: { path, sha256, skipped: boolean }
+  raw_scan:          { path, sha256 } | null
+ambiguity:
+  final_score: number | null
+  threshold_met: boolean
+  override: { active, reason, by } | null
+  rounds: number
+spec:
+  user_request_hash:  "sha256 of user_request (normalized)"
+  resolved_spec_hash: "sha256 of Stage 1 + Stage 2 accumulated responses (normalized)"
+```
+
+### Immutability (write-guard)
+
+`hooks/mpl-baseline-guard.mjs` is a PreToolUse Edit|Write hook that:
+1. Allows the first write (no `.mpl/mpl/baseline.yaml` yet).
+2. Blocks subsequent writes **unless** `.mpl/mpl/.baseline-renewal` sentinel file exists.
+3. Deny response explains the correct workflow: drop the sentinel, write, remove the sentinel.
+
+The orchestrator uses this dance during Phase 0 re-interview to legitimately refresh the baseline. All other agents cannot overwrite baseline — prevents silent drift corruption.
+
+### Consumers
+
+| Consumer | Usage |
+|---|---|
+| Decomposer | Reads baseline for delta target (ground truth vs current state) |
+| Seed Generator | Includes baseline hashes in seed for cache validation |
+| 4.7 Partial Rollback | Uses `git.base_sha` as reset target on circuit break |
+| 5.1.5 Scope Drift Detection | Compares current artifact hashes against baseline to detect unauthorized drift |
+| Finalize 5.4 Metrics | Reports baseline-relative change volume |
+
+### Branch Mode (optional)
+
+`.mpl/config.json` may opt into worktree isolation:
+
+```json
+{ "branch_mode": "worktree" }
+```
+
+When set, Step 2.9 also runs `git worktree add` so the entire pipeline executes in an isolated directory. Default is `"snapshot"` — baseline records git SHA only, user manages branches.
+
+Worktree mode integrates with existing 4.1.5 Worktree Isolation logic (`commands/mpl-run-execute-context.md`).
 
 ---
 
