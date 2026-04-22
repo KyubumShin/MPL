@@ -63,19 +63,20 @@ Task(subagent_type="mpl-decomposer", model="opus",
      ### Codebase Analysis
      {codebase_analysis JSON from .mpl/mpl/codebase-analysis.json}
 
-     ### Phase 0 Enhanced Artifacts
-     #### Complexity
-     {complexity_report from .mpl/mpl/phase0/complexity-report.json}
-     #### Phase 0 Summary
-     {phase0_summary from .mpl/mpl/phase0/summary.md}
-     #### Detailed Artifacts (if generated)
-     {api_contracts from .mpl/mpl/phase0/api-contracts.md — if exists}
-     {examples from .mpl/mpl/phase0/examples.md — if exists}
-     {type_policy from .mpl/mpl/phase0/type-policy.md — if exists}
-     {error_spec from .mpl/mpl/phase0/error-spec.md — always exists}
+     ### Phase 0 Artifacts
+     #### Raw Scan (v0.17, #56 — single source from mpl-phase0-analyzer)
+     {raw_scan from .mpl/mpl/phase0/raw-scan.md — always exists, may be minimal for greenfield}
+     #### Core Scenarios + Intent Invariants + User Contract
+     {core_scenarios from .mpl/mpl/core-scenarios.yaml}
+     {design_intent from .mpl/mpl/phase0/design-intent.yaml}
+     {user_contract from .mpl/requirements/user-contract.md — if exists}
+     #### Baseline (v0.17 #59 stub)
+     {baseline from .mpl/mpl/baseline.yaml — if exists}
 
-     ### Pre-Execution Analysis (Gap + Tradeoff)
-     {pre_execution_analysis from .mpl/mpl/pre-execution-analysis.md}
+     ### Synthesis Responsibility (v0.17 #57)
+     You (decomposer) now synthesize `type_policy` and `error_spec` per phase inline
+     — previously in phase0-analyzer. Raw scan provides the facts; you decide
+     per-phase rules. See agents/mpl-decomposer.md Step 5.5 / 5.6.
 
      ## Task
      Break the user request into ordered phases that cover the ENTIRE scope of the request.
