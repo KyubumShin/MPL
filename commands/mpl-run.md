@@ -178,6 +178,7 @@ Only load the file needed for the current stage — this saves ~60-70% of contex
 | `mpl-run-execute-parallel.md` | 4.2.3-4.2.4 | TODO Parallel Dispatch, Background Execution, Context Cleanup | ~1K |
 | `mpl-run-finalize.md` | 5 | E2E, Learnings, Commits, PR, Metrics | ~5K |
 | `mpl-run-finalize-resume.md` | 6 | Resume Protocol, Budget Pause Resume, Discovery Processing, Related Skills | ~2K |
+| `commands/references/e2e-recovery.md` (v0.17 #67) | 5.0.4 detail | Automated E2E Recovery Loop full protocol — load on failure | ~2K |
 
 ### Sub-File Loading Rules
 
