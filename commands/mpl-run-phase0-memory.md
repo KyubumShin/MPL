@@ -1,12 +1,12 @@
 ---
-description: MPL Phase 0 Protocol - 4-Tier Adaptive Memory, Routing Pattern Loading
+description: MPL Phase 0 Protocol - 4-Tier Adaptive Memory
 ---
 
-# MPL Phase 0: Memory Loading (F-11, F-22, F-25)
+# MPL Phase 0: Memory Loading (F-11, F-25)
 
 This file contains the memory loading protocols used during Phase 0 and execution:
-Run-to-Run Learnings (F-11), Routing Pattern Matching (F-22), 4-Tier Adaptive Memory (F-25),
-and the semantic.md-assisted Phase 0 shortcut mechanism.
+Run-to-Run Learnings (F-11), 4-Tier Adaptive Memory (F-25), and the semantic.md-assisted
+Phase 0 shortcut mechanism. F-22 Routing Pattern Matching removed in v0.17 (#60).
 Load this when loading memory in Step 0 or Step 2.5.
 
 See also: `mpl-run-phase0.md` (interview + triage), `mpl-run-phase0-analysis.md` (codebase analysis).

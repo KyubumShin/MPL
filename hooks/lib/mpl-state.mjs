@@ -256,7 +256,6 @@ const PIPELINE_SCOPE_PATHS = [
  *   .mpl/memory/procedural.jsonl  - tool usage patterns
  *   .mpl/memory/episodic.md       - phase history (time-compressed)
  *   .mpl/memory/learnings.md      - distilled project knowledge
- *   .mpl/memory/routing-patterns.jsonl - tier prediction history
  *   .mpl/cache/                   - phase0 cache (7-day TTL, self-expiring)
  *   .mpl/mpl/profile/             - token usage metrics (append-only)
  */
