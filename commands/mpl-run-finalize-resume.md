@@ -44,6 +44,66 @@ On session start:
       Continue from Step 4.1 for nextPhase
 ```
 
+### Per-Phase Resume Rules
+
+Each phase has phase-specific continuation logic. `/mpl:mpl-resume` skill invokes these after state validation + drift detection.
+
+#### phase1a-research — Stage-aware resume
+
+Research is 3 stages. Completed stages are NOT re-run.
+
+| Cancel point | Resume action |
+|---|---|
+| Stage 1 in progress (no cache) | Full Stage 1 re-run |
+| Stage 1 done (`stage1-cache.md` exists) | Load cache → resume Stage 2 |
+| Stage 2 done (`stage2-cache.md` exists) | Load stage1+2 → resume Stage 3 (Synthesis) |
+| Stage 3 done (`report.md` exists) | Research complete → advance to phase1b-plan |
+
+```
+Check .mpl/research/ for stage1-cache.md, stage2-cache.md, report.md
+writeState(cwd, { research: { status: "<next incomplete stage>" } })
+```
+
+#### phase1b-plan — Plan generation resume
+
+- `report.md` exists → feed it to planners
+- `decomposition.yaml` exists → skip exploration, go to HITL
+- Otherwise → full phase1b-plan restart with research context
+
+#### mpl-decompose — Decomposition resume
+
+- `decomposition.yaml` exists → re-run HITL approval gate
+- Otherwise → full decomposition with Phase 0 artifacts
+
+#### phase2-sprint — Sprint resume
+
+- Re-parse `decomposition.yaml` for incomplete phases
+- Skip phases with completed state-summary.md
+- Continue dependency-aware parallel execution from next incomplete phase
+
+#### phase3-gate — Gate resume
+
+- Check `state.gate_results` for already-evaluated gates
+- Skip `PASS` gates, re-run `NOT_EVALUATED` or failed gates
+- Hard 1 PASS → skip to Hard 2; Hard 2 PASS → skip to Hard 3
+
+#### phase4-fix — Fix loop resume
+
+- Return to phase3-gate (re-evaluate gates after prior fixes)
+- Carry forward `fix_loop_count` and `pass_rate_history` (critical — ConvergenceDetector uses history)
+
+#### phase5-finalize — Finalize resume
+
+- Check which finalize steps completed (learnings → memory → commits → report → metrics)
+- Continue from the first incomplete step
+
+### Safety invariants (enforced by `/mpl:mpl-resume`)
+
+- NEVER skip the resume summary (user must see what's being resumed)
+- NEVER reset progress — completed phases stay completed
+- Carry forward ALL convergence data (`pass_rate_history`, `fix_loop_count`)
+- Re-read `decomposition.yaml` fresh on every resume — user may have manually updated it
+
 #### F-33: Budget Pause Resume
 
 ```python
