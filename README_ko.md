@@ -351,10 +351,9 @@ MPL/
 
 | 경로 | 용도 |
 |------|------|
-| `.mpl/state.json` | 파이프라인 상태 (run_mode, current_phase, hat_level, tool_mode) |
+| `.mpl/state.json` | 파이프라인 + 실행 상태 통합 파일 (schema v2, P2-6). `run_mode`/`current_phase`/`tool_mode` + `execution` subtree(task, phase_details, totals, cumulative_pass_rate) — 이전 2개 파일이 통합됨. |
 | `.mpl/pivot-points.md` | 불변 제약조건 (Pivot Points) |
 | `.mpl/config.json` | 사용자 설정 오버라이드 |
-| `.mpl/mpl/state.json` | MPL 실행 상태 (페이즈, 통계) |
 | `.mpl/mpl/RUNBOOK.md` | 세션 연속성을 위한 통합 실행 로그 (F-10) |
 | `.mpl/mpl/decomposition.yaml` | 페이즈 분해 출력 |
 | `.mpl/mpl/phase-decisions.md` | 축적된 Phase Decisions (2-Tier) |

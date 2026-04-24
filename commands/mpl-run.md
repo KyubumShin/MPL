@@ -40,30 +40,31 @@ Retry: Phase Runner handles retries internally based on PP-proximity level. Orch
 
 ## State Management
 
-### Pipeline State: `.mpl/state.json`
+### Unified State: `.mpl/state.json` (P2-6)
+
+Pipeline-scope and execution-scope state share one file. Pre-P2-6 pipelines
+used two files (`.mpl/state.json` + `.mpl/mpl/state.json`); on read, `hooks/lib/mpl-state.mjs`
+transparently migrates v1 files to v2. `schema_version: 2` marks the unified
+layout.
 
 ```json
 {
+  "schema_version": 2,
   "run_mode": "mpl",
   "current_phase": "phase2-sprint",
   "tool_mode": "full",
-  "started_at": "2026-03-02T10:00:00Z"
-}
-```
-
-### MPL State: `.mpl/mpl/state.json`
-
-```json
-{
-  "task": "User request description",
-  "status": "running",
   "started_at": "2026-03-02T10:00:00Z",
-  "phases": { "total": 4, "completed": 2, "current": "phase-3", "failed": 0, "circuit_breaks": 0 },
-  "phase_details": [
-    { "id": "phase-1", "name": "Phase Name", "status": "completed", "pp_proximity": "pp_core", "retries": 0, "criteria_passed": "4/4", "pass_rate": 100 }
-  ],
-  "totals": { "total_retries": 0, "total_discoveries": 0, "elapsed_ms": 0 },
-  "cumulative_pass_rate": 100
+  "execution": {
+    "task": "User request description",
+    "status": "running",
+    "started_at": "2026-03-02T10:00:00Z",
+    "phases": { "total": 4, "completed": 2, "current": "phase-3", "failed": 0, "circuit_breaks": 0 },
+    "phase_details": [
+      { "id": "phase-1", "name": "Phase Name", "status": "completed", "pp_proximity": "pp_core", "retries": 0, "criteria_passed": "4/4", "pass_rate": 100 }
+    ],
+    "totals": { "total_retries": 0, "total_micro_fixes": 0, "total_discoveries": 0, "elapsed_ms": 0 },
+    "cumulative_pass_rate": 100
+  }
 }
 ```
 

@@ -19,7 +19,7 @@ Read `.mpl/mpl/decomposition.yaml` to count phase progress:
 - Each phase entry with status tracking
 - Count completed vs total phases from decomposition
 
-Also check `.mpl/state.json` for `phases_completed` count.
+Also read `.mpl/state.json.execution` (P2-6 — unified state) for authoritative progress: `execution.phases.completed` / `execution.phases.total` / `execution.phase_details[].status`.
 
 ### Step 3: Generate Dashboard
 

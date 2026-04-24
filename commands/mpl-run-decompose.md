@@ -246,7 +246,30 @@ Add the following instructions to the mpl-decomposer agent:
     Report: `[MPL] AD-0005: {pattern_count} EXPERIMENTAL pattern checks injected across {phase_count} phases`
 3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
-5. Update MPL state with `phase_details` (all phases as `"pending"`)
+5. **Initialize execution state (P2-6)** — write to the unified `.mpl/state.json.execution` subtree, NOT the legacy `.mpl/mpl/state.json` (removed in P2-6; hooks auto-migrate any leftover legacy files):
+
+   ```
+   mpl_state_write(cwd, {
+     execution: {
+       task: user_request_first_120_chars,
+       status: "running",
+       started_at: new Date().toISOString(),
+       phases: {
+         total: phases.length,
+         completed: 0,
+         current: phases[0].id,
+         failed: 0,
+         circuit_breaks: 0,
+       },
+       phase_details: phases.map(p => ({
+         id: p.id, name: p.name, status: "pending",
+         pp_proximity: p.pp_proximity, retries: 0,
+         criteria_passed: null, pass_rate: null,
+       })),
+     }
+   })
+   ```
+
 6. Update pipeline state: `current_phase: "phase2-sprint"`
 7. Process `risk_assessment` from decomposer output:
    - If `go_no_go == "NOT_READY"`:

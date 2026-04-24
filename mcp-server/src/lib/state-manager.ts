@@ -17,7 +17,39 @@ const STATE_PATH = '.mpl/state.json';
  */
 export const MAX_AMBIGUITY_HISTORY = 10;
 
+/**
+ * P2-6: schema version for `.mpl/state.json`. The JS-side hook
+ * (`hooks/lib/mpl-state.mjs`) owns the v1 → v2 migration (legacy
+ * `.mpl/mpl/state.json` → `state.execution`). The MCP server merely needs
+ * to understand the v2 shape; any v1 state it encounters will have been
+ * migrated by the time the orchestrator issues `mpl_state_write`.
+ */
+export const CURRENT_SCHEMA_VERSION = 2;
+
+export interface MplExecutionState {
+  task: string | null;
+  status: string | null;
+  started_at: string | null;
+  phases: {
+    total: number;
+    completed: number;
+    current: string | null;
+    failed: number;
+    circuit_breaks: number;
+  };
+  phase_details: Array<Record<string, unknown>>;
+  totals: {
+    total_retries: number;
+    total_micro_fixes: number;
+    total_discoveries: number;
+    elapsed_ms: number;
+  };
+  cumulative_pass_rate: number | null;
+  failure_phase: string | null;
+}
+
 export interface MplState {
+  schema_version?: number;   // P2-6: absent = legacy v1 (migration handled by hook layer)
   pipeline_id: string | null;
   run_mode: string;
   tool_mode: string;
@@ -70,10 +102,13 @@ export interface MplState {
     halted: boolean;
     halt_reason: string | null;
   };
+  // P2-6: execution-scope state absorbed from the legacy .mpl/mpl/state.json.
+  execution: MplExecutionState;
   [key: string]: unknown;
 }
 
 const DEFAULT_STATE: MplState = {
+  schema_version: CURRENT_SCHEMA_VERSION,
   pipeline_id: null,
   run_mode: 'full',
   tool_mode: 'full',
@@ -123,6 +158,16 @@ const DEFAULT_STATE: MplState = {
     last_diagnosis: null,
     halted: false,
     halt_reason: null,
+  },
+  execution: {
+    task: null,
+    status: null,
+    started_at: null,
+    phases: { total: 0, completed: 0, current: null, failed: 0, circuit_breaks: 0 },
+    phase_details: [],
+    totals: { total_retries: 0, total_micro_fixes: 0, total_discoveries: 0, elapsed_ms: 0 },
+    cumulative_pass_rate: null,
+    failure_phase: null,
   },
 };
 

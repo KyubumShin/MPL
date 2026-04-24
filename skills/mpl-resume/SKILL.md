@@ -23,7 +23,34 @@ Expected resumable states:
 
 For `paused_budget` / `paused_checkpoint`: the pipeline was paused, not cancelled. Resume from `resume_from_phase` (or `current_phase` if unset) and clear `session_status`, `pause_reason`, `pause_timestamp`, `budget_at_pause`.
 
-## Step 2: Drift Detection (v0.14.1, #35)
+## Step 2: Drift Detection (v0.14.1 #35, extended by P2-6)
+
+### 2a: Execution-state file drift (P2-6)
+
+Pre-resume guard against v1 → v2 migration gaps. The hook-side `readState`
+migrates automatically on access, but if something writes to the legacy
+`.mpl/mpl/state.json` after migration (e.g. an old orchestrator version in a
+long-lived cmux session), the two files can diverge silently.
+
+```
+import { detectStateDrift } from "hooks/lib/mpl-state.mjs"
+
+d = detectStateDrift(cwd)
+if d.drift:
+  AskUserQuestion({
+    question: `Execution state drift detected (${d.details.length} fields): ${d.details.join("; ")}. Unified .mpl/state.json.execution vs legacy .mpl/mpl/state.json. The unified file is authoritative (schema v2). Proceed?`,
+    header: "P2-6 state drift",
+    options: [
+      { label: "Proceed (trust unified)", description: "Archive legacy file; resume from unified execution state." },
+      { label: "Cancel resume",           description: "Investigate manually before continuing." }
+    ]
+  })
+  if answer == "Cancel resume": abort
+  # On Proceed: force re-migration so the archived legacy file reflects final disk state.
+  migrateLegacyExecutionState(cwd, readState(cwd))
+```
+
+### 2b: Phase-disk drift (pre-existing)
 
 ```
 disk_phases = Glob(".mpl/mpl/phases/phase-*/state-summary.md")
@@ -49,7 +76,7 @@ if state.current_phase ∈ ACTIVE_PHASES and state.session_status ∈ (null, "ac
 ## Step 3: Restore Context
 
 Read in order:
-1. `.mpl/state.json` — pipeline state + progress snapshot
+1. `.mpl/state.json` — pipeline + execution state (P2-6: `execution` subtree replaces the old `.mpl/mpl/state.json`; migration runs automatically on readState)
 2. `.mpl/mpl/decomposition.yaml` — phase definitions + success criteria (fresh read — user may have edited)
 3. `.mpl/mpl/phase0/raw-scan.md` (+ baseline.yaml if exists)
 4. `.mpl/mpl/phase-decisions.md` — accumulated PDs

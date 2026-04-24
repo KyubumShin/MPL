@@ -22,6 +22,31 @@ const STATE_FILE = 'state.json';
 export const MAX_AMBIGUITY_HISTORY = 10;
 
 /**
+ * Schema version for the unified `.mpl/state.json` file.
+ *
+ * - `undefined` in a read state = legacy v1 (pre-P2-6): the pipeline-scope
+ *   fields lived in `.mpl/state.json` and the execution-scope fields
+ *   (`task`, `phases`, `phase_details`, `totals`, `cumulative_pass_rate`)
+ *   lived in a separate `.mpl/mpl/state.json` maintained by orchestrator
+ *   prompts.
+ * - `2` = unified shape: everything in `.mpl/state.json`, execution-scope
+ *   fields under the top-level `execution` subtree.
+ *
+ * readState() transparently migrates v1 → v2 on first access by merging any
+ * surviving `.mpl/mpl/state.json` into `state.execution` and archiving the
+ * legacy file.
+ */
+export const CURRENT_SCHEMA_VERSION = 2;
+
+/**
+ * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
+ * via Write/Edit; v2 stores the same shape under `state.execution` in
+ * `.mpl/state.json`. The constant is retained so the migration path can
+ * locate and archive the legacy file.
+ */
+export const LEGACY_EXECUTION_STATE_PATH = '.mpl/mpl/state.json';
+
+/**
  * Valid pipeline phase names (v0.13.1).
  * writeState() warns on unrecognized current_phase values.
  */
@@ -37,6 +62,8 @@ const VALID_PHASES = new Set([
  * Default state schema (design doc section 12.2)
  */
 const DEFAULT_STATE = {
+  // P2-6: unified schema version marker. Migration runs when absent or < 2.
+  schema_version: CURRENT_SCHEMA_VERSION,
   pipeline_id: null,
   run_mode: 'full',
   tool_mode: 'full',         // F-04: "full" | "partial" | "standalone"
@@ -148,13 +175,46 @@ const DEFAULT_STATE = {
   resume_from_phase: null,       // phase ID to resume from
   pause_timestamp: null,         // ISO timestamp of pause
   budget_at_pause: null,         // { context_pct, estimated_needed_pct }
+  // P2-6: execution-scope state (formerly .mpl/mpl/state.json). Schema mirrors
+  // the shape documented in commands/mpl-run.md §"MPL State". Orchestrator
+  // prompts (mpl-run-decompose.md, mpl-run-execute.md) update this subtree via
+  // mpl_state_write instead of editing a separate JSON file. Resume reads it
+  // through readState so drift between two files becomes structurally
+  // impossible.
+  execution: {
+    task: null,                      // short user-request description
+    status: null,                    // "running" | "completed" | "failed" | "cancelled"
+    started_at: null,                // ISO timestamp
+    phases: {
+      total: 0,
+      completed: 0,
+      current: null,                 // phase id, e.g. "phase-3"
+      failed: 0,
+      circuit_breaks: 0,
+    },
+    phase_details: [],               // [{ id, name, status, pp_proximity, retries, criteria_passed, pass_rate }]
+    totals: {
+      total_retries: 0,
+      total_micro_fixes: 0,
+      total_discoveries: 0,
+      elapsed_ms: 0,
+    },
+    cumulative_pass_rate: null,      // last observed pass rate (0–100)
+    failure_phase: null,             // populated on circuit break
+  },
 };
 
 // Prototype pollution guard keys
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
- * Read MPL state from .mpl/state.json
+ * Read MPL state from .mpl/state.json.
+ *
+ * P2-6: if the parsed state lacks `schema_version` (legacy v1) AND a legacy
+ * `.mpl/mpl/state.json` exists, run the migration before returning. The
+ * migration is idempotent — subsequent reads see `schema_version: 2` and
+ * skip the check.
+ *
  * @param {string} cwd - Working directory
  * @returns {object|null} State object or null if not found/invalid
  */
@@ -166,9 +226,155 @@ export function readState(cwd) {
     // M5: Minimal schema validation
     if (typeof parsed !== 'object' || parsed === null) return null;
     if (!parsed.current_phase) return null;
+
+    // P2-6: transparent v1 → v2 migration. Delegates to the pure helper so
+    // writers that bypass readState (direct JSON munging in tests) can
+    // still run the same logic on demand.
+    if ((parsed.schema_version ?? 1) < CURRENT_SCHEMA_VERSION) {
+      const migrated = migrateLegacyExecutionState(cwd, parsed);
+      if (migrated) return migrated;
+    }
     return parsed;
   } catch {
     return null;
+  }
+}
+
+/**
+ * P2-6: one-shot migration from the dual-file v1 layout to the unified v2
+ * layout. Reads .mpl/mpl/state.json (if present), merges its fields into
+ * `state.execution`, archives the legacy file to
+ * `.mpl/archive/legacy-execution-state.json`, and bumps schema_version.
+ *
+ * Idempotent: callers may invoke freely — if there's nothing to migrate
+ * (legacy file absent, already-migrated, or `state.execution` already
+ * populated from a newer write) the function still bumps schema_version and
+ * persists.
+ *
+ * Returns the migrated state object, or null on I/O failure (caller keeps
+ * the unmigrated state so the pipeline doesn't wedge).
+ */
+export function migrateLegacyExecutionState(cwd, currentState) {
+  try {
+    const legacyPath = join(cwd, LEGACY_EXECUTION_STATE_PATH);
+    const stateDir = join(cwd, STATE_DIR);
+    const merged = { ...currentState };
+
+    // Treat the DEFAULT_STATE.execution shape as the baseline so the legacy
+    // file only needs to contribute the fields it actually knows about.
+    const baseExecution = {
+      task: null,
+      status: null,
+      started_at: null,
+      phases: { total: 0, completed: 0, current: null, failed: 0, circuit_breaks: 0 },
+      phase_details: [],
+      totals: { total_retries: 0, total_micro_fixes: 0, total_discoveries: 0, elapsed_ms: 0 },
+      cumulative_pass_rate: null,
+      failure_phase: null,
+    };
+
+    let legacyParsed = null;
+    if (existsSync(legacyPath)) {
+      try {
+        legacyParsed = JSON.parse(readFileSync(legacyPath, 'utf-8'));
+      } catch {
+        // Corrupt legacy file — archive verbatim below, proceed with defaults.
+        legacyParsed = null;
+      }
+    }
+
+    // Later writes (v2) may have already populated state.execution. Preserve
+    // them: incoming merge order is base < legacy < already-unified, so a
+    // partial v2 write followed by a v1 read still keeps the newer data.
+    const existingExecution = (currentState && typeof currentState.execution === 'object' && currentState.execution !== null)
+      ? currentState.execution
+      : {};
+
+    merged.execution = deepMerge(
+      deepMerge(baseExecution, legacyParsed && typeof legacyParsed === 'object' ? legacyParsed : {}),
+      existingExecution,
+    );
+    merged.schema_version = CURRENT_SCHEMA_VERSION;
+
+    // Persist the migrated state back to disk so subsequent reads short-circuit.
+    if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
+    const stateTmp = join(stateDir, `.state-${randomBytes(4).toString('hex')}.tmp`);
+    writeFileSync(stateTmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    renameSync(stateTmp, join(stateDir, STATE_FILE));
+
+    // Archive the legacy file (once per migration). Using the pipeline_id
+    // when available keeps the archive co-located with other pipeline
+    // artifacts; otherwise a single legacy-execution-state.json at the
+    // archive root is sufficient.
+    if (legacyParsed !== null || existsSync(legacyPath)) {
+      const archiveRoot = join(cwd, '.mpl', 'archive');
+      try {
+        mkdirSync(archiveRoot, { recursive: true });
+        const archiveName = currentState?.pipeline_id
+          ? `${currentState.pipeline_id}-legacy-execution-state.json`
+          : 'legacy-execution-state.json';
+        const archivePath = join(archiveRoot, archiveName);
+        writeFileSync(
+          archivePath,
+          JSON.stringify({
+            migrated_at: new Date().toISOString(),
+            pipeline_id: currentState?.pipeline_id ?? null,
+            legacy_content: legacyParsed,
+          }, null, 2),
+          { mode: 0o600 },
+        );
+        if (existsSync(legacyPath)) rmSync(legacyPath, { force: true });
+      } catch {
+        // Archive failure is non-fatal — better to leave the legacy file in
+        // place than to wedge the pipeline.
+      }
+    }
+
+    return merged;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * P2-6: detect drift between the unified state.execution subtree and a
+ * surviving legacy .mpl/mpl/state.json. Called by resume to surface
+ * discrepancies before continuing. Returns { drift: boolean, details: [] };
+ * any I/O or parse failure resolves to `{ drift: false, details: [] }` so
+ * a corrupt legacy file never blocks resume.
+ */
+export function detectStateDrift(cwd) {
+  try {
+    const statePath = join(cwd, STATE_DIR, STATE_FILE);
+    const legacyPath = join(cwd, LEGACY_EXECUTION_STATE_PATH);
+    if (!existsSync(statePath) || !existsSync(legacyPath)) {
+      return { drift: false, details: [] };
+    }
+    const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+    const legacy = JSON.parse(readFileSync(legacyPath, 'utf-8'));
+    const execution = state?.execution ?? {};
+
+    const details = [];
+    if ((legacy?.phases?.completed ?? null) !== (execution?.phases?.completed ?? null)) {
+      details.push(`phases.completed: legacy=${legacy?.phases?.completed} unified=${execution?.phases?.completed}`);
+    }
+    if ((legacy?.phases?.total ?? null) !== (execution?.phases?.total ?? null)) {
+      details.push(`phases.total: legacy=${legacy?.phases?.total} unified=${execution?.phases?.total}`);
+    }
+    if ((legacy?.status ?? null) !== (execution?.status ?? null)) {
+      details.push(`status: legacy=${legacy?.status} unified=${execution?.status}`);
+    }
+    if ((legacy?.cumulative_pass_rate ?? null) !== (execution?.cumulative_pass_rate ?? null)) {
+      details.push(`cumulative_pass_rate: legacy=${legacy?.cumulative_pass_rate} unified=${execution?.cumulative_pass_rate}`);
+    }
+    const legacyPhaseIds = (legacy?.phase_details ?? []).map((p) => p?.id).filter(Boolean);
+    const unifiedPhaseIds = (execution?.phase_details ?? []).map((p) => p?.id).filter(Boolean);
+    if (legacyPhaseIds.join(',') !== unifiedPhaseIds.join(',')) {
+      details.push(`phase_details ids differ: legacy=[${legacyPhaseIds.join(',')}] unified=[${unifiedPhaseIds.join(',')}]`);
+    }
+    return { drift: details.length > 0, details };
+  } catch {
+    return { drift: false, details: [] };
   }
 }
 
@@ -245,6 +451,9 @@ const PIPELINE_SCOPE_PATHS = [
   // Signals (transient)
   '.mpl/signals',
   // MPL pipeline artifacts (entire subtree except profile)
+  // P2-6: `.mpl/mpl/state.json` is no longer generated (unified into
+  // `.mpl/state.json.execution`); kept in this cleanup list so any leftover
+  // legacy file from a pre-P2-6 pipeline is removed on next init.
   '.mpl/mpl/state.json',
   '.mpl/mpl/decomposition.yaml',
   '.mpl/mpl/phase-decisions.md',
