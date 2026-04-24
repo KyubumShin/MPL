@@ -516,6 +516,12 @@ Before leaving decomposition with `chain_seed.enabled=true`, verify
 `.mpl/mpl/chain-assignment.yaml` exists. If not, Step 3-G did not actually
 run — return to it.
 
+**Machine enforcement (P1-4d)**: `hooks/mpl-require-chain-assignment.mjs`
+(PreToolUse on `Task|Agent` with `subagent_type=mpl-seed-generator`) denies
+the dispatch outright when `chain_seed.enabled=true` and the yaml is absent.
+The prose warning above is preserved for context; the hook makes the prior
+silent-skip path impossible.
+
 
 After decomposition is saved (Step 3) and validated (Step 3-F, 3-B), derive chain structure from phase edges and proximity. Output: `.mpl/mpl/chain-assignment.yaml`.
 
