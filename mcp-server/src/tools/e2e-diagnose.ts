@@ -74,14 +74,17 @@ export async function handleDiagnoseE2EFailure(args: {
   prev_iter: number;
 }) {
   const prev_iter = Math.max(0, Math.min(2, Math.floor(args.prev_iter)));
-  const result = await diagnoseE2EFailure({
-    scenarios: args.scenarios,
-    e2e_results: args.e2e_results,
-    trace_excerpt: args.trace_excerpt,
-    user_contract: args.user_contract,
-    decomposition: args.decomposition,
-    prev_iter,
-  });
+  const result = await diagnoseE2EFailure(
+    {
+      scenarios: args.scenarios,
+      e2e_results: args.e2e_results,
+      trace_excerpt: args.trace_excerpt,
+      user_contract: args.user_contract,
+      decomposition: args.decomposition,
+      prev_iter,
+    },
+    { cwd: args.cwd },
+  );
 
   const ordered = {
     prompt_version: PROMPT_VERSION,

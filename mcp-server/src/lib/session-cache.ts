@@ -28,8 +28,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { homedir } from 'os';
 import { join } from 'path';
 
-const CACHE_DIR = join(homedir(), '.mpl', 'cache');
-const CACHE_FILE = join(CACHE_DIR, 'sessions.json');
+// Resolve HOME-relative paths on each call (not at import time) so tests that
+// swap `process.env.HOME` between cases see the new location. Production
+// callers pay a trivial `homedir()` lookup per cache read/write — negligible.
+function cacheDir(): string {
+  return join(homedir(), '.mpl', 'cache');
+}
+function cacheFile(): string {
+  return join(cacheDir(), 'sessions.json');
+}
 const SCHEMA_VERSION = 1;
 const DEFAULT_TTL_MINUTES = 30;
 const GC_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days — hard ceiling
@@ -58,9 +65,9 @@ function emptyCache(): CacheFile {
 }
 
 function loadCache(): CacheFile {
-  if (!existsSync(CACHE_FILE)) return emptyCache();
+  if (!existsSync(cacheFile())) return emptyCache();
   try {
-    const parsed = JSON.parse(readFileSync(CACHE_FILE, 'utf-8')) as CacheFile;
+    const parsed = JSON.parse(readFileSync(cacheFile(), 'utf-8')) as CacheFile;
     if (parsed?.version !== SCHEMA_VERSION) return emptyCache();
     if (!parsed.sessions || typeof parsed.sessions !== 'object') return emptyCache();
     if (!parsed.config || typeof parsed.config.ttl_minutes !== 'number') {
@@ -98,11 +105,11 @@ export function readProjectTtlMinutes(cwd: string): number | null {
 }
 
 function persistCache(cache: CacheFile): void {
-  if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
+  if (!existsSync(cacheDir())) mkdirSync(cacheDir(), { recursive: true, mode: 0o700 });
   // Atomic write via temp + rename to avoid partial files on concurrent access.
-  const tmpPath = join(CACHE_DIR, `.sessions-${randomBytes(4).toString('hex')}.tmp`);
+  const tmpPath = join(cacheDir(), `.sessions-${randomBytes(4).toString('hex')}.tmp`);
   writeFileSync(tmpPath, JSON.stringify(cache, null, 2), { mode: 0o600 });
-  renameSync(tmpPath, CACHE_FILE);
+  renameSync(tmpPath, cacheFile());
 }
 
 /**
@@ -227,8 +234,8 @@ export function gcExpiredEntries(maxAgeMs: number = GC_MAX_AGE_MS): number {
 
 // Internal helpers exposed for tests — not part of the public contract.
 export const __testing = {
-  CACHE_DIR,
-  CACHE_FILE,
+  cacheDir,
+  cacheFile,
   SCHEMA_VERSION,
   loadCache,
   persistCache,
