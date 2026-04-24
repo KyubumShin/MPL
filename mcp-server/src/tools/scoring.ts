@@ -99,6 +99,11 @@ export async function handleScoreAmbiguity(args: {
     weakest_dimension_key: weakestDim,
     weakest_score: weakestScore,
     suggested_question: suggestedQuestion,
+    // When set, the orchestrator must escalate to the user (AskUserQuestion)
+    // instead of looping on the fabricated 0.5 scores that carry no signal.
+    // Populated by llm-scorer's neutralResult() fallback paths.
+    degraded: scores.degraded ?? false,
+    degraded_reason: scores.degraded_reason ?? null,
   };
 
   return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };

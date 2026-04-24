@@ -9,6 +9,14 @@ import { randomUUID } from 'crypto';
 
 const STATE_PATH = '.mpl/state.json';
 
+/**
+ * Ring-buffer cap for ambiguity_history. Mirrored from hooks/lib/mpl-state.mjs
+ * so that whichever writer reaches state.json first still enforces the same
+ * bound. The orchestrator already slices client-side as a courtesy; this is
+ * the defense-in-depth guarantee.
+ */
+export const MAX_AMBIGUITY_HISTORY = 10;
+
 export interface MplState {
   pipeline_id: string | null;
   run_mode: string;
@@ -163,6 +171,16 @@ export function writeState(cwd: string, patch: Record<string, unknown>): { succe
 
   const current = readState(cwd) ?? { ...DEFAULT_STATE };
   const merged = deepMerge(current as unknown as Record<string, unknown>, patch);
+
+  // Ring-buffer cap for ambiguity_history (mirrors hooks/lib/mpl-state.mjs).
+  // deepMerge replaces arrays wholesale, so the patch either set or preserved
+  // the final array; we trim the head if it exceeds the bound.
+  const history = merged.ambiguity_history;
+  if (Array.isArray(history) && history.length > MAX_AMBIGUITY_HISTORY) {
+    const dropped = history.length - MAX_AMBIGUITY_HISTORY;
+    merged.ambiguity_history = history.slice(-MAX_AMBIGUITY_HISTORY);
+    process.stderr.write(`[mpl-state] ambiguity_history ring-buffer truncated ${dropped} oldest entries (cap=${MAX_AMBIGUITY_HISTORY})\n`);
+  }
 
   // Atomic write: temp file → rename
   const tmpPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
