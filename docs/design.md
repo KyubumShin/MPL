@@ -76,14 +76,22 @@ mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize
 
 ### 3.2 Full Flow Summary Table
 
+> **v0.17 status note**: rows below preserved as historical record; the
+> v0.17 simplification (#55) removed Step -1 (moved to `hooks/mpl-lsp-warmup.mjs`),
+> Step 0.0.5 (artifact freshness + field classification), and Step 0 Triage
+> (interview_depth + pp_proximity scoring). Step 1 PP Interview is now Stage 1
+> inside `commands/mpl-run-phase0.md` Step 1 Interview Block; Steps 1-D / 1-E
+> are absorbed into Stage 1.9 Interview Snapshot. See `commands/mpl-run-phase0.md`
+> for the canonical v0.17 flow.
+
 | Step | Name | Core Agent | Artifact |
 |------|------|-------------|--------|
-| -1 | LSP Warm-up | (orchestrator, non-blocking) | lsp_servers list, cold start elimination |
-| 0.0.5 | Artifact Freshness + Field Classification (v0.8.5) | (orchestrator) | field_classification, freshness_ratio, `.mpl/manifest.json` (read) |
-| 0 | Triage | (orchestrator) | interview_depth (light/light+scan/full), pp_proximity |
+| -1 | LSP Warm-up *(v0.17: hook)* | `hooks/mpl-lsp-warmup.mjs` (UserPromptSubmit) | `state.lsp_servers` |
+| 0.0.5 | Artifact Freshness + Field Classification *(v0.17: REMOVED)* | — | (was: `.mpl/manifest.json`) |
+| 0 | Triage *(v0.17: REMOVED)* | — | (was: interview_depth, pp_proximity) |
 | 1 | PP Interview | mpl-interviewer | `.mpl/pivot-points.md` |
-| 1-D | PP Confirmation | (orchestrator) | PP final confirmation with user |
-| 1-E | Interview Snapshot Save | (orchestrator) | `.mpl/mpl/interview-snapshot.md` |
+| 1-D | PP Confirmation *(v0.17: absorbed into Stage 1.9)* | (orchestrator) | PP final confirmation with user |
+| 1-E | Interview Snapshot Save *(v0.17: Stage 1.9)* | (orchestrator) | `.mpl/mpl/interview-snapshot.md` |
 | 2 | Codebase Analysis | (orchestrator) | `.mpl/mpl/codebase-analysis.json` |
 | 2.4 | Architecture Decision Checklist | (orchestrator) | Key architecture decisions documented |
 | 2.5 | Phase 0 Enhanced | (orchestrator) | `.mpl/mpl/phase0/*.md` |
@@ -839,7 +847,13 @@ Roadmap: `docs/roadmap/pending-features.md` → "E2E Execution Fix" section
 
 Audit report: `analysis/mpl-internal-consistency-audit.md`
 
-### v0.8.5 — Artifact Freshness Check + Field Classification (2026-03-27)
+### v0.8.5 — Artifact Freshness Check + Field Classification (2026-03-27) — REMOVED in v0.17 (#55)
+
+> **REMOVED in v0.17**: Step 0.0.5, manifest.json generation, and the
+> field-1/2/3/4 classification system were deleted in #55. The whole
+> "what kind of project is this?" branching was found to add Phase 0
+> complexity without changing observed behavior. Use `.mpl/mpl/baseline.yaml`
+> (#59) for ground-truth provenance instead.
 
 Foundation for Field 4 (AI-Built Maintenance) support. Detects .mpl/ artifact existence and freshness, classifies projects into 6 field types.
 
