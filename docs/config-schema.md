@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.16.0
-> **Last updated**: 2026-04-20
+> **Version**: v0.16.0 (v0.17 cleanup pending — `session_cache` added; manifest/field_classification marked removed)
+> **Last updated**: 2026-04-26
 
 ---
 
@@ -170,51 +170,31 @@ Semantics:
 |-------|------|---------|-------------|--------|
 | `context_rotation.backend` | `"kitty"` \| `"tmux"` \| `"osascript"` | auto-detect | Terminal backend for session rotation | `hooks/lib/mpl-rotator.mjs` |
 
-## Manifest & Field Classification (v0.8.5)
+## Manifest & Field Classification — REMOVED (v0.17)
 
-### `.mpl/manifest.json` Schema
+Pre-v0.17 generated `.mpl/manifest.json` at finalize (5.4.5) for the Step 0.0.5
+Artifact Freshness Check + Field Classification. v0.17 (#55) deleted Step 0.0.5
+along with `field_classification` / `freshness_ratio` / `pp_proximity` state
+fields, which orphaned the manifest write. The schema and classification table
+were removed from this doc on the same audit pass.
 
-Generated at Step 5.4.5 (Finalize), consumed at Step 0.0.5 (Triage).
-Separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
+For v0.17 ground-truth provenance use `.mpl/mpl/baseline.yaml` (#59) — it is
+the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `version` | string | Manifest schema version (e.g., `"0.9.0"`) |
-| `generated_at` | string (ISO 8601) | When manifest was generated |
-| `commit_hash` | string | Git HEAD at generation time |
-| `pp_proximity` | `"pp_core"` \| `"pp_adjacent"` \| `"non_pp"` | Last run's PP-proximity classification |
-| `field_classification` | string | Last run's field classification |
-| `artifact_count` | number | Number of tracked artifacts |
-| `artifacts` | ArtifactEntry[] | Artifact metadata list |
-
-### ArtifactEntry
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `path` | string | File path relative to project root |
-| `hash` | string | SHA-256 content hash |
-| `timestamp` | string (ISO 8601) | File last modified time |
-| `source` | `"mpl"` \| `"cep"` | Generator (mpl = MPL pipeline, cep = Context Extraction Pipeline) |
-| `category` | string | `"phase0"` \| `"decomposition"` \| `"interview"` \| `"decisions"` \| `"runbook"` \| `"analysis"` \| `"verification"` |
-
-### Field Classification (`state.json → field_classification`)
-
-| Value | Condition | MPL Scope | Phase 0 (v0.8.5) | Phase 0 (v0.9.0 planned) |
-|-------|-----------|-----------|-------------------|--------------------------|
-| `field-1` | No source or no manifest | ✅ Greenfield | full | full |
-| `field-2` | Source + tests (>30%), no .mpl/ | ✅ Well-Documented | full | full + Gate 0.8 baseline |
-| `field-3` | Source + minimal tests, no .mpl/ | ⚠️ WARNING | full | full + WARNING |
-| `field-4-fresh` | .mpl/ + freshness ≥ 0.8 | ✅ AI-Built | full | cache hit + Delta PP |
-| `field-4-stale` | .mpl/ + freshness 0.4~0.8 | ✅ AI-Built | full | partial re-execution |
-| `field-4-degraded` | .mpl/ + freshness < 0.4 | ⚠️ WARNING | full | full + WARNING |
-
-**Note**: Memory files (`.mpl/memory/*`) are excluded from freshness calculation — append-only files would cause false staleness.
 
 ## E2E Testing (v0.8.3)
 
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
+
+## MCP Session Cache (P1-3b, #79)
+
+Per-project override for the global `~/.mpl/cache/sessions.json` TTL. The cache backs `mpl_score_ambiguity`, `mpl_classify_feature_scope`, and `mpl_diagnose_e2e_failure` — extending the resumed-session prompt cache across MCP server restarts.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `session_cache.ttl_minutes` | number (>0) | `30` | Per-project override of the session-cache freshness window. Precedence: explicit `ttl_ms` (test only) > project config > global cache config > 30. | `mcp-server/src/lib/session-cache.ts` |
 
 ---
 

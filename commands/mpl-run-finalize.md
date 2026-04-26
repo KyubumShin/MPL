@@ -633,57 +633,19 @@ Profile data enables:
 2. **Optimize Phase 0 step combinations**: statistics on which step combinations are most efficient
 3. **Detect abnormal runs**: warn on excessive token usage (2x+ the average), excessive micro-fixes (5+)
 
-### 5.4.5: Manifest Generation (F-FC-1, v0.8.5)
+### 5.4.5: Manifest Generation — REMOVED (v0.17)
 
-Generate `.mpl/manifest.json` to track all `.mpl/` artifacts for freshness checking in future runs.
-This file is consumed by Step 0.0.5 (Artifact Freshness Check) in the next MPL execution.
+The pre-v0.17 manifest generation (F-FC-1, v0.8.5) wrote `.mpl/manifest.json`
+for the Step 0.0.5 Artifact Freshness Check. Step 0.0.5 was deleted in v0.17
+(#55) along with `field_classification` / `freshness_ratio` / `pp_proximity`
+state fields, leaving manifest.json as a write-only orphan referencing
+defunct Phase 0 Enhanced artifacts (`phase0/api-contracts.md` etc., collapsed
+to a single `raw-scan.md` in #56). The whole step is removed; nothing now
+reads or writes `.mpl/manifest.json`.
 
-**NOTE**: This is separate from `.mpl/cache/phase0/manifest.json` (Phase 0 cache-specific).
-
-```pseudocode
-commit_hash = Bash("git rev-parse HEAD").trim()
-
-tracked_artifacts = []
-
-// 1. Phase 0 Enhanced artifacts
-phase0_files = ["phase0/api-contracts.md", "phase0/examples.md",
-                "phase0/type-policy.md", "phase0/error-spec.md",
-                "phase0/summary.md", "phase0/complexity-report.json"]
-for each file in phase0_files:
-  path = ".mpl/mpl/" + file
-  if file_exists(path):
-    hash = Bash("shasum -a 256 {path}").split(" ")[0]
-    tracked_artifacts.push({ path, hash, timestamp: file_mtime(path), source: "mpl", category: "phase0" })
-
-// 2. Core artifacts
-core_files = [
-  { path: ".mpl/mpl/decomposition.yaml", category: "decomposition" },
-  { path: ".mpl/pivot-points.md", category: "interview" },
-  { path: ".mpl/mpl/phase-decisions.md", category: "decisions" },
-  { path: ".mpl/mpl/RUNBOOK.md", category: "runbook" },
-  { path: ".mpl/mpl/codebase-analysis.json", category: "analysis" },
-  { path: ".mpl/mpl/interview-snapshot.md", category: "interview" },
-  { path: ".mpl/mpl/verification-plan.md", category: "verification" }
-]
-for each entry in core_files:
-  if file_exists(entry.path):
-    hash = Bash("shasum -a 256 {entry.path}").split(" ")[0]
-    tracked_artifacts.push({ path: entry.path, hash, timestamp: file_mtime(entry.path), source: "mpl", category: entry.category })
-
-// 3. Write manifest (memory files excluded — append-only files cause false staleness)
-manifest = {
-  version: "0.9.2",
-  generated_at: new Date().toISOString(),
-  commit_hash: commit_hash,
-  pp_proximity: state.pp_proximity,
-  field_classification: state.field_classification || "field-1",
-  artifact_count: tracked_artifacts.length,
-  artifacts: tracked_artifacts
-}
-
-Write(".mpl/manifest.json", JSON.stringify(manifest, null, 2))
-Announce: "[MPL] Manifest generated: {tracked_artifacts.length} artifacts tracked at commit {commit_hash.slice(0,7)}."
-```
+> If a future workflow needs artifact provenance, build it on top of
+> `.mpl/mpl/baseline.yaml` (#59) — that file is already the v0.17 ground-truth
+> snapshot for delta calculation and rollback.
 
 ### 5.5: Completion Report
 
