@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.16.0 Design Document
+# MPL (Micro-Phase Loop) v0.17.0 Design Document
 
 ## 1. Overview
 
@@ -481,6 +481,43 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.17.0 — Simplification + P1/P2 Hardening Stream (2026-04-26)
+
+Bundles the v0.17 simplification (#55) with five issue-driven hardening PRs (#80/#82/#84/#87/#88) merged 2026-04-23 ~ 2026-04-26. Roadmap-level overview in `docs/roadmap/overview.md` "v0.17.0" section. The simplification removes legacy concepts that empirical runs (ygg-exp10/11) showed had zero downstream effect; the P1/P2 stream hardens MCP session handling, machine-enforces AP-CHAIN-01, unifies state.json into a single SSOT, and generalizes the cross-project session cache across MCP tools.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Step -1 LSP Warm-up | Orchestrator-driven turn step | `hooks/mpl-lsp-warmup.mjs` (UserPromptSubmit hook) | Removal/move | Out-of-band hook is faster and saves orchestrator tokens (#55) |
+| Step 0.0.5 Artifact Freshness + Field Classification | Generated `.mpl/manifest.json` per phase | REMOVED — manifest no longer generated | Removal | Empirical: zero downstream consumer in v0.14/v0.15 runs (#55) |
+| Step 0 Triage | Computed `interview_depth` (skip/light/full) and `pp_proximity` | REMOVED entirely; pipeline always enters at full-depth equivalent | Removal | Triage choice rarely changed orchestrator behavior in measured runs; complexity > value (#55) |
+| Step 1-D PP Confirmation | Separate confirmation gate | Absorbed into Stage 1.9 (single confirmation inside the interview) | Consolidation | Reduce orchestrator turn count (#55) |
+| Step 1-E Interview Snapshot Save | Separate step | Renumbered to Stage 1.9 | Renumbering | Mirrors PP-Confirmation absorption (#55) |
+| Routing-pattern recall (F-22) | `routing-patterns.jsonl` consulted at Triage start | DROPPED — no recall, no recording | Removal | Triage gone; recall has no consumer (#55) |
+| Hat model PP-proximity tier branching | Pipeline depth routed on `pp_proximity` score | DROPPED — no hat selection | Removal | Same root cause as Triage removal (#55) |
+| MCP `state.ambiguity_history` growth | Unbounded array | `MAX_AMBIGUITY_HISTORY=10` ring buffer | Hardening | Prevent state.json bloat across long pipelines (#80, P1-3a) |
+| MCP session cache TTL | Global default | Per-project `session_cache.ttl_minutes` config override | Hardening | Long-running projects need longer TTL than default (#80, P1-3b) |
+| MCP session 404 handling | Stale session id retried until pipeline failure | Auto-invalidate on 404 + retry once | Hardening | Survives Anthropic-side session expiry mid-pipeline (#80, P1-3c) |
+| MCP session degraded state | Silent degradation | `degraded` flag escalated to user via systemMessage | Hardening | Surfaces persistent MCP failure instead of silent stall (#80, P1-3d) |
+| AP-CHAIN-01 enforcement | Prompt-only convention | `hooks/mpl-require-chain-assignment.mjs` PreToolUse hook (matcher: Task\|Agent, subagent_type=mpl-seed-generator). Denies dispatch when `chain_seed.enabled=true` ∧ `chain-assignment.yaml` absent | Hook (new) | Prompt-level enforcement was bypassed in measured runs (#82, P1-4d) |
+| `state.json` layout | Split across `.mpl/state.json` + `.mpl/mpl/state.json` | Single SSOT `.mpl/state.json` with `execution` subtree (`CURRENT_SCHEMA_VERSION=2`); auto v1→v2 migration on first read; `detectStateDrift()` warning on dual-write attempts | Schema | Two-file split was the source of resume-state drift (#84, P2-6) |
+| Legacy execution state | Lived at `.mpl/mpl/state.json` | Auto-archived to `.mpl/archive/{pipeline_id}-legacy-execution-state.json` on first read | Migration | Preserves debug evidence without leaving live drift surface (#84, P2-6) |
+| MCP cross-tool session cache | `cachedSessionId` module-level var per file (3 callers: scorer, classifier, diagnoser) | New `mcp-server/src/lib/agent-sdk-query.ts` with `runCachedQuery<T>` + `isSessionExpiredError`; all 3 callers reuse `~/.mpl/cache/sessions.json` via lazy `cacheDir()` resolve | Refactor | −187 net lines; absorbs the proposed-but-not-built P2-8 separate cache-manager abstraction (#87, P2-7) |
+| Manifest schema in config docs | Documented as live | Removed from `docs/config-schema.md`; v0.8.5 history entry gets REMOVED banner | Docs | Matches runtime removal (#88, drift audit) |
+| `session_cache.ttl_minutes` config | Undocumented | Added to `docs/config-schema.md` | Docs | Matches P1-3b feature (#88, drift audit) |
+
+**Affected files:**
+- Hooks: `hooks/mpl-require-chain-assignment.mjs` (new), `hooks/lib/mpl-state.mjs`, `hooks/hooks.json`
+- MCP: `mcp-server/src/lib/agent-sdk-query.ts` (new), `mcp-server/src/lib/session-cache.ts`, `mcp-server/src/lib/state-manager.ts`, `mcp-server/src/lib/llm-scorer.ts`, `mcp-server/src/lib/feature-classifier.ts`, `mcp-server/src/lib/e2e-diagnoser.ts`, `mcp-server/src/tools/feature-scope.ts`, `mcp-server/src/tools/e2e-diagnose.ts`
+- Prompts: `commands/mpl-run-phase0.md`, `commands/mpl-run-decompose.md`, `commands/mpl-run-execute.md`, `commands/mpl-run-finalize.md`, `commands/mpl-run-finalize-resume.md`, `commands/mpl-run.md`
+- Skills: `skills/mpl-resume/SKILL.md`, `skills/mpl-status/SKILL.md`, `skills/mpl/SKILL.md`
+- Docs: `docs/config-schema.md`, `docs/design.md` (this entry + §3.2 v0.17 markers + v0.8.5 REMOVED banner), `docs/roadmap/overview.md`, `docs/roadmap/pending-features.md`, `docs/roadmap/sprints.md`, `docs/roadmap/adaptive-router-plan.md`, `docs/roadmap/0.16-exp12-plan.md`, `docs/pm-design.md`, `agents/mpl-decomposer.md`, `agents/mpl-interviewer.md`, `commands/mpl-run-execute-context.md`, `skills/mpl-pivot/SKILL.md`
+
+**Tests:** Hooks 287 → 317 pass (+30 across P1-3a / P1-4d / P2-6). MCP 42 → 73 pass (+31 across P1-3a-d / P2-7).
+
+**Breaking changes:** Removal of observable state fields (`interview_depth`, `pp_proximity`, `pipeline_tier`, `routing_pattern_*`) and `.mpl/manifest.json` artifact. State schema bumped v1→v2 with auto-migration on read — projects do not need manual intervention. Any external consumer reading the removed fields must be re-baselined. Plugin minor bump signals this surface change.
+
+**Issues closed:** #55 (v0.17 simplification), #79 (P1-3), #81 (P1-4d), #83 (P2-6), #85 (P2-7).
 
 ### v0.16.0 — 3-Tier User Contract Architecture (2026-04-20)
 

@@ -1,10 +1,35 @@
 # MPL Roadmap TEMP: Pending Feature Candidates
 
 > **⚠ v2 반영 완료 (v0.12.2)**: maturity_mode 제거, 5-Gate → 3H+1A Gate, pipeline_tier → pp_proximity 반영됨. 삭제된 에이전트(mpl-compound, mpl-scout, mpl-code-reviewer, mpl-verification-planner 등) 참조는 현행 담당자로 주석 처리됨.
+>
+> **⚠ v0.17 (#55) 반영**: Triage / `interview_depth` / `pp_proximity` / Hat model / F-22 routing-pattern recall 모두 삭제됨. 본 문서 내 위 개념을 가정한 설계(특히 `interview_depth` 분기를 활용하는 PM 설계, F-20→F-22 라우터 의존 항목)는 **재기준선화 필요**. 측정 대기 항목(F-25/F-28/F-39)은 `docs/roadmap/0.16-exp12-plan.md` exp12 데이터로 결정 보류 중.
 
 > **Status**: Pending implementation (for review)
-> **Last updated**: 2026-04-10
+> **Last updated**: 2026-04-26
 > **Purpose**: Consolidated list of all features not yet implemented. Completed items have been moved to `overview.md`.
+
+### Recently Completed (Post-v0.16 — 2026-04-21 ~ 2026-04-26)
+
+Moved out of "pending" because they were merged in the v0.17 + P1/P2 hardening stream. Detail in `docs/design.md` §9 + `docs/roadmap/overview.md` "Post-v0.16" section.
+
+| ID / PR | Item | Resolution |
+|---|---|---|
+| #55 | v0.17 Simplification | Triage + Step 0.0.5 (manifest.json) + `interview_depth` + `pp_proximity` + Hat model + F-22 routing recall — all REMOVED. Step -1 LSP Warm-up moved to `hooks/mpl-lsp-warmup.mjs`. |
+| #79 / PR #80 | P1-3 MCP session robustness | Ring buffer + per-project TTL override + 404 auto-invalidate + degraded escalation. |
+| #81 / PR #82 | P1-4d AP-CHAIN-01 enforcement | New `mpl-require-chain-assignment.mjs` PreToolUse hook. |
+| #83 / PR #84 | P2-6 state.json schema v2 | Single file + `execution` subtree + auto v1→v2 migration + `detectStateDrift()`. |
+| #85 / PR #87 | P2-7 generic session cache (also absorbs P2-8) | `runCachedQuery<T>` helper extracted; classifier + diagnoser reuse `~/.mpl/cache/sessions.json`. **P2-8 (separate cache-manager abstraction) no longer needed — naturally absorbed.** |
+| — / PR #88 | docs drift audit | manifest.json schema removed from config-schema; `session_cache.ttl_minutes` added; design.md §3.2 + v0.8.5 entry markers. |
+
+### Measurement-blocked items
+
+Decision pending exp12 measurement (`docs/roadmap/0.16-exp12-plan.md`). Do not promote/sunset until data exists.
+
+| ID | Item | Decision rule |
+|---|---|---|
+| F-25 | 4-Tier Adaptive Memory | If Tier-3/4 actual load frequency < 10% across exp12 runs → collapse to 2-tier. |
+| F-28 | `phase_domain` field | If field has no routing effect beyond phase-runner model selection → demote to plain tag and remove metadata wiring. |
+| F-39 | `phase_subdomain` / `task_type` / `lang` (4-Layer prompt composition) | Validate that distinct prompt paths actually compose; if always-same path → simplify. |
 
 ---
 

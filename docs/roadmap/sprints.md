@@ -2,6 +2,8 @@
 
 > Remaining 10 items organized into 4 Sprints, starting from Sprint 1 completion criteria.
 > Written: 2026-03-08
+>
+> **Currency note (2026-04-26)**: Sprints 1-7 below describe the v3.2 → v0.13.x work and are completed as recorded. Releases since then (v0.14 → v0.16.0 → v0.17 simplification + the P1/P2 hardening stream #80/#82/#84/#87/#88) are tracked release-by-release, not sprint-by-sprint, and live in `docs/design.md` §9 + `docs/roadmap/overview.md` "Post-v0.16" section. F-22 (Sprint 2) is **REMOVED in v0.17** — routing-pattern recall no longer runs at start. Acceptance criteria for F-22 are historical.
 
 ---
 
@@ -19,7 +21,7 @@ Single entry point + automatic tier classification + dynamic escalation + RUNBOO
 |----|------|---------|--------|-----------|
 | F-11 | Cross-Run Learning Accumulation | HIGH | F-10 (RUNBOOK) complete | `.mpl/memory/learnings.md`, orchestrator distillation logic *(was mpl-compound, removed v0.11.0)* |
 | F-12 | Intra-Session Context Persistence | HIGH | None | `<remember priority>` marking protocol, RUNBOOK dual safety net |
-| F-22 | Routing Pattern Learning | MED | F-20 (Router) complete | `.mpl/memory/routing-patterns.jsonl`, Jaccard matching |
+| F-22 | Routing Pattern Learning *(v0.17 REMOVED — recall + recording dropped)* | MED | F-20 (Router) complete | `.mpl/memory/routing-patterns.jsonl`, Jaccard matching |
 
 ### Dependency Graph
 

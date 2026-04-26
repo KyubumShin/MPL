@@ -2,7 +2,7 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.16.0 (v0.17 cleanup pending — `session_cache` added; manifest/field_classification marked removed)
+> **Version**: v0.17.0 (Triage / interview_depth / pp_proximity / Hat model / F-22 routing recall removed; `session_cache` added; manifest/field_classification removed)
 > **Last updated**: 2026-04-26
 
 ---

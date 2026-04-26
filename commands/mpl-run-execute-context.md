@@ -21,7 +21,7 @@ context = {
   phase_definition: phases[current_index],
   phase_seed:       load_phase_seed(current_phase),   // D-01: JIT seed (null if not generated)
   impact_files:     load_impact_files(phase.impact),
-  pp_proximity:     state.pp_proximity,
+  pp_proximity:     state.pp_proximity,    // (v0.17 REMOVED — Triage gone; field is null/legacy. Consumers should treat as `non_pp` or absent.)
   prev_summary:       Read previous phase's state-summary.md (if available),
   prev_verification:  Read previous phase's verification.md (if available),    // v0.7.0: failure context
   prev_changes_diff:  load_prev_phase_diff(prev_phase),                        // v0.7.0: code diff (N-1 only)

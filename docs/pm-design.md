@@ -5,6 +5,8 @@
 > **Status**: Design complete — awaiting mpl-interviewer v2 extension implementation
 > **Related Roadmap**: F-26 (PM Capability, mpl-interviewer integrated)
 > **References**: AI_PM(kimsanguine/AI_PM), UAM uam-pm, mpl-interviewer.md, pm-skill-proposal, mpl-pm-skill-research
+>
+> **v0.17 status (2026-04-26)**: This document is **historically frozen**. Triage, `interview_depth`, `pp_proximity`, and routing-pattern recall (F-22) were all removed in v0.17 (#55). Every reference below to `interview_depth` (light/full branching), `pp_proximity` tier mapping, F-20 router, and F-22 routing-pattern learning describes the pre-v0.17 architecture. The PM subsystem itself was not implemented as designed; PP interview is now a single always-on `full`-equivalent flow inside `agents/mpl-interviewer.md`. Use this doc as design archaeology only — do not implement against it without re-baselining.
 
 ---
 
