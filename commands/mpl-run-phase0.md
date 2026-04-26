@@ -362,6 +362,12 @@ Orchestrator-driven loop using `mpl_score_ambiguity` MCP. Runs **after** Step 2 
 - PP conformance escalation — 3 consecutive rounds with `weakest_dimension == pp_conformance` → re-dispatch `mpl-interviewer` Stage 1 to repair PPs.
 - Score is sacrosanct — `ambiguity_override.active` is the only bypass; score retains truthful value.
 
+**Neutral-fallback detection (P1-3d)**: when the MCP scorer returns `degraded == true`
+(SDK unavailable, retries exhausted, or every dimension is an exact 0.5 neutral —
+the signature of `llm-scorer.ts::neutralResult`), the loop would otherwise
+spin forever asking clarifying questions against fabricated scores. Short-circuit
+with `AskUserQuestion` so the user can override, retry, or cancel.
+
 ```
 round = 0
 while true:
@@ -379,6 +385,8 @@ while true:
     current_choices,
   })
 
+  # Client-side ring-buffer trim (MAX_AMBIGUITY_HISTORY = 10 in mpl-state.mjs).
+  # writeState enforces the same cap defense-in-depth and logs truncation.
   history = (readState(cwd).ambiguity_history ?? []).slice(-9)
   history.push({
     round, score: r.ambiguity_score,
@@ -389,6 +397,46 @@ while true:
     ambiguity_history: history,
     ambiguity_score: r.ambiguity_score,
   })
+
+  # --- Neutral-fallback detection (P1-3d) ---
+  # Either the MCP flag (preferred) or the all-0.5 signature (fallback for
+  # older MCP servers without the `degraded` field). Either signal means the
+  # scores carry no information — escalate instead of looping.
+  dim_scores = [
+    r.dimensions.spec_completeness.score,
+    r.dimensions.edge_case_coverage.score,
+    r.dimensions.technical_decision.score,
+    r.dimensions.acceptance_testability.score,
+    r.dimensions.pp_conformance.score,
+  ]
+  all_neutral = dim_scores.every(s => s === 0.5)
+  if r.degraded OR all_neutral:
+    reason_text = r.degraded_reason ?? (all_neutral ? "all_dimensions_0.5" : "unknown")
+    answer = AskUserQuestion({
+      question: `MCP ambiguity scoring returned a degraded result (reason: ${reason_text}). ` +
+                "SDK/session issue suspected. Override to proceed, retry, or cancel?",
+      header: "Ambiguity scorer degraded",
+      options: [
+        { label: "Override & proceed", description: "Accept residual ambiguity. ambiguity_override is set (by=sdk_fallback)." },
+        { label: "Retry scoring",      description: "Call mpl_score_ambiguity again (e.g. after MCP recovers)." },
+        { label: "Cancel pipeline",    description: "Stop. Investigate MCP/SDK, then restart via /mpl:mpl." }
+      ]
+    })
+    if answer == "Override & proceed":
+      mpl_state_write(cwd, {
+        ambiguity_override: {
+          active: true,
+          reason: `Scorer degraded: ${reason_text}`,
+          by: "sdk_fallback",
+          set_at: new Date().toISOString(),
+        }
+      })
+      break
+    if answer == "Cancel pipeline":
+      mpl_state_write(cwd, { current_phase: "cancelled" })
+      abort
+    # "Retry scoring" → continue loop without consuming an answer round.
+    continue
 
   if r.threshold_met: break
 

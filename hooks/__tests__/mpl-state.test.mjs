@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-import { deepMerge, readState, writeState, isMplActive, initState, checkConvergence } from '../lib/mpl-state.mjs';
+import { deepMerge, readState, writeState, isMplActive, initState, checkConvergence, MAX_AMBIGUITY_HISTORY } from '../lib/mpl-state.mjs';
 
 describe('deepMerge', () => {
   it('should merge nested objects', () => {
@@ -122,6 +122,67 @@ describe('readState / writeState', () => {
     const files = readdirSync(stateDir);
     const tmpFiles = files.filter(f => f.endsWith('.tmp'));
     assert.strictEqual(tmpFiles.length, 0, 'No temp files should remain after write');
+  });
+});
+
+describe('ambiguity_history ring buffer (P1-3a)', () => {
+  let tmpDir;
+  let originalStderrWrite;
+  let stderrCaptured;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mpl-test-'));
+    stderrCaptured = '';
+    originalStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => {
+      stderrCaptured += chunk;
+      return true;
+    };
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalStderrWrite;
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('preserves full history when at or below cap', () => {
+    const entries = Array.from({ length: MAX_AMBIGUITY_HISTORY }, (_, i) => ({
+      round: i + 1, score: 0.5, weakest_dimension: 'spec_completeness', ts: `t-${i}`,
+    }));
+    writeState(tmpDir, { current_phase: 'mpl-ambiguity-resolve', ambiguity_history: entries });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.ambiguity_history.length, MAX_AMBIGUITY_HISTORY);
+    assert.strictEqual(state.ambiguity_history[0].round, 1);
+    assert.strictEqual(stderrCaptured, '', 'should not log truncation at the cap');
+  });
+
+  it('truncates oldest entries when exceeding cap', () => {
+    const overflow = MAX_AMBIGUITY_HISTORY + 5;
+    const entries = Array.from({ length: overflow }, (_, i) => ({
+      round: i + 1, score: 0.5, weakest_dimension: 'spec_completeness', ts: `t-${i}`,
+    }));
+    writeState(tmpDir, { current_phase: 'mpl-ambiguity-resolve', ambiguity_history: entries });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.ambiguity_history.length, MAX_AMBIGUITY_HISTORY);
+    // Oldest 5 dropped → first kept entry has round = overflow - MAX + 1
+    assert.strictEqual(state.ambiguity_history[0].round, overflow - MAX_AMBIGUITY_HISTORY + 1);
+    assert.strictEqual(state.ambiguity_history.at(-1).round, overflow);
+  });
+
+  it('emits a stderr truncation event on overflow', () => {
+    const entries = Array.from({ length: MAX_AMBIGUITY_HISTORY + 3 }, (_, i) => ({
+      round: i, score: 0.5, weakest_dimension: 'edge_case_coverage', ts: `t-${i}`,
+    }));
+    writeState(tmpDir, { current_phase: 'mpl-ambiguity-resolve', ambiguity_history: entries });
+    assert.match(stderrCaptured, /ambiguity_history ring-buffer truncated 3 oldest entries/);
+    assert.match(stderrCaptured, new RegExp(`cap=${MAX_AMBIGUITY_HISTORY}`));
+  });
+
+  it('ignores non-array ambiguity_history values', () => {
+    writeState(tmpDir, { current_phase: 'mpl-ambiguity-resolve', ambiguity_history: null });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.ambiguity_history, null);
+    assert.strictEqual(stderrCaptured, '');
   });
 });
 

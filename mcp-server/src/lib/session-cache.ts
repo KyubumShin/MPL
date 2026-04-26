@@ -10,7 +10,13 @@
  * Each entry is validated on lookup against three dimensions:
  *   - pipeline_id:   fresh pipeline → fresh session
  *   - content_hash:  input context changed (pivot_points edited) → fresh session
- *   - last_used_at:  TTL expired (default 30 min) → fresh session
+ *   - last_used_at:  TTL expired → fresh session
+ *
+ * TTL precedence (highest wins):
+ *   1. explicit `ttl_ms` on the lookup input (test overrides only)
+ *   2. per-project `.mpl/config.json` → `session_cache.ttl_minutes`
+ *   3. global `~/.mpl/cache/sessions.json` → `config.ttl_minutes`
+ *   4. DEFAULT_TTL_MINUTES (30)
  *
  * A fresh session is signalled by returning `null` from `lookupSession`; the
  * caller then issues a query without `sessionId` and calls `persistSession`
@@ -66,6 +72,31 @@ function loadCache(): CacheFile {
   }
 }
 
+/**
+ * Read `session_cache.ttl_minutes` from the project's `.mpl/config.json`, if
+ * present. Returns `null` when the file is absent, unreadable, missing the
+ * key, or holds a non-positive/NaN value — callers then fall back to the
+ * global cache config or DEFAULT_TTL_MINUTES.
+ *
+ * Scope: per-project override only. The global cache file's `config.ttl_minutes`
+ * is still honored for projects without a per-project override, so existing
+ * installs without `session_cache` in their config see no behavior change.
+ */
+export function readProjectTtlMinutes(cwd: string): number | null {
+  try {
+    const configPath = join(cwd, '.mpl', 'config.json');
+    if (!existsSync(configPath)) return null;
+    const parsed = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      session_cache?: { ttl_minutes?: unknown };
+    };
+    const raw = parsed?.session_cache?.ttl_minutes;
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
 function persistCache(cache: CacheFile): void {
   if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
   // Atomic write via temp + rename to avoid partial files on concurrent access.
@@ -112,7 +143,9 @@ export function lookupSession(input: LookupInput): string | null {
   if (!entry) return null;
   if (entry.pipeline_id !== input.pipeline_id) return null;
   if (entry.content_hash !== input.content_hash) return null;
-  const ttlMs = input.ttl_ms ?? cache.config.ttl_minutes * 60_000;
+  const projectMinutes = readProjectTtlMinutes(input.cwd);
+  const effectiveMinutes = projectMinutes ?? cache.config.ttl_minutes;
+  const ttlMs = input.ttl_ms ?? effectiveMinutes * 60_000;
   const lastUsed = Date.parse(entry.last_used_at);
   if (!Number.isFinite(lastUsed)) return null;
   if (Date.now() - lastUsed > ttlMs) return null;

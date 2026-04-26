@@ -14,6 +14,14 @@ const STATE_DIR = '.mpl';
 const STATE_FILE = 'state.json';
 
 /**
+ * Ring-buffer cap for Stage 2 ambiguity round records. writeState enforces this
+ * post-merge so the state file cannot grow unbounded even when the orchestrator
+ * forgets to slice before writing. The orchestrator still slices on its side as
+ * a courtesy (cheaper stringify); this is the defense-in-depth guarantee.
+ */
+export const MAX_AMBIGUITY_HISTORY = 10;
+
+/**
  * Valid pipeline phase names (v0.13.1).
  * writeState() warns on unrecognized current_phase values.
  */
@@ -183,6 +191,15 @@ export function writeState(cwd, patch) {
 
   const current = readState(cwd) || { ...DEFAULT_STATE };
   const merged = deepMerge(current, patch);
+
+  // Ring-buffer cap for ambiguity_history. Arrays are replaced (not merged) by
+  // deepMerge, so any patch that supplies ambiguity_history has already set the
+  // final array — we just trim the tail if it exceeds MAX_AMBIGUITY_HISTORY.
+  if (Array.isArray(merged.ambiguity_history) && merged.ambiguity_history.length > MAX_AMBIGUITY_HISTORY) {
+    const dropped = merged.ambiguity_history.length - MAX_AMBIGUITY_HISTORY;
+    merged.ambiguity_history = merged.ambiguity_history.slice(-MAX_AMBIGUITY_HISTORY);
+    process.stderr.write(`[mpl-state] ambiguity_history ring-buffer truncated ${dropped} oldest entries (cap=${MAX_AMBIGUITY_HISTORY})\n`);
+  }
 
   // C2: Atomic write via temp file + rename
   const tmpPath = join(stateDir, `.state-${randomBytes(4).toString('hex')}.tmp`);

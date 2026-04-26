@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -270,6 +270,93 @@ describe('session-cache', () => {
       assert.strictEqual(removed, 1);
       const refreshed = JSON.parse(readFileSync(path, 'utf-8'));
       assert.deepStrictEqual(refreshed.sessions, {});
+    });
+  });
+
+  describe('per-project TTL override (P1-3b)', () => {
+    let PROJECT_DIR;
+
+    beforeEach(() => {
+      PROJECT_DIR = mkdtempSync(join(tmpdir(), 'mpl-proj-ttl-'));
+    });
+
+    afterEach(() => {
+      if (PROJECT_DIR && existsSync(PROJECT_DIR)) {
+        rmSync(PROJECT_DIR, { recursive: true, force: true });
+      }
+    });
+
+    function writeProjectConfig(ttlMinutes) {
+      const dir = join(PROJECT_DIR, '.mpl');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'config.json'), JSON.stringify({ session_cache: { ttl_minutes: ttlMinutes } }));
+    }
+
+    function backdateEntry(ageMinutes) {
+      const path = join(TEST_HOME, '.mpl', 'cache', 'sessions.json');
+      const raw = JSON.parse(readFileSync(path, 'utf-8'));
+      raw.sessions[PROJECT_DIR].ambiguity.last_used_at = new Date(Date.now() - ageMinutes * 60_000).toISOString();
+      writeFileSync(path, JSON.stringify(raw));
+    }
+
+    it('readProjectTtlMinutes returns null when config absent', async () => {
+      const mod = await loadModule();
+      assert.strictEqual(mod.readProjectTtlMinutes(PROJECT_DIR), null);
+    });
+
+    it('readProjectTtlMinutes returns null for non-positive or non-number values', async () => {
+      const mod = await loadModule();
+      mkdirSync(join(PROJECT_DIR, '.mpl'), { recursive: true });
+      writeFileSync(join(PROJECT_DIR, '.mpl', 'config.json'), JSON.stringify({ session_cache: { ttl_minutes: 0 } }));
+      assert.strictEqual(mod.readProjectTtlMinutes(PROJECT_DIR), null);
+      writeFileSync(join(PROJECT_DIR, '.mpl', 'config.json'), JSON.stringify({ session_cache: { ttl_minutes: 'thirty' } }));
+      assert.strictEqual(mod.readProjectTtlMinutes(PROJECT_DIR), null);
+    });
+
+    it('readProjectTtlMinutes returns the configured positive minutes', async () => {
+      const mod = await loadModule();
+      writeProjectConfig(60);
+      assert.strictEqual(mod.readProjectTtlMinutes(PROJECT_DIR), 60);
+    });
+
+    it('project TTL=60 keeps a 40-minute-old entry alive (default 30 would evict)', async () => {
+      const mod = await loadModule();
+      writeProjectConfig(60);
+      mod.persistSession({
+        cwd: PROJECT_DIR, kind: 'ambiguity', pipeline_id: 'p1', content_hash: 'h1', session_id: 'sess_x',
+      });
+      backdateEntry(40);
+      const id = mod.lookupSession({
+        cwd: PROJECT_DIR, kind: 'ambiguity', pipeline_id: 'p1', content_hash: 'h1',
+      });
+      assert.strictEqual(id, 'sess_x');
+    });
+
+    it('project TTL=10 evicts a 20-minute-old entry (default 30 would keep)', async () => {
+      const mod = await loadModule();
+      writeProjectConfig(10);
+      mod.persistSession({
+        cwd: PROJECT_DIR, kind: 'ambiguity', pipeline_id: 'p1', content_hash: 'h1', session_id: 'sess_x',
+      });
+      backdateEntry(20);
+      const id = mod.lookupSession({
+        cwd: PROJECT_DIR, kind: 'ambiguity', pipeline_id: 'p1', content_hash: 'h1',
+      });
+      assert.strictEqual(id, null);
+    });
+
+    it('explicit ttl_ms on lookup still wins over project config', async () => {
+      const mod = await loadModule();
+      writeProjectConfig(60);
+      mod.persistSession({
+        cwd: PROJECT_DIR, kind: 'ambiguity', pipeline_id: 'p1', content_hash: 'h1', session_id: 'sess_x',
+      });
+      backdateEntry(2);
+      const id = mod.lookupSession({
+        cwd: PROJECT_DIR, kind: 'ambiguity', pipeline_id: 'p1', content_hash: 'h1',
+        ttl_ms: 60_000,  // 1 minute — 2-minute-old entry must be evicted
+      });
+      assert.strictEqual(id, null);
     });
   });
 
