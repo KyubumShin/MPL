@@ -4,7 +4,19 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-import { deepMerge, readState, writeState, isMplActive, initState, checkConvergence, MAX_AMBIGUITY_HISTORY } from '../lib/mpl-state.mjs';
+import {
+  deepMerge,
+  readState,
+  writeState,
+  isMplActive,
+  initState,
+  checkConvergence,
+  MAX_AMBIGUITY_HISTORY,
+  migrateLegacyExecutionState,
+  detectStateDrift,
+  CURRENT_SCHEMA_VERSION,
+  LEGACY_EXECUTION_STATE_PATH,
+} from '../lib/mpl-state.mjs';
 
 describe('deepMerge', () => {
   it('should merge nested objects', () => {
@@ -319,5 +331,218 @@ describe('checkConvergence', () => {
   it('should return insufficient_data for null state', () => {
     const result = checkConvergence(null);
     assert.strictEqual(result.status, 'insufficient_data');
+  });
+});
+
+describe('P2-6 unified state: schema_version + execution subtree', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-p2-6-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('initState stamps the current schema_version and empty execution subtree', () => {
+    const state = initState(tmpDir, 'p2-6-feat', 'full');
+    assert.strictEqual(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.ok(state.execution, 'execution subtree must be present');
+    assert.deepStrictEqual(state.execution.phases, {
+      total: 0, completed: 0, current: null, failed: 0, circuit_breaks: 0,
+    });
+    assert.deepStrictEqual(state.execution.phase_details, []);
+  });
+
+  it('writeState merges patches into execution subtree (deep merge)', () => {
+    writeState(tmpDir, { current_phase: 'phase2-sprint' });
+    writeState(tmpDir, {
+      execution: {
+        task: 'add login',
+        status: 'running',
+        phases: { total: 3, completed: 1, current: 'phase-2' },
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.execution.task, 'add login');
+    assert.strictEqual(state.execution.status, 'running');
+    assert.strictEqual(state.execution.phases.total, 3);
+    assert.strictEqual(state.execution.phases.completed, 1);
+    assert.strictEqual(state.execution.phases.current, 'phase-2');
+    // Untouched nested fields retain defaults
+    assert.strictEqual(state.execution.phases.failed, 0);
+  });
+});
+
+describe('P2-6 unified state: legacy migration', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-migrate-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeLegacyExecutionFile(dir, body) {
+    mkdirSync(join(dir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'mpl', 'state.json'), JSON.stringify(body));
+  }
+
+  function writeUnversionedState(dir, body) {
+    mkdirSync(join(dir, '.mpl'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'state.json'), JSON.stringify(body));
+  }
+
+  it('readState migrates v1 → v2 on first access when legacy file exists', () => {
+    writeUnversionedState(tmpDir, {
+      pipeline_id: 'mpl-legacy',
+      current_phase: 'phase2-sprint',
+      // no schema_version, no execution
+    });
+    writeLegacyExecutionFile(tmpDir, {
+      task: 'legacy task',
+      status: 'running',
+      phases: { total: 4, completed: 2, current: 'phase-3', failed: 0, circuit_breaks: 0 },
+      phase_details: [
+        { id: 'phase-1', name: 'A', status: 'completed' },
+        { id: 'phase-2', name: 'B', status: 'completed' },
+      ],
+      cumulative_pass_rate: 85,
+    });
+
+    const state = readState(tmpDir);
+    assert.strictEqual(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.strictEqual(state.execution.task, 'legacy task');
+    assert.strictEqual(state.execution.phases.total, 4);
+    assert.strictEqual(state.execution.phases.completed, 2);
+    assert.strictEqual(state.execution.phase_details.length, 2);
+    assert.strictEqual(state.execution.cumulative_pass_rate, 85);
+
+    // Legacy file archived + removed
+    assert.strictEqual(existsSync(join(tmpDir, LEGACY_EXECUTION_STATE_PATH)), false);
+    const archiveDir = join(tmpDir, '.mpl', 'archive');
+    assert.ok(existsSync(archiveDir), 'archive dir should exist');
+    const archived = readdirSync(archiveDir).filter((f) => f.endsWith('legacy-execution-state.json'));
+    assert.strictEqual(archived.length, 1);
+    const archivedContent = JSON.parse(readFileSync(join(archiveDir, archived[0]), 'utf-8'));
+    assert.strictEqual(archivedContent.pipeline_id, 'mpl-legacy');
+    assert.strictEqual(archivedContent.legacy_content.task, 'legacy task');
+  });
+
+  it('persists schema_version on disk after migration so subsequent reads skip the check', () => {
+    writeUnversionedState(tmpDir, { pipeline_id: 'p', current_phase: 'phase1-plan' });
+    writeLegacyExecutionFile(tmpDir, { task: 'one-shot', status: 'running', phases: { total: 1 } });
+    readState(tmpDir);  // triggers migration
+
+    const rawAfter = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.strictEqual(rawAfter.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.strictEqual(rawAfter.execution.task, 'one-shot');
+  });
+
+  it('is idempotent — migration on an already-v2 state leaves it unchanged', () => {
+    writeState(tmpDir, { current_phase: 'phase2-sprint', execution: { task: 'already v2', status: 'running' } });
+    const first = readState(tmpDir);
+    const snapshot = JSON.stringify(first);
+    const second = readState(tmpDir);
+    assert.strictEqual(JSON.stringify(second), snapshot);
+    assert.strictEqual(second.execution.task, 'already v2');
+  });
+
+  it('runs with no legacy file present (pure version bump)', () => {
+    writeUnversionedState(tmpDir, { pipeline_id: 'p2', current_phase: 'phase2-sprint' });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.schema_version, CURRENT_SCHEMA_VERSION);
+    // execution defaulted from baseline
+    assert.deepStrictEqual(state.execution.phase_details, []);
+  });
+
+  it('preserves later v2 writes when legacy file is also present (unified wins per field)', () => {
+    writeUnversionedState(tmpDir, {
+      pipeline_id: 'p3',
+      current_phase: 'phase2-sprint',
+      execution: { task: 'unified-preferred', phases: { completed: 5 } },
+    });
+    writeLegacyExecutionFile(tmpDir, {
+      task: 'legacy-value',
+      phases: { completed: 0, total: 10 },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.execution.task, 'unified-preferred', 'unified beats legacy on conflict');
+    assert.strictEqual(state.execution.phases.completed, 5, 'unified beats legacy on conflict');
+    // Unified did not set phases.total; legacy fills the gap
+    assert.strictEqual(state.execution.phases.total, 10);
+  });
+
+  it('handles corrupt legacy file gracefully (archives, does not throw)', () => {
+    writeUnversionedState(tmpDir, { pipeline_id: 'p4', current_phase: 'phase1-plan' });
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), 'garbage{{{');
+    const state = readState(tmpDir);
+    assert.strictEqual(state.schema_version, CURRENT_SCHEMA_VERSION);
+    // Legacy file still archived + removed so corrupt data stops haunting resume
+    assert.strictEqual(existsSync(join(tmpDir, LEGACY_EXECUTION_STATE_PATH)), false);
+  });
+});
+
+describe('P2-6 drift detection', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-drift-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('returns no drift when legacy file does not exist', () => {
+    writeState(tmpDir, { current_phase: 'phase2-sprint' });
+    const r = detectStateDrift(tmpDir);
+    assert.strictEqual(r.drift, false);
+    assert.deepStrictEqual(r.details, []);
+  });
+
+  it('returns no drift when legacy and unified match', () => {
+    writeState(tmpDir, {
+      current_phase: 'phase2-sprint',
+      execution: {
+        status: 'running',
+        phases: { total: 3, completed: 1, current: 'phase-2', failed: 0, circuit_breaks: 0 },
+        cumulative_pass_rate: 75,
+        phase_details: [{ id: 'phase-1', name: 'A', status: 'completed' }],
+      },
+    });
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), JSON.stringify({
+      status: 'running',
+      phases: { total: 3, completed: 1, current: 'phase-2', failed: 0, circuit_breaks: 0 },
+      cumulative_pass_rate: 75,
+      phase_details: [{ id: 'phase-1', name: 'A', status: 'completed' }],
+    }));
+    const r = detectStateDrift(tmpDir);
+    assert.strictEqual(r.drift, false);
+  });
+
+  it('reports drift when phases.completed diverges', () => {
+    writeState(tmpDir, {
+      current_phase: 'phase2-sprint',
+      execution: { phases: { total: 3, completed: 2 } },
+    });
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), JSON.stringify({
+      phases: { total: 3, completed: 1 },
+    }));
+    const r = detectStateDrift(tmpDir);
+    assert.strictEqual(r.drift, true);
+    assert.ok(r.details.some((d) => /phases\.completed/.test(d)));
+  });
+
+  it('reports drift when phase_details ids differ', () => {
+    writeState(tmpDir, {
+      current_phase: 'phase2-sprint',
+      execution: { phase_details: [{ id: 'phase-1' }, { id: 'phase-2' }] },
+    });
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), JSON.stringify({
+      phase_details: [{ id: 'phase-1' }],
+    }));
+    const r = detectStateDrift(tmpDir);
+    assert.strictEqual(r.drift, true);
+    assert.ok(r.details.some((d) => /phase_details ids differ/.test(d)));
+  });
+
+  it('never throws on corrupt inputs', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), '{not json');
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), '{also not json');
+    const r = detectStateDrift(tmpDir);
+    assert.strictEqual(r.drift, false);
+    assert.deepStrictEqual(r.details, []);
   });
 });

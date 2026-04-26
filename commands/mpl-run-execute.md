@@ -540,13 +540,36 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
      - Append to `.mpl/mpl/phases/phase-N/warnings.json` (for traceability)
      - When generating the next Phase Seed, include relevant warnings in the `prior_summaries` context
      - Warnings that affect adjacent phases (dependency substitutions, platform constraints) → inject into next Seed's constraints section
-6. Update MPL state:
-   phases.completed++, phase_details[N].status = "completed"
-   phase_details[N].criteria_passed, pass_rate, micro_fixes, pd_count, discoveries
-   totals.total_micro_fixes += result.verification.micro_cycle_fixes
-   cumulative_pass_rate = result.verification.pass_rate
-   // M-5: Populate pass_rate_history for convergence detection
-   convergence.pass_rate_history.push(result.verification.pass_rate)
+6. **Update execution state (P2-6 — unified `.mpl/state.json.execution`)**:
+   ```
+   mpl_state_write(cwd, {
+     execution: {
+       phases: {
+         // readState first, increment completed, set current to next phase id
+         completed: state.execution.phases.completed + 1,
+         current: next_phase_id_or_null,
+       },
+       // phase_details is an array — provide the FULL array (deepMerge replaces arrays)
+       phase_details: patch_phase_detail(state.execution.phase_details, N, {
+         status: "completed",
+         criteria_passed: result.verification.criteria_passed,
+         pass_rate: result.verification.pass_rate,
+         micro_fixes: result.verification.micro_cycle_fixes,
+         pd_count: result.pd_count,
+         discoveries: result.discovery_count,
+       }),
+       totals: {
+         total_micro_fixes: state.execution.totals.total_micro_fixes + result.verification.micro_cycle_fixes,
+       },
+       cumulative_pass_rate: result.verification.pass_rate,
+     },
+     // M-5: pass_rate_history is pipeline-scoped, stays outside execution
+     convergence: {
+       pass_rate_history: [...state.convergence.pass_rate_history, result.verification.pass_rate],
+     },
+   })
+   ```
+   > The legacy `.mpl/mpl/state.json` file has been removed (P2-6 / #79-continuation). Any lingering write to that path is a v1 regression — hooks will surface it as drift at resume time.
 7. (Pipeline stays in `phase2-sprint` — no state transition per phase. Only MPL state updates above.)
 8. Profile: Record phase execution profile to .mpl/mpl/profile/phases.jsonl:
    {
@@ -636,7 +659,17 @@ else:
 **On `"circuit_break"`**:
 
 ```
-1. Record: phase_details[N].status = "circuit_break", phases.circuit_breaks++
+1. Record execution state via unified store:
+   ```
+   mpl_state_write(cwd, {
+     execution: {
+       phases: { circuit_breaks: state.execution.phases.circuit_breaks + 1 },
+       phase_details: patch_phase_detail(state.execution.phase_details, N, { status: "circuit_break" }),
+       status: "failed",
+       failure_phase: phase.id,
+     }
+   })
+   ```
 2. Update pipeline state: writeState(cwd, { current_phase: "phase5-finalize" })
 3. **RUNBOOK Update (F-10)**: Append to `.mpl/mpl/RUNBOOK.md`:
    ## Circuit Break: Phase {N} - {name}
@@ -645,7 +678,7 @@ else:
    - **Retries Exhausted**: 3/3
    - **Timestamp**: {ISO timestamp}
 4. Phase retry budget exhausted → circuit break → `phase5-finalize` (partial completion)
-   Update MPL state: status = "failed", failure_phase = N
+   (execution.status/failure_phase already written above in step 1)
    Report: "[MPL] Circuit break on Phase {N}. Pipeline failed. Preserving completed work. Entering finalize."
 ```
 

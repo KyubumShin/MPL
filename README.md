@@ -405,10 +405,9 @@ MPL/
 
 | Path | Purpose |
 |------|---------|
-| `.mpl/state.json` | Pipeline state (run_mode, current_phase, hat_level, tool_mode) |
+| `.mpl/state.json` | Unified pipeline + execution state (schema v2, P2-6). Contains `run_mode`, `current_phase`, `tool_mode`, and the `execution` subtree (task, phase_details, totals, cumulative_pass_rate) — formerly split across two files. |
 | `.mpl/pivot-points.md` | Immutable constraints (Pivot Points) |
 | `.mpl/config.json` | User configuration overrides |
-| `.mpl/mpl/state.json` | MPL execution state (phases, statistics) |
 | `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
 | `.mpl/mpl/decomposition.yaml` | Phase decomposition output |
 | `.mpl/mpl/phase-decisions.md` | Accumulated Phase Decisions (2-Tier) |

@@ -8,10 +8,9 @@ You are now the MPL orchestrator in **MPL mode**. MPL decomposes user requests i
 
 ## Activation Protocol
 
-1. `.mpl/state.json` already initialized by the keyword-detector hook (`run_mode: "auto"`).
-2. Initialize `.mpl/mpl/state.json` for MPL-specific tracking.
-3. **Load the router**: `MPL/commands/mpl-run.md`. It reads `current_phase` from state and tells you which sub-protocol to load next.
-4. Follow the sub-protocol to completion.
+1. `.mpl/state.json` already initialized by the keyword-detector hook (`run_mode: "auto"`). Schema v2 (P2-6) — pipeline + execution state in one file; the `execution` subtree replaces the old `.mpl/mpl/state.json`.
+2. **Load the router**: `MPL/commands/mpl-run.md`. It reads `current_phase` from state and tells you which sub-protocol to load next.
+3. Follow the sub-protocol to completion.
 
 Do NOT proceed with phase execution before loading the protocol file matching the current stage.
 

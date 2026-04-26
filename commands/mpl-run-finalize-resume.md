@@ -19,8 +19,9 @@ MPL naturally supports resume via per-phase state persistence.
 ```
 On session start:
   if .mpl/state.json has run_mode == "mpl":
-    mplState = Read .mpl/mpl/state.json
-    nextPhase = first phase with status != "completed"
+    state = readState(cwd)                    # P2-6: migration runs transparently if v1 is encountered
+    execution = state.execution               # formerly .mpl/mpl/state.json; now a subtree of .mpl/state.json
+    nextPhase = first phase in execution.phase_details with status != "completed"
 
     # F-10: Load RUNBOOK for session continuity
     if exists(".mpl/mpl/RUNBOOK.md"):
@@ -159,7 +160,7 @@ Signal freshness: mpl-session-init.mjs validates the signal is <120s old (HANDOF
 | Completed results | `.mpl/mpl/phases/phase-N/state-summary.md` |
 | Accumulated PDs | `.mpl/mpl/phase-decisions.md` |
 | Phase definitions | `.mpl/mpl/decomposition.yaml` |
-| Progress | `.mpl/mpl/state.json` |
+| Progress | `.mpl/state.json` → `execution` subtree (P2-6; legacy file auto-migrated) |
 | Pivot Points | `.mpl/pivot-points.md` |
 
 ---

@@ -246,7 +246,7 @@ MPL supports natural resume through per-phase state persistence. When a session 
 | Completed results | `.mpl/mpl/phases/phase-N/state-summary.md` |
 | Accumulated PD | `.mpl/mpl/phase-decisions.md` |
 | Phase definition | `.mpl/mpl/decomposition.yaml` |
-| Progress state | `.mpl/mpl/state.json` |
+| Progress state | `.mpl/state.json` → `execution` subtree (P2-6; legacy `.mpl/mpl/state.json` auto-migrated on read) |
 | Pivot Points | `.mpl/pivot-points.md` |
 
 ---
