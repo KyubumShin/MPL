@@ -15,64 +15,17 @@
  * Fallback: if Agent SDK is unavailable, returns neutral scores.
  */
 
-import {
-  computeContentHash,
-  invalidateSession,
-  lookupSession,
-  persistSession,
-} from './session-cache.js';
+import { runCachedQuery, isSessionExpiredError as _isSessionExpiredError } from './agent-sdk-query.js';
 import { readState } from './state-manager.js';
 
-const MAX_RETRIES = 2;
 const SESSION_KIND = 'ambiguity';
 
 /**
- * Detect Anthropic API responses that indicate the resumed session id is no
- * longer valid (expired / purged / never-existed). The Agent SDK does not
- * expose typed errors, so we match on the small set of signatures Anthropic
- * emits: HTTP 404, "session not found" / "not_found_error" textual fragments,
- * or our SDK's own "Session ... not found" wrapper message.
- *
- * Exported for tests. False positives are non-fatal — they trigger a cache
- * invalidation and a fresh-session retry, which is the same work we'd do on
- * any cache miss.
+ * Re-export of `isSessionExpiredError` from the shared agent-sdk-query module.
+ * Retained for backward compatibility with pre-P2-7 tests importing from
+ * llm-scorer; new callers should import directly from `./agent-sdk-query.js`.
  */
-export function isSessionExpiredError(err: unknown): boolean {
-  if (err === null || err === undefined) return false;
-
-  // Thrown error with numeric status (Anthropic SDK or fetch)
-  const status = (err as { status?: unknown }).status;
-  if (typeof status === 'number' && status === 404) return true;
-
-  const parts: string[] = [];
-  if (err instanceof Error) {
-    if (err.message) parts.push(err.message);
-    if ((err as { name?: string }).name) parts.push((err as { name: string }).name);
-  } else if (typeof err === 'string') {
-    parts.push(err);
-  } else {
-    try {
-      parts.push(JSON.stringify(err));
-    } catch {
-      parts.push(String(err));
-    }
-  }
-
-  const haystack = parts.join(' ').toLowerCase();
-  if (!haystack) return false;
-
-  const signatures = [
-    'session not found',
-    'session_not_found',
-    'not_found_error',
-    'sessionid not found',
-    'sessionid is invalid',
-    'no such session',
-    '"status":404',
-    'status: 404',
-  ];
-  return signatures.some((sig) => haystack.includes(sig));
-}
+export const isSessionExpiredError = _isSessionExpiredError;
 
 export interface DimensionScore {
   score: number;
@@ -177,136 +130,30 @@ export async function scoreDimensions(input: {
   const userMessage = buildUserMessage(input);
   const fullPrompt = `${SCORING_PROMPT}\n\nINPUT:\n${userMessage}`;
 
-  // Try Claude Agent SDK (no API key needed — uses session auth). Tests
-  // override via `__testing.setQueryFn` to inject a deterministic fake.
-  let queryFn: typeof import('@anthropic-ai/claude-agent-sdk').query | null = __injectedQueryFn;
-  if (!queryFn) {
-    try {
-      const sdk = await import('@anthropic-ai/claude-agent-sdk');
-      queryFn = sdk.query;
-    } catch {
-      // Agent SDK not available — return neutral scores
-      return neutralResult('sdk_unavailable');
-    }
-  }
-
   // Session cache identity: pipeline_id from state + content hash over the
   // stable scoring prefix (prompt + pivot_points). user_responses is NOT
   // hashed — it grows across rounds and mismatch would force a fresh
   // session on every round, defeating the cache.
   const state = readState(input.cwd);
   const pipelineId = state?.pipeline_id ?? 'unknown-pipeline';
-  const contentHash = computeContentHash(`${SCORING_PROMPT}\n${input.pivot_points}`);
 
-  // `activeSessionId` starts as the cached id and is cleared the moment we
-  // observe a session-expired signature, so the next retry runs without a
-  // stale resume token.
-  let activeSessionId: string | null = lookupSession({
-    cwd: input.cwd,
-    kind: SESSION_KIND,
-    pipeline_id: pipelineId,
-    content_hash: contentHash,
-  });
+  const r = await runCachedQuery<ScoringResult>(
+    {
+      cwd: input.cwd,
+      kind: SESSION_KIND,
+      pipeline_id: pipelineId,
+      cache_input: `${SCORING_PROMPT}\n${input.pivot_points}`,
+      system_prompt: 'You are a JSON-only scoring assistant. Output only valid JSON.',
+      full_prompt: fullPrompt,
+    },
+    parseScores,
+  );
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const queryOptions: Record<string, unknown> = {
-        model: 'opus',
-        maxTurns: 1,
-        systemPrompt: 'You are a JSON-only scoring assistant. Output only valid JSON.',
-        allowedTools: [], // No tools needed — pure text completion
-      };
-
-      // Resume existing session when we have a valid cached id so the
-      // prompt-cache prefix survives across calls.
-      if (activeSessionId) queryOptions.sessionId = activeSessionId;
-
-      const q = queryFn({
-        prompt: fullPrompt,
-        options: queryOptions,
-      });
-
-      // Collect response text and sessionId from SDK events
-      let responseText = '';
-      let observedSessionId: string | null = null;
-      let resultErrorText: string | null = null;
-      for await (const event of q) {
-        if (event.type === 'result' && event.subtype === 'success') {
-          responseText = (event as { result: string }).result;
-          const sessionId = (event as { sessionId?: string }).sessionId;
-          if (sessionId) observedSessionId = sessionId;
-        } else if (event.type === 'result' && 'is_error' in event && (event as { is_error?: boolean }).is_error) {
-          // SDKResultError — collect the error payload so we can detect a
-          // session-expired signature and invalidate the cache entry.
-          const errs = (event as { errors?: unknown }).errors;
-          if (Array.isArray(errs)) resultErrorText = errs.map((e) => String(e)).join(' | ');
-          else if (typeof errs === 'string') resultErrorText = errs;
-        } else if (event.type === 'assistant') {
-          // SDKAssistantMessage — extract text from BetaMessage content blocks
-          const msg = event.message as { content?: Array<{ type: string; text?: string }> };
-          if (msg.content) {
-            for (const block of msg.content) {
-              if (block.type === 'text' && block.text) {
-                responseText += block.text;
-              }
-            }
-          }
-        } else if ((event as { sessionId?: string }).sessionId) {
-          // Capture sessionId from any event that carries it
-          const sessionId = (event as { sessionId?: string }).sessionId;
-          if (sessionId) observedSessionId = sessionId;
-        }
-      }
-
-      // Result-level error with session-expired signature → invalidate and
-      // retry without the sessionId. Burns one retry attempt, which is the
-      // correct accounting (the server already processed the bad resume).
-      if (resultErrorText && activeSessionId && isSessionExpiredError(resultErrorText)) {
-        invalidateSession(input.cwd, SESSION_KIND);
-        activeSessionId = null;
-        continue;
-      }
-
-      const scores = parseScores(responseText);
-      if (scores) {
-        if (observedSessionId) {
-          // Upsert cache so subsequent rounds hit the prompt cache. The
-          // persist call refreshes last_used_at and bumps turn_count.
-          persistSession({
-            cwd: input.cwd,
-            kind: SESSION_KIND,
-            pipeline_id: pipelineId,
-            content_hash: contentHash,
-            session_id: observedSessionId,
-          });
-        }
-        return scores;
-      }
-
-      // Parse failed, retry
-    } catch (error) {
-      // Thrown session-expired error (e.g. 404 from resume). Invalidate the
-      // stale cache entry and retry with a fresh session on the next attempt.
-      if (activeSessionId && isSessionExpiredError(error)) {
-        invalidateSession(input.cwd, SESSION_KIND);
-        activeSessionId = null;
-        if (attempt < MAX_RETRIES) continue;
-      }
-      if (attempt === MAX_RETRIES) {
-        // All retries failed — return neutral
-        return neutralResult('retry_exhausted');
-      }
-    }
-  }
-
-  return neutralResult('retry_exhausted');
+  if (r.ok) return r.value;
+  return neutralResult(r.reason);
 }
 
-// Test-only injection point for the Agent SDK `query` function. Callers should
-// use `__testing.setQueryFn(fn)` to install, and `setQueryFn(null)` to reset.
-let __injectedQueryFn: typeof import('@anthropic-ai/claude-agent-sdk').query | null = null;
-export const __testing = {
-  setQueryFn(fn: typeof import('@anthropic-ai/claude-agent-sdk').query | null): void {
-    __injectedQueryFn = fn;
-  },
-};
+// Test-only injection point. Delegates to the shared agent-sdk-query hook so
+// existing scorer tests (`__testing.setQueryFn`) keep working verbatim.
+import { __testing as _sdkTesting } from './agent-sdk-query.js';
+export const __testing = _sdkTesting;

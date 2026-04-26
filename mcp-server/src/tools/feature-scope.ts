@@ -67,13 +67,16 @@ export async function handleClassifyFeatureScope(args: {
 }) {
   const round = Math.max(1, Math.min(4, Math.floor(args.round)));
 
-  const result = await classifyFeatureScope({
-    spec_text: args.spec_text,
-    pivot_points: args.pivot_points,
-    user_responses: args.user_responses,
-    prev_contract: args.prev_contract,
-    round,
-  });
+  const result = await classifyFeatureScope(
+    {
+      spec_text: args.spec_text,
+      pivot_points: args.pivot_points,
+      user_responses: args.user_responses,
+      prev_contract: args.prev_contract,
+      round,
+    },
+    { cwd: args.cwd },
+  );
 
   // Ensure deterministic field order at the top level for caller parsing stability
   const ordered = {

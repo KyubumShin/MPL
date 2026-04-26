@@ -18,9 +18,10 @@
 
 export const PROMPT_VERSION = 'v1-2026-04-19';
 
-const MAX_RETRIES = 2;
+const SESSION_KIND = 'e2e_diagnose';
 
-let cachedSessionId: string | null = null;
+import { runCachedQuery } from './agent-sdk-query.js';
+import { readState } from './state-manager.js';
 
 export type Classification = 'A' | 'B' | 'C' | 'D';
 
@@ -150,62 +151,38 @@ export function neutralDiagnosis(): DiagnosisResult {
   };
 }
 
+export interface DiagnoserContext {
+  /** Project root (for session-cache scoping). Defaults to process.cwd(). */
+  cwd?: string;
+}
+
 export async function diagnoseE2EFailure(
   input: DiagnoserInput,
+  context: DiagnoserContext = {},
 ): Promise<DiagnosisResult> {
   const fullPrompt = `${DIAGNOSE_PROMPT}\n\nINPUT:\n${buildUserMessage(input)}`;
+  const cwd = context.cwd ?? process.cwd();
+  const state = readState(cwd);
+  const pipelineId = state?.pipeline_id ?? 'unknown-pipeline';
 
-  let queryFn:
-    | typeof import('@anthropic-ai/claude-agent-sdk').query
-    | null = null;
-  try {
-    const sdk = await import('@anthropic-ai/claude-agent-sdk');
-    queryFn = sdk.query;
-  } catch {
-    return neutralDiagnosis();
-  }
+  // Cache key: stable prefix only (prompt + scenarios + user_contract +
+  // decomposition). Per-call inputs that change with each diagnosis attempt
+  // (e2e_results, trace_excerpt, prev_iter) are excluded so retries within
+  // one pipeline hit the prompt cache.
+  const cacheInput = `${DIAGNOSE_PROMPT}\n${input.scenarios}\n${input.user_contract}\n${input.decomposition}`;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const opts: Record<string, unknown> = {
-        model: 'opus',
-        maxTurns: 1,
-        systemPrompt:
-          'You are a JSON-only E2E failure diagnoser. Output only valid JSON per the schema.',
-        allowedTools: [],
-      };
-      if (cachedSessionId) opts.sessionId = cachedSessionId;
+  const r = await runCachedQuery<DiagnosisResult>(
+    {
+      cwd,
+      kind: SESSION_KIND,
+      pipeline_id: pipelineId,
+      cache_input: cacheInput,
+      system_prompt: 'You are a JSON-only E2E failure diagnoser. Output only valid JSON per the schema.',
+      full_prompt: fullPrompt,
+    },
+    parseDiagnosis,
+  );
 
-      const q = queryFn({ prompt: fullPrompt, options: opts });
-      let responseText = '';
-      for await (const event of q) {
-        if (event.type === 'result' && event.subtype === 'success') {
-          responseText = (event as { result: string }).result;
-          const sid = (event as { sessionId?: string }).sessionId;
-          if (sid) cachedSessionId = sid;
-        } else if (event.type === 'assistant') {
-          const msg = event.message as {
-            content?: Array<{ type: string; text?: string }>;
-          };
-          if (msg.content) {
-            for (const block of msg.content) {
-              if (block.type === 'text' && block.text) {
-                responseText += block.text;
-              }
-            }
-          }
-        } else if ((event as { sessionId?: string }).sessionId) {
-          const sid = (event as { sessionId?: string }).sessionId;
-          if (sid) cachedSessionId = sid;
-        }
-      }
-
-      const parsed = parseDiagnosis(responseText);
-      if (parsed) return parsed;
-    } catch {
-      if (attempt === MAX_RETRIES) return neutralDiagnosis();
-    }
-  }
-
+  if (r.ok) return r.value;
   return neutralDiagnosis();
 }

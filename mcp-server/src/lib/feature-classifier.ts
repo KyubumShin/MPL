@@ -12,9 +12,10 @@
 
 export const PROMPT_VERSION = 'v1-2026-04-19';
 
-const MAX_RETRIES = 2;
+const SESSION_KIND = 'classify_scope';
 
-let cachedSessionId: string | null = null;
+import { runCachedQuery } from './agent-sdk-query.js';
+import { readState } from './state-manager.js';
 
 export interface UserCase {
   id: string;
@@ -210,63 +211,38 @@ export function neutralResult(): ClassificationResult {
   };
 }
 
+export interface ClassifierContext {
+  /** Project root (for session-cache scoping). When absent, uses cwd of server. */
+  cwd?: string;
+}
+
 export async function classifyFeatureScope(
   input: ClassifierInput,
+  context: ClassifierContext = {},
 ): Promise<ClassificationResult> {
   const userMessage = buildUserMessage(input);
   const fullPrompt = `${CLASSIFY_PROMPT}\n\nINPUT:\n${userMessage}`;
+  const cwd = context.cwd ?? process.cwd();
+  const state = readState(cwd);
+  const pipelineId = state?.pipeline_id ?? 'unknown-pipeline';
 
-  let queryFn:
-    | typeof import('@anthropic-ai/claude-agent-sdk').query
-    | null = null;
-  try {
-    const sdk = await import('@anthropic-ai/claude-agent-sdk');
-    queryFn = sdk.query;
-  } catch {
-    return neutralResult();
-  }
+  // Cache key: stable prefix only (prompt + pivot_points + spec_text). Dynamic
+  // per-call inputs (user_responses, prev_contract, round) are excluded so the
+  // cache survives across iterative interview rounds.
+  const cacheInput = `${CLASSIFY_PROMPT}\n${input.pivot_points}\n${input.spec_text ?? ''}`;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const queryOptions: Record<string, unknown> = {
-        model: 'opus',
-        maxTurns: 1,
-        systemPrompt:
-          'You are a JSON-only classification assistant. Output only valid JSON per the schema.',
-        allowedTools: [],
-      };
-      if (cachedSessionId) queryOptions.sessionId = cachedSessionId;
+  const r = await runCachedQuery<ClassificationResult>(
+    {
+      cwd,
+      kind: SESSION_KIND,
+      pipeline_id: pipelineId,
+      cache_input: cacheInput,
+      system_prompt: 'You are a JSON-only classification assistant. Output only valid JSON per the schema.',
+      full_prompt: fullPrompt,
+    },
+    parseClassification,
+  );
 
-      const q = queryFn({ prompt: fullPrompt, options: queryOptions });
-      let responseText = '';
-      for await (const event of q) {
-        if (event.type === 'result' && event.subtype === 'success') {
-          responseText = (event as { result: string }).result;
-          const sessionId = (event as { sessionId?: string }).sessionId;
-          if (sessionId) cachedSessionId = sessionId;
-        } else if (event.type === 'assistant') {
-          const msg = event.message as {
-            content?: Array<{ type: string; text?: string }>;
-          };
-          if (msg.content) {
-            for (const block of msg.content) {
-              if (block.type === 'text' && block.text) {
-                responseText += block.text;
-              }
-            }
-          }
-        } else if ((event as { sessionId?: string }).sessionId) {
-          const sessionId = (event as { sessionId?: string }).sessionId;
-          if (sessionId) cachedSessionId = sessionId;
-        }
-      }
-
-      const parsed = parseClassification(responseText);
-      if (parsed) return parsed;
-    } catch {
-      if (attempt === MAX_RETRIES) return neutralResult();
-    }
-  }
-
+  if (r.ok) return r.value;
   return neutralResult();
 }
