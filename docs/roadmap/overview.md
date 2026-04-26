@@ -1,6 +1,8 @@
 # MPL Roadmap: Evolution and Remaining Plans
 
 > **Version notation (v0.9.4)**: This file uses legacy major-version notation (v1.0, v3.0, v4.0) from the original roadmap. Actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.x ≈ v0.3.x, v4.x ≈ v0.4.x. See `design.md` for the canonical version reference.
+>
+> **Currency note (2026-04-26)**: Plugin version is `0.17.0` (released 2026-04-26 — bundles v0.17 simplification + P1/P2 hardening stream #80/#82/#84/#87/#88). The roadmap-level summary for v0.15.x → v0.16.0 → v0.17 is the first release section below. Per-version detail for v0.15.x and v0.16.0 lives in `docs/design.md` §9 to avoid duplication.
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 
@@ -257,6 +259,61 @@ Structural protocol changes leveraging 1M context for richer cross-phase informa
 | `docs/design.md` | v0.7.0 version bump, all planned notes resolved |
 
 Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
+
+---
+
+## v0.17.0 — Simplification + P1/P2 Hardening Stream (2026-04-21 ~ 2026-04-26)
+
+> Per-version detail lives in `docs/design.md` Section 9. This block is the roadmap-level summary for v0.15.x → v0.16.0 → v0.17 simplification + the merged P1/P2 follow-ups (#80, #82, #84, #87, #88). Released as plugin `0.17.0` on 2026-04-26.
+
+### v0.15.x → v0.16.0 — Documented in design.md
+
+| Release | Theme | design.md anchor |
+|---|---|---|
+| v0.15.0 (2026-04-19) | Measurement Integrity (AD-0006): gate-recorder + RUNBOOK self-report removal + launch smoke deterministic detection + Anti-rationalization guardrails | `### v0.15.0` |
+| v0.15.1 (2026-04-19) | Test-Agent Enforcement (AD-0007): `test_agent_required` field + `mpl-require-test-agent.mjs` hook | `### v0.15.1` |
+| v0.15.2 (2026-04-19) | E2E Scenario Enforcement (AD-0008): two-layer scenario design + `mpl-require-e2e.mjs` hook | `### v0.15.2` |
+| v0.15.3 (2026-04-19) | QMD Removal Actual Completion: 121 references / 14 files, 2 file deletions, .mcp.json qmd entry removed | `### v0.15.3` |
+| v0.16.0 (2026-04-20) | 3-Tier User Contract Architecture: Tier A' UC spec + `mpl_classify_feature_scope` MCP tool + Tier B `covers:[UC-NN]` decomposer field + `mpl-require-covers.mjs` hook + Tier C `@contract(UC-NN)` E2E annotation + `mpl-validate-pp-schema.mjs` hook + `mpl_diagnose_e2e_failure` MCP tool. Zero new agent files. | `### v0.16.0` |
+
+### v0.17 Simplification (#55, ~2026-04-21)
+
+> Pivot from instrumentation accretion back to mechanical minimalism. Removes legacy concepts that empirical runs (ygg-exp10/11) showed had zero downstream effect.
+
+| Concept removed | Replacement / fate |
+|---|---|
+| Step -1 LSP Warm-up (orchestrator-driven) | Moved to `hooks/mpl-lsp-warmup.mjs` (UserPromptSubmit hook) — out of orchestrator turn |
+| Step 0.0.5 Artifact Freshness + Field Classification | REMOVED entirely. `.mpl/manifest.json` no longer generated. |
+| Step 0 Triage | REMOVED. `interview_depth` and `pp_proximity` no longer computed. Stage 1 interview always runs to PP completion. |
+| Step 1-D PP Confirmation (separate step) | Absorbed into Stage 1.9 (single confirmation gate inside the interview) |
+| Step 1-E Interview Snapshot Save | Renumbered to Stage 1.9 (`.mpl/mpl/interview-snapshot.md`) |
+| Routing pattern recall (F-22) | DROPPED. `routing-patterns.jsonl` no longer consulted at start. |
+| Hat model PP-proximity tier branching | DROPPED. Pipeline depth no longer routes on PP-proximity score. |
+
+Cross-reference: `docs/design.md` §3.2 Flow table carries v0.17 markers row-by-row; `docs/design.md` §9 v0.8.5 entry has a REMOVED banner.
+
+### Post-v0.17 — P1/P2 Hardening Stream (#80, #82, #84, #87, #88) (2026-04-23 ~ 2026-04-26)
+
+5 PRs merged on top of the v0.16.0 baseline + v0.17 simplification. All issue-driven, scoped to specific defects/duplications discovered during v0.16/v0.17 settling.
+
+| PR | Issue | Theme | Impact |
+|---|---|---|---|
+| #80 | #79 | **P1-3 — MCP session robustness** | 4-in-1 hardening: `MAX_AMBIGUITY_HISTORY=10` ring buffer + per-project TTL override (`session_cache.ttl_minutes`) + 404 auto-invalidate on session expiry + `degraded` flag escalation to user. New tests: state-manager ring buffer (3), TTL override (6), scorer detector + recovery + degraded (11). |
+| #82 | #81 | **P1-4d — AP-CHAIN-01 machine enforcement** | New `hooks/mpl-require-chain-assignment.mjs` PreToolUse hook (matcher: Task\|Agent, subagent_type=mpl-seed-generator). Denies dispatch when `chain_seed.enabled=true` ∧ `chain-assignment.yaml` absent. Inline-mode escapes via "AP-SEED-01 exempt per #58" message. 17 tests (helper unit + spawnSync integration). |
+| #84 | #83 | **P2-6 — `state.json` schema v2 unification** | Single source: `.mpl/state.json` → `execution` subtree (was split with `.mpl/mpl/state.json`). `CURRENT_SCHEMA_VERSION=2` + auto v1→v2 migration on first read + `detectStateDrift()`. Legacy `.mpl/mpl/state.json` preserved at `.mpl/archive/{pipeline_id}-legacy-execution-state.json`. Ring buffer cap defense-in-depth in `writeState`. 13 tests (migration + drift). |
+| #87 | #85 | **P2-7 — Generic cross-project session cache** | New `mcp-server/src/lib/agent-sdk-query.ts` extracts `runCachedQuery<T>` + `isSessionExpiredError` helpers. `feature-classifier.ts` and `e2e-diagnoser.ts` reuse the same cache (`~/.mpl/cache/sessions.json`) — module-level `cachedSessionId` removed in 3 callers. Net code: −187 lines. 11 tests (helper + classifier/diagnoser integration). **Side effect**: P2-8 (separate cache-manager abstraction) is now naturally absorbed; no separate work needed. |
+| #88 | — | **docs drift audit** | Manifest.json schema removed from `docs/config-schema.md`. `session_cache.ttl_minutes` added. `docs/design.md` Section 3.2 carries v0.17 marker; v0.8.5 history entry gets REMOVED banner. |
+
+**Test totals at end of stream:**
+- Hooks: 287 → 317 pass (+30)
+- MCP server: 42 → 73 pass (+31)
+
+**Issues closed this stream:** 4 (#79, #81, #83, #85). #88 is chore-only.
+
+### Decision boundaries (open)
+
+- **Plugin version bump**: ✅ released as `0.17.0` (2026-04-26). 0.18.0 reserved for the next stream (post-exp12 F-25/F-28/F-39 reductions if measurement justifies them).
+- **F-25 / F-28 / F-39 future**: 4-Tier Memory + `phase_domain` + `phase_subdomain`/`task_type`/`lang` reduction decisions remain blocked on exp12 measurement (`docs/roadmap/0.16-exp12-plan.md`). Not in scope of this release.
 
 ---
 

@@ -45,7 +45,7 @@ disallowedTools: Write, Edit, Bash, Task
   <Constraints>
     - Use Read, Glob, Grep, WebFetch for Pre-Research. No Write, Edit, Bash, Task.
     - Use AskUserQuestion for all user-facing questions (not plain text questions).
-    - Respect interview_depth from Triage:
+    - Respect interview_depth from Triage *(v0.17 REMOVED — Triage and `interview_depth` no longer computed; behavior collapses to `full` always. Rows below preserved for back-reference; treat all invocations as `full` until this constraint is rewritten.)*:
       - "light": 1-2 rounds max; for density >= 8, extract PPs directly then run Uncertainty Scan
       - "full": up to 4 rounds, exit early when converged
     - Maximum 2 questions per round (avoid interview fatigue).
@@ -138,7 +138,7 @@ disallowedTools: Write, Edit, Bash, Task
     ```
   </Convergence_Exit>
 
-  ## Behavior by interview_depth
+  ## Behavior by interview_depth *(v0.17 REMOVED — Triage gone, `interview_depth` no longer set; runtime always picks `full`. Table preserved as historical reference only.)*
 
   | depth | PP Rounds | Uncertainty Scan | Output |
   |-------|-----------|-----------------|--------|

@@ -1,6 +1,8 @@
 # Adaptive Pipeline Router — Implementation Plan
 
 > **⚠ v2 이후 Deprecated**: Hat model(pp_proximity)로 대체됨. 역사적 참조용.
+>
+> **⚠ v0.17 (#55) REMOVED**: Hat model itself is now also dropped. F-20 Quick Scope Scan + `pipeline_score`/`pipeline_tier` classification, F-21 Dynamic Escalation, F-22 Routing Pattern Learning + `routing-patterns.jsonl` recall — every component documented below is no longer wired into the runtime. Step 0 Triage was deleted; the pipeline always enters at the equivalent of the previous Frontier/Full tier with no hat selection. Treat this entire document as archived design archaeology.
 
 > Implementation plan for F-20, F-21, F-22. Based on Ouroboros PAL Router analysis.
 > Written: 2026-03-07

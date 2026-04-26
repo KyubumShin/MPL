@@ -14,7 +14,7 @@ This skill discovers and defines PPs through a structured interview.
 - When starting a new project or making a large directional change
 - When running `/mpl:mpl` and no PP exists, this skill runs automatically first
 
-## Triage Integration
+## Triage Integration *(v0.17 REMOVED — Triage step deleted; `interview_depth` is no longer set by the pipeline. Treat all invocations as `full`. Section preserved as historical reference until rewrite.)*
 
 When invoked from the MPL pipeline, the Triage step determines interview depth:
 

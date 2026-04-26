@@ -192,7 +192,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
       post-decompose step (commands/mpl-run-decompose.md Step 3-H) extracts and
       writes `.mpl/mpl/e2e-scenarios.yaml`.
 
-    Step 8: PP-proximity classification
+    Step 8: PP-proximity classification *(v0.17 REMOVED — Triage and pp_proximity routing dropped; field still emitted as a tag for backward-compat readers but no longer drives pipeline depth or hat selection. New decompositions may set `non_pp` uniformly.)*
       For each phase, assign `pp_proximity`:
       - `pp_core`: directly implements a CONFIRMED PP
       - `pp_adjacent`: implements PROVISIONAL PP or extends a pp_core phase
