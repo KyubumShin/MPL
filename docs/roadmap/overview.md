@@ -2,7 +2,7 @@
 
 > **Version notation (v0.9.4)**: This file uses legacy major-version notation (v1.0, v3.0, v4.0) from the original roadmap. Actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.x ≈ v0.3.x, v4.x ≈ v0.4.x. See `design.md` for the canonical version reference.
 >
-> **Currency note (2026-04-26)**: Plugin version is `0.17.0` (released 2026-04-26 — bundles v0.17 simplification + P1/P2 hardening stream #80/#82/#84/#87/#88). The roadmap-level summary for v0.15.x → v0.16.0 → v0.17 is the first release section below. Per-version detail for v0.15.x and v0.16.0 lives in `docs/design.md` §9 to avoid duplication.
+> **Currency note (2026-05-02)**: Plugin version is `0.17.1` (v0.17.0 released 2026-04-26, v0.17.1 patch released 2026-05-02 — adds `.mpl/metrics/e2e-recovery.jsonl` emission + design.md narrative drift cleanup). The roadmap-level summary for v0.15.x → v0.16.0 → v0.17 is the first release section below. Per-version detail for v0.15.x → v0.17.1 lives in `docs/design.md` §9 to avoid duplication.
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 
