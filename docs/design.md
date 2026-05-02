@@ -12,7 +12,7 @@ The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent stru
 |------|------|------|
 | Pipeline Steps | 5 steps (Step 0~5) | 9+ steps (Step 0~6 + sub-steps) |
 | Agents | 5 | 7 |
-| Pre-Analysis | None | Triage + Phase 0 Enhanced |
+| Pre-Analysis | None | Phase 0 Enhanced (Triage REMOVED in v0.17) |
 | Quality System | Simple verification | Build-Test-Fix + 3 Hard Gates + A/S/H classification + Convergence Detection |
 | Caching | None | Phase 0 artifact caching |
 | Token Profiling | None | Per-phase token/time profiling |
@@ -102,7 +102,7 @@ mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize
 
 ### 3.3 Step-by-Step Description
 
-#### Step 0: Triage
+#### Step 0: Triage *(v0.17 REMOVED — entire step deleted; both `interview_depth` and `pp_proximity` are no longer computed. Body preserved as historical reference; current pipeline enters Stage 1 directly with full-equivalent interview depth and no hat selection. See §9 v0.17.0 entry.)*
 
 Analyzes the **information density** of the user prompt to determine interview depth and PP-proximity (Hat model). Counts the number of explicit constraints, specific files, measurable criteria, and tradeoff choices.
 
@@ -124,9 +124,9 @@ Analyzes the **information density** of the user prompt to determine interview d
 
 This step consists of 2 sub-steps:
 
-**Step 1: PP Interview** — `mpl-interviewer` (opus) discovers Pivot Points through a structured 4-Round interview. Interview scope is adjusted based on Triage's `interview_depth` (light: Round 1~2 only, full: all 4 rounds). PP status is classified as CONFIRMED (hard constraint, auto-reject on conflict) or PROVISIONAL (soft, HITL on conflict). The interviewer also handles ambiguity resolution and pre-execution gap analysis inline, consolidating what was previously 3 separate agents (mpl-interviewer, mpl-ambiguity-resolver, mpl-pre-execution-analyzer) into a single opus call.
+**Step 1: PP Interview** — `mpl-interviewer` (opus) discovers Pivot Points through a structured 4-Round interview. *(v0.17: interview always runs at full-equivalent depth — Triage `interview_depth` no longer adjusts scope.)* Interview scope is adjusted based on Triage's `interview_depth` (light: Round 1~2 only, full: all 4 rounds). PP status is classified as CONFIRMED (hard constraint, auto-reject on conflict) or PROVISIONAL (soft, HITL on conflict). The interviewer also handles ambiguity resolution and pre-execution gap analysis inline, consolidating what was previously 3 separate agents (mpl-interviewer, mpl-ambiguity-resolver, mpl-pre-execution-analyzer) into a single opus call.
 
-**Step 1-D: PP Confirmation** — Finalizes PP. Asks the user additional questions as needed.
+**Step 1-D: PP Confirmation** *(v0.17: absorbed into Stage 1.9 single confirmation gate inside the interview)* — Finalizes PP. Asks the user additional questions as needed.
 
 #### Step 2: Codebase Analysis
 
@@ -383,13 +383,14 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
 
 ```
 .mpl/
-├── state.json                    # Pipeline state (run_mode, current_phase)
-├── config.json                   # Configuration (max_fix_loops, pp_proximity, etc.)
+├── state.json                    # Pipeline + execution state (P2-6 v0.17.0: schema v2 with `execution` subtree, was split with .mpl/mpl/state.json)
+├── config.json                   # Configuration (max_fix_loops, etc.) — pp_proximity REMOVED in v0.17
 ├── pivot-points.md               # Pivot Points
 ├── discoveries.md                # Discovery log
+├── archive/                      # P2-6 v0.17.0: legacy state archives (e.g. `{pipeline_id}-legacy-execution-state.json`)
 ├── cache/
 │   └── phase0/                   # Phase 0 cache
-│       ├── manifest.json         # Cache metadata (key, timestamp)
+│       ├── manifest.json         # Cache metadata (key, timestamp) — Phase 0 cache, distinct from the v0.8.5 manifest.json that was REMOVED in v0.17
 │       ├── api-contracts.md      # Cached API contracts
 │       ├── examples.md           # Cached example patterns
 │       ├── type-policy.md        # Cached type policy
@@ -397,7 +398,7 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
 │       ├── summary.md            # Cached Phase 0 summary
 │       └── complexity-report.json
 └── mpl/
-    ├── state.json                # MPL state (phase progress, statistics)
+    ├── state.json                # (v0.17.0 / P2-6 REMOVED — auto-archived to .mpl/archive/ on first read; unified into .mpl/state.json `execution` subtree)
     ├── codebase-analysis.json    # Codebase analysis results
     ├── decomposition.yaml        # Phase decomposition results
     ├── phase-decisions.md        # Accumulated Phase Decisions
@@ -418,8 +419,8 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
     │   ├── phases.jsonl          # Per-phase token/time (append-only)
     │   └── run-summary.json     # Full execution profile
     ├── metrics.json              # Final metrics
-    └── ../memory/                # Routing memory (F-22)
-        ├── routing-patterns.jsonl # Past execution patterns (for tier prediction, append-only)
+    └── ../memory/                # Routing memory (F-22) — (v0.17 REMOVED: routing-patterns.jsonl no longer recorded or recalled; learnings.md still in use via F-11)
+        ├── routing-patterns.jsonl # (v0.17 REMOVED) Past execution patterns — Triage gone; no consumer
         └── learnings.md          # Accumulated learnings across runs (F-11)
 ```
 
@@ -434,7 +435,7 @@ Phase Decisions are classified into 2 tiers to balance context preservation with
 
 Total PD token cost: ~2K~5K tokens for a 10-phase project (well within 1M budget).
 
-### 6.3 Discovery Handling
+### 6.3 Discovery Handling *(v0.17 PARTIAL: `pp_proximity` is no longer computed at the pipeline level; rules below that branch on `pp_proximity` collapse to "always HITL on conflict, always review on phase transition" — i.e. the most-conservative path. Per-phase `pp_proximity:` field on decompositions is retained as a tag but does not gate behavior.)*
 
 Discoveries reported by Phase Runner are processed in the following order:
 
@@ -447,6 +448,8 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 ---
 
 ## 7. Hook System
+
+> **Drift note (v0.17.0)**: This table captures the original 8-hook lineup from v0.13.x. Subsequent releases added enforcement + sentinel hooks: `mpl-gate-recorder` (v0.15.0), `mpl-require-test-agent` (v0.15.1), `mpl-require-e2e` (v0.15.2), `mpl-require-covers` + `mpl-validate-pp-schema` (v0.16.0), `mpl-require-chain-assignment` (v0.17.0 P1-4d), `mpl-lsp-warmup` (v0.17.0). For the authoritative live list see `hooks/hooks.json` and the per-release version history below.
 
 MPL maintains pipeline integrity with 8 hooks:
 
