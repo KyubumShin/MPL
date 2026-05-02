@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.17.0 Design Document
+# MPL (Micro-Phase Loop) v0.17.1 Design Document
 
 ## 1. Overview
 
@@ -484,6 +484,27 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.17.1 — Recovery Metrics Emission + Narrative Drift Cleanup (2026-05-02)
+
+Patch follow-up to v0.17.0 (#90, #91, #92). Three additive doc/code changes that close gaps surfaced during the post-release audit. No behavioral break.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| design.md narrative drift | Sections 1, 3.3, 6.1, 6.3, 7 carried live-tense references to v0.17-removed concepts (Triage / interview_depth / pp_proximity / Hat / manifest.json / routing-patterns.jsonl) | Inline `(v0.17 REMOVED)` markers per the agent/skill convention; directory tree refreshed for P2-6 single-SSOT layout; §7 hooks drift note enumerating enforcement/sentinel hooks added since the original 8-hook table | Docs (#90) | Original v0.17.0 PR captured §3.2 Flow + §9 history but missed body sections — clean up the rest in one pass |
+| exp12 pre-flight gap notes | Plan + e2e-recovery.md promised `.mpl/metrics/e2e-recovery.jsonl` emission, but no code wrote that path. Stage 4 sunset option also collapsed "remove MCP tool" with "remove Step 5.0.4" into a single outcome. | Pre-flight gap note recorded both gaps. Stage 4 outcomes reframed around the **classifier slot only** — auto-recovery loop treated as structurally essential once E2E is in the pipeline; sunset of the LLM classifier falls back to a deterministic heuristic or AskUserQuestion, dispatch table intact. | Docs (#91) | Decouple "is the classifier accurate enough to keep" from "should recovery exist at all" — those are independent decisions |
+| `.mpl/metrics/e2e-recovery.jsonl` emission | Promised by plan + protocol; not actually written by any code path | New `appendRecoveryMetric(cwd, record)` helper in `mcp-server/src/lib/e2e-diagnoser.ts`; called as a side effect of `mpl_diagnose_e2e_failure` MCP tool handler. Schema frozen: `{ts, classification, confidence, iter, prompt_version}`. I/O failures swallowed — diagnosis return contract preserved. | Feature (#92) | Universal observability for any project running E2E recovery, not exp12-specific |
+
+**Affected files:**
+- MCP: `mcp-server/src/lib/e2e-diagnoser.ts` (new helper + exported `RECOVERY_METRICS_PATH`), `mcp-server/src/tools/e2e-diagnose.ts` (handler emits side effect)
+- Tests: `mcp-server/__tests__/e2e-diagnoser.test.mjs` (+4 cases: dir creation / single append / multi-line append / unwritable cwd graceful failure)
+- Docs: `docs/design.md` (this entry + Sections 1/3.3/6.1/6.3/7 markers + title), `docs/config-schema.md` (Version + scope note), `docs/roadmap/0.16-exp12-plan.md` (pre-flight + Stage 4 scope correction), `commands/references/e2e-recovery.md` ("Recovery audit trail" rewrite)
+
+**Tests:** Hooks unchanged at 317/317. MCP server 73 → 77 pass.
+
+**Breaking changes:** NONE. Side-effect file emission is additive and silently no-ops on I/O failure. No existing API surface changed.
+
+**Issues touched:** None opened or closed; pure follow-up to the v0.17.0 stream.
 
 ### v0.17.0 — Simplification + P1/P2 Hardening Stream (2026-04-26)
 
