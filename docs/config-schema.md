@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.17.0 (Triage / interview_depth / pp_proximity / Hat model / F-22 routing recall removed; `session_cache` added; manifest/field_classification removed)
-> **Last updated**: 2026-04-26
+> **Version**: v0.17.1 (v0.17.0 simplification + recovery metrics emission. Triage / interview_depth / pp_proximity / Hat model / F-22 routing recall removed; `session_cache` added; manifest/field_classification removed; `.mpl/metrics/e2e-recovery.jsonl` emitted per diagnose call)
+> **Last updated**: 2026-05-02
 
 ---
 
