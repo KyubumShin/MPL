@@ -149,10 +149,14 @@ AskUserQuestion(
 directly from state.json and inlines the summary into the orchestrator
 prompt. No MCP round-trip.
 
-**Exp12 measurement**: every diagnostician call increments
-`state.e2e_recovery.iter` by `iter_hint`; the pipeline summary writes
-`{classification, confidence, iter}` into `.mpl/metrics/e2e-recovery.jsonl`
-for Stage 4 data-driven promotion analysis.
+**Recovery audit trail**: the `mpl_diagnose_e2e_failure` MCP tool itself
+appends one line per call to `.mpl/metrics/e2e-recovery.jsonl` —
+`{ts, classification, confidence, iter, prompt_version}`. Emission is a
+side effect of the tool handler (`mcp-server/src/tools/e2e-diagnose.ts`),
+so any pipeline that runs E2E recovery accumulates a per-call record
+without orchestrator-side bookkeeping. The file is the substrate for
+exp12 Metric 4 (diagnostician behavior) and Metric 5 (Q8 agreement
+rate); routine projects can also read it for post-hoc inspection.
 
 ### 5.0.5: AD Final Verification
 
