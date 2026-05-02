@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.17.1 Design Document
+# MPL (Micro-Phase Loop) v0.17.2 Design Document
 
 ## 1. Overview
 
@@ -272,7 +272,7 @@ MPL uses 9 specialized agents in the active catalog (v0.14.1: consolidated from 
 | `mpl-interviewer` | PP Interview + ambiguity resolution + gap analysis — discovers Pivot Points, resolves ambiguities, identifies gaps (consolidates previous mpl-interviewer + mpl-ambiguity-resolver + mpl-pre-execution-analyzer) | opus | Write, Edit, Bash, Task |
 | `mpl-codebase-analyzer` | Codebase structure analysis — static analysis of directory structure, dependencies, interfaces | haiku | Edit, Task |
 | `mpl-phase0-analyzer` | Pre-Execution deep analysis — in-depth Phase 0 Enhanced analysis before execution | sonnet | Edit, Task |
-| `mpl-decomposer` | Phase decomposition + verification planning — decomposes request into ordered micro-phases with inline A/S/H classification (consolidates previous mpl-decomposer + mpl-verification-planner) | opus | Write, Edit, Bash, Task, WebFetch, WebSearch, NotebookEdit |
+| `mpl-decomposer` | Phase decomposition + verification planning — decomposes request into ordered micro-phases with inline A/S/H classification (consolidates previous mpl-decomposer + mpl-verification-planner). v0.17.2: agent now owns the Write to `.mpl/mpl/decomposition.yaml` directly (orchestrator no longer authors). | opus | Bash, Task, WebFetch, WebSearch, NotebookEdit |
 
 ### Execution Agents (Execution/Verification)
 
@@ -484,6 +484,30 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.17.2 — Decomposer Write Authority (2026-05-02)
+
+Patch fix surfaced from a ygg-exp12 pipeline run where the orchestrator, under an autonomous mandate, hand-rolled a 5-phase `.mpl/mpl/decomposition.yaml` and was caught only by `mpl-require-covers.mjs` (covers field missing). The shortcut bypassed the decomposer agent's Step 5.5 / 5.6 / 6.5 / 9.7 synthesis (type_policy, error_spec, contract_files, intent invariants) — the covers hook was the only line of defense, and it would not have caught a shortcut that happened to include `covers:` while omitting other synthesis fields. Closing the gap by moving Write authority into the agent itself, so the orchestrator no longer holds the surface area to fabricate.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| `mpl-decomposer` tool surface | `disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit` — agent emits YAML in response, orchestrator persists | `disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit` — agent owns the Write to `.mpl/mpl/decomposition.yaml` directly; response is a one-line confirmation | Agent config | Removes orchestrator's structural ability to author the file at all |
+| Orchestrator role on decomposition.yaml | Parses agent YAML response, validates, Writes file, runs post-processing | **Reads** file from disk after agent's Write, validates, runs post-processing (contract JSON extraction, e2e-scenarios split) | Protocol (`commands/mpl-run-decompose.md`) | Single authoring entity; validation hooks run on agent's Write |
+| Authoring authority guard | None — `mpl-run-decompose.md` Step 3 had only the dispatch instruction, autonomous shortcuts could skip the Task call entirely | New §3.0.0 "Authoring Authority — Decomposer Owns the Write" with hard rules + carve-out note for Step 3-F mechanical patches (Types A/C/E remain orchestrator-Write as a known TODO) | Protocol | Prevents the autonomous-mode shortcut class of failure documented in this entry |
+| Dispatch prompt | "Output YAML only" | "Write the YAML directly to `.mpl/mpl/decomposition.yaml`, return one confirmation line" | Prompt | Consistent with new authority model |
+
+**Affected files:**
+- Agent: `agents/mpl-decomposer.md` (frontmatter `disallowedTools` + `<Output_Schema>` Authoring authority preamble)
+- Protocol: `commands/mpl-run-decompose.md` (§3.0.0 new, §3.1 hard rule update, dispatch prompt rewrite, "After Receiving Output" Read-not-Write, Step 3-H `decomp_output = Read(...)` clarification)
+- Docs: `docs/design.md` (this entry + agent catalog table disallowedTools column + title), `docs/config-schema.md` (Version field), `docs/roadmap/overview.md` (Currency note)
+
+**Breaking changes:** None at the user-facing protocol level — pipeline phase boundaries, state schema, and hook contracts unchanged. The agent dispatch contract changes (response is now a confirmation line, not the YAML body); any external consumer of the agent's stdout body would need to switch to reading the file from disk. No known external consumers.
+
+**Known carve-outs (deferred):**
+- Step 3-F mechanical patches (Types A/C/E: phase_domain swap, risk_notes append, ai_complexity default) remain orchestrator-Write. TODO: route through the agent for purity.
+- `mpl-require-decomposition-fields.mjs` (full-field validation hook covering contract_files / type_policy / error_spec) not yet authored — current `mpl-require-covers.mjs` is the only schema-level defense, but the new authority model makes fabrication-class failures unreachable in the first place.
+
+**Tests:** Hooks unchanged at 317/317.
 
 ### v0.17.1 — Recovery Metrics Emission + Narrative Drift Cleanup (2026-05-02)
 

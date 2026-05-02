@@ -2,7 +2,7 @@
 name: mpl-decomposer
 description: Phase Decomposer - breaks user requests into ordered micro-phases with verification plan
 model: opus
-disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
+disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
 ---
 
 <Agent_Prompt>
@@ -288,7 +288,13 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
   </Reasoning_Steps>
 
   <Output_Schema>
-    Output ONLY valid YAML. No prose outside the YAML block.
+    **Authoring authority (v0.17.2)**: YOU are the sole writer of `.mpl/mpl/decomposition.yaml`. The orchestrator no longer persists this file — it dispatches you, reads what you wrote, and runs post-processing (contract JSON file extraction, e2e-scenarios.yaml split). Your job:
+
+      1. Construct the full YAML below in your reasoning.
+      2. **Write it to `.mpl/mpl/decomposition.yaml`** using the Write tool (overwrite if it exists; APPEND-MODE re-emits the full updated file per Rule 9).
+      3. Return a single-line response confirming the write: `Wrote .mpl/mpl/decomposition.yaml — N phases, M tiers.`
+
+    Do NOT print the YAML body in the response — it lives on disk now. Validation hooks (`mpl-require-covers.mjs`, future `mpl-require-decomposition-fields.mjs`) run on your Write call; if blocked, surface the hook reason and re-emit a corrected YAML in a follow-up Write. Never re-route the Write through the orchestrator.
 
     ```yaml
     architecture_anchor:

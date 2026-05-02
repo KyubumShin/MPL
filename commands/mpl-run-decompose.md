@@ -11,6 +11,24 @@ Load this when transitioning from pre-execution analysis to phase decomposition.
 
 ## Step 3: Phase Decomposition
 
+### 3.0.0: Authoring Authority — Decomposer Owns the Write (v0.17.2)
+
+**The orchestrator MUST NOT Write or Edit `.mpl/mpl/decomposition.yaml` under any circumstances.** Authoring authority belongs exclusively to the `mpl-decomposer` agent (see `agents/mpl-decomposer.md` Output_Schema §Authoring authority). The orchestrator's roles in this file are now:
+
+  (a) build the dispatch prompt,
+  (b) call `Task(subagent_type="mpl-decomposer", ...)` — the agent reasons AND writes the file,
+  (c) **Read** `.mpl/mpl/decomposition.yaml` from disk (do not parse the agent's response — it returns only a confirmation line),
+  (d) validate fields the agent must have produced (covers, contract_files, type_policy, error_spec, e2e_scenarios, etc.),
+  (e) post-process: extract `contract_files[]` to `.mpl/contracts/*.json`, split `e2e_scenarios[]` to `.mpl/mpl/e2e-scenarios.yaml`.
+
+The orchestrator never holds a Write authority on `decomposition.yaml` for the **initial creation path** (3.0 → 3.1 → "After Receiving Output"). If validation fails, surface the failure and re-dispatch the agent with the diagnostics; do not patch the file by hand.
+
+**Known carve-out (Step 3-F mechanical patches)**: the feedback path at Step 3-F currently performs surgical in-place patches (Types A/C/E: phase_domain swap, risk_notes append, ai_complexity default) without re-dispatching the agent. These are deterministic field-level edits informed by Pre-Execution feedback, not fabricated decompositions. They remain orchestrator-Write for now to avoid full re-dispatch cost. Treat this as an inherited exception to be revisited (TODO: route 3-F through the agent for purity). Type B (phase split) and Type D (unmapped requirements) already re-dispatch the agent.
+
+**Why this rule exists**: an earlier autonomous-mode shortcut had the orchestrator write a 5-phase decomposition itself ("pragmatic decomposition"). It was caught by `mpl-require-covers.mjs` (covers missing) but only because covers happened to be missing — main-context fabrications can also pass schema-checks while silently omitting the agent's Step 5.5 / 5.6 / 6.5 / 9.7 synthesis (type_policy, error_spec, contract_files, intent invariants). Moving the Write into the agent removes the orchestrator's ability to fabricate at all.
+
+**How this rule applies under autonomous mandates**: a user instruction like "no questions, run autonomously" authorizes the agent to skip *user-facing prompts*, never to skip *agent dispatches*. Phase 0 artifacts (PP, core-scenarios, design-intent, user-contract) remain orchestrator-authored; everything from Step 3 onward is agent-authored. APPEND-MODE (3.1 dispatch with `APPEND-MODE:` prefix) is also agent-authored end-to-end — the agent re-Writes the full updated file per `agents/mpl-decomposer.md` Rule 9.
+
 ### 3.0: Ambiguity Gate — Delegated to Stage 2 Re-Entry (Issue #51)
 
 The decomposer dispatch is guarded by `hooks/mpl-ambiguity-gate.mjs` (PreToolUse).
@@ -49,6 +67,8 @@ if result.blocked_by_ambiguity_gate:
 
 ### 3.1: Decomposer Dispatch
 
+> **Hard rule (see 3.0.0)**: the `Task(...)` call below is REQUIRED. The agent both reasons and Writes `.mpl/mpl/decomposition.yaml` itself; the orchestrator must NOT pre-create, post-edit, or "fix up" that file. There is no inline-authoring path even under autonomous mandates.
+
 ```
 Task(subagent_type="mpl-decomposer", model="opus",
      prompt="""
@@ -82,7 +102,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      Break the user request into ordered phases that cover the ENTIRE scope of the request.
      CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
 
-     Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. Output YAML only.
+     Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. **Write the YAML directly to `.mpl/mpl/decomposition.yaml` using the Write tool**, then return a single confirmation line (e.g., `Wrote .mpl/mpl/decomposition.yaml — 5 phases, 3 tiers.`). Do NOT print the YAML body in your response.
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
      pp_proximity (pp_core|pp_adjacent|non_pp — see classification rules below),
      phase_subdomain (F-39, optional: tech-stack e.g. react, prisma, langchain),
@@ -162,8 +182,10 @@ Add the following instructions to the mpl-decomposer agent:
 
 ### After Receiving Output
 
-1. Parse YAML, validate phase count and pp_proximity assignments
-2. Save to `.mpl/mpl/decomposition.yaml`
+> The decomposer Task in 3.1 has already Written `.mpl/mpl/decomposition.yaml`. The orchestrator's response from Task is just a confirmation line (e.g., `Wrote .mpl/mpl/decomposition.yaml — 5 phases, 3 tiers.`). The orchestrator MUST NOT issue any Write/Edit against this path (see 3.0.0). If validation below fails, surface the failure and re-dispatch the decomposer; never patch the file by hand.
+
+1. **Read** `.mpl/mpl/decomposition.yaml` from disk; parse YAML, validate phase count and pp_proximity assignments
+2. (Removed — agent owns the Write; see 3.0.0)
 2a. **Write contract files (CB-08 L0 / AD-01, v0.13.0)**:
     Validate that every phase has `interface_contract.contract_files` present (empty list allowed, omission is a hard error — abort with "[MPL] Decomposer output missing required interface_contract.contract_files on phase {id}").
 
@@ -468,7 +490,7 @@ gap_analysis = Read(".mpl/mpl/pre-execution-analysis.md")
 After Decomposer emits `e2e_scenarios[]` in its output (per Reasoning_Steps Step 7.5), extract this top-level field and write to `.mpl/mpl/e2e-scenarios.yaml`:
 
 ```
-decomp_output = <Decomposer result>
+decomp_output = Read(".mpl/mpl/decomposition.yaml")  # v0.17.2: agent-authored, orchestrator reads from disk
 if not exists(".mpl/mpl/core-scenarios.yaml"):
   announce: "[MPL AD-0008] core-scenarios.yaml not found — skipping Step 3-H. Doctor audit [h] will flag as WARN."
   proceed to Step 3-G

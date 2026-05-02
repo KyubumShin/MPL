@@ -2,7 +2,7 @@
 
 > **Version notation (v0.9.4)**: This file uses legacy major-version notation (v1.0, v3.0, v4.0) from the original roadmap. Actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.x ≈ v0.3.x, v4.x ≈ v0.4.x. See `design.md` for the canonical version reference.
 >
-> **Currency note (2026-05-02)**: Plugin version is `0.17.1` (v0.17.0 released 2026-04-26, v0.17.1 patch released 2026-05-02 — adds `.mpl/metrics/e2e-recovery.jsonl` emission + design.md narrative drift cleanup). The roadmap-level summary for v0.15.x → v0.16.0 → v0.17 is the first release section below. Per-version detail for v0.15.x → v0.17.1 lives in `docs/design.md` §9 to avoid duplication.
+> **Currency note (2026-05-02)**: Plugin version is `0.17.2` (v0.17.0 released 2026-04-26; v0.17.1 patch 2026-05-02 added `.mpl/metrics/e2e-recovery.jsonl` emission + design.md cleanup; v0.17.2 patch 2026-05-02 moves `.mpl/mpl/decomposition.yaml` Write authority to the `mpl-decomposer` agent — orchestrator can no longer fabricate decomposition in main context). The roadmap-level summary for v0.15.x → v0.16.0 → v0.17 is the first release section below. Per-version detail for v0.15.x → v0.17.2 lives in `docs/design.md` §9 to avoid duplication.
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 
