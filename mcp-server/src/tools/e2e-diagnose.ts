@@ -12,6 +12,7 @@
  */
 
 import {
+  appendRecoveryMetric,
   diagnoseE2EFailure,
   PROMPT_VERSION,
 } from '../lib/e2e-diagnoser.js';
@@ -97,6 +98,14 @@ export async function handleDiagnoseE2EFailure(args: {
     append_phases: result.append_phases,
     confidence: result.confidence,
   };
+
+  appendRecoveryMetric(args.cwd, {
+    ts: new Date().toISOString(),
+    classification: result.classification,
+    confidence: result.confidence,
+    iter: prev_iter + result.iter_hint,
+    prompt_version: PROMPT_VERSION,
+  });
 
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(ordered, null, 2) }],

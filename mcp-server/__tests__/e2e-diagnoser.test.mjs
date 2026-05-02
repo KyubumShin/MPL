@@ -1,9 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, existsSync, rmSync, chmodSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   PROMPT_VERSION,
   parseDiagnosis,
   neutralDiagnosis,
+  appendRecoveryMetric,
+  RECOVERY_METRICS_PATH,
 } from '../dist/lib/e2e-diagnoser.js';
 
 describe('PROMPT_VERSION', () => {
@@ -96,6 +101,84 @@ describe('parseDiagnosis', () => {
   it('returns null for malformed JSON', () => {
     assert.equal(parseDiagnosis('{unclosed'), null);
     assert.equal(parseDiagnosis(''), null);
+  });
+});
+
+describe('appendRecoveryMetric', () => {
+  function makeFixture() {
+    return mkdtempSync(join(tmpdir(), 'mpl-e2e-recovery-metric-'));
+  }
+
+  it('exports the canonical relative path', () => {
+    assert.equal(RECOVERY_METRICS_PATH, '.mpl/metrics/e2e-recovery.jsonl');
+  });
+
+  it('creates .mpl/metrics directory and writes one jsonl line', () => {
+    const cwd = makeFixture();
+    try {
+      const ok = appendRecoveryMetric(cwd, {
+        ts: '2026-05-02T00:00:00.000Z',
+        classification: 'A',
+        confidence: 0.87,
+        iter: 1,
+        prompt_version: PROMPT_VERSION,
+      });
+      assert.equal(ok, true);
+      const path = join(cwd, RECOVERY_METRICS_PATH);
+      assert.ok(existsSync(path));
+      const raw = readFileSync(path, 'utf-8');
+      assert.equal(raw.endsWith('\n'), true);
+      const parsed = JSON.parse(raw.trim());
+      assert.equal(parsed.classification, 'A');
+      assert.equal(parsed.confidence, 0.87);
+      assert.equal(parsed.iter, 1);
+      assert.equal(parsed.prompt_version, PROMPT_VERSION);
+      assert.equal(parsed.ts, '2026-05-02T00:00:00.000Z');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('appends multiple records as separate lines', () => {
+    const cwd = makeFixture();
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        appendRecoveryMetric(cwd, {
+          ts: `2026-05-02T00:00:0${i}.000Z`,
+          classification: 'D',
+          confidence: 0.5,
+          iter: i,
+          prompt_version: PROMPT_VERSION,
+        });
+      }
+      const lines = readFileSync(join(cwd, RECOVERY_METRICS_PATH), 'utf-8').trim().split('\n');
+      assert.equal(lines.length, 3);
+      assert.equal(JSON.parse(lines[0]).iter, 0);
+      assert.equal(JSON.parse(lines[2]).iter, 2);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false on unwritable target without throwing', () => {
+    // Pointing at a non-existent root that cannot be created (permission denied)
+    // is hard to fake portably; instead simulate by chmod-ing the parent so
+    // the metrics dir creation fails.
+    const cwd = makeFixture();
+    try {
+      chmodSync(cwd, 0o400); // read-only
+      const ok = appendRecoveryMetric(cwd, {
+        ts: '2026-05-02T00:00:00.000Z',
+        classification: 'B',
+        confidence: 1,
+        iter: 0,
+        prompt_version: PROMPT_VERSION,
+      });
+      assert.equal(ok, false);
+    } finally {
+      chmodSync(cwd, 0o700);
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });
 

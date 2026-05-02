@@ -20,8 +20,43 @@ export const PROMPT_VERSION = 'v1-2026-04-19';
 
 const SESSION_KIND = 'e2e_diagnose';
 
+import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runCachedQuery } from './agent-sdk-query.js';
 import { readState } from './state-manager.js';
+
+export const RECOVERY_METRICS_PATH = '.mpl/metrics/e2e-recovery.jsonl';
+
+export interface RecoveryMetricRecord {
+  ts: string;
+  classification: 'A' | 'B' | 'C' | 'D';
+  confidence: number;
+  iter: number;
+  prompt_version: string;
+}
+
+/**
+ * Append one structured record to `.mpl/metrics/e2e-recovery.jsonl`.
+ *
+ * Called by the `mpl_diagnose_e2e_failure` MCP tool handler after every
+ * diagnose call so that any pipeline running E2E recovery emits a per-call
+ * audit trail without requiring orchestrator-side bookkeeping. Schema is
+ * stable per `docs/roadmap/0.16-exp12-plan.md` Metric 4.
+ *
+ * Returns true on successful append, false on any I/O failure (caller
+ * should not surface metrics emission errors — diagnosis return is the
+ * primary contract).
+ */
+export function appendRecoveryMetric(cwd: string, record: RecoveryMetricRecord): boolean {
+  try {
+    const metricsDir = join(cwd, '.mpl', 'metrics');
+    if (!existsSync(metricsDir)) mkdirSync(metricsDir, { recursive: true });
+    appendFileSync(join(cwd, RECOVERY_METRICS_PATH), JSON.stringify(record) + '\n', { mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type Classification = 'A' | 'B' | 'C' | 'D';
 
