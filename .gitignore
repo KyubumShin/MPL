@@ -4,3 +4,4 @@ mcp-server/dist/
 .mpl/
 node_modules/
 .omc/
+.resume/
