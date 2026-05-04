@@ -1,10 +1,22 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
 import { checkPlanStatus, checkGateResults } from '../mpl-phase-controller.mjs';
+
+const HOOK_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'mpl-phase-controller.mjs');
+
+function runStopHook(cwd, state) {
+  mkdirSync(join(cwd, '.mpl'), { recursive: true });
+  writeFileSync(join(cwd, '.mpl', 'state.json'), JSON.stringify(state));
+  const stdin = JSON.stringify({ cwd });
+  const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
+  return JSON.parse(out);
+}
 
 describe('checkPlanStatus', () => {
   let tmpDir;
@@ -332,5 +344,85 @@ describe('checkGateResults', () => {
       assert.strictEqual(result.anyFailed, false);
       assert.strictEqual(result.source, 'none');
     });
+  });
+});
+
+describe('phase3-gate Stop hook integration (PR #119 review #5 follow-up)', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-phase3-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  const ent = (exit_code) => ({
+    command: 'npm test', exit_code, stdout_tail: '', timestamp: '2026-05-04T00:00:00Z',
+  });
+  const baseState = (gate_results, extra = {}) => ({
+    current_phase: 'phase3-gate',
+    gate_results,
+    ...extra,
+  });
+
+  it('A · structured 3 PASS → Phase 5 transition, source=structured', () => {
+    const out = runStopHook(tmpDir, baseState({
+      hard1_baseline: ent(0), hard2_coverage: ent(0), hard3_resilience: ent(0),
+    }));
+    assert.match(out.stopReason, /All Quality Gates passed \(source=structured\)/);
+    assert.match(out.stopReason, /Phase 5: Finalize/);
+  });
+
+  it('B · fake-gate (legacy 3 true + structured 1 nonzero) MUST NOT pass', () => {
+    const out = runStopHook(tmpDir, baseState({
+      hard1_passed: true, hard2_passed: true, hard3_passed: true,
+      hard1_baseline: ent(1),
+    }));
+    assert.match(out.stopReason, /Quality Gate failed \(source=structured\)/);
+    assert.match(out.stopReason, /H1=false/);
+    assert.match(out.stopReason, /Phase 4: Fix Loop/);
+  });
+
+  it('C · zero structured + legacy 3 true (non-strict) → pass + ⚠ legacy fallback warn', () => {
+    const out = runStopHook(tmpDir, baseState({
+      hard1_passed: true, hard2_passed: true, hard3_passed: true,
+    }));
+    assert.match(out.stopReason, /All Quality Gates passed \(source=legacy\)/);
+    assert.match(out.stopReason, /⚠ Using legacy gate boolean fallback/);
+    assert.match(out.stopReason, /exp16 strict mode will block this transition/);
+  });
+
+  it('D · zero structured + legacy 3 true + strict → BLOCKED with explicit missing list', () => {
+    const out = runStopHook(tmpDir, baseState({
+      hard1_passed: true, hard2_passed: true, hard3_passed: true,
+    }, { enforcement: { strict: true } }));
+    assert.match(out.stopReason, /⛔ BLOCKED/);
+    assert.match(out.stopReason, /missing structured gate evidence \(hard1_baseline, hard2_coverage, hard3_resilience\)/);
+    assert.match(out.stopReason, /Self-reported booleans are not accepted/);
+  });
+
+  it('E · partial structured (2/3 pass) + legacy true (non-strict) → in-progress with explicit missing list', () => {
+    // PR #119 follow-up: previously this branch surfaced a generic "Phase 3: Quality Gate
+    // in progress" without telling the orchestrator which gate was missing. Now the missing
+    // list is surfaced even in non-strict mode (issue #102 "missing → false" UX completion).
+    const out = runStopHook(tmpDir, baseState({
+      hard1_passed: true, hard2_passed: true, hard3_passed: true,
+      hard1_baseline: ent(0), hard2_coverage: ent(0),
+    }));
+    assert.match(out.stopReason, /Phase 3 in progress/);
+    assert.match(out.stopReason, /missing structured gate evidence \(hard3_resilience\)/);
+    assert.match(out.stopReason, /loop will continue once all 3 remaining are recorded/);
+    assert.doesNotMatch(out.stopReason, /⛔ BLOCKED/);
+  });
+
+  it('E-strict · partial structured (2/3 pass) + strict → BLOCKED with explicit missing list', () => {
+    const out = runStopHook(tmpDir, baseState({
+      hard1_baseline: ent(0), hard2_coverage: ent(0),
+    }, { enforcement: { strict: true } }));
+    assert.match(out.stopReason, /⛔ BLOCKED/);
+    assert.match(out.stopReason, /missing structured gate evidence \(hard3_resilience\)/);
+  });
+
+  it('F · zero structured + zero legacy → generic "in progress" with legacy-fallback warn', () => {
+    const out = runStopHook(tmpDir, baseState({}));
+    assert.match(out.stopReason, /Phase 3: Quality Gate in progress\. Run all 3 gates before proceeding/);
+    // source=='none' here, so the legacy fallback warn does NOT prepend (warn is for source=='legacy')
+    assert.doesNotMatch(out.stopReason, /⚠ Using legacy gate boolean fallback/);
   });
 });
