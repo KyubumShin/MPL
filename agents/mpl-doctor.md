@@ -22,12 +22,14 @@ disallowedTools: Write, Edit, Task
     Run all 11 categories in order. For each, report PASS / WARN / FAIL with evidence.
 
     ### Category 1: Plugin Structure
+    - **Scope**: `.claude-plugin/plugin.json`
     - Check `MPL/.claude-plugin/plugin.json` exists and is valid JSON
     - Verify fields: name, version, description, commands, skills, hooks
     - FAIL if missing or invalid JSON
     - WARN if optional fields missing
 
     ### Category 2: Hooks
+    - **Scope**: `hooks/hooks.json`, `hooks/**/*.mjs`, `hooks/lib/**/*.mjs`
     - Check `MPL/hooks/hooks.json` exists and is valid JSON
     - Verify 4 hook events: PreToolUse, PostToolUse, Stop, UserPromptSubmit
     - For each referenced .mjs file: verify it exists
@@ -36,6 +38,7 @@ disallowedTools: Write, Edit, Task
     - WARN if hook count < 4
 
     ### Category 3: Agents
+    - **Scope**: `agents/**/*.md`
     - List all .md files in `MPL/agents/`
     - For each: verify YAML frontmatter has `name`, `description`, `model`
     - Verify `model` is one of: haiku, sonnet, opus
@@ -46,12 +49,14 @@ disallowedTools: Write, Edit, Task
     - WARN if count != 8
 
     ### Category 4: Skills
+    - **Scope**: `skills/**/SKILL.md`
     - List all directories in `MPL/skills/`
     - For each: verify `SKILL.md` exists with `description` in frontmatter
     - FAIL if SKILL.md missing in any skill directory
     - WARN if frontmatter incomplete
 
     ### Category 5: Commands
+    - **Scope**: `commands/**/*.md`
     - Check `MPL/commands/` for protocol files (11 total, v0.8.1):
       mpl-run.md, mpl-run-phase0.md, mpl-run-phase0-analysis.md,
       mpl-run-phase0-memory.md, mpl-run-decompose.md,
@@ -62,12 +67,14 @@ disallowedTools: Write, Edit, Task
     - WARN if auxiliary files missing (context, gates, parallel, resume, analysis, memory)
 
     ### Category 6: Runtime State
+    - **Scope**: `.mpl/state.json`, `.mpl/config.json`, `.mpl/mpl/**`
     - Check `.mpl/` directory exists
     - Check `.mpl/config.json` exists and is valid JSON
     - WARN if missing (setup will create)
     - Check `.mpl/mpl/` subdirectories if pipeline has been run before
 
     ### Category 7: Tool Availability (Standalone Check)
+    - **Scope**: runtime probe (no file scope)
     Detect which tool tiers are available:
 
     **Tier 1 (Built-in, always available):**
@@ -96,6 +103,7 @@ disallowedTools: Write, Edit, Task
     - "standalone": Tier 1 only (pure Claude Code, LSP not available)
 
     ### Category 8: Configuration
+    - **Scope**: `.mpl/config.json`, `config/enforcement.json`, `docs/config-schema.md`
     - If `.mpl/config.json` exists, validate all fields:
       max_fix_loops (number),
       gate1_strategy (string), convergence (object),
@@ -124,11 +132,13 @@ disallowedTools: Write, Edit, Task
     - FAIL if plugin baseline `config/enforcement.json` is missing or unparseable.
 
     ### Category 9: Node.js Environment
+    - **Scope**: runtime probe (no file scope)
     - Check `node --version` >= 18
     - FAIL if Node.js not available (hooks won't work)
     - WARN if version < 18
 
     ### Category 10: MCP Server (v0.8.1)
+    - **Scope**: `mcp-server/**`
     - Check `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` exists
     - Check `${CLAUDE_PLUGIN_ROOT}/mcp-server/node_modules/@modelcontextprotocol` exists
     - If dist exists but node_modules missing:
@@ -144,11 +154,13 @@ disallowedTools: Write, Edit, Task
     - Expected tools: mpl_score_ambiguity, mpl_state_read, mpl_state_write
 
     ### Category 11: Documentation
+    - **Scope**: `README.md`, `docs/**/*.md`
     - Check `MPL/README.md` exists
     - Check `MPL/docs/design.md` exists
     - WARN if missing (functional but undocumented)
 
     ### Category 12: Measurement Integrity Audit (AD-0006, v0.15.0)
+    - **Scope**: `.mpl/state.json`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`
     This category runs only when invoked as `mpl-doctor audit` (not default). Validates that a **completed** pipeline produced machine-evidence gate records and that Anti-rationalization guardrails held. Run against `.mpl/state.json` and `.mpl/mpl/` of a finalized run.
 
     **Preconditions**: `.mpl/state.json.current_phase == "completed"` AND `.mpl/state.json.finalize_done == true`. Otherwise report "NOT APPLICABLE (pipeline not finalized)" and skip.
@@ -212,6 +224,46 @@ disallowedTools: Write, Edit, Task
     [f] chain_seed integrity:       ✓         or ✗ enabled=true but chain-assignment.yaml missing
     [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} mandatory-domain phases
     Result: PASS (7/7) / FAIL (X/7) / WARN (Y/7)
+    ```
+
+    ### Category 14: Meta-Self Audit (F4, #106)
+    - **Scope**: `agents/mpl-doctor.md`, `hooks/mpl-doctor*.mjs`, `hooks/lib/mpl-meta-self.mjs`
+    - Closes the audit hole where doctor previously skipped its own surface
+      while telling the rest of the codebase to comply (R-DOCTOR-SELF-FALLBACK,
+      R-DOCTOR-SCOPE-LEAK).
+
+    **Procedure**: invoke the meta-self CLI and parse its JSON output:
+    ```
+    Bash("node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-doctor-meta-self.mjs ${CLAUDE_PLUGIN_ROOT}", timeout: 10_000)
+    ```
+
+    The CLI returns four arrays:
+
+    - **anti_pattern_hits** — F3 anti-pattern registry hits inside doctor's own
+      source. Markdown is normally excluded by F3's runtime scope, but Category
+      14 deliberately scans `agents/mpl-doctor.md` so doctor can't quietly
+      carry e.g. `?? ''` (v3.10 §3.1 #6 finding) in its own prompt. WARN per hit;
+      FAIL if `severity: block` with no `tier_3_only` escalation.
+    - **self_exemption_hits** — explicit self-exclude regex inside doctor source
+      (e.g. `if (file.endsWith('mpl-doctor.md')) skip`). Even one hit warrants
+      WARN — every doctor self-exemption must be a deliberate, reviewed entry.
+      FAIL if more than one distinct id surfaces.
+    - **scope_manifest.missing** — Categories that lack a `**Scope**:` glob
+      declaration. FAIL: doctor cannot self-validate audit coverage when a
+      Category's scope is undeclared (this is the spec-citations / scripts/
+      leak shape).
+    - **inverse_audit_hits** — anti-pattern hits in `scripts/`, `agents/`, and
+      `commands/` directories that fall outside F3's PostToolUse scope. WARN
+      per hit. FAIL with summary if any `severity: block` hit appears.
+
+    **Output format for Category 14**:
+    ```
+    ### Meta-Self Audit (F4)
+    [a] doctor anti-pattern self-scan:   ✓ clean    or ✗ {n} hit(s) in agents/mpl-doctor.md
+    [b] doctor self-exemption regex:     ✓ 0건      or ⚠️ {n} hit(s): {ids}
+    [c] Category scope manifest:         ✓ {N}/{N}  or ✗ missing scope: Category {x.y} - {title}
+    [d] inverse audit (scripts/agents/commands): ✓ clean   or ⚠️ {n} hit(s) outside F3 runtime scope
+    Result: PASS / WARN ({m} advisories) / FAIL (any blocker above)
     ```
   </Diagnostic_Categories>
 
