@@ -89,7 +89,7 @@ export function detectHang(state, now, opts = {}) {
     true,
     elapsedMs,
     lastToolAt,
-    `[MPL G4] ⚠ Verification appears hung. Last tool execution: ${lastToolAt} (${minutes}min ago, threshold ${Math.floor(thresholdMs / 60_000)}min). Check verification command or kill stuck process. Resume marks session_status=verification_hang.`,
+    `[MPL G4] ⚠ Verification appears hung. Last tool execution: ${lastToolAt} (${minutes}min ago, threshold ${Math.floor(thresholdMs / 60_000)}min). Check the verification command or kill the stuck process. Session marked as verification_hang — run /mpl:mpl-resume to triage (resume / rollback / cancel).`,
   );
 }
 

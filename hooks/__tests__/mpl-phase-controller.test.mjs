@@ -475,16 +475,47 @@ describe('G4 hang detection (#109) Stop hook integration', () => {
     assert.strictEqual(readState().session_status, 'paused_budget');
   });
 
-  it('verification_hang pre-mark → not re-marked, banner suppressed (idempotent)', () => {
-    // Already-marked sessions should pass through to phase routing so the
-    // user sees the normal phase message; the marker persists for resume.
+  it('verification_hang pre-mark → not re-marked, alarm banner suppressed', () => {
+    // Already-marked sessions: alarm banner is replaced with a softer triage
+    // pointer (so the user is told to resume rather than re-shown the alarm
+    // every Stop tick). Marker itself persists.
     const stale = new Date(Date.now() - 5 * 60 * 60_000).toISOString();
     const out = runStopHook(tmpDir, {
       current_phase: 'phase2-sprint',
       last_tool_at: stale,
       session_status: 'verification_hang',
     });
-    assert.doesNotMatch(out.stopReason || '', /Verification appears hung/);
+    assert.doesNotMatch(out.stopReason || '', /⚠ Verification appears hung/);
+    assert.match(out.stopReason, /Session is currently marked verification_hang/);
+    assert.match(out.stopReason, /\/mpl:mpl-resume/);
     assert.strictEqual(readState().session_status, 'verification_hang');
+  });
+
+  it('verification_hang pre-mark on phase3-gate PASS → blocks Phase 5 transition (PR #126 review)', () => {
+    // Reproduction of the high-severity finding: previously the exempt branch
+    // fell through to phase switch, allowing checkGateResults → Phase 5
+    // writeState even though the user had not triaged the hang. Marker must
+    // gate every transition.
+    const ent = (exit_code) => ({
+      command: 'npm test', exit_code, stdout_tail: '', timestamp: '2026-05-04T00:00:00Z',
+    });
+    const stale = new Date(Date.now() - 30 * 60_000).toISOString();
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase3-gate',
+      last_tool_at: stale,
+      session_status: 'verification_hang',
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_coverage: ent(0),
+        hard3_resilience: ent(0),
+      },
+    });
+    assert.match(out.stopReason, /Session is currently marked verification_hang/);
+    // Phase routing must NOT have advanced.
+    assert.doesNotMatch(out.stopReason, /Transitioning to Phase 5/);
+    assert.doesNotMatch(out.stopReason, /All Quality Gates passed/);
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase3-gate', 'phase must NOT transition');
+    assert.strictEqual(state.session_status, 'verification_hang');
   });
 });

@@ -41,6 +41,11 @@ describe('detectHang', () => {
     assert.match(r.reason, /\[MPL G4\] ⚠ Verification appears hung/);
     assert.match(r.reason, /16min ago/);
     assert.match(r.reason, /threshold 15min/);
+    // PR #126 review nit: tense — banner should describe past-tense marking
+    // ("Session marked as verification_hang") rather than future "Resume marks ...".
+    assert.match(r.reason, /Session marked as verification_hang/);
+    assert.match(r.reason, /\/mpl:mpl-resume to triage/);
+    assert.doesNotMatch(r.reason, /Resume marks session_status/);
   });
 
   it('flag is NOT raised exactly AT threshold (boundary inclusive lower side)', () => {

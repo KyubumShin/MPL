@@ -104,7 +104,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit|Task|Agent|Read|Grep|Glob|TodoWrite|NotebookEdit|WebFetch|WebSearch|SlashCommand|BashOutput|KillShell|ExitPlanMode",
+        "matcher": "Bash|Edit|Write|MultiEdit|Task|Agent|Read|Grep|Glob|TodoWrite|NotebookEdit|WebFetch|WebSearch|SlashCommand|BashOutput|KillShell|ExitPlanMode|mcp__.*",
         "hooks": [
           {
             "type": "command",

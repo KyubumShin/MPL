@@ -39,7 +39,8 @@ async function main() {
   if (!state) return silent();
 
   // Write only the timestamp; do not perturb any other state field.
-  // mpl-state.mjs writeState performs a shallow merge.
+  // writeState performs a deep merge — patching the flat `last_tool_at`
+  // key leaves nested fields (`execution`, `gate_results`, etc.) untouched.
   try {
     writeState(cwd, { last_tool_at: new Date().toISOString() });
   } catch {
