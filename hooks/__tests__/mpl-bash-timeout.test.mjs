@@ -26,7 +26,13 @@ describe('classifyCommand', () => {
   it('classifies playwright', () => {
     assert.strictEqual(classifyCommand('npx playwright test').name, 'playwright');
     assert.strictEqual(classifyCommand('playwright test').name, 'playwright');
-    assert.strictEqual(classifyCommand('pw test').name, 'playwright');
+    assert.strictEqual(classifyCommand('playwright install').name, 'playwright');
+  });
+
+  it('does NOT match `pw test` (non-standard alias, removed for collision safety)', () => {
+    // `pw` is not the canonical playwright binary; it collides with `pwgen` and other
+    // user aliases. Use `playwright` or `npx playwright` instead.
+    assert.strictEqual(classifyCommand('pw test'), null);
   });
 
   it('classifies build commands', () => {
@@ -34,12 +40,31 @@ describe('classifyCommand', () => {
     assert.strictEqual(classifyCommand('vite build').name, 'build');
     assert.strictEqual(classifyCommand('cargo build --release').name, 'build');
     assert.strictEqual(classifyCommand('npm run build').name, 'build');
+    assert.strictEqual(classifyCommand('./gradlew compileJava').name, 'build');
+    assert.strictEqual(classifyCommand('./gradlew build').name, 'build');
+    assert.strictEqual(classifyCommand('mvn compile -q').name, 'build');
+    assert.strictEqual(classifyCommand('mvn package').name, 'build');
   });
 
   it('classifies typecheck/lint (tsc --noEmit / eslint / ruff)', () => {
     assert.strictEqual(classifyCommand('tsc --noEmit').name, 'typecheck-lint');
     assert.strictEqual(classifyCommand('npx eslint src/').name, 'typecheck-lint');
     assert.strictEqual(classifyCommand('ruff check .').name, 'typecheck-lint');
+  });
+
+  it('classifies MPL gate-generated typecheck-lint commands (#107 review fix)', () => {
+    // commands/mpl-run-execute-gates.md emits these — they MUST be enforced.
+    assert.strictEqual(classifyCommand('npm run typecheck').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('pnpm run typecheck').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('yarn typecheck').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('npm run lint').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('cd src-tauri && cargo check').name, 'typecheck-lint');
+    assert.strictEqual(
+      classifyCommand("python -m py_compile $(find . -name '*.py')").name,
+      'typecheck-lint',
+    );
+    assert.strictEqual(classifyCommand('flake8 .').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('npx biome check .').name, 'typecheck-lint');
   });
 
   it('returns null for non-verification commands', () => {
@@ -56,6 +81,16 @@ describe('classifyCommand', () => {
     assert.strictEqual(classifyCommand('tsc -p tsconfig.json').name, 'build');
     // tsc --noEmit → typecheck (faster, lower ceiling)
     assert.strictEqual(classifyCommand('tsc --noEmit').name, 'typecheck-lint');
+  });
+
+  it('tsc with intermediate flags + --noEmit anywhere → typecheck-lint (#107 review fix)', () => {
+    // Prior implementation used a negative lookahead that only checked the first token
+    // after `tsc`, so `tsc -p tsconfig.json --noEmit` was misclassified as build.
+    assert.strictEqual(classifyCommand('tsc -p tsconfig.json --noEmit').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('tsc --project ./packages/foo --noEmit').name, 'typecheck-lint');
+    assert.strictEqual(classifyCommand('npx tsc -p tsconfig.json --noEmit').name, 'typecheck-lint');
+    // Reverse — `tsc -p ...` without --noEmit is still build
+    assert.strictEqual(classifyCommand('tsc -p tsconfig.json').name, 'build');
   });
 
   it('first-match wins (playwright before vitest-jest)', () => {

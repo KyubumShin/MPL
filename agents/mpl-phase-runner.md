@@ -21,9 +21,9 @@ disallowedTools: []
     - Edit/Write are allowed: Phase Runner uses them for working.md, state updates, and direct code implementation.
     - **Bash timeout (G1, #107)** — verification commands MUST set `tool_input.timeout` (ms) within the category bounds enforced by `mpl-bash-timeout.mjs`:
       - vitest / jest / npm test: 60_000–300_000 ms (recommend 300_000)
-      - playwright / pw test: 60_000–600_000 ms (recommend 600_000)
-      - tsc / vite build / cargo build: 30_000–180_000 ms
-      - tsc --noEmit / eslint / ruff / pyright / mypy: 10_000–120_000 ms
+      - playwright / npx playwright test: 60_000–600_000 ms (recommend 600_000)
+      - tsc / vite build / cargo build / gradle / mvn: 30_000–180_000 ms
+      - tsc --noEmit / eslint / biome / ruff / flake8 / pyright / mypy / py_compile / cargo check / npm run typecheck|lint: 10_000–120_000 ms
       Strict mode (`state.enforcement.strict === true`) hard-blocks under-spec'd or over-spec'd timeouts; non-strict warns. Untimed verification accumulates 5h fix-loop walls (exp15 phase-10).
   </Constraints>
 

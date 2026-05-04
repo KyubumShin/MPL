@@ -22,15 +22,19 @@
 export const CATEGORIES = [
   {
     name: 'playwright',
-    // playwright / pw test / npx playwright test
-    pattern: /\b(?:npx\s+)?(?:playwright|pw)\s+test\b|\bplaywright\s+(?:install|test|debug)\b/,
+    // playwright test / npx playwright test / playwright {install,debug}
+    // (`pw` alias intentionally omitted — non-standard, collides with `pwgen` etc.)
+    pattern: /\b(?:npx\s+)?playwright\s+(?:install|test|debug)\b/,
     minMs: 60_000,
     maxMs: 600_000,
     recommendedMs: 600_000,
   },
   {
     name: 'vitest-jest',
-    // vitest / jest / npm test / pnpm test / yarn test (the latter typically wraps vitest|jest)
+    // vitest / jest / npm test / pnpm test / yarn test (the latter typically wraps vitest|jest).
+    // Note: bare `vitest` (no args) defaults to watch mode in dev — keeping it in the
+    // pattern is intentional. Watch hangs are precisely the 5h fix-loop wall G1 guards
+    // against; if phase-runner forgets `run`, classifier still catches it.
     pattern: /\bvitest\b|\bjest\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b/,
     minMs: 60_000,
     maxMs: 300_000,
@@ -38,16 +42,18 @@ export const CATEGORIES = [
   },
   {
     name: 'build',
-    // tsc (without --noEmit), vite build, cargo build, npm run build, go build
-    pattern: /\btsc\s*$|\btsc\s+(?!--noEmit)|\bvite\s+build\b|\bcargo\s+build\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b|\bgo\s+build\b/,
+    // vite build, cargo build, npm run build, go build, gradle compile/build, maven compile/verify/package.
+    // (tsc is handled in classifyCommand to disambiguate --noEmit anywhere in the command.)
+    pattern: /\bvite\s+build\b|\bcargo\s+build\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b|\bgo\s+build\b|\.\/gradlew\s+(?:compile\w*|build|assemble\w*)\b|\bmvn\s+(?:compile|verify|package|install)\b/,
     minMs: 30_000,
     maxMs: 180_000,
     recommendedMs: 180_000,
   },
   {
     name: 'typecheck-lint',
-    // tsc --noEmit, eslint, ruff, pyright, mypy
-    pattern: /\btsc\s+--noEmit\b|\beslint\b|\bruff\b|\bpyright\b|\bmypy\b/,
+    // tsc --noEmit, eslint, biome, ruff, flake8, pyright, mypy, py_compile, cargo check,
+    // npm/pnpm/yarn run {typecheck,lint,check}.
+    pattern: /\beslint\b|\bbiome\s+check\b|\bruff\b|\bflake8\b|\bpyright\b|\bmypy\b|\bpython\s+-m\s+py_compile\b|\bcargo\s+check\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:typecheck|lint|check)\b/,
     minMs: 10_000,
     maxMs: 120_000,
     recommendedMs: 120_000,
@@ -63,6 +69,13 @@ export const CATEGORIES = [
  */
 export function classifyCommand(command) {
   if (!command || typeof command !== 'string') return null;
+  // tsc special case: `--noEmit` may appear after `-p tsconfig.json`, `--project`, etc.
+  // Single-pass lookahead (the prior approach) only inspected the token immediately
+  // after `tsc`, misclassifying `tsc -p tsconfig.json --noEmit` as build.
+  if (/\btsc\b/.test(command)) {
+    const name = /--noEmit\b/.test(command) ? 'typecheck-lint' : 'build';
+    return CATEGORIES.find((c) => c.name === name);
+  }
   for (const c of CATEGORIES) {
     if (c.pattern.test(command)) return c;
   }
