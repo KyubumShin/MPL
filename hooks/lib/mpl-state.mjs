@@ -183,6 +183,11 @@ const DEFAULT_STATE = {
   // mpl-tool-tracker.mjs. Stop hook compares to wall clock; > threshold (default
   // 15min) without an active "paused_*" flag → verification_hang marking.
   last_tool_at: null,            // ISO-8601 timestamp | null
+  // #103 P0-A redesign: orchestrator-driven adversarial reviewer.
+  // hooks/mpl-quality-gate.mjs increments retry on FAIL, resets to 0 on PASS,
+  // freezes at max on escalate. Default budget = 3 retries before user surface.
+  adversarial_retry_count: 0,    // current consecutive retry count
+  quality_score_history: [],     // [{ phase, score, verdict, issues, timestamp, action, retry_count }]
   // P2-6: execution-scope state (formerly .mpl/mpl/state.json). Schema mirrors
   // the shape documented in commands/mpl-run.md §"MPL State". Orchestrator
   // prompts (mpl-run-decompose.md, mpl-run-execute.md) update this subtree via
