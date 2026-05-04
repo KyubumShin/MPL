@@ -188,6 +188,17 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
 
+## Dogfood Mode (P0-3, #111)
+
+When developing the MPL plugin against itself (i.e. when the workspace IS the
+plugin), `/MPL/` paths should be subject to the same write-guard rules as
+ordinary application source — orchestrator must delegate edits through
+`mpl-phase-runner` rather than touching plugin files directly.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `dogfood` | boolean | `false` | When `true`, removes `/MPL/` from `mpl-write-guard.mjs` allowlist so plugin edits are governed by `enforcement.direct_source_edit`. Equivalent env: `MPL_DOGFOOD=1`. | `mpl-write-guard.mjs` |
+
 ## Enforcement (P0-2, #110)
 
 Strict-mode toggle and per-rule policy. Source-of-truth:
