@@ -86,6 +86,69 @@ assert\\s*\\(\\s*true\\s*\\)
     assert.ok(scope.allowed.has('.ts'));
     assert.ok(scope.excluded.has('.md'));
   });
+
+  it('parses bullet value when trailing prose follows backticked token (PR #122 review)', () => {
+    // Pre-fix bug: regex required `\s*$` after the optional closing backtick, dropping
+    // any line that had explanatory prose after the backticked value. Real registry
+    // entries (C2/C3/M1/CSP/D1.a/TC1) all carry such prose. With the bug, escalation
+    // was [] for those patterns and strict-mode F3 erroneously blocked C3 (severity=block,
+    // tier_3_only) instead of deferring to Tier 3.
+    const md = `
+### XX · Test pattern
+
+- **id**: \`XX\`
+- **category**: \`test-fake\`
+- **severity**: \`block\`
+- **escalation**: \`tier_3_only\` (Tier 1 emits warn only — explanatory prose after backtick)
+- **rationale**: arbitrary prose with no backticks
+- **ground-truth count**: 5 (exp15)
+
+\`\`\`regex
+foo
+\`\`\`
+`;
+    const { patterns } = parseRegistry(md);
+    assert.strictEqual(patterns.length, 1);
+    const p = patterns[0];
+    assert.strictEqual(p.id, 'XX');
+    assert.strictEqual(p.category, 'test-fake');
+    assert.strictEqual(p.severity, 'block');
+    assert.deepStrictEqual(p.escalation, ['tier_3_only']);
+    assert.match(p.rationale, /arbitrary prose/);
+    assert.match(p.groundTruthCount, /5 \(exp15\)/);
+  });
+
+  it('real registry: every escalation-bearing pattern parses non-empty escalation', () => {
+    const reg = loadRegistry(REGISTRY_PATH);
+    // From the registry source-of-truth, these patterns explicitly declare escalation:
+    const expected = {
+      'TC1': ['tier_3_block_in:production'],
+      'TC2': ['strict_block'],
+      'C2':  ['tier_3_block_in:production'],
+      'C3':  ['tier_3_only'],
+      'M1':  ['tier_3_block_in:production'],
+      'CSP': ['tier_3_only'],
+      'D1.a': ['tier_3_block_in:verification-result-LHS'],
+    };
+    for (const [id, exp] of Object.entries(expected)) {
+      const p = reg.patterns.find(x => x.id === id);
+      assert.ok(p, `${id} pattern present`);
+      assert.deepStrictEqual(p.escalation, exp, `${id} escalation should be ${JSON.stringify(exp)}`);
+    }
+    // And patterns that intentionally omit escalation:
+    for (const id of ['TC3', 'D1.b', 'D2']) {
+      const p = reg.patterns.find(x => x.id === id);
+      assert.deepStrictEqual(p.escalation, [], `${id} has no escalation field`);
+    }
+  });
+
+  it('real registry: every severity is the bare enum (no compound text)', () => {
+    const reg = loadRegistry(REGISTRY_PATH);
+    for (const p of reg.patterns) {
+      assert.ok(['block', 'warn'].includes(p.severity),
+        `${p.id} severity must be 'block' or 'warn', got '${p.severity}'`);
+    }
+  });
 });
 
 describe('compileRegistry', () => {
@@ -223,6 +286,21 @@ describe('decideAction', () => {
   it('block-severity + tier_3_only escalation + strict → warn (defer to Tier 3)', () => {
     const r = decideAction([{ id: 'C3', severity: 'block', escalation: ['tier_3_only'] }], { strict: true });
     assert.strictEqual(r.action, 'warn');
+  });
+
+  it('PR #122 review repro — real-registry C3 hit + strict → warn (not block)', () => {
+    // Reviewer's exact repro:
+    //   const c3 = r.patterns.find(p => p.id === 'C3');
+    //   const hits = scanContent('console.log("INV-123 PASS");', [c3]);
+    //   decideAction(hits, {strict: true}).action  // should be 'warn', was 'block'
+    // Root cause: parser dropped the `tier_3_only` escalation due to trailing prose.
+    const reg = loadRegistry(REGISTRY_PATH);
+    const c3 = reg.patterns.find(p => p.id === 'C3');
+    const hits = scanContent('console.log("INV-123 PASS");', [c3]);
+    assert.ok(hits.length > 0, 'C3 must match the silent INV PASS pattern');
+    const decision = decideAction(hits, { strict: true });
+    assert.strictEqual(decision.action, 'warn');
+    assert.deepStrictEqual(decision.blocking, []);
   });
 });
 

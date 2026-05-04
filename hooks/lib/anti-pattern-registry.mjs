@@ -79,17 +79,27 @@ export function parseRegistry(md) {
       permittedWhen: '',
     };
     i++;
-    // Front matter bullets until first fenced block or next heading
+    // Front matter bullets until first fenced block or next heading.
+    // PR #122 review fix: previous regex required `\s*$` after the optional closing
+    // backtick, dropping any line with trailing prose (e.g. `- **escalation**:
+    // \`tier_3_only\` (Tier 1 emits warn only ...)`). The registry intentionally
+    // mixes backticked canonical values with explanatory prose, so the parser must
+    // accept both forms.
     while (i < lines.length) {
       const l = lines[i];
       if (l.startsWith('### ') || l.startsWith('```regex') || l.startsWith('```permitted-when')) break;
-      const bm = l.match(/^- \*\*([\w\s-]+)\*\*:?\s*[`]?([^`\n]*?)[`]?\s*$/);
+      const bm = l.match(/^- \*\*([\w\s-]+)\*\*:?\s*(.*)$/);
       if (bm) {
         const key = bm[1].trim().toLowerCase().replace(/\s+/g, '_');
-        const val = bm[2].trim();
+        const rest = bm[2].trim();
+        // Extract first backticked code-span as canonical value when present.
+        // Backticked = id/category/severity/escalation. Plain prose = rationale,
+        // ground-truth count (which may begin with a number then prose).
+        const tickMatch = rest.match(/^`([^`]+)`/);
+        const val = tickMatch ? tickMatch[1].trim() : rest;
         if (key === 'id') pat.id = val || pat.id;
         else if (key === 'category') pat.category = val;
-        else if (key === 'severity') pat.severity = val.replace(/[`]/g, '').trim();
+        else if (key === 'severity') pat.severity = val;
         else if (key === 'escalation') pat.escalation = parseEscalation(val);
         else if (key === 'rationale') pat.rationale = val;
         else if (key === 'ground-truth_count' || key === 'ground_truth_count' || key === 'ground-truth_source' || key === 'ground_truth_source') pat.groundTruthCount = val;
