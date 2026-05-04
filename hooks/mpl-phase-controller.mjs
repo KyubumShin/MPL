@@ -380,10 +380,10 @@ async function main() {
 
     case 'phase3-gate': {
       // Per-rule policy (P0-2, #110): `missing_gate_evidence` resolves the
-      // strict toggle for checkGateResults. Default DEFAULTS.enforcement
-      // value is 'block' — zero-structured-evidence transitions block out of
-      // the box. Workspace can downgrade to 'warn' (legacy fallback surfaced)
-      // or 'off' (legacy fallback silent) for transitional environments.
+      // strict toggle for checkGateResults. Default is 'warn' per #110 §정책
+      // (transitional — surface only, no block). Workspace can opt-in to
+      // 'block' to halt phase3-gate transitions until mpl-gate-recorder writes
+      // structured exits, or 'off' to suppress the legacy fallback ⚠ entirely.
       // Precedence: state.enforcement > .mpl/config.json > plugin baseline.
       const gateRuleAction = resolveRuleAction(cwd, state, 'missing_gate_evidence');
       const enforcementStrict = gateRuleAction === 'block';
