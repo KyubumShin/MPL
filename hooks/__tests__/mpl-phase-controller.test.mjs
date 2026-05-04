@@ -178,7 +178,10 @@ describe('checkGateResults', () => {
       assert.strictEqual(result.allPassed, false);
     });
 
-    it('partial structured (2/3) + non-strict → falls through to legacy', () => {
+    it('partial structured (2/3) + non-strict → blocks even with legacy true (issue #102 spec)', () => {
+      // PR #119 review fix: once gate-recorder produces any structured entry, the
+      // remaining gates are required. Legacy fallback would otherwise let phase-runner
+      // skip a gate by self-reporting only.
       const result = checkGateResults({
         gate_results: {
           hard1_baseline: ent(0),
@@ -186,9 +189,54 @@ describe('checkGateResults', () => {
           hard1_passed: true, hard2_passed: true, hard3_passed: true,
         }
       });
-      assert.strictEqual(result.source, 'legacy');
-      assert.strictEqual(result.allPassed, true);
+      assert.strictEqual(result.source, 'structured');
+      assert.strictEqual(result.allPassed, false);
+      assert.strictEqual(result.anyFailed, false);
       assert.deepStrictEqual(result.missingEvidence, ['hard3_resilience']);
+    });
+
+    it('PR #119 blocking repro — partial structured nonzero + legacy all true must not pass', () => {
+      // Reviewer's exact repro:
+      //   checkGateResults({ gate_results: {
+      //     hard1_passed: true, hard2_passed: true, hard3_passed: true,
+      //     hard1_baseline: { exit_code: 1 }
+      //   }})
+      // Pre-fix: returned { allPassed: true, source: 'legacy' } — masking the failure.
+      const result = checkGateResults({
+        gate_results: {
+          hard1_passed: true, hard2_passed: true, hard3_passed: true,
+          hard1_baseline: { command: 'npm test', exit_code: 1, stdout_tail: '', timestamp: 'now' },
+        }
+      });
+      assert.strictEqual(result.allPassed, false);
+      assert.strictEqual(result.anyFailed, true);
+      assert.strictEqual(result.source, 'structured');
+      assert.strictEqual(result.details.hard1, false);
+    });
+
+    it('single structured nonzero + no legacy → anyFailed wins immediately', () => {
+      const result = checkGateResults({
+        gate_results: {
+          hard1_baseline: ent(1),
+        }
+      });
+      assert.strictEqual(result.allPassed, false);
+      assert.strictEqual(result.anyFailed, true);
+      assert.strictEqual(result.source, 'structured');
+      assert.deepStrictEqual(result.missingEvidence, ['hard2_coverage', 'hard3_resilience']);
+    });
+
+    it('single structured pass (1/3) + legacy true → blocks (issue #102 spec)', () => {
+      const result = checkGateResults({
+        gate_results: {
+          hard1_baseline: ent(0),
+          hard1_passed: true, hard2_passed: true, hard3_passed: true,
+        }
+      });
+      assert.strictEqual(result.source, 'structured');
+      assert.strictEqual(result.allPassed, false);
+      assert.strictEqual(result.anyFailed, false);
+      assert.deepStrictEqual(result.missingEvidence, ['hard2_coverage', 'hard3_resilience']);
     });
   });
 
@@ -232,9 +280,10 @@ describe('checkGateResults', () => {
       assert.strictEqual(result.details.hard3, null);
     });
 
-    it('partial structured + 1 nonzero in strict → still not allPassed (missing > evaluated)', () => {
-      // 2 entries present (one nonzero), 1 missing. In strict, structured count != 3
-      // so we don't fall into the all-three branch — we stay in the missing-evidence branch.
+    it('partial structured + 1 nonzero in strict → anyFailed=true (failure dominates missing)', () => {
+      // PR #119 review fix: machine-recorded failure dominates. Step 1 fires before
+      // Step 3 (missing-evidence), so even in strict mode a present nonzero exit_code
+      // surfaces as anyFailed=true rather than waiting for the missing gate to be filled.
       const result = checkGateResults({
         gate_results: {
           hard1_baseline: ent(1),
@@ -242,7 +291,8 @@ describe('checkGateResults', () => {
         }
       }, { strict: true });
       assert.strictEqual(result.allPassed, false);
-      assert.strictEqual(result.anyFailed, false);
+      assert.strictEqual(result.anyFailed, true);
+      assert.strictEqual(result.source, 'structured');
       assert.deepStrictEqual(result.missingEvidence, ['hard3_resilience']);
     });
   });

@@ -80,8 +80,10 @@ const DEFAULT_STATE = {
     failed_todos: 0
   },
   // AD-0006: structured gate evidence recorded by mpl-gate-recorder.mjs hook.
-  // Legacy keys (hard1_passed, etc.) are still read by some older code paths;
-  // gate-recorder writes the new structured entries under hard1_baseline, etc.
+  // Post-#102 (P0-1): mpl-phase-controller `checkGateResults` reads structured first
+  // (`hard{1,2,3}_{baseline,coverage,resilience}.exit_code`); legacy booleans are
+  // a non-strict transitional fallback only when zero structured entries exist.
+  // Once #110 (P0-2) ships `enforcement.strict`, the legacy booleans are retired.
   gate_results: {
     hard1_passed: null,
     hard2_passed: null,

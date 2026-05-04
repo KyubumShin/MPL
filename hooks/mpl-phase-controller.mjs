@@ -68,13 +68,22 @@ function checkPlanStatus(cwd) {
  * Check gate results from state.
  *
  * Reads structured evidence (`hard1_baseline`, `hard2_coverage`, `hard3_resilience`)
- * written by `mpl-gate-recorder` from real Bash exit codes. Falls back to legacy
- * boolean (`hard1_passed`, `hard2_passed`, `hard3_passed`) only when structured is
- * absent and `opts.strict !== true`. Structured evidence cannot be self-reported by
- * phase-runner; the legacy boolean can — issue #102 / R-GATE-EVIDENCE-DESYNC.
+ * written by `mpl-gate-recorder` from real Bash exit codes. Decision tree:
+ *
+ *   1. Any present structured entry with `exit_code !== 0` → anyFailed=true.
+ *      Machine-recorded failure dominates self-reported legacy — never let legacy
+ *      booleans mask a recorded nonzero exit (PR #119 review blocker).
+ *   2. All 3 structured present and zero failures → allPassed=true.
+ *   3. Partial structured (some present, none failed, some missing) → allPassed=false,
+ *      anyFailed=false, source='structured'. Per issue #102 spec ("하나라도 missing →
+ *      allPassed=false"), do NOT fall through to legacy. Once mpl-gate-recorder has
+ *      produced any structured entry, the rest must follow.
+ *   4. Zero structured + strict → blocked (no machine evidence at all).
+ *   5. Zero structured + non-strict → legacy boolean fallback with caller-surfaced
+ *      warn (transitional; retired when `enforcement.strict` rolls out, #110).
  *
  * @param {object} state - parsed `.mpl/state.json`
- * @param {{ strict?: boolean }} [opts] - strict mode rejects legacy fallback
+ * @param {{ strict?: boolean }} [opts] - strict mode disables zero-structured legacy fallback
  * @returns {{
  *   allPassed: boolean,
  *   anyFailed: boolean,
@@ -94,49 +103,72 @@ function checkGateResults(state, opts = {}) {
   };
 
   const isStructuredEntry = (e) => e && typeof e === 'object' && typeof e.exit_code === 'number';
-  const structuredCount = Object.values(structuredEntries).filter(isStructuredEntry).length;
+  const presentEntries = Object.values(structuredEntries).filter(isStructuredEntry);
+  const structuredCount = presentEntries.length;
+
   const missingEvidence = [];
   if (!isStructuredEntry(structuredEntries.hard1)) missingEvidence.push('hard1_baseline');
   if (!isStructuredEntry(structuredEntries.hard2)) missingEvidence.push('hard2_coverage');
   if (!isStructuredEntry(structuredEntries.hard3)) missingEvidence.push('hard3_resilience');
 
-  // Tier A — all 3 structured entries present (canonical path)
-  if (structuredCount === 3) {
-    const allZero = Object.values(structuredEntries).every(e => e.exit_code === 0);
-    const anyNonZero = Object.values(structuredEntries).some(e => e.exit_code !== 0);
+  const detailsFromStructured = () => ({
+    hard1: isStructuredEntry(structuredEntries.hard1) ? structuredEntries.hard1.exit_code === 0 : null,
+    hard2: isStructuredEntry(structuredEntries.hard2) ? structuredEntries.hard2.exit_code === 0 : null,
+    hard3: isStructuredEntry(structuredEntries.hard3) ? structuredEntries.hard3.exit_code === 0 : null,
+  });
+
+  // Step 1: machine-recorded failure dominates. Even one structured entry with
+  // nonzero exit_code forces anyFailed=true, irrespective of legacy booleans.
+  // Closes PR #119 review blocker (legacy true + structured nonzero must not pass).
+  if (presentEntries.some(e => e.exit_code !== 0)) {
     return {
-      allPassed: allZero,
-      anyFailed: anyNonZero,
+      allPassed: false,
+      anyFailed: true,
       source: 'structured',
-      missingEvidence: [],
-      details: {
-        hard1: structuredEntries.hard1.exit_code === 0,
-        hard2: structuredEntries.hard2.exit_code === 0,
-        hard3: structuredEntries.hard3.exit_code === 0,
-      },
+      missingEvidence,
+      details: detailsFromStructured(),
     };
   }
 
-  // Strict mode: missing structured evidence blocks transition (no legacy fallback).
-  // anyFailed stays false because we have no failure evidence — the caller must
-  // distinguish "missing evidence" from "evaluated and failed".
+  // Step 2: all 3 structured present and zero failures → genuine pass.
+  if (structuredCount === 3) {
+    return {
+      allPassed: true,
+      anyFailed: false,
+      source: 'structured',
+      missingEvidence: [],
+      details: { hard1: true, hard2: true, hard3: true },
+    };
+  }
+
+  // Step 3: partial structured (1 or 2 present, none failed, some missing).
+  // Issue #102 spec: "하나라도 missing → allPassed=false". Once gate-recorder has
+  // started producing structured entries, the rest are required — legacy fallback
+  // would let a phase-runner skip a gate by self-reporting only.
+  if (structuredCount > 0) {
+    return {
+      allPassed: false,
+      anyFailed: false,
+      source: 'structured',
+      missingEvidence,
+      details: detailsFromStructured(),
+    };
+  }
+
+  // Step 4: zero structured + strict → block (no machine evidence at all).
   if (strict) {
     return {
       allPassed: false,
       anyFailed: false,
       source: 'structured',
       missingEvidence,
-      details: {
-        hard1: isStructuredEntry(structuredEntries.hard1) ? structuredEntries.hard1.exit_code === 0 : null,
-        hard2: isStructuredEntry(structuredEntries.hard2) ? structuredEntries.hard2.exit_code === 0 : null,
-        hard3: isStructuredEntry(structuredEntries.hard3) ? structuredEntries.hard3.exit_code === 0 : null,
-      },
+      details: detailsFromStructured(),
     };
   }
 
-  // Tier B — legacy boolean fallback (transitional, default warn). Caller surfaces
-  // a system-reminder on `source === 'legacy'`. Removed once `enforcement.strict`
-  // ships (#110, P0-2).
+  // Step 5: zero structured + non-strict → legacy boolean fallback (transitional).
+  // Phase3-gate caller surfaces a system-reminder ⚠ on `source === 'legacy'`.
+  // Retired once `enforcement.strict` ships (#110, P0-2).
   const hardResults = [gates.hard1_passed, gates.hard2_passed, gates.hard3_passed];
   const required = hardResults.filter(r => r !== null && r !== undefined);
   const passed = required.filter(r => r === true);
@@ -145,7 +177,7 @@ function checkGateResults(state, opts = {}) {
   return {
     allPassed: failed.length === 0 && passed.length > 0,
     anyFailed: failed.length > 0,
-    source: required.length === 0 && structuredCount === 0 ? 'none' : 'legacy',
+    source: required.length === 0 ? 'none' : 'legacy',
     missingEvidence,
     details: {
       hard1: gates.hard1_passed,
@@ -342,9 +374,12 @@ async function main() {
     }
 
     case 'phase3-gate': {
-      // Read enforcement strictness from config (P0-2 / #110 will populate this).
-      // Until then, default behavior is non-strict (legacy fallback with warn).
-      const enforcementStrict = state.enforcement_strict === true;
+      // Read enforcement strictness from `state.enforcement.strict` (nested), aligned
+      // with #110 P0-2 schema (`config/enforcement.json: { enforcement: { strict, ... }}`).
+      // Until #110 lands the config plumbing, the field is undefined → non-strict
+      // (legacy fallback with caller-side ⚠ warn). This nested form is forward-compatible
+      // with #110 so this branch will not become dead code on schema land.
+      const enforcementStrict = state.enforcement && state.enforcement.strict === true;
       const gateResults = checkGateResults(state, { strict: enforcementStrict });
 
       const fallbackWarn = gateResults.source === 'legacy'
