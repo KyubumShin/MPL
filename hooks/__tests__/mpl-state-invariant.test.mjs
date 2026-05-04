@@ -47,6 +47,9 @@ describe('checkInvariants — basics', () => {
 
   it('clean realistic state → ok=true', () => {
     makePhaseFolders(2);
+    // Both phase folders carry state-summary.md → counted as completed.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'state-summary.md'), '# done');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-2', 'state-summary.md'), '# done');
     const r = checkInvariants({
       current_phase: 'phase2-sprint',
       finalize_done: false,
@@ -106,13 +109,25 @@ describe('I3 paused/hung blocks new dispatch', () => {
 });
 
 describe('I4 phase folder count vs execution.phases.completed', () => {
-  it('flags mismatch', () => {
+  function markCompleted(n) {
+    // Only phase-N directories carrying state-summary.md count as completed.
+    for (let i = 1; i <= n; i++) {
+      writeFileSync(
+        join(tmp, '.mpl', 'mpl', 'phases', `phase-${i}`, 'state-summary.md'),
+        '# done',
+      );
+    }
+  }
+
+  it('flags mismatch when 3 phases completed but state says 1', () => {
     makePhaseFolders(3);
+    markCompleted(3);
     const r = checkInvariants({ execution: { phases: { completed: 1 } } }, { cwd: tmp });
     assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.PHASE_FOLDER_MISMATCH));
   });
-  it('match passes', () => {
+  it('match passes when 3 completed and state agrees', () => {
     makePhaseFolders(3);
+    markCompleted(3);
     const r = checkInvariants({ execution: { phases: { completed: 3 } } }, { cwd: tmp });
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.PHASE_FOLDER_MISMATCH));
   });
@@ -120,6 +135,22 @@ describe('I4 phase folder count vs execution.phases.completed', () => {
     makePhaseFolders(3);
     const r = checkInvariants({}, { cwd: tmp });
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.PHASE_FOLDER_MISMATCH));
+  });
+
+  it('PR #128 review #1: decompose-pre-created phase-N dirs without state-summary do NOT count', () => {
+    // commands/mpl-run-decompose.md Step 4 pre-creates every phase-N/ directory
+    // before any phase runs; Step 5 initializes execution.phases.completed=0.
+    // I4 must read the disk-truth that matches phase-runner finalize artifacts
+    // (state-summary.md), not raw directory existence.
+    makePhaseFolders(3); // empty dirs only — no state-summary.md
+    const r = checkInvariants({
+      current_phase: 'phase2-sprint',
+      execution: { phases: { total: 3, completed: 0 } },
+    }, { cwd: tmp });
+    assert.ok(
+      !r.violations.some((v) => v.id === VIOLATION_IDS.PHASE_FOLDER_MISMATCH),
+      `expected no I4 false positive, got: ${JSON.stringify(r.violations, null, 2)}`,
+    );
   });
 });
 
@@ -351,6 +382,99 @@ describe('mpl-state-invariant hook integration', () => {
       { current_phase: 'phase3-gate', gate_results: {} },
     );
     assert.match(r.systemMessage || r.reason || '', /I6/);
+  });
+
+  it('PR #128 review #2: PreToolUse Write that strips structured evidence → I6 surfaced (proposed state simulation)', () => {
+    // Pre-write state HAS structured evidence; the Write replaces it with
+    // legacy-booleans only. The hook must validate the PROPOSED state, not
+    // the current on-disk state, otherwise the strip-down silently passes.
+    const stateJsonPath = join(tmp, '.mpl', 'state.json');
+    const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    const cleanState = {
+      schema_version: 2,
+      current_phase: 'phase3-gate',
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_coverage: ent(0),
+        hard3_resilience: ent(0),
+      },
+    };
+    writeFileSync(stateJsonPath, JSON.stringify(cleanState));
+    const proposedDirty = {
+      schema_version: 2,
+      current_phase: 'phase3-gate',
+      gate_results: { hard1_passed: true, hard2_passed: true, hard3_passed: true },
+    };
+    const stdin = JSON.stringify({
+      cwd: tmp,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: stateJsonPath, content: JSON.stringify(proposedDirty) },
+    });
+    const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
+    const r = JSON.parse(out);
+    assert.match(r.systemMessage || r.reason || '', /I6/);
+  });
+
+  it('PR #128 review #2: PreToolUse Edit that swaps structured for legacy → I6 surfaced', () => {
+    const stateJsonPath = join(tmp, '.mpl', 'state.json');
+    const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    const cleanState = {
+      schema_version: 2,
+      current_phase: 'phase3-gate',
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_coverage: ent(0),
+        hard3_resilience: ent(0),
+      },
+    };
+    const cleanText = JSON.stringify(cleanState);
+    writeFileSync(stateJsonPath, cleanText);
+    const dirtyText = JSON.stringify({
+      schema_version: 2,
+      current_phase: 'phase3-gate',
+      gate_results: { hard1_passed: true, hard2_passed: true, hard3_passed: true },
+    });
+    const stdin = JSON.stringify({
+      cwd: tmp,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: stateJsonPath, old_string: cleanText, new_string: dirtyText },
+    });
+    const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
+    const r = JSON.parse(out);
+    assert.match(r.systemMessage || r.reason || '', /I6/);
+  });
+
+  it('Write that ADDS structured evidence (clean transition) → silent, no I6', () => {
+    // Inverse case: a Write that introduces structured evidence to a state
+    // that previously had none should NOT surface I6.
+    const stateJsonPath = join(tmp, '.mpl', 'state.json');
+    const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    writeFileSync(stateJsonPath, JSON.stringify({
+      schema_version: 2,
+      current_phase: 'phase3-gate',
+      gate_results: {},
+    }));
+    const proposedClean = {
+      schema_version: 2,
+      current_phase: 'phase3-gate',
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_coverage: ent(0),
+        hard3_resilience: ent(0),
+      },
+    };
+    const stdin = JSON.stringify({
+      cwd: tmp,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: stateJsonPath, content: JSON.stringify(proposedClean) },
+    });
+    const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
+    const r = JSON.parse(out);
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
   });
 
   it('MPL not active → silent', () => {

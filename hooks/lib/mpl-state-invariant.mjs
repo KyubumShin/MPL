@@ -67,12 +67,21 @@ function v(id, message, details = {}) {
   return { id, message, ...details };
 }
 
+/**
+ * Count phase folders that have actually completed — i.e. carry a
+ * `state-summary.md` artifact written by phase-runner at finalize. Plain
+ * directory existence is NOT enough: `commands/mpl-run-decompose.md` Step 4
+ * pre-creates every `phase-N/` directory before any phase runs, so naïve
+ * folder count would report N completed phases the moment decomposition
+ * finishes even though `execution.phases.completed === 0`. (PR #128 review.)
+ */
 function countPhaseFolders(cwd) {
   const phasesDir = join(cwd, '.mpl', 'mpl', 'phases');
   if (!existsSync(phasesDir)) return null; // signal "not measurable"
   try {
     return readdirSync(phasesDir, { withFileTypes: true })
       .filter((e) => e.isDirectory() && /^phase-\d+/.test(e.name))
+      .filter((e) => existsSync(join(phasesDir, e.name, 'state-summary.md')))
       .length;
   } catch {
     return null;
