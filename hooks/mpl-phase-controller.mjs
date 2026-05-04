@@ -36,6 +36,11 @@ const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
+// G4 hang detection (#109)
+const { detectHang } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-hang-detector.mjs')).href
+);
+
 /**
  * Check PLAN.md checkbox completion status
  */
@@ -214,6 +219,23 @@ async function main() {
   const state = readState(cwd);
   if (!state) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  // G4 (#109) — hang detection. Run before phase routing so a stalled
+  // session is marked even when the phase branch would otherwise return
+  // a generic "in progress" message. Skipped when state already carries
+  // an intentional pause (paused_budget / paused_checkpoint) or the hang
+  // marker (preserve original detection time).
+  const hangDet = detectHang(state, Date.now());
+  if (hangDet.hung) {
+    try {
+      writeState(cwd, { session_status: 'verification_hang' });
+    } catch { /* best-effort marking — never fail Stop hook on disk error */ }
+    console.log(JSON.stringify({
+      continue: true,
+      stopReason: hangDet.reason,
+    }));
     return;
   }
 

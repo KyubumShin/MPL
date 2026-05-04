@@ -104,6 +104,16 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Bash|Edit|Write|MultiEdit|Task|Agent|Read|Grep|Glob|TodoWrite|NotebookEdit|WebFetch|WebSearch|SlashCommand|BashOutput|KillShell|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-tool-tracker.mjs\"",
+            "timeout": 2
+          }
+        ]
+      },
+      {
         "matcher": "Bash|Task|Agent",
         "hooks": [
           {

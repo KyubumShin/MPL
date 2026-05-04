@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -424,5 +424,67 @@ describe('phase3-gate Stop hook integration (PR #119 review #5 follow-up)', () =
     assert.match(out.stopReason, /Phase 3: Quality Gate in progress\. Run all 3 gates before proceeding/);
     // source=='none' here, so the legacy fallback warn does NOT prepend (warn is for source=='legacy')
     assert.doesNotMatch(out.stopReason, /⚠ Using legacy gate boolean fallback/);
+  });
+});
+
+describe('G4 hang detection (#109) Stop hook integration', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-g4-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function readState() {
+    return JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+  }
+
+  it('no last_tool_at → falls through to phase routing (no hang marking)', () => {
+    const out = runStopHook(tmpDir, { current_phase: 'phase2-sprint' });
+    // Whatever phase2-sprint emits is fine; we just want NOT to see the hang banner.
+    assert.doesNotMatch(out.stopReason || '', /\[MPL G4\] ⚠ Verification appears hung/);
+    assert.notStrictEqual(readState().session_status, 'verification_hang');
+  });
+
+  it('last_tool_at within 15min → falls through (no hang marking)', () => {
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      last_tool_at: recent,
+    });
+    assert.doesNotMatch(out.stopReason || '', /Verification appears hung/);
+    assert.notStrictEqual(readState().session_status, 'verification_hang');
+  });
+
+  it('last_tool_at older than 15min → marks verification_hang and surfaces banner', () => {
+    const stale = new Date(Date.now() - 30 * 60_000).toISOString();
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      last_tool_at: stale,
+    });
+    assert.match(out.stopReason, /\[MPL G4\] ⚠ Verification appears hung/);
+    assert.match(out.stopReason, /threshold 15min/);
+    assert.strictEqual(readState().session_status, 'verification_hang');
+  });
+
+  it('paused_budget pre-mark → never flagged as hang (intentional pause)', () => {
+    const stale = new Date(Date.now() - 60 * 60_000).toISOString();
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      last_tool_at: stale,
+      session_status: 'paused_budget',
+    });
+    assert.doesNotMatch(out.stopReason || '', /Verification appears hung/);
+    assert.strictEqual(readState().session_status, 'paused_budget');
+  });
+
+  it('verification_hang pre-mark → not re-marked, banner suppressed (idempotent)', () => {
+    // Already-marked sessions should pass through to phase routing so the
+    // user sees the normal phase message; the marker persists for resume.
+    const stale = new Date(Date.now() - 5 * 60 * 60_000).toISOString();
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      last_tool_at: stale,
+      session_status: 'verification_hang',
+    });
+    assert.doesNotMatch(out.stopReason || '', /Verification appears hung/);
+    assert.strictEqual(readState().session_status, 'verification_hang');
   });
 });
