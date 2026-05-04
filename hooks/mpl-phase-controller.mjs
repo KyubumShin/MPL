@@ -65,12 +65,79 @@ function checkPlanStatus(cwd) {
 }
 
 /**
- * Check gate results from state
+ * Check gate results from state.
+ *
+ * Reads structured evidence (`hard1_baseline`, `hard2_coverage`, `hard3_resilience`)
+ * written by `mpl-gate-recorder` from real Bash exit codes. Falls back to legacy
+ * boolean (`hard1_passed`, `hard2_passed`, `hard3_passed`) only when structured is
+ * absent and `opts.strict !== true`. Structured evidence cannot be self-reported by
+ * phase-runner; the legacy boolean can — issue #102 / R-GATE-EVIDENCE-DESYNC.
+ *
+ * @param {object} state - parsed `.mpl/state.json`
+ * @param {{ strict?: boolean }} [opts] - strict mode rejects legacy fallback
+ * @returns {{
+ *   allPassed: boolean,
+ *   anyFailed: boolean,
+ *   source: 'structured' | 'legacy' | 'none',
+ *   missingEvidence: string[],
+ *   details: { hard1: boolean|null, hard2: boolean|null, hard3: boolean|null }
+ * }}
  */
-function checkGateResults(state) {
-  const gates = state.gate_results || {};
-  const hardResults = [gates.hard1_passed, gates.hard2_passed, gates.hard3_passed];
+function checkGateResults(state, opts = {}) {
+  const gates = (state && state.gate_results) || {};
+  const strict = opts.strict === true;
 
+  const structuredEntries = {
+    hard1: gates.hard1_baseline,
+    hard2: gates.hard2_coverage,
+    hard3: gates.hard3_resilience,
+  };
+
+  const isStructuredEntry = (e) => e && typeof e === 'object' && typeof e.exit_code === 'number';
+  const structuredCount = Object.values(structuredEntries).filter(isStructuredEntry).length;
+  const missingEvidence = [];
+  if (!isStructuredEntry(structuredEntries.hard1)) missingEvidence.push('hard1_baseline');
+  if (!isStructuredEntry(structuredEntries.hard2)) missingEvidence.push('hard2_coverage');
+  if (!isStructuredEntry(structuredEntries.hard3)) missingEvidence.push('hard3_resilience');
+
+  // Tier A — all 3 structured entries present (canonical path)
+  if (structuredCount === 3) {
+    const allZero = Object.values(structuredEntries).every(e => e.exit_code === 0);
+    const anyNonZero = Object.values(structuredEntries).some(e => e.exit_code !== 0);
+    return {
+      allPassed: allZero,
+      anyFailed: anyNonZero,
+      source: 'structured',
+      missingEvidence: [],
+      details: {
+        hard1: structuredEntries.hard1.exit_code === 0,
+        hard2: structuredEntries.hard2.exit_code === 0,
+        hard3: structuredEntries.hard3.exit_code === 0,
+      },
+    };
+  }
+
+  // Strict mode: missing structured evidence blocks transition (no legacy fallback).
+  // anyFailed stays false because we have no failure evidence — the caller must
+  // distinguish "missing evidence" from "evaluated and failed".
+  if (strict) {
+    return {
+      allPassed: false,
+      anyFailed: false,
+      source: 'structured',
+      missingEvidence,
+      details: {
+        hard1: isStructuredEntry(structuredEntries.hard1) ? structuredEntries.hard1.exit_code === 0 : null,
+        hard2: isStructuredEntry(structuredEntries.hard2) ? structuredEntries.hard2.exit_code === 0 : null,
+        hard3: isStructuredEntry(structuredEntries.hard3) ? structuredEntries.hard3.exit_code === 0 : null,
+      },
+    };
+  }
+
+  // Tier B — legacy boolean fallback (transitional, default warn). Caller surfaces
+  // a system-reminder on `source === 'legacy'`. Removed once `enforcement.strict`
+  // ships (#110, P0-2).
+  const hardResults = [gates.hard1_passed, gates.hard2_passed, gates.hard3_passed];
   const required = hardResults.filter(r => r !== null && r !== undefined);
   const passed = required.filter(r => r === true);
   const failed = required.filter(r => r === false);
@@ -78,11 +145,13 @@ function checkGateResults(state) {
   return {
     allPassed: failed.length === 0 && passed.length > 0,
     anyFailed: failed.length > 0,
+    source: required.length === 0 && structuredCount === 0 ? 'none' : 'legacy',
+    missingEvidence,
     details: {
       hard1: gates.hard1_passed,
       hard2: gates.hard2_passed,
       hard3: gates.hard3_passed,
-    }
+    },
   };
 }
 
@@ -273,36 +342,51 @@ async function main() {
     }
 
     case 'phase3-gate': {
-      // Check gate results
-      const gateResults = checkGateResults(state);
+      // Read enforcement strictness from config (P0-2 / #110 will populate this).
+      // Until then, default behavior is non-strict (legacy fallback with warn).
+      const enforcementStrict = state.enforcement_strict === true;
+      const gateResults = checkGateResults(state, { strict: enforcementStrict });
+
+      const fallbackWarn = gateResults.source === 'legacy'
+        ? ' ⚠ Using legacy gate boolean fallback (no structured evidence in state.gate_results.hard{1,2,3}_{baseline,coverage,resilience}). exp16 strict mode will block this transition. Run real verification commands so mpl-gate-recorder can record exit codes.'
+        : '';
 
       if (gateResults.allPassed) {
         // All gates passed → Phase 5
         writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: '[MPL] All Quality Gates passed! Transitioning to Phase 5: Finalize.'
+          stopReason: `[MPL] All Quality Gates passed (source=${gateResults.source}). Transitioning to Phase 5: Finalize.${fallbackWarn}`
         }));
       } else if (gateResults.anyFailed) {
         // Gate failed → Phase 4
         // Preserve existing fix_loop_count to prevent infinite loop bypass
         // (only initialize to 0 on first entry, not on re-entry from Phase 3)
         const currentFixCount = state.fix_loop_count || 0;
-        // Reset gate results when re-entering gate phase to prevent stale data
+        // Reset both legacy and structured gate evidence on retry to prevent stale data.
         writeState(cwd, {
           current_phase: 'phase4-fix',
           fix_loop_count: currentFixCount,
-          gate_results: { hard1_passed: null, hard2_passed: null, hard3_passed: null }
+          gate_results: {
+            hard1_passed: null, hard2_passed: null, hard3_passed: null,
+            hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+          }
         });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Quality Gate failed. Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}. Transitioning to Phase 4: Fix Loop.`
+          stopReason: `[MPL] Quality Gate failed (source=${gateResults.source}). Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}. Transitioning to Phase 4: Fix Loop.${fallbackWarn}`
+        }));
+      } else if (gateResults.missingEvidence.length > 0 && enforcementStrict) {
+        // Strict mode: structured evidence missing → block transition with explicit reason.
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ Phase 3 BLOCKED: missing structured gate evidence (${gateResults.missingEvidence.join(', ')}). Strict enforcement requires all 3 gates to be recorded by mpl-gate-recorder via real Bash exit codes. Self-reported booleans are not accepted.`
         }));
       } else {
         // Gates not yet evaluated
         console.log(JSON.stringify({
           continue: true,
-          stopReason: '[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.'
+          stopReason: `[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.${fallbackWarn}`
         }));
       }
       break;
