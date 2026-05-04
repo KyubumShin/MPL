@@ -187,49 +187,69 @@ disallowedTools: []
   </Failure_Modes_To_Avoid>
 
   <Anti_Patterns_Prohibited>
-    Ground truth: yggdrasil-exp15 §11 audit (4-category × 8 patterns, retrofit catch ≥ 7/8). The patterns below are
-    enforced at machine level by `hooks/mpl-fallback-grep.mjs` (#105) — phase-runner self-checks before declaring a TODO
-    complete. Match → fail the TODO and route to fix loop. Full machine-readable specification:
-    `commands/references/anti-patterns.md`.
+    Ground truth: yggdrasil-exp15 §11 audit (8 distinct anti-patterns; expanded to 10 regex IDs in the registry for
+    metric attribution — see `commands/references/anti-patterns.md` §"Ground-truth → registry mapping"). Tier 4
+    catch rate 8/8, Tier 1+2+3 catch rate 7/8. The patterns below are enforced at machine level by
+    `hooks/mpl-fallback-grep.mjs` (#105) on **source code only** (`.mjs/.ts/.py/.rs/...`); markdown documentation
+    (this prompt included) is excluded from scanning. Phase-runner self-checks before declaring a TODO complete:
+    match on a non-excluded file → fail the TODO and route to fix loop. Full machine-readable specification with
+    `regex` / `permitted-when` / `severity` / `escalation` per pattern: `commands/references/anti-patterns.md`.
+
+    Examples below are intentionally referenced by description rather than literal — the registry holds the
+    authoritative regex set, and this prose summary is not a parseable input.
 
     **Category A · Test fakes** (assertion that does not test the System Under Test):
 
-    - **TC1 · Tautological assertion** — `expect(true).toBe(true)` / `assert(true)` / `assertEquals(1, 1)`. The test
-      passes whether the SUT is correct or not. (Ground truth: 5 occurrences in exp15.)
-    - **TC2 · Conditional assertion** — `if (cond) expect(x).toBe(y)`. The assertion is silently skipped when `cond`
-      is false; failures hide as "no assertion". (Ground truth: 9 occurrences in exp15, §11 found 1.)
-    - **TC3 · Logged-but-not-asserted error path** — `console.warn(...)` (or `console.error`) followed by
-      `expect(true).toBe(true)`. The error path is observed but not asserted, masking real failures as warnings.
+    - **TC1 · Tautological assertion** — assertions that hold regardless of the SUT (e.g. asserting a constant equals
+      itself). Severity `block`. Ground truth: 5 in exp15.
+    - **TC2 · Conditional assertion** — assertions wrapped in a falsy-skippable conditional or short-circuit; the
+      test reports "no assertion" rather than failure when the guard short-circuits. Severity `block`. Ground truth:
+      9 in exp15.
+    - **TC3 · Logged-but-not-asserted error path** — error logged via console immediately followed by a tautological
+      assertion. Severity `block`.
 
     **Category B · Gate fakes** (declared check that no branch consumes):
 
-    - **C2 · Config-as-decoration** — `const X_CONFIG = { threshold: N }` declared at module top, never read by any
-      branch. Looks like a configurable gate; behaves as a comment. (Ground truth: `release-gate.mjs:56`.)
-    - **C3 · Silent INV PASS** — INV-N invariant declared with no assertion / no exit-non-zero / no recorded
-      `evidence` on failure. Logs "INV PASS" regardless of input. (Ground truth: `release-gate.mjs:295`.)
+    - **C2 · Config-as-decoration** — top-level uppercase const initialized as object literal, never read by any
+      branch (broadened from earlier `*_CONFIG` naming-only matcher). Severity `warn`; Tier 3 property-check
+      escalates to `block` when the identifier is confirmed unread in production paths. Ground truth:
+      `release-gate.mjs:56`.
+    - **C3 · Silent INV PASS** — invariant logged "PASS" without an assertion, non-zero exit, or recorded evidence.
+      Severity `block`; Tier 1 grep emits `warn` only because its 200-char window approximation produces
+      false-negatives in long functions — Tier 3 block-scope analysis is authoritative. Ground truth:
+      `release-gate.mjs:295`.
 
     **Category C · Type-safety holes**:
 
-    - **M1 · Double-cast escape hatch** — `as unknown as X` or `as any as X`. Defeats the type checker by laundering
-      one type into another with no runtime check. Permitted only inside test fixtures with an inline justification
-      comment naming the property under test. (Ground truth: 9 occurrences in exp15.)
-    - **CSP · Missing CSP meta** — renderer/index.html (or equivalent) without a `Content-Security-Policy` meta tag
-      when handling external content. Permitted only when CSP is set at the response-header layer (must be
-      cross-referenced in the same phase).
+    - **M1 · Double-cast escape hatch** — `unknown`-via or `any`-via casts that launder a type without runtime check.
+      Severity `warn` at Tier 1 (cannot infer test-vs-prod from grep alone); Tier 3 escalates to `block` for
+      production paths in strict mode. Test fixtures with inline justification remain permitted. Ground truth: 9 in
+      exp15. (Note: the `state-manager.ts:206-248` deepMerge generic-typing bridge is a documented permitted-when
+      case.)
+    - **CSP · Missing CSP meta** — renderer HTML handling external content without a Content-Security-Policy meta
+      tag or response header. Severity `warn` (Tier 3-only authoritative — Tier 1 regex is intentionally simplified
+      to avoid V8 catastrophic backtracking).
 
     **Category D · Fallback poisoning** (silently turns a failure into a non-failure value):
 
-    - **D1 · Unconditional default-coalesce** — `?? ''` / `?? []` / `?? null` in scripts/agents/hooks paths where the
-      LHS represents a verification result, exit code, or external response. Permitted only when (a) the LHS is
-      genuinely user-input on a UI boundary AND (b) the default is the documented neutral value. Synthetic ID
-      patterns like `\`no-git-${ISO}\`` are explicit instances. (Ground truth: `release-gate.mjs:152`.)
-    - **D2 · Swallowed promise rejection** — `.catch(() => false)` / `.catch(() => null)` / `.catch(() => undefined)`
-      without logging or rethrowing. Turns a real failure into a silent boolean/null. Permitted only when the catch
-      argument is named (`.catch((err) => …)`) and the handler logs structured evidence + records the failure.
-      (Ground truth: 11 occurrences in exp15.)
+    - **D1.a · Unconditional default-coalesce** — coalesce operators (`??`) producing a neutral default where the LHS
+      represents a verification result, exit code, or external response. Severity `warn` at Tier 1; Tier 3
+      escalates to `block` only when the LHS identifier name pattern indicates an evaluation outcome (e.g. result,
+      exit_code, status, passed, gate_result). State-shape tolerance and null-safe rendering are explicit
+      permitted-when cases.
+    - **D1.b · Synthetic-ID literal masking absence** — template-literal synthesis like `no-git-${...}` or
+      `unknown-${...}` that invents an identifier when an upstream identity lookup fails, hiding the absence from
+      downstream consumers. Severity `block`. Ground truth: `release-gate.mjs:152`. Split from D1.a per registry
+      review (different semantics, different metric).
+    - **D2 · Swallowed promise rejection** — `.catch` with arrow/function returning `false`/`null`/`undefined`
+      without logging or rethrowing. Turns a real rejection into a silent boolean/null. Severity `block`. Permitted
+      only with named-arg form (`.catch((err) => ...)`) plus structured logging. Ground truth: 11 in exp15.
 
-    **Self-exemption is not allowed.** Patterns above apply to the phase-runner's own writes (see #106 F4 doctor
-    meta-self-fallback for analogous coverage of MPL plugin source).
+    **Self-exemption is not allowed in source code.** The plugin's own source files (`.mjs/.ts/...` under
+    `hooks/`, `mcp-server/src/`, `agents/scripts/`, etc.) are subject to the registry — F4 doctor meta-self-fallback
+    (#106) enforces this. Markdown documentation (this prompt, the registry doc) is excluded by path-extension
+    filter applied **before** regex compilation, not by self-exemption regexes inside the registry (which would
+    themselves be a violation pattern).
 
     **On match**: the phase-runner MUST treat the TODO as failed (route to Step 5 Fix Loop). Do not edit the comment
     or rename the variable to evade the regex — that is `R-EVASION` (v3.10 §2.1) and produces no testable code change.
