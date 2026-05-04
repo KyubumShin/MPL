@@ -618,9 +618,42 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
       announce: "[MPL] Regression suite: {regression_suite.total_assertions} assertions accumulated across {regression_suite.accumulated_tests.length} phases"
     ```
 
-12. More phases → continue in `phase2-sprint`, return to 4.1
+12. **Adversarial Review (P0-A redesign, #103)** — dispatch the reviewer
+    BEFORE advancing to the next phase:
+    ```
+    Task({
+      subagent_type: "mpl-adversarial-reviewer",
+      prompt: `Audit phase ${phase.id}.
+        - phase_definition: ${JSON.stringify(phase_definition)}
+        - state_summary_path: .mpl/mpl/phases/${phase.id}/state-summary.md
+        - verification_path: .mpl/mpl/phases/${phase.id}/verification.md
+        - changes_diff_path: .mpl/mpl/phases/${phase.id}/changes.diff (optional)
+        - prior_history: ${JSON.stringify(state.quality_score_history)}
+
+        Write the score JSON to .mpl/signals/quality-score.json per
+        agents/mpl-adversarial-reviewer.md spec. Return a one-paragraph summary.`
+    })
+    ```
+
+    `hooks/mpl-quality-gate.mjs` (PostToolUse Task) reads the JSON, mutates
+    `state.adversarial_retry_count` + `state.quality_score_history[]`, and
+    surfaces a `systemMessage` describing the action:
+
+    - **PASS** (score ≥ threshold AND verdict=PASS) → reset retry, proceed to step 13.
+    - **RETRY** (score < threshold OR verdict=FAIL, retry < 3) → re-dispatch
+      `mpl-phase-runner` for ${phase.id} with the issues list as fix prompt.
+      Phase artifacts are overwritten on the retry; re-enter step 4.3.7.
+    - **ESCALATE** (retry ≥ 3) → halt the sprint, surface to the user via
+      AskUserQuestion: {force-pass, manual-fix, cancel}. On force-pass record
+      the override in `state.adversarial_overrides[]` and proceed.
+
+    Workspace tunables (`.mpl/config.json:adversarial`):
+    - `threshold` (default 0.7)
+    - `max_retries` (default 3)
+
+13. More phases → continue in `phase2-sprint`, return to 4.1
     → **Budget Check (F-33)**: See Step 4.3 extension — check session budget before starting next Phase.
-13. All done → **MANDATORY Gate System entry (Floor guarantee)**:
+14. All done → **MANDATORY Gate System entry (Floor guarantee)**:
     ```
     // This is NOT optional. ALL phases, regardless of PP-proximity, MUST pass
     // Hard 1 + Hard 2 + Hard 3 (Floor Definition, mpl-run-execute-gates.md:16).

@@ -188,6 +188,23 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
 
+## Adversarial Reviewer (P0-A, #103)
+
+Orchestrator-driven quality gate. After every phase-runner finishes, the
+orchestrator (`commands/mpl-run-execute.md` Step 4.3.7 step 12) dispatches
+`mpl-adversarial-reviewer`. The agent writes
+`.mpl/signals/quality-score.json`; `hooks/mpl-quality-gate.mjs` consumes it
+and decides pass / retry / escalate.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `adversarial.threshold` | number (0..1) | `0.7` | Minimum score required for `PASS` (combined with reviewer's verdict). Below this, the gate emits `retry` until `max_retries`. | `mpl-quality-gate.mjs` |
+| `adversarial.max_retries` | integer ≥0 | `3` | Retry budget before escalation to the user via AskUserQuestion. The retry counter resets to 0 on the next PASS. | `mpl-quality-gate.mjs` |
+
+State fields (per pipeline):
+- `adversarial_retry_count` — current consecutive retry; resets on PASS, freezes at max on escalate.
+- `quality_score_history[]` — `{phase, score, verdict, issues[], timestamp, action, retry_count}` per reviewer dispatch.
+
 ## Dogfood Mode (P0-3, #111)
 
 When developing the MPL plugin against itself (i.e. when the workspace IS the
