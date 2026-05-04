@@ -391,6 +391,51 @@ describe('mpl-fallback-grep hook integration', () => {
     assert.match(rec.file, /foo\.ts$/);
   });
 
+  it('workspace config strict (no state override) → block (#110 workspace path)', () => {
+    writeFileSync(
+      join(tmpDir, '.mpl', 'config.json'),
+      JSON.stringify({ enforcement: { strict: true } }),
+    );
+    const ts = join(tmpDir, 'foo.ts');
+    writeFileSync(ts, 'test("x", () => { expect(true).toBe(true); });\n');
+    const r = runHook('Edit', { file_path: ts, old_string: 'a', new_string: 'b' });
+    assert.strictEqual(r.decision, 'block');
+    assert.match(r.reason, /TC1/);
+  });
+
+  it('workspace per-rule anti_pattern_match:block + strict false → block', () => {
+    writeFileSync(
+      join(tmpDir, '.mpl', 'config.json'),
+      JSON.stringify({ enforcement: { strict: false, anti_pattern_match: 'block' } }),
+    );
+    const ts = join(tmpDir, 'foo.ts');
+    writeFileSync(ts, 'test("x", () => { expect(true).toBe(true); });\n');
+    const r = runHook('Edit', { file_path: ts, old_string: 'a', new_string: 'b' });
+    assert.strictEqual(r.decision, 'block');
+  });
+
+  it('workspace per-rule anti_pattern_match:off + state strict true → silent (off opt-out, hits still logged)', () => {
+    writeFileSync(
+      join(tmpDir, '.mpl', 'config.json'),
+      JSON.stringify({ enforcement: { anti_pattern_match: 'off' } }),
+    );
+    const ts = join(tmpDir, 'foo.ts');
+    writeFileSync(ts, 'test("x", () => { expect(true).toBe(true); });\n');
+    const r = runHook(
+      'Edit',
+      { file_path: ts, old_string: 'a', new_string: 'b' },
+      { enforcement: { strict: true } },
+    );
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+    // Audit trail must persist even when hook output is silent.
+    const sig = join(tmpDir, '.mpl', 'signals', 'anti-pattern-hits.jsonl');
+    assert.ok(existsSync(sig), 'hits.jsonl should exist for off-mode audit');
+    const lines = readFileSync(sig, 'utf-8').trim().split('\n').filter(Boolean);
+    assert.ok(lines.length >= 1);
+    assert.strictEqual(JSON.parse(lines[0]).action, 'off');
+  });
+
   it('MPL not active → silent', () => {
     rmSync(join(tmpDir, '.mpl'), { recursive: true });
     const ts = join(tmpDir, 'foo.ts');

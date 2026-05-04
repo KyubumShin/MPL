@@ -231,6 +231,34 @@ describe('mpl-bash-timeout hook integration', () => {
     assert.match(r.reason, /playwright/);
   });
 
+  it('workspace config strict (no state override) → block (#110 workspace path)', () => {
+    writeFileSync(
+      join(tmpDir, '.mpl', 'config.json'),
+      JSON.stringify({ enforcement: { strict: true } }),
+    );
+    const r = runHook('Bash', { command: 'vitest run' });
+    assert.strictEqual(r.decision, 'block');
+  });
+
+  it('workspace per-rule bash_timeout_violation:block + strict false → block', () => {
+    writeFileSync(
+      join(tmpDir, '.mpl', 'config.json'),
+      JSON.stringify({ enforcement: { strict: false, bash_timeout_violation: 'block' } }),
+    );
+    const r = runHook('Bash', { command: 'vitest run' });
+    assert.strictEqual(r.decision, 'block');
+  });
+
+  it('workspace per-rule bash_timeout_violation:off + state strict true → silent (off opt-out)', () => {
+    writeFileSync(
+      join(tmpDir, '.mpl', 'config.json'),
+      JSON.stringify({ enforcement: { bash_timeout_violation: 'off' } }),
+    );
+    const r = runHook('Bash', { command: 'vitest run' }, { enforcement: { strict: true } });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
   it('MPL not active → silent (no enforcement outside MPL)', () => {
     rmSync(join(tmpDir, '.mpl'), { recursive: true });
     const r = runHook('Bash', { command: 'vitest run' });

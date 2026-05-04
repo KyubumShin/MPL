@@ -15,7 +15,8 @@
  *   - verification + timeout > ceiling → block/warn (per-call budget)
  *   - verification + in range → silent allow
  *
- * Strict mode = `state.enforcement.strict === true` (#110 P0-2).
+ * Strict mode resolved by `lib/mpl-enforcement.mjs#isStrict` (#110 P0-2):
+ *   state.enforcement.strict  >  .mpl/config.json enforcement.strict  >  DEFAULT (false).
  */
 
 import { dirname, join } from 'path';
@@ -32,6 +33,9 @@ const { readStdin } = await import(
 );
 const { decideTimeout } = await import(
   pathToFileURL(join(__dirname, 'lib', 'bash-timeout-categories.mjs')).href
+);
+const { resolveRuleAction } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
 function silent() {
@@ -55,7 +59,13 @@ async function main() {
   const timeoutMs = toolInput.timeout;
 
   const state = readState(cwd) || {};
-  const strict = state.enforcement && state.enforcement.strict === true;
+  // Per-rule policy (P0-2, #110): `bash_timeout_violation` controls whether
+  // verification commands without acceptable timeouts are blocked or warned.
+  // 'off' = explicit opt-out (hook stays silent — logs intentionally absent
+  // since G1 has no signals.jsonl analogue yet).
+  const ruleAction = resolveRuleAction(cwd, state, 'bash_timeout_violation');
+  if (ruleAction === 'off') return silent();
+  const strict = ruleAction === 'block';
 
   const decision = decideTimeout(command, timeoutMs, { strict });
 

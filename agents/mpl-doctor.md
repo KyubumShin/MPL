@@ -104,6 +104,25 @@ disallowedTools: Write, Edit, Task
     - WARN if missing optional fields
     - FAIL if invalid types
 
+    **Enforcement subsection (P0-2, #110)**:
+    - Resolve effective enforcement policy via the precedence chain
+      `state.enforcement` > `.mpl/config.json:enforcement` > `config/enforcement.json` (plugin baseline).
+    - Report:
+      - `strict` — current effective boolean (origin: state | workspace | default)
+      - per-rule policy table: `direct_source_edit`, `phase_scope_violation`,
+        `missing_gate_evidence`, `missing_artifact_schema`, `anti_pattern_match`,
+        `state_invariant_violation`, `bash_timeout_violation`
+      - `overrides[]` — audit-trail entries (rule, value, reason, timestamp, source)
+        from workspace config; surface count + dump table when nonzero.
+    - WARN if a rule value is outside `{warn, block, off}`.
+    - WARN if a rule **key** is outside the known set (`strict`,
+      `direct_source_edit`, `phase_scope_violation`, `missing_gate_evidence`,
+      `missing_artifact_schema`, `anti_pattern_match`, `state_invariant_violation`,
+      `bash_timeout_violation`) — typo audit (e.g. `anti_pattern_matche` would
+      otherwise silently fall through to default warn-or-strict-block).
+    - WARN if `strict: true` but any rule is explicitly `off` (potential audit hole).
+    - FAIL if plugin baseline `config/enforcement.json` is missing or unparseable.
+
     ### Category 9: Node.js Environment
     - Check `node --version` >= 18
     - FAIL if Node.js not available (hooks won't work)

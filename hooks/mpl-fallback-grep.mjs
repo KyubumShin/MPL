@@ -5,9 +5,9 @@
  * F3 (#105). Tier 1 anti-pattern observer per commands/references/anti-patterns.md.
  * Path-extension scope filter applied BEFORE regex compile. Hits are appended to
  * `.mpl/signals/anti-pattern-hits.jsonl` for Tier 3 (#112 F5) and adversarial
- * reviewer (#103 P0-A) to consume. Strict mode (#110 P0-2:
- * `state.enforcement.strict`) escalates `severity: block` matches to actual block;
- * default emits a `system-reminder` warn.
+ * reviewer (#103 P0-A) to consume. Strict mode resolved by
+ * `lib/mpl-enforcement.mjs#isStrict` (#110 P0-2) — escalates `severity: block`
+ * matches to actual block; default emits a `system-reminder` warn.
  *
  * Self-application contract (PR #120 review): markdown / config files are filtered
  * by extension allowlist before any regex compiles. The registry doc and agent
@@ -30,6 +30,9 @@ const { readStdin } = await import(
 );
 const { loadRegistry, isInScope, scanContent, decideAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'anti-pattern-registry.mjs')).href
+);
+const { resolveRuleAction } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
 const REGISTRY_RELATIVE = 'commands/references/anti-patterns.md';
@@ -101,7 +104,11 @@ async function main() {
   catch { return silent(); }
 
   const state = readState(cwd) || {};
-  const strict = state.enforcement && state.enforcement.strict === true;
+  // Per-rule policy (P0-2, #110): `anti_pattern_match` controls whether F3
+  // surfaces the hit. 'off' = log audit-trail but never surface; 'block' =
+  // severity:block hits hard-block; 'warn' = legacy advisory output.
+  const ruleAction = resolveRuleAction(cwd, state, 'anti_pattern_match');
+  const strict = ruleAction === 'block';
 
   const allHits = [];
   const blockingDetails = [];
@@ -114,13 +121,17 @@ async function main() {
     const hits = scanContent(content, registry.patterns);
     const decision = decideAction(hits, { strict });
     const rel = workspaceRel(cwd, abs);
-    logHits(cwd, rel, hits, decision.action);
+    // Always persist signals for audit trail, even when ruleAction='off' —
+    // F5 (#112) / adversarial reviewer (#103) still consume hits.jsonl.
+    logHits(cwd, rel, hits, ruleAction === 'off' ? 'off' : decision.action);
     if (hits.length > 0) {
       allHits.push({ file: rel, hits, decision });
       if (decision.action === 'block') blockingDetails.push({ file: rel, decision });
     }
   }
 
+  // Explicit opt-out: hits logged, no hook-level surfacing.
+  if (ruleAction === 'off') return silent();
   if (allHits.length === 0) return silent();
 
   if (blockingDetails.length > 0) {

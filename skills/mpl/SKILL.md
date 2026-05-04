@@ -22,6 +22,37 @@ Do NOT proceed with phase execution before loading the protocol file matching th
 4. Respect phase gates and circuit-breaker limits.
 5. No implicit context leakage — downstream phases see only the prior phase's State Summary plus their own fresh seed.
 
+## Enforcement Mode (P0-2, #110)
+
+MPL ships with a **transitional default** — gate misses, anti-pattern hits, and
+under-spec'd Bash timeouts emit `system-reminder` warnings but do not block.
+**Strict mode** elevates every `warn` to `block` so the pipeline halts on the
+first violation.
+
+Toggle precedence (highest → lowest):
+1. `state.json` `enforcement.strict` — per-pipeline (e.g. set by `--strict` or
+   recovery flow)
+2. `.mpl/config.json` `enforcement.strict` — workspace baseline
+3. `config/enforcement.json` plugin default (`false`)
+
+Workspace example (`.mpl/config.json`):
+```json
+{
+  "enforcement": {
+    "strict": true,
+    "anti_pattern_match": "block",
+    "bash_timeout_violation": "warn"
+  }
+}
+```
+
+Per-rule policy (`warn` | `block` | `off`) overrides strict elevation:
+explicit `block` always blocks (regardless of strict); `off` always allows
+(audit hole — doctor surfaces a warning if `strict: true` and any rule is
+`off`). Default for every rule is `warn` (issue #110 §정책 — transitional;
+exp16 raises to strict). Run `/mpl:mpl-doctor` to see the effective policy
+and the `overrides[]` audit trail.
+
 ## State Machine (v0.17)
 
 ```
