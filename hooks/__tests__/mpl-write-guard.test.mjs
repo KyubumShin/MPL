@@ -249,6 +249,41 @@ describe('mpl-write-guard hook integration (P0-3, #111)', () => {
     assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL SAFETY WARNING/);
   });
 
+  it('PR #129 review #1: MultiEdit on source file is intercepted (strict → block)', () => {
+    // Reviewer flagged that the previous matcher (Edit|Write|Bash) and the
+    // hook's tool allowlist both excluded MultiEdit, letting orchestrator
+    // bypass strict mode by switching tools.
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      edits: [
+        { old_string: 'a', new_string: 'b' },
+        { old_string: 'c', new_string: 'd' },
+      ],
+    }, { enforcement: { strict: true } });
+    assert.strictEqual(r.decision, 'block');
+    assert.match(r.reason, /MPL DELEGATION NOTICE/);
+    assert.match(r.reason, /MultiEdit/);
+  });
+
+  it('MultiEdit on source file (default warn) → continue + delegation notice', () => {
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      edits: [{ old_string: 'a', new_string: 'b' }],
+    });
+    assert.strictEqual(r.continue, true);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MultiEdit/);
+  });
+
+  it('MultiEdit on allowed .mpl/ path → silent regardless of policy', () => {
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, '.mpl', 'memory', 'working.md'),
+      edits: [{ old_string: 'a', new_string: 'b' }],
+    }, { enforcement: { strict: true, direct_source_edit: 'block' } });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
   it('MPL inactive → silent regardless of policy', () => {
     rmSync(join(tmp, '.mpl'), { recursive: true });
     const r = runHook('Edit', {

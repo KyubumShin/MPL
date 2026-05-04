@@ -146,8 +146,8 @@ async function main() {
 
   const toolName = data.tool_name || data.toolName || '';
 
-  // Only intercept Edit, Write, and Bash tools
-  if (!['Edit', 'Write', 'edit', 'write', 'Bash', 'bash'].includes(toolName)) {
+  // Only intercept Edit, Write, MultiEdit, and Bash tools
+  if (!['Edit', 'Write', 'MultiEdit', 'edit', 'write', 'multiEdit', 'multiedit', 'Bash', 'bash'].includes(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
