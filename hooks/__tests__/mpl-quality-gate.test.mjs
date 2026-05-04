@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -62,6 +62,15 @@ describe('parseScore', () => {
   it('rejects non-finite score (NaN, Infinity)', () => {
     assert.strictEqual(parseScore({ ...VALID_PASS, score: NaN }), null);
     assert.strictEqual(parseScore({ ...VALID_PASS, score: Infinity }), null);
+  });
+
+  it('PR #130 review nit: rejects score outside [0, 1] bounds', () => {
+    assert.strictEqual(parseScore({ ...VALID_PASS, score: 1.5 }), null);
+    assert.strictEqual(parseScore({ ...VALID_PASS, score: -0.1 }), null);
+    assert.strictEqual(parseScore({ ...VALID_PASS, score: 2 }), null);
+    // boundary values are valid
+    assert.ok(parseScore({ ...VALID_PASS, score: 0 }));
+    assert.ok(parseScore({ ...VALID_PASS, score: 1 }));
   });
 
   it('coerces issues[] safely (filters non-strings)', () => {
@@ -148,6 +157,13 @@ describe('composeHistoryEntry', () => {
     assert.strictEqual(entry.action, 'retry');
     assert.strictEqual(entry.retry_count, 2);
   });
+
+  it('PR #130 review nit: history entry includes the decision reason', () => {
+    const decision = decideAction(VALID_FAIL, { retryCount: 0 });
+    const entry = composeHistoryEntry(VALID_FAIL, decision);
+    assert.strictEqual(entry.reason, decision.reason);
+    assert.match(entry.reason, /Retry 1\/3/);
+  });
 });
 
 /* hook integration --------------------------------------------------------- */
@@ -195,10 +211,13 @@ describe('mpl-quality-gate hook integration', () => {
     assert.strictEqual(r.suppressOutput, true);
   });
 
-  it('adversarial Task with no score file → silent (reviewer wrote nothing)', () => {
+  it('PR #130 review High #1: missing score file → systemMessage (fail-closed surface)', () => {
     const r = runHook('Task', { subagent_type: 'mpl-adversarial-reviewer', prompt: 'audit' });
     assert.strictEqual(r.continue, true);
-    assert.strictEqual(r.suppressOutput, true);
+    assert.match(r.systemMessage, /quality-score\.json is missing/);
+    assert.match(r.systemMessage, /gate-NOT-passed/);
+    // history must NOT mutate when the artifact is missing
+    assert.strictEqual(readState().quality_score_history, undefined);
   });
 
   it('adversarial Task with malformed score → systemMessage, no state mutation', () => {
@@ -253,6 +272,25 @@ describe('mpl-quality-gate hook integration', () => {
     writeScore({ ...VALID_FAIL });
     const r2 = runHook('Task', { subagent_type: 'mpl-adversarial-reviewer', prompt: 'x' });
     assert.match(r2.systemMessage, /after 1 retry/);
+  });
+
+  it('PR #130 review High #2: score file is consumed (deleted) after processing → next dispatch without write fails closed', () => {
+    // Round 1: reviewer writes → hook consumes → file gone
+    writeScore(VALID_PASS);
+    runHook('Task', { subagent_type: 'mpl-adversarial-reviewer', prompt: 'audit' });
+    assert.strictEqual(
+      existsSync(join(tmp, '.mpl', 'signals', 'quality-score.json')),
+      false,
+      'score file must be deleted after consume',
+    );
+
+    // Round 2: next reviewer dispatch fails to write — must NOT re-process round 1
+    const r2 = runHook('Task', { subagent_type: 'mpl-adversarial-reviewer', prompt: 'audit phase 2' });
+    assert.match(r2.systemMessage, /quality-score\.json is missing/);
+    // History should still have only the round-1 entry; no double-append
+    const s = readState();
+    assert.strictEqual(s.quality_score_history.length, 1);
+    assert.strictEqual(s.quality_score_history[0].phase, VALID_PASS.phase);
   });
 
   it('MPL inactive → silent', () => {

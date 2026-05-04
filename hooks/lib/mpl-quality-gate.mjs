@@ -54,8 +54,14 @@ export function parseScore(input) {
   }
   if (!obj || typeof obj !== 'object') return null;
   const phase = typeof obj.phase === 'string' ? obj.phase : null;
-  const score = typeof obj.score === 'number' && Number.isFinite(obj.score)
-    ? obj.score : null;
+  // PR #130 review nit: enforce the [0, 1] bound the prompt promises so a
+  // miscalibrated reviewer (score=2 or score=-0.5) cannot bypass the gate.
+  const score = (
+    typeof obj.score === 'number'
+    && Number.isFinite(obj.score)
+    && obj.score >= 0
+    && obj.score <= 1
+  ) ? obj.score : null;
   const verdict = obj.verdict === 'PASS' || obj.verdict === 'FAIL' ? obj.verdict : null;
   const issues = Array.isArray(obj.issues) ? obj.issues.filter((s) => typeof s === 'string') : [];
   const timestamp = typeof obj.timestamp === 'string' ? obj.timestamp : null;
@@ -143,5 +149,6 @@ export function composeHistoryEntry(parsed, decision) {
     timestamp: parsed.timestamp,
     action: decision.action,
     retry_count: decision.retryCount,
+    reason: decision.reason,
   };
 }

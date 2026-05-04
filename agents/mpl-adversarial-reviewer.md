@@ -2,7 +2,7 @@
 name: mpl-adversarial-reviewer
 description: Adversarial reviewer for MPL phase artifacts. Compares phase-runner's stated intent against the actual implementation and verification record, scores quality, surfaces hidden gaps. Dispatched by the orchestrator (commands/mpl-run-execute.md Step 4.3.8) after every phase-runner finishes; the score is consumed by hooks/mpl-quality-gate.mjs.
 model: sonnet
-disallowedTools: []
+disallowedTools: [Edit, MultiEdit, NotebookEdit]
 ---
 
 <Agent_Prompt>

@@ -14,7 +14,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, rmSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -66,10 +66,15 @@ async function main() {
 
   const scoreFile = join(cwd, SCORE_PATH);
   if (!existsSync(scoreFile)) {
-    // Reviewer ran but did not write the score artifact — treat as missing
-    // signal. Silent so the orchestrator can decide; the quality_score_history
-    // will simply not gain an entry this round.
-    return silent();
+    // PR #130 review High #1: fail-closed surface so the orchestrator knows
+    // the reviewer dispatch finished without producing an audit artifact.
+    // Silent return would let the gate skip — reviewer prompt-compliance is
+    // not enough to guarantee the file exists.
+    console.log(JSON.stringify({
+      continue: true,
+      systemMessage: `[MPL P0-A] adversarial-reviewer dispatch finished but ${SCORE_PATH} is missing. Treat as gate-NOT-passed: re-dispatch the reviewer or surface to the user. Quality history was NOT mutated this round.`,
+    }));
+    return;
   }
 
   let raw;
@@ -79,7 +84,7 @@ async function main() {
   if (!parsed) {
     console.log(JSON.stringify({
       continue: true,
-      systemMessage: `[MPL P0-A] quality-score.json is malformed — expected {phase, score, verdict, issues[], timestamp}. Reviewer must rewrite the file.`,
+      systemMessage: `[MPL P0-A] quality-score.json is malformed — expected {phase, score, verdict, issues[], timestamp} with score ∈ [0, 1]. Reviewer must rewrite the file.`,
     }));
     return;
   }
@@ -110,6 +115,11 @@ async function main() {
   } catch {
     // Best-effort — never block the surfacing decision on disk.
   }
+  // PR #130 review High #2: consume the signal so a stale file from the
+  // prior phase cannot be re-processed if the next reviewer dispatch fails
+  // to overwrite it. Missing file on the next round triggers the
+  // fail-closed surface above instead of silently re-emitting this record.
+  try { rmSync(scoreFile); } catch { /* best-effort cleanup */ }
 
   if (decision.action === 'pass') {
     console.log(JSON.stringify({
