@@ -42,6 +42,16 @@
         ]
       },
       {
+        "matcher": "Task|Agent|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-state-invariant.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write",
         "hooks": [
           {
@@ -239,6 +249,11 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-phase-controller.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-state-invariant.mjs\"",
+            "timeout": 3
           }
         ]
       }
