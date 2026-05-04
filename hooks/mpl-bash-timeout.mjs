@@ -15,7 +15,8 @@
  *   - verification + timeout > ceiling → block/warn (per-call budget)
  *   - verification + in range → silent allow
  *
- * Strict mode = `state.enforcement.strict === true` (#110 P0-2).
+ * Strict mode resolved by `lib/mpl-enforcement.mjs#isStrict` (#110 P0-2):
+ *   state.enforcement.strict  >  .mpl/config.json enforcement.strict  >  DEFAULT (false).
  */
 
 import { dirname, join } from 'path';
@@ -32,6 +33,9 @@ const { readStdin } = await import(
 );
 const { decideTimeout } = await import(
   pathToFileURL(join(__dirname, 'lib', 'bash-timeout-categories.mjs')).href
+);
+const { isStrict } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
 function silent() {
@@ -55,7 +59,7 @@ async function main() {
   const timeoutMs = toolInput.timeout;
 
   const state = readState(cwd) || {};
-  const strict = state.enforcement && state.enforcement.strict === true;
+  const strict = isStrict(cwd, state);
 
   const decision = decideTimeout(command, timeoutMs, { strict });
 

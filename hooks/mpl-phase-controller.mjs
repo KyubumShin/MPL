@@ -31,6 +31,11 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+// Enforcement policy resolver (P0-2, #110)
+const { isStrict } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
+);
+
 /**
  * Check PLAN.md checkbox completion status
  */
@@ -374,12 +379,9 @@ async function main() {
     }
 
     case 'phase3-gate': {
-      // Read enforcement strictness from `state.enforcement.strict` (nested), aligned
-      // with #110 P0-2 schema (`config/enforcement.json: { enforcement: { strict, ... }}`).
-      // Until #110 lands the config plumbing, the field is undefined → non-strict
-      // (legacy fallback with caller-side ⚠ warn). This nested form is forward-compatible
-      // with #110 so this branch will not become dead code on schema land.
-      const enforcementStrict = state.enforcement && state.enforcement.strict === true;
+      // Strict toggle resolved through P0-2 (#110) precedence chain:
+      //   state.enforcement.strict  >  .mpl/config.json enforcement.strict  >  DEFAULT (false).
+      const enforcementStrict = isStrict(cwd, state);
       const gateResults = checkGateResults(state, { strict: enforcementStrict });
 
       const fallbackWarn = gateResults.source === 'legacy'

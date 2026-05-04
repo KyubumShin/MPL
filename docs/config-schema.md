@@ -188,6 +188,28 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
 
+## Enforcement (P0-2, #110)
+
+Strict-mode toggle and per-rule policy. Source-of-truth:
+`hooks/lib/mpl-config.mjs#ENFORCEMENT_DEFAULTS`. Plugin baseline mirror:
+`config/enforcement.json`. Resolver: `hooks/lib/mpl-enforcement.mjs`.
+
+Precedence (highest → lowest): `state.json:enforcement` > `.mpl/config.json:enforcement` > plugin baseline.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `enforcement.strict` | boolean | `false` | When `true`, every per-rule `warn` elevates to `block` at the consuming hook. | `mpl-enforcement.mjs` |
+| `enforcement.direct_source_edit` | `"warn" \| "block" \| "off"` | `"warn"` | Phase-runner edits outside declared scope. Consumed by `mpl-write-guard.mjs` (#111). | `mpl-write-guard.mjs` |
+| `enforcement.phase_scope_violation` | same | `"warn"` | Cross-phase artifact authorship. | `mpl-write-guard.mjs` |
+| `enforcement.missing_gate_evidence` | same | `"block"` | Gate boolean nonzero without structured machine evidence. Hard-pinned `block` even when strict is off. | `mpl-phase-controller.mjs` |
+| `enforcement.missing_artifact_schema` | same | `"warn"` | `decomposition.yaml`/`state-summary.md` failing schema (#115). | `mpl-state-invariant.mjs` |
+| `enforcement.anti_pattern_match` | same | `"warn"` | F3 fallback-grep severity-block hit. | `mpl-fallback-grep.mjs` |
+| `enforcement.state_invariant_violation` | same | `"warn"` | G3+H1 4-way desync (#108). | `mpl-state-invariant.mjs` |
+| `enforcement.bash_timeout_violation` | same | `"warn"` | G1 verification command timeout outside category bounds. | `mpl-bash-timeout.mjs` |
+| `overrides[]` | array of `{rule, value, reason, timestamp, source}` | `[]` | Audit trail entries. Doctor surfaces count and warns when nonzero. | `mpl-doctor.md` |
+
+**Per-pipeline override** — recovery / debug flows can pin `state.json` `enforcement.*` for a single pipeline run; that wins over workspace and plugin baseline.
+
 ## MCP Session Cache (P1-3b, #79)
 
 Per-project override for the global `~/.mpl/cache/sessions.json` TTL. The cache backs `mpl_score_ambiguity`, `mpl_classify_feature_scope`, and `mpl_diagnose_e2e_failure` — extending the resumed-session prompt cache across MCP server restarts.
@@ -214,6 +236,11 @@ Per-project override for the global `~/.mpl/cache/sessions.json` TTL. The cache 
   "auto_pr": {
     "enabled": false,
     "base_branch": "auto"
+  },
+  "enforcement": {
+    "strict": false,
+    "anti_pattern_match": "warn",
+    "bash_timeout_violation": "warn"
   }
 }
 ```

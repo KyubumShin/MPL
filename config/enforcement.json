@@ -1,0 +1,14 @@
+{
+  "_comment": "MPL P0-2 (#110) — plugin-shipped enforcement baseline. Workspace overrides go to .mpl/config.json under the same `enforcement` key. Per-pipeline overrides go to state.json `enforcement` (highest precedence). Source of truth for behaviour: hooks/lib/mpl-config.mjs DEFAULTS.enforcement (this JSON mirrors it for human reference and tooling).",
+  "enforcement": {
+    "strict": false,
+    "direct_source_edit": "warn",
+    "phase_scope_violation": "warn",
+    "missing_gate_evidence": "block",
+    "missing_artifact_schema": "warn",
+    "anti_pattern_match": "warn",
+    "state_invariant_violation": "warn",
+    "bash_timeout_violation": "warn"
+  },
+  "overrides": []
+}

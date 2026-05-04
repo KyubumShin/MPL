@@ -5,9 +5,9 @@
  * F3 (#105). Tier 1 anti-pattern observer per commands/references/anti-patterns.md.
  * Path-extension scope filter applied BEFORE regex compile. Hits are appended to
  * `.mpl/signals/anti-pattern-hits.jsonl` for Tier 3 (#112 F5) and adversarial
- * reviewer (#103 P0-A) to consume. Strict mode (#110 P0-2:
- * `state.enforcement.strict`) escalates `severity: block` matches to actual block;
- * default emits a `system-reminder` warn.
+ * reviewer (#103 P0-A) to consume. Strict mode resolved by
+ * `lib/mpl-enforcement.mjs#isStrict` (#110 P0-2) — escalates `severity: block`
+ * matches to actual block; default emits a `system-reminder` warn.
  *
  * Self-application contract (PR #120 review): markdown / config files are filtered
  * by extension allowlist before any regex compiles. The registry doc and agent
@@ -30,6 +30,9 @@ const { readStdin } = await import(
 );
 const { loadRegistry, isInScope, scanContent, decideAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'anti-pattern-registry.mjs')).href
+);
+const { isStrict } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
 const REGISTRY_RELATIVE = 'commands/references/anti-patterns.md';
@@ -101,7 +104,7 @@ async function main() {
   catch { return silent(); }
 
   const state = readState(cwd) || {};
-  const strict = state.enforcement && state.enforcement.strict === true;
+  const strict = isStrict(cwd, state);
 
   const allHits = [];
   const blockingDetails = [];
