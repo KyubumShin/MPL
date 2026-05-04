@@ -227,7 +227,8 @@ disallowedTools: Write, Edit, Task
     ```
 
     ### Category 14: Meta-Self Audit (F4, #106)
-    - **Scope**: `agents/mpl-doctor.md`, `hooks/mpl-doctor*.mjs`, `hooks/lib/mpl-meta-self.mjs`
+    - **Scope**: `agents/mpl-doctor.md`, `skills/mpl-doctor/SKILL.md`, `hooks/mpl-doctor*.mjs`
+      (Note: `hooks/lib/mpl-meta-self.mjs` is the audit *engine*, intentionally NOT a doctor surface — it owns the patterns and would self-match its own definitions if scanned.)
     - Closes the audit hole where doctor previously skipped its own surface
       while telling the rest of the codebase to comply (R-DOCTOR-SELF-FALLBACK,
       R-DOCTOR-SCOPE-LEAK).

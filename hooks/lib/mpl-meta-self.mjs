@@ -32,6 +32,7 @@ import { loadRegistry, scanContent } from './anti-pattern-registry.mjs';
  */
 const DOCTOR_SELF_SOURCES = [
   'agents/mpl-doctor.md',
+  'skills/mpl-doctor/SKILL.md',
 ];
 
 const DOCTOR_LIB_GLOBS = [
@@ -60,6 +61,33 @@ export function enumerateDoctorSources(pluginRoot) {
   const dynamic = DOCTOR_LIB_GLOBS.flatMap((spec) => listMatchingFiles(pluginRoot, spec));
   // De-dupe, preserve relative paths.
   return [...new Set([...explicit, ...dynamic])];
+}
+
+/* ────────────────────────── Markdown prose stripper ──────────────────────── */
+
+/**
+ * Reduce markdown content to just its fenced code blocks (```...```) so audits
+ * ignore inline-code reference prose. Without this, doctor documenting its own
+ * findings (e.g. mentioning `?? ''` as a v3.10 finding, or `if (file.endsWith
+ * ('mpl-doctor.md')) skip` as an example self-exemption shape) would self-match
+ * every audit run. Lines outside fenced blocks are blanked to keep line numbers
+ * intact for surface messages.
+ *
+ * @param {string} markdown
+ * @returns {string}
+ */
+function stripMarkdownProse(markdown) {
+  const lines = markdown.split('\n');
+  let inFence = false;
+  return lines
+    .map((line) => {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        return ''; // fence delimiter itself is not code
+      }
+      return inFence ? line : '';
+    })
+    .join('\n');
 }
 
 /* ────────────────────────── Self-exemption detection ──────────────────────── */
@@ -95,11 +123,14 @@ export function detectSelfExemption(pluginRoot, sources = null) {
     const abs = join(pluginRoot, rel);
     let content;
     try { content = readFileSync(abs, 'utf-8'); } catch { continue; }
-    const lines = content.split('\n');
+    // For markdown surfaces (agents/mpl-doctor.md, skills/mpl-doctor/SKILL.md),
+    // only fenced code blocks are inspected — Category 14's own prose mentions
+    // example code shapes like `if (file.endsWith('mpl-doctor.md')) skip` and
+    // those would otherwise self-match. Real .mjs source is scanned in full.
+    const scanText = rel.endsWith('.md') ? stripMarkdownProse(content) : content;
+    const lines = scanText.split('\n');
     for (const pat of SELF_EXEMPTION_PATTERNS) {
       lines.forEach((line, i) => {
-        // Skip the registry lines that *describe* the patterns (this file).
-        if (rel.endsWith('mpl-meta-self.mjs')) return;
         const m = line.match(pat.regex);
         if (m) {
           hits.push({
@@ -173,30 +204,6 @@ export function validateScopeManifest(pluginRoot) {
 }
 
 /* ────────────────────────── Anti-pattern self-audit ───────────────────────── */
-
-/**
- * Reduce markdown content to just its fenced code blocks (```...```) so the
- * anti-pattern audit ignores inline-code reference prose. Without this, doctor
- * documenting its own findings (e.g. mentioning `?? ''` as a v3.10 finding) would
- * self-match every audit run. Lines outside fenced blocks are blanked out so
- * line numbers stay intact for surface messages.
- *
- * @param {string} markdown
- * @returns {string}
- */
-function stripMarkdownProse(markdown) {
-  const lines = markdown.split('\n');
-  let inFence = false;
-  return lines
-    .map((line) => {
-      if (/^\s*```/.test(line)) {
-        inFence = !inFence;
-        return ''; // fence delimiter itself is not code
-      }
-      return inFence ? line : '';
-    })
-    .join('\n');
-}
 
 /**
  * Apply the F3 anti-pattern registry against doctor's own source files and
@@ -277,9 +284,13 @@ export function inverseAudit(pluginRoot, opts = {}) {
   try { registry = loadRegistry(registryPath); }
   catch { return []; }
 
-  // Audit anything code-shaped: .mjs, .ts, .py, .sh — even if F3's runtime
-  // scope skips them in markdown-heavy directories.
-  const auditExts = new Set(['.mjs', '.ts', '.tsx', '.js', '.py', '.sh']);
+  // Single source for which extensions count as code: F3 registry's own
+  // `Scope` allowlist. Keeps the inverse audit in lockstep with F3's runtime
+  // scope when the registry adds languages (Rust / Go / Java / Swift / SQL /
+  // ...). Without this we previously hard-coded a 6-ext subset that missed
+  // anything beyond the JS/TS/Python/shell core — false negatives in
+  // multi-language codebases.
+  const auditExts = registry.scope?.allowed ?? new Set(['.mjs', '.ts', '.py', '.sh']);
   const out = [];
   for (const dir of INVERSE_AUDIT_DIRS) {
     const absDir = join(pluginRoot, dir);

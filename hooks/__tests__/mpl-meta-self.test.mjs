@@ -77,6 +77,11 @@ describe('enumerateDoctorSources', () => {
     assert.deepStrictEqual(enumerateDoctorSources(tmp), ['agents/mpl-doctor.md']);
   });
 
+  it('picks up skills/mpl-doctor/SKILL.md (PR #127 review #1 fix)', () => {
+    scaffold(tmp, { 'skills/mpl-doctor/SKILL.md': '# doctor skill' });
+    assert.ok(enumerateDoctorSources(tmp).includes('skills/mpl-doctor/SKILL.md'));
+  });
+
   it('discovers hooks/mpl-doctor*.mjs and hooks/lib/mpl-doctor*.mjs', () => {
     scaffold(tmp, {
       'agents/mpl-doctor.md': '# doctor',
@@ -149,6 +154,30 @@ describe('detectSelfExemption', () => {
     // Plain English prose inside doctor markdown should not trip the
     // narrow code-shape patterns.
     assert.strictEqual(hits.length, 0);
+  });
+
+  it('does NOT match code-shaped examples wrapped in inline backtick prose (PR #127 issue #1)', () => {
+    // Category 14 itself documents `if (file.endsWith('mpl-doctor.md')) skip`
+    // as an example. Without fenced-code-only scanning of markdown, the
+    // detector self-matches every audit run.
+    scaffold(tmp, {
+      'agents/mpl-doctor.md':
+        '### Category 14: Meta-Self Audit\n'
+        + '- example self-exemption shape: `if (file.endsWith(\'mpl-doctor.md\')) skip`\n'
+        + '- another: `files.filter(f => f !== \'agents/mpl-doctor.md\')` form\n',
+    });
+    const hits = detectSelfExemption(tmp);
+    assert.strictEqual(hits.length, 0);
+  });
+
+  it('DOES match code-shaped patterns inside fenced code blocks of markdown', () => {
+    scaffold(tmp, {
+      'agents/mpl-doctor.md':
+        '```js\nif (file.endsWith(\'mpl-doctor.md\')) return;\n```\n',
+    });
+    const hits = detectSelfExemption(tmp);
+    assert.strictEqual(hits.length, 1);
+    assert.strictEqual(hits[0].id, 'self-exempt-conditional');
   });
 });
 
@@ -322,6 +351,26 @@ describe('mpl-doctor-meta-self CLI', () => {
     assert.ok(Array.isArray(r.anti_pattern_hits));
     assert.ok(r.scope_manifest && Array.isArray(r.scope_manifest.categories));
     assert.ok(Array.isArray(r.inverse_audit_hits));
+  });
+
+  it('real plugin root self-run is CLEAN (PR #127 issue #1 regression guard)', () => {
+    // Beyond array-type checks: F4 must also keep the actual MPL plugin clean.
+    // Otherwise doctor reports a permanent warning state on its own surface.
+    const out = execFileSync('node', [CLI_PATH, REAL_PLUGIN_ROOT], { encoding: 'utf-8' });
+    const r = JSON.parse(out);
+    assert.strictEqual(
+      r.self_exemption_hits.length,
+      0,
+      `self_exemption_hits must be empty; got: ${JSON.stringify(r.self_exemption_hits, null, 2)}`,
+    );
+    assert.strictEqual(
+      r.scope_manifest.missing.length,
+      0,
+      `scope_manifest.missing must be empty; got: ${JSON.stringify(r.scope_manifest.missing, null, 2)}`,
+    );
+    // Sanity: declared Category 14 scope should be reflected in actual enumeration.
+    assert.ok(r.doctor_sources.includes('agents/mpl-doctor.md'));
+    assert.ok(r.doctor_sources.includes('skills/mpl-doctor/SKILL.md'));
   });
 
   it('exits non-zero when pluginRoot is missing', () => {
