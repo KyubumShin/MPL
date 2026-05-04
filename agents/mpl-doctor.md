@@ -255,11 +255,13 @@ disallowedTools: Write, Edit, Task
     ```
 
     **Verification tool paths manifest** (`config/verification-tool-paths.json`):
-    workspace declares which paths each verification command (vitest, eslint,
-    tsc, ...) covers. F5 cross-references this against `mpl-bash-timeout`
-    categories so a tool listed here without a category — or vice versa —
-    surfaces as drift. WARN per drift entry. (Cross-check is intentionally
-    advisory; the matched scope itself is workspace-defined.)
+    workspace declares which paths each verification command covers. The
+    manifest ships as a seed in #112; the programmatic cross-check against
+    `mpl-bash-timeout` categories is **not implemented yet** — it requires
+    array-aware extraction (the manifest's `tools.<name>.match` and
+    `tools.<name>.scope` are arrays which `extractDeclarations` currently
+    skips). Tracked as a follow-up; until then Category 15 surfaces only
+    declaration drift over scalar config files.
 
     ### Category 14: Meta-Self Audit (F4, #106)
     - **Scope**: `agents/mpl-doctor.md`, `skills/mpl-doctor/SKILL.md`, `hooks/mpl-doctor*.mjs`

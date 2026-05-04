@@ -82,7 +82,7 @@ describe('extractDeclarations', () => {
 /* findReferences ----------------------------------------------------------- */
 
 describe('findReferences', () => {
-  it('finds the leaf key as a word boundary match in code files', () => {
+  it('matches member-access pattern (cfg.min_tests)', () => {
     scaffold({
       'src/app.ts': 'if (cfg.min_tests >= 50) { ... }\n',
       'config/c.json': '{"min_tests": 50}',
@@ -90,6 +90,23 @@ describe('findReferences', () => {
     const refs = findReferences(tmp, 'min_tests');
     assert.strictEqual(refs.length, 1);
     assert.match(refs[0].file, /^src\/app\.ts$/);
+  });
+
+  it('matches subscript-access pattern', () => {
+    scaffold({
+      'src/a.ts': 'cfg["min_tests"]',
+      'src/b.ts': 'cfg[\'min_tests\']',
+    });
+    const refs = findReferences(tmp, 'min_tests');
+    assert.strictEqual(refs.length, 2);
+  });
+
+  it('matches function-arg string-literal pattern', () => {
+    scaffold({
+      'src/a.ts': "resolveRuleAction(cwd, state, 'min_tests')\n",
+    });
+    const refs = findReferences(tmp, 'min_tests');
+    assert.strictEqual(refs.length, 1);
   });
 
   it('uses the leaf for nested keys', () => {
@@ -111,23 +128,53 @@ describe('findReferences', () => {
 
   it('skips node_modules / .git / build output', () => {
     scaffold({
-      'node_modules/lib/index.mjs': 'expected_tests',
-      'dist/output.js': 'expected_tests',
-      'src/main.ts': 'expected_tests',
+      'node_modules/lib/index.mjs': 'cfg.expected_tests\n',
+      'dist/output.js': 'cfg.expected_tests\n',
+      'src/main.ts': 'cfg.expected_tests\n',
     });
     const refs = findReferences(tmp, 'expected_tests');
     assert.strictEqual(refs.length, 1);
     assert.match(refs[0].file, /^src\/main\.ts$/);
   });
 
-  it('respects word-boundary (no substring match)', () => {
+  it('PR #131 review: skips test files (__tests__, *.test.*, *.spec.*)', () => {
     scaffold({
-      'src/main.ts': 'tests = 50; expected_total = 60;\n',
+      'hooks/__tests__/foo.test.mjs': 'cfg.min_tests\n',
+      'src/foo.spec.ts': 'cfg.min_tests\n',
+      'src/bar.test.ts': 'cfg.min_tests\n',
+    });
+    const refs = findReferences(tmp, 'min_tests');
+    assert.strictEqual(refs.length, 0, 'test files must not count as consumers');
+  });
+
+  it('PR #131 review: skips property-check own implementation', () => {
+    scaffold({
+      'hooks/lib/mpl-property-check.mjs': "// example: cfg.expected_tests\n",
+      'hooks/mpl-property-check.mjs': "console.log('expected_tests')\n",
+    });
+    const refs = findReferences(tmp, 'expected_tests');
+    assert.strictEqual(refs.length, 0, 'property-check own files describe keys, not consume them');
+  });
+
+  it('PR #131 review: bare word in prose / import path is NOT a reference', () => {
+    scaffold({
+      // import path — `\.strict\b` member-access wouldn't match here, but the
+      // old word-boundary regex did
+      'src/a.ts': "import assert from 'node:assert/strict';\n",
+      // prose-style comment
+      'src/b.ts': "// strict mode: see docs\nconst x = 1;\n",
+    });
+    const refs = findReferences(tmp, 'strict');
+    assert.strictEqual(refs.length, 0);
+  });
+
+  it('PR #131 review: standalone identifier (not member/subscript/string-arg) is NOT used', () => {
+    scaffold({
+      'src/a.ts': 'const tests = 50; expected_total = 60;\n',
     });
     const refs = findReferences(tmp, 'tests');
-    assert.strictEqual(refs.length, 1, 'should match standalone "tests" word');
-    const refs2 = findReferences(tmp, 'expected');
-    assert.strictEqual(refs2.length, 0, 'should not match prefix of expected_total');
+    assert.strictEqual(refs.length, 0,
+      'bare assignment should NOT count — only code-shape access patterns do');
   });
 });
 
@@ -137,7 +184,7 @@ describe('runPropertyCheck', () => {
   it('partitions declarations into used/unused', () => {
     scaffold({
       'config/c.json': JSON.stringify({ min_tests: 50, expected_tests: 100 }),
-      'src/used.ts': 'if (min_tests >= 1) {}\n',
+      'src/used.ts': 'if (cfg.min_tests >= 1) {}\n',
     });
     const r = runPropertyCheck(tmp, 'config/c.json');
     assert.strictEqual(r.declarations.length, 2);
@@ -153,8 +200,8 @@ describe('runPropertyCheck', () => {
   it('used entries carry references[]', () => {
     scaffold({
       'config/c.json': JSON.stringify({ flag: true }),
-      'src/a.ts': 'flag\n',
-      'src/b.ts': 'flag\n',
+      'src/a.ts': 'cfg.flag\n',
+      'src/b.ts': 'cfg.flag\n',
     });
     const r = runPropertyCheck(tmp, 'config/c.json');
     assert.strictEqual(r.used[0].references.length, 2);
@@ -202,19 +249,25 @@ describe('runBatch + CLI', () => {
     assert.ok(DEFAULT_CONFIG_TARGETS.includes('.mpl/config.json'));
   });
 
-  it('real-root self-run shows zero unused for shipped enforcement.json', () => {
-    // Regression guard: any future enforcement.json key that no code
-    // references will surface here so the audit catches drift.
+  it('real-root self-run: only known forward-compat keys may be unused', () => {
+    // Regression guard. The allow-list documents declarations whose consumer
+    // is shipped by a later issue — when that issue lands, the key drops out
+    // of unused naturally and any NEW unused declarations surface here.
+    const EXPECTED_UNUSED = [
+      'enforcement.missing_artifact_schema', // P0-K (#115) ships the consumer
+    ];
     const out = execFileSync('node', [CLI_PATH, REAL_PLUGIN_ROOT, 'config/enforcement.json'], {
       encoding: 'utf-8',
     });
     const r = JSON.parse(out);
     const cfg = r.configs.find((c) => c.configPath === 'config/enforcement.json');
     assert.ok(cfg, 'enforcement.json result expected');
-    assert.strictEqual(
-      cfg.unused.length,
-      0,
-      `enforcement.json should have no unused declarations; got: ${JSON.stringify(cfg.unused.map((u) => u.key))}`,
+    const surprises = cfg.unused
+      .map((u) => u.key)
+      .filter((k) => !EXPECTED_UNUSED.includes(k));
+    assert.deepStrictEqual(
+      surprises, [],
+      `enforcement.json has new unused declarations not on the allow-list: ${surprises.join(', ')}`,
     );
   });
 });

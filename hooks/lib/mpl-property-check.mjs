@@ -102,15 +102,30 @@ function walkCodeFiles(rootDir) {
 }
 
 /**
+ * Files whose presence shouldn't count as a config-key reference. Test files
+ * exist precisely because the config exists — counting them would render F5
+ * blind to the config-as-decoration pattern (PR #131 review #1). The
+ * property-check implementation itself is excluded for the same reason: it
+ * mentions arbitrary keys in prose and string examples.
+ */
+const NON_CONSUMER_FILE_RE = /(?:^|\/)(?:__tests__\/|.+\.(?:test|spec)\.[^/]+|mpl-property-check\.(?:mjs|md))/;
+
+/**
  * Find references to a declaration key inside the code files of `rootDir`.
- * The key is checked as the trailing dot-segment ('min_tests') so that nested
- * config keys like 'gates.min_tests' still surface references that read just
- * `obj.min_tests`. Configs themselves are skipped (only CODE_EXTS files are
- * scanned).
+ * The key is reduced to its trailing dot-segment ('min_tests') and matched by
+ * code-shape patterns only:
  *
- * Reference detection is intentionally lightweight: word-boundary grep for
- * the leaf key. False positives (a function named `min_tests` unrelated to
- * the config) are accepted in exchange for a deterministic Tier 3 signal.
+ *   - member access:  `obj.min_tests`
+ *   - subscript:      `obj['min_tests']` / `obj["min_tests"]`
+ *   - function arg:   `resolveRuleAction(cwd, state, 'min_tests')`
+ *
+ * Word-boundary grep alone (PR #131 review #1) is too permissive: it matches
+ * unrelated identifiers, prose, comments mentioning the key, import paths
+ * like `node:assert/strict`, etc. Code-shape access is what an actual
+ * consumer looks like.
+ *
+ * Test files and the property-check implementation are also excluded — those
+ * surfaces mention keys without consuming them.
  *
  * @param {string} rootDir
  * @param {string} key - dot-notation key, e.g. 'gates.min_tests'
@@ -120,15 +135,21 @@ function walkCodeFiles(rootDir) {
 export function findReferences(rootDir, key, opts = {}) {
   const leaf = key.split('.').pop();
   if (!leaf) return [];
+  const e = escapeRegex(leaf);
+  const patterns = [
+    new RegExp(`\\.${e}\\b`),                         // member access
+    new RegExp(`\\[\\s*['"\`]${e}['"\`]\\s*\\]`),     // subscript
+    new RegExp(`\\([^)]*['"\`]${e}['"\`][^)]*\\)`),   // function-arg string literal
+  ];
   const refs = [];
-  const re = new RegExp(`\\b${escapeRegex(leaf)}\\b`);
-  const files = opts.codeFiles ?? walkCodeFiles(rootDir);
+  const files = (opts.codeFiles ?? walkCodeFiles(rootDir))
+    .filter((abs) => !NON_CONSUMER_FILE_RE.test(relative(rootDir, abs)));
   for (const abs of files) {
     let content;
     try { content = readFileSync(abs, 'utf-8'); } catch { continue; }
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      if (re.test(lines[i])) {
+      if (patterns.some((p) => p.test(lines[i]))) {
         refs.push({ file: relative(rootDir, abs), line: i + 1 });
       }
     }
