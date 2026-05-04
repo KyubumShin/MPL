@@ -4,7 +4,7 @@
     "strict": false,
     "direct_source_edit": "warn",
     "phase_scope_violation": "warn",
-    "missing_gate_evidence": "block",
+    "missing_gate_evidence": "warn",
     "missing_artifact_schema": "warn",
     "anti_pattern_match": "warn",
     "state_invariant_violation": "warn",

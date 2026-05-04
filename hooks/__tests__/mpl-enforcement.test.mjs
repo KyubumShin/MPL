@@ -25,7 +25,9 @@ describe('getEnforcementPolicy', () => {
   it('returns DEFAULTS when no config and no state', () => {
     const p = getEnforcementPolicy(tmp, null);
     assert.strictEqual(p.strict, false);
-    assert.strictEqual(p.missing_gate_evidence, 'block');
+    // Per #110 §정책: every rule defaults to 'warn' in v0.18.0 (transitional);
+    // exp16 / workspace opt-in raises individual rules to 'block'.
+    assert.strictEqual(p.missing_gate_evidence, 'warn');
     assert.strictEqual(p.anti_pattern_match, 'warn');
     assert.strictEqual(p.bash_timeout_violation, 'warn');
   });
@@ -42,7 +44,7 @@ describe('getEnforcementPolicy', () => {
     assert.strictEqual(p.strict, true);
     assert.strictEqual(p.anti_pattern_match, 'block');
     // Untouched fields fall back to baseline
-    assert.strictEqual(p.missing_gate_evidence, 'block');
+    assert.strictEqual(p.missing_gate_evidence, 'warn');
   });
 
   it('state.enforcement overrides config (per-pipeline precedence)', () => {
@@ -68,7 +70,7 @@ describe('getEnforcementPolicy', () => {
     writeFileSync(join(tmp, '.mpl', 'config.json'), '{ this is not json');
     const p = getEnforcementPolicy(tmp, null);
     assert.strictEqual(p.strict, false);
-    assert.strictEqual(p.missing_gate_evidence, 'block');
+    assert.strictEqual(p.missing_gate_evidence, 'warn');
   });
 });
 
@@ -100,8 +102,9 @@ describe('isStrict', () => {
 });
 
 describe('resolveRuleAction', () => {
-  it('returns explicit block regardless of strict', () => {
-    // missing_gate_evidence is hard-pinned 'block' in DEFAULTS
+  it('returns explicit block regardless of strict (workspace opt-in)', () => {
+    // No rule is hard-pinned in DEFAULTS — `block` only when explicitly set.
+    writeUserConfig({ enforcement: { strict: false, missing_gate_evidence: 'block' } });
     assert.strictEqual(resolveRuleAction(tmp, null, 'missing_gate_evidence'), 'block');
     assert.strictEqual(
       resolveRuleAction(tmp, { enforcement: { strict: false } }, 'missing_gate_evidence'),

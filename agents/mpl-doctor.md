@@ -115,6 +115,11 @@ disallowedTools: Write, Edit, Task
       - `overrides[]` — audit-trail entries (rule, value, reason, timestamp, source)
         from workspace config; surface count + dump table when nonzero.
     - WARN if a rule value is outside `{warn, block, off}`.
+    - WARN if a rule **key** is outside the known set (`strict`,
+      `direct_source_edit`, `phase_scope_violation`, `missing_gate_evidence`,
+      `missing_artifact_schema`, `anti_pattern_match`, `state_invariant_violation`,
+      `bash_timeout_violation`) — typo audit (e.g. `anti_pattern_matche` would
+      otherwise silently fall through to default warn-or-strict-block).
     - WARN if `strict: true` but any rule is explicitly `off` (potential audit hole).
     - FAIL if plugin baseline `config/enforcement.json` is missing or unparseable.
 

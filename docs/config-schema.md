@@ -201,7 +201,7 @@ Precedence (highest → lowest): `state.json:enforcement` > `.mpl/config.json:en
 | `enforcement.strict` | boolean | `false` | When `true`, every per-rule `warn` elevates to `block` at the consuming hook. | `mpl-enforcement.mjs` |
 | `enforcement.direct_source_edit` | `"warn" \| "block" \| "off"` | `"warn"` | Phase-runner edits outside declared scope. Consumed by `mpl-write-guard.mjs` (#111). | `mpl-write-guard.mjs` |
 | `enforcement.phase_scope_violation` | same | `"warn"` | Cross-phase artifact authorship. | `mpl-write-guard.mjs` |
-| `enforcement.missing_gate_evidence` | same | `"block"` | Gate boolean nonzero without structured machine evidence. Hard-pinned `block` even when strict is off. | `mpl-phase-controller.mjs` |
+| `enforcement.missing_gate_evidence` | same | `"warn"` | Zero structured gate evidence (legacy boolean fallback). Default `warn` per #110 transitional policy — workspace can pin `block` to halt phase3-gate transition until `mpl-gate-recorder` writes structured exits. | `mpl-phase-controller.mjs` |
 | `enforcement.missing_artifact_schema` | same | `"warn"` | `decomposition.yaml`/`state-summary.md` failing schema (#115). | `mpl-state-invariant.mjs` |
 | `enforcement.anti_pattern_match` | same | `"warn"` | F3 fallback-grep severity-block hit. | `mpl-fallback-grep.mjs` |
 | `enforcement.state_invariant_violation` | same | `"warn"` | G3+H1 4-way desync (#108). | `mpl-state-invariant.mjs` |

@@ -31,7 +31,7 @@ const { readStdin } = await import(
 const { loadRegistry, isInScope, scanContent, decideAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'anti-pattern-registry.mjs')).href
 );
-const { isStrict } = await import(
+const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
@@ -104,7 +104,11 @@ async function main() {
   catch { return silent(); }
 
   const state = readState(cwd) || {};
-  const strict = isStrict(cwd, state);
+  // Per-rule policy (P0-2, #110): `anti_pattern_match` controls whether F3
+  // surfaces the hit. 'off' = log audit-trail but never surface; 'block' =
+  // severity:block hits hard-block; 'warn' = legacy advisory output.
+  const ruleAction = resolveRuleAction(cwd, state, 'anti_pattern_match');
+  const strict = ruleAction === 'block';
 
   const allHits = [];
   const blockingDetails = [];
@@ -117,13 +121,17 @@ async function main() {
     const hits = scanContent(content, registry.patterns);
     const decision = decideAction(hits, { strict });
     const rel = workspaceRel(cwd, abs);
-    logHits(cwd, rel, hits, decision.action);
+    // Always persist signals for audit trail, even when ruleAction='off' —
+    // F5 (#112) / adversarial reviewer (#103) still consume hits.jsonl.
+    logHits(cwd, rel, hits, ruleAction === 'off' ? 'off' : decision.action);
     if (hits.length > 0) {
       allHits.push({ file: rel, hits, decision });
       if (decision.action === 'block') blockingDetails.push({ file: rel, decision });
     }
   }
 
+  // Explicit opt-out: hits logged, no hook-level surfacing.
+  if (ruleAction === 'off') return silent();
   if (allHits.length === 0) return silent();
 
   if (blockingDetails.length > 0) {

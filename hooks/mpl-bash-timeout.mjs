@@ -34,7 +34,7 @@ const { readStdin } = await import(
 const { decideTimeout } = await import(
   pathToFileURL(join(__dirname, 'lib', 'bash-timeout-categories.mjs')).href
 );
-const { isStrict } = await import(
+const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
@@ -59,7 +59,13 @@ async function main() {
   const timeoutMs = toolInput.timeout;
 
   const state = readState(cwd) || {};
-  const strict = isStrict(cwd, state);
+  // Per-rule policy (P0-2, #110): `bash_timeout_violation` controls whether
+  // verification commands without acceptable timeouts are blocked or warned.
+  // 'off' = explicit opt-out (hook stays silent — logs intentionally absent
+  // since G1 has no signals.jsonl analogue yet).
+  const ruleAction = resolveRuleAction(cwd, state, 'bash_timeout_violation');
+  if (ruleAction === 'off') return silent();
+  const strict = ruleAction === 'block';
 
   const decision = decideTimeout(command, timeoutMs, { strict });
 

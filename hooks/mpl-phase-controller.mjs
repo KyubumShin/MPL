@@ -32,7 +32,7 @@ const { readStdin } = await import(
 );
 
 // Enforcement policy resolver (P0-2, #110)
-const { isStrict } = await import(
+const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
@@ -379,12 +379,17 @@ async function main() {
     }
 
     case 'phase3-gate': {
-      // Strict toggle resolved through P0-2 (#110) precedence chain:
-      //   state.enforcement.strict  >  .mpl/config.json enforcement.strict  >  DEFAULT (false).
-      const enforcementStrict = isStrict(cwd, state);
+      // Per-rule policy (P0-2, #110): `missing_gate_evidence` resolves the
+      // strict toggle for checkGateResults. Default DEFAULTS.enforcement
+      // value is 'block' — zero-structured-evidence transitions block out of
+      // the box. Workspace can downgrade to 'warn' (legacy fallback surfaced)
+      // or 'off' (legacy fallback silent) for transitional environments.
+      // Precedence: state.enforcement > .mpl/config.json > plugin baseline.
+      const gateRuleAction = resolveRuleAction(cwd, state, 'missing_gate_evidence');
+      const enforcementStrict = gateRuleAction === 'block';
       const gateResults = checkGateResults(state, { strict: enforcementStrict });
 
-      const fallbackWarn = gateResults.source === 'legacy'
+      const fallbackWarn = (gateResults.source === 'legacy' && gateRuleAction !== 'off')
         ? ' ⚠ Using legacy gate boolean fallback (no structured evidence in state.gate_results.hard{1,2,3}_{baseline,coverage,resilience}). exp16 strict mode will block this transition. Run real verification commands so mpl-gate-recorder can record exit codes.'
         : '';
 

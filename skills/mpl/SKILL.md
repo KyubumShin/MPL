@@ -47,9 +47,11 @@ Workspace example (`.mpl/config.json`):
 ```
 
 Per-rule policy (`warn` | `block` | `off`) overrides strict elevation:
-`block` always blocks; `off` always allows (audit hole — doctor surfaces a
-warning if `strict: true` and any rule is `off`). Run `/mpl:mpl-doctor` to see
-the effective policy and the `overrides[]` audit trail.
+explicit `block` always blocks (regardless of strict); `off` always allows
+(audit hole — doctor surfaces a warning if `strict: true` and any rule is
+`off`). Default for every rule is `warn` (issue #110 §정책 — transitional;
+exp16 raises to strict). Run `/mpl:mpl-doctor` to see the effective policy
+and the `overrides[]` audit trail.
 
 ## State Machine (v0.17)
 

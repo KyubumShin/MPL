@@ -34,19 +34,24 @@ function deepMergeConfig(target, source) {
  *
  * Schema:
  * - `strict`: boolean — when true, all per-rule `warn` policies elevate to `block`
- *   at the consuming hook's discretion. Individual rules can still hard-pin
- *   `block` regardless of strict (e.g. `missing_gate_evidence`).
- * - per-rule `warn` | `block` | `off` — policy for that specific violation.
+ *   at the consuming hook's discretion.
+ * - per-rule `warn` | `block` | `off` — policy for that specific violation. Workspace
+ *   or state can pin `block` regardless of strict (per issue #110 elevation rules);
+ *   `off` is an explicit opt-out.
  * - `overrides`: [] — audit trail entries `{rule, value, reason, timestamp, source}`.
  *
  * Precedence (highest → lowest):
  *   state.json `enforcement.*`  >  .mpl/config.json `enforcement.*`  >  this DEFAULTS
+ *
+ * v0.18.0 ships ALL rules at `warn` by default per issue #110 §정책 ("default:
+ * transitional warn (사용자 surface 만, 차단 없음); exp16부터 strict: true"). Hooks
+ * never silently downgrade — workspace must explicitly opt-in to block.
  */
 const ENFORCEMENT_DEFAULTS = {
   strict: false,
   direct_source_edit: 'warn',
   phase_scope_violation: 'warn',
-  missing_gate_evidence: 'block',
+  missing_gate_evidence: 'warn',
   missing_artifact_schema: 'warn',
   anti_pattern_match: 'warn',
   state_invariant_violation: 'warn',
