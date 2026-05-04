@@ -167,15 +167,17 @@ function checkI3(state, trigger) {
 }
 
 function checkI4(state, cwd) {
-  // execution.phases.completed should match phase folder count on disk.
-  // Only meaningful when execution subtree exists and the phases directory exists.
+  // execution.phases.completed should match the number of `phase-N/` directories
+  // that carry a `state-summary.md` finalize artifact (the disk truth phase-runner
+  // emits at completion). Empty pre-created directories from
+  // `commands/mpl-run-decompose.md` Step 4 are NOT counted — see countPhaseFolders.
   const declared = state?.execution?.phases?.completed;
   if (typeof declared !== 'number') return null;
   const onDisk = countPhaseFolders(cwd);
   if (onDisk === null) return null;
   if (declared !== onDisk) {
     return v(VIOLATION_IDS.PHASE_FOLDER_MISMATCH,
-      `execution.phases.completed=${declared} but ${onDisk} phase folders exist on disk. Drift between state and filesystem.`,
+      `execution.phases.completed=${declared} but ${onDisk} phase(s) carry state-summary.md on disk. Drift between state and finalize artifacts.`,
       { declared, onDisk });
   }
   return null;

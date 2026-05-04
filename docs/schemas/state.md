@@ -37,7 +37,7 @@ strict mode elevates `warn → block`.
 | I1 | `session_status='paused_budget' AND finalize_done=true` is impossible | all | Mutual contradiction. |
 | I2 | `current_phase='completed' AND finalize_done=false` is impossible | all | Completion requires finalize. |
 | I3 | `paused_*` or `verification_hang` AND new Task/Agent dispatch | task-dispatch | Resume the pipeline (`/mpl:mpl-resume`) before dispatching. |
-| I4 | `execution.phases.completed != phase folder count` | all | Disk truth wins; declared count must match. |
+| I4 | `execution.phases.completed != count(phase-N/state-summary.md)` | all | Disk truth = number of phase directories carrying the `state-summary.md` finalize artifact. Declared count must match. Empty `phase-N/` directories pre-created by `mpl-run-decompose.md` Step 4 do NOT count. |
 | I5 | `fix_loop_count != sum(fix_loop_history)` | all | G5 (#114) writes history; counter must agree. |
 | I6 | phase3-gate state-write missing structured gate evidence | state-write | P0-1 (#102) requirement. |
 | I7 | `current_phase='phase-N' AND .mpl/mpl/phases/phase-N/` absent | all | Lifecycle marker vs disk drift. |
