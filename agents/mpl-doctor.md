@@ -226,6 +226,41 @@ disallowedTools: Write, Edit, Task
     Result: PASS (7/7) / FAIL (X/7) / WARN (Y/7)
     ```
 
+    ### Category 15: Property Check (F5, #112)
+    - **Scope**: `.mpl/config.json`, `config/enforcement.json`, `config/verification-tool-paths.json`, plus any path supplied via CLI args
+    - Catches the **config-as-decoration** anti-pattern (C2). exp15
+      `release-gate.mjs` declared `expected_tests = 50` but no branch ever
+      consulted it — the constant was a comment in the wrong format. F5
+      surfaces declarations whose key never appears in any code-shape file
+      (Tier 3 advisory; doctor reports, does not enforce).
+
+    **Procedure**: invoke the property-check CLI:
+    ```
+    Bash("node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-property-check.mjs ${CLAUDE_PLUGIN_ROOT}", timeout: 15_000)
+    ```
+
+    The CLI returns:
+    - `totals.declarations` — total numeric/boolean/string properties extracted
+    - `totals.used` — declarations whose leaf key is referenced in code (.mjs/.ts/.py/...)
+    - `totals.unused` — declarations with zero references
+    - `configs[].unused[]` — per-config unused list with `{key, value, source}`
+
+    **Output format for Category 15**:
+    ```
+    ### Property Check (F5)
+    [a] declared properties:                   {N}
+    [b] referenced in code:                     {N}/{N} ({pct}%)
+    [c] unused (config-as-decoration):          ✓ 0건       or ⚠️ {n}: {keys}
+    Result: PASS / WARN ({n} unused declarations)
+    ```
+
+    **Verification tool paths manifest** (`config/verification-tool-paths.json`):
+    workspace declares which paths each verification command (vitest, eslint,
+    tsc, ...) covers. F5 cross-references this against `mpl-bash-timeout`
+    categories so a tool listed here without a category — or vice versa —
+    surfaces as drift. WARN per drift entry. (Cross-check is intentionally
+    advisory; the matched scope itself is workspace-defined.)
+
     ### Category 14: Meta-Self Audit (F4, #106)
     - **Scope**: `agents/mpl-doctor.md`, `skills/mpl-doctor/SKILL.md`, `hooks/mpl-doctor*.mjs`
       (Note: `hooks/lib/mpl-meta-self.mjs` is the audit *engine*, intentionally NOT a doctor surface — it owns the patterns and would self-match its own definitions if scanned.)
