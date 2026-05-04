@@ -185,4 +185,53 @@ disallowedTools: []
     - **AP-RUNNER-03 · Weak state summary**: omitting required sections. The next phase has no other source of truth about what happened here; missing sections force later phases to re-discover context and drift.
     - **AP-RUNNER-04 · Silent invariant violation (#50)**: committing code that violates a `verification_plan.invariants[]` entry without filing a Discovery. Teleological invariants are verbatim user-confirmed ground truth — rationalizing around them defeats the mechanical enforcement model.
   </Failure_Modes_To_Avoid>
+
+  <Anti_Patterns_Prohibited>
+    Ground truth: yggdrasil-exp15 §11 audit (4-category × 8 patterns, retrofit catch ≥ 7/8). The patterns below are
+    enforced at machine level by `hooks/mpl-fallback-grep.mjs` (#105) — phase-runner self-checks before declaring a TODO
+    complete. Match → fail the TODO and route to fix loop. Full machine-readable specification:
+    `commands/references/anti-patterns.md`.
+
+    **Category A · Test fakes** (assertion that does not test the System Under Test):
+
+    - **TC1 · Tautological assertion** — `expect(true).toBe(true)` / `assert(true)` / `assertEquals(1, 1)`. The test
+      passes whether the SUT is correct or not. (Ground truth: 5 occurrences in exp15.)
+    - **TC2 · Conditional assertion** — `if (cond) expect(x).toBe(y)`. The assertion is silently skipped when `cond`
+      is false; failures hide as "no assertion". (Ground truth: 9 occurrences in exp15, §11 found 1.)
+    - **TC3 · Logged-but-not-asserted error path** — `console.warn(...)` (or `console.error`) followed by
+      `expect(true).toBe(true)`. The error path is observed but not asserted, masking real failures as warnings.
+
+    **Category B · Gate fakes** (declared check that no branch consumes):
+
+    - **C2 · Config-as-decoration** — `const X_CONFIG = { threshold: N }` declared at module top, never read by any
+      branch. Looks like a configurable gate; behaves as a comment. (Ground truth: `release-gate.mjs:56`.)
+    - **C3 · Silent INV PASS** — INV-N invariant declared with no assertion / no exit-non-zero / no recorded
+      `evidence` on failure. Logs "INV PASS" regardless of input. (Ground truth: `release-gate.mjs:295`.)
+
+    **Category C · Type-safety holes**:
+
+    - **M1 · Double-cast escape hatch** — `as unknown as X` or `as any as X`. Defeats the type checker by laundering
+      one type into another with no runtime check. Permitted only inside test fixtures with an inline justification
+      comment naming the property under test. (Ground truth: 9 occurrences in exp15.)
+    - **CSP · Missing CSP meta** — renderer/index.html (or equivalent) without a `Content-Security-Policy` meta tag
+      when handling external content. Permitted only when CSP is set at the response-header layer (must be
+      cross-referenced in the same phase).
+
+    **Category D · Fallback poisoning** (silently turns a failure into a non-failure value):
+
+    - **D1 · Unconditional default-coalesce** — `?? ''` / `?? []` / `?? null` in scripts/agents/hooks paths where the
+      LHS represents a verification result, exit code, or external response. Permitted only when (a) the LHS is
+      genuinely user-input on a UI boundary AND (b) the default is the documented neutral value. Synthetic ID
+      patterns like `\`no-git-${ISO}\`` are explicit instances. (Ground truth: `release-gate.mjs:152`.)
+    - **D2 · Swallowed promise rejection** — `.catch(() => false)` / `.catch(() => null)` / `.catch(() => undefined)`
+      without logging or rethrowing. Turns a real failure into a silent boolean/null. Permitted only when the catch
+      argument is named (`.catch((err) => …)`) and the handler logs structured evidence + records the failure.
+      (Ground truth: 11 occurrences in exp15.)
+
+    **Self-exemption is not allowed.** Patterns above apply to the phase-runner's own writes (see #106 F4 doctor
+    meta-self-fallback for analogous coverage of MPL plugin source).
+
+    **On match**: the phase-runner MUST treat the TODO as failed (route to Step 5 Fix Loop). Do not edit the comment
+    or rename the variable to evade the regex — that is `R-EVASION` (v3.10 §2.1) and produces no testable code change.
+  </Anti_Patterns_Prohibited>
 </Agent_Prompt>
