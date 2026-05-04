@@ -22,7 +22,7 @@
         ]
       },
       {
-        "matcher": "Edit|Write|Bash",
+        "matcher": "Edit|Write|MultiEdit|Bash",
         "hooks": [
           {
             "type": "command",

@@ -34,16 +34,42 @@ const { getPhaseScope } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-decomposition-parser.mjs')).href
 );
 
-// Allowed path patterns (orchestrator CAN write to these)
+// P0-2 / #110 — per-rule policy resolver. P0-3 (#111) consumes
+// `direct_source_edit` and `phase_scope_violation`.
+const { resolveRuleAction } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
+);
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
+
+// Dogfood mode (P0-3, #111): when developing the MPL plugin against itself,
+// `/MPL/` paths must be treated like ordinary source — orchestrator should
+// route those edits through phase-runner the same as application code.
+// Toggle via .mpl/config.json `dogfood: true` or env `MPL_DOGFOOD=1`.
+const DOGFOOD_SUPPRESSED = /\/MPL\//;
+
+// Allowed path patterns (orchestrator CAN write to these). DOGFOOD_SUPPRESSED
+// is included by reference so isAllowedPath() can drop it when dogfood is on.
 const ALLOWED_PATTERNS = [
   /\.mpl\//,           // .mpl/ state directory
   /\.omc\//,           // .omc/ OMC state
   /\.claude\//,        // .claude/ config
   /\/\.claude\//,      // absolute .claude/ paths
-  /\/MPL\//,           // MPL/ plugin directory
+  DOGFOOD_SUPPRESSED,  // /MPL/ plugin directory (suppressed in dogfood mode)
   /PLAN\.md$/,         // PLAN.md (orchestrator manages checkboxes)
   /docs\/learnings\//, // learnings directory
 ];
+
+function isDogfoodMode(cwd) {
+  if (process.env.MPL_DOGFOOD === '1') return true;
+  try {
+    const cfg = loadConfig(cwd);
+    return cfg?.dogfood === true;
+  } catch {
+    return false;
+  }
+}
 
 // Source file extensions (orchestrator must NOT write to these)
 const SOURCE_EXTENSIONS = new Set([
@@ -92,9 +118,13 @@ function isDangerousBashCommand(command) {
   return DANGEROUS_BASH_PATTERNS.some(p => p.test(command));
 }
 
-function isAllowedPath(filePath) {
+function isAllowedPath(filePath, opts = {}) {
   if (!filePath) return true;
-  return ALLOWED_PATTERNS.some(pattern => pattern.test(filePath));
+  const { dogfood = false } = opts;
+  return ALLOWED_PATTERNS.some((pattern) => {
+    if (dogfood && pattern === DOGFOOD_SUPPRESSED) return false;
+    return pattern.test(filePath);
+  });
 }
 
 function isSourceFile(filePath) {
@@ -116,8 +146,8 @@ async function main() {
 
   const toolName = data.tool_name || data.toolName || '';
 
-  // Only intercept Edit, Write, and Bash tools
-  if (!['Edit', 'Write', 'edit', 'write', 'Bash', 'bash'].includes(toolName)) {
+  // Only intercept Edit, Write, MultiEdit, and Bash tools
+  if (!['Edit', 'Write', 'MultiEdit', 'edit', 'write', 'multiEdit', 'multiedit', 'Bash', 'bash'].includes(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -156,7 +186,7 @@ ensure you have the correct target path. The command will proceed, but please ve
     return;
   }
 
-  // --- Edit/Write source file guard (existing behavior) ---
+  // --- Edit/Write source file guard (P0-3, #111) ---
   // Extract file path
   const filePath = toolInput.file_path || toolInput.filePath || '';
 
@@ -165,55 +195,81 @@ ensure you have the correct target path. The command will proceed, but please ve
     return;
   }
 
-  // Check if path is allowed for orchestrator
-  if (isAllowedPath(filePath)) {
+  const state = readState(cwd) || {};
+  const dogfood = isDogfoodMode(cwd);
+
+  // Check if path is allowed for orchestrator (honours dogfood mode).
+  if (isAllowedPath(filePath, { dogfood })) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
 
-  // Check if it's a source file
+  // Check if it's a source file → resolve direct_source_edit policy.
   if (isSourceFile(filePath)) {
-    // SOFT BLOCK: warn and recommend delegation (OMC-style)
-    const message = `[MPL DELEGATION NOTICE] Direct ${toolName} on source file: ${filePath}
+    const action = resolveRuleAction(cwd, state, 'direct_source_edit');
+    if (action === 'off') {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+    const dogfoodTag = dogfood ? ' [dogfood mode: MPL/ also enforced]' : '';
+    const message = `[MPL DELEGATION NOTICE] Direct ${toolName} on source file: ${filePath}${dogfoodTag}
 
 Source files should be edited by mpl-phase-runner agents, not the orchestrator.
-Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} to ...")
+Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} to ...")`;
 
-Next time, delegate to mpl-phase-runner instead of editing directly.`;
-
+    if (action === 'block') {
+      console.log(JSON.stringify({
+        decision: 'block',
+        reason: message,
+      }));
+      return;
+    }
+    // warn (transitional default)
     console.log(JSON.stringify({
       continue: true,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
-        additionalContext: message
-      }
+        additionalContext: message,
+      },
     }));
     return;
   }
 
-  // --- Phase-Scoped File Lock (T-01 Phase 2, v3.9) ---
-  // Check if the file is within the current phase's declared scope
+  // --- Phase-Scoped File Lock (T-01 Phase 2, v3.9; P0-3 wiring) ---
+  // Check if the file is within the current phase's declared scope.
   try {
-    const state = readState(cwd);
     const currentPhase = state?.current_phase;
     if (currentPhase && filePath) {
       const scope = getPhaseScope(cwd, currentPhase);
       if (scope && scope.allowed.length > 0) {
-        const inScope = scope.allowed.some(f =>
-          filePath.endsWith(f) || filePath.includes(f)
+        const inScope = scope.allowed.some((f) =>
+          filePath.endsWith(f) || filePath.includes(f),
         );
         if (!inScope) {
+          const action = resolveRuleAction(cwd, state, 'phase_scope_violation');
+          if (action === 'off') {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
           const message = `[MPL SCOPE WARNING] File "${filePath}" is outside phase "${currentPhase}" scope.
 Declared scope files: ${scope.allowed.slice(0, 5).join(', ')}${scope.allowed.length > 5 ? ` (+${scope.allowed.length - 5} more)` : ''}
 
 This may cause cross-phase side effects. Verify this modification belongs in the current phase.`;
 
+          if (action === 'block') {
+            console.log(JSON.stringify({
+              decision: 'block',
+              reason: message,
+            }));
+            return;
+          }
+          // warn
           console.log(JSON.stringify({
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'PreToolUse',
-              additionalContext: message
-            }
+              additionalContext: message,
+            },
           }));
           return;
         }
@@ -232,4 +288,4 @@ main().catch(() => {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 });
 
-export { isAllowedPath, isSourceFile, isDangerousBashCommand };
+export { isAllowedPath, isSourceFile, isDangerousBashCommand, isDogfoodMode };

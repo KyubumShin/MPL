@@ -1,7 +1,15 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 
 import { isAllowedPath, isSourceFile } from '../mpl-write-guard.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const HOOK_PATH = join(dirname(__filename), '..', 'mpl-write-guard.mjs');
 
 describe('isAllowedPath', () => {
   it('should allow .mpl/ paths', () => {
@@ -98,5 +106,192 @@ describe('isSourceFile', () => {
   it('should return false for null/empty path', () => {
     assert.strictEqual(isSourceFile(null), false);
     assert.strictEqual(isSourceFile(''), false);
+  });
+});
+
+/* ────────────────────────── P0-3 (#111) ──────────────────────────────── */
+
+describe('isAllowedPath dogfood mode (P0-3, #111)', () => {
+  it('default mode keeps /MPL/ allowed', () => {
+    assert.strictEqual(isAllowedPath('/proj/MPL/hooks/x.mjs', { dogfood: false }), true);
+    // backwards-compat without opts
+    assert.strictEqual(isAllowedPath('/proj/MPL/hooks/x.mjs'), true);
+  });
+  it('dogfood mode strips /MPL/ from allowlist', () => {
+    assert.strictEqual(isAllowedPath('/proj/MPL/hooks/x.mjs', { dogfood: true }), false);
+  });
+  it('dogfood mode does not affect .mpl/ / .claude/', () => {
+    assert.strictEqual(isAllowedPath('/proj/.mpl/state.json', { dogfood: true }), true);
+    assert.strictEqual(isAllowedPath('/proj/.claude/settings.json', { dogfood: true }), true);
+  });
+});
+
+describe('mpl-write-guard hook integration (P0-3, #111)', () => {
+  let tmp;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'mpl-wg-'));
+    mkdirSync(join(tmp, '.mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({ current_phase: 'phase2-sprint' }));
+  });
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+  function runHook(toolName, toolInput, extraConfig, env) {
+    if (extraConfig) {
+      writeFileSync(join(tmp, '.mpl', 'config.json'), JSON.stringify(extraConfig));
+    }
+    const stdin = JSON.stringify({
+      cwd: tmp,
+      tool_name: toolName,
+      tool_input: toolInput,
+    });
+    const out = execFileSync('node', [HOOK_PATH], {
+      input: stdin,
+      encoding: 'utf-8',
+      env: { ...process.env, ...(env || {}) },
+    });
+    return JSON.parse(out);
+  }
+
+  it('default (warn) on source file outside allowlist → continue + delegation notice', () => {
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      old_string: 'a',
+      new_string: 'b',
+    });
+    assert.strictEqual(r.continue, true);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
+  });
+
+  it('strict mode (P0-2) elevates direct_source_edit warn → block', () => {
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      old_string: 'a',
+      new_string: 'b',
+    }, { enforcement: { strict: true } });
+    assert.strictEqual(r.decision, 'block');
+    assert.match(r.reason, /MPL DELEGATION NOTICE/);
+  });
+
+  it('direct_source_edit: "block" + strict false → block', () => {
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      old_string: 'a',
+      new_string: 'b',
+    }, { enforcement: { direct_source_edit: 'block' } });
+    assert.strictEqual(r.decision, 'block');
+  });
+
+  it('direct_source_edit: "off" + strict true → silent (explicit opt-out)', () => {
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      old_string: 'a',
+      new_string: 'b',
+    }, { enforcement: { strict: true, direct_source_edit: 'off' } });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
+  it('dogfood mode (config) + edit on /MPL/ source → delegation notice, not silent', () => {
+    const r = runHook('Edit', {
+      file_path: '/proj/MPL/hooks/test.mjs',
+      old_string: 'a',
+      new_string: 'b',
+    }, { dogfood: true });
+    assert.strictEqual(r.continue, true);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /dogfood mode/);
+  });
+
+  it('dogfood mode (env MPL_DOGFOOD=1) toggles equally', () => {
+    const r = runHook('Edit', {
+      file_path: '/proj/MPL/hooks/test.mjs',
+      old_string: 'a',
+      new_string: 'b',
+    }, null, { MPL_DOGFOOD: '1' });
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
+  });
+
+  it('non-dogfood + /MPL/ source still allowed (backwards-compat)', () => {
+    const r = runHook('Edit', {
+      file_path: '/proj/MPL/hooks/test.mjs',
+      old_string: 'a',
+      new_string: 'b',
+    });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
+  it('allowed path .mpl/ → silent regardless of policy', () => {
+    const r = runHook('Edit', {
+      file_path: join(tmp, '.mpl', 'memory', 'working.md'),
+      old_string: 'a',
+      new_string: 'b',
+    }, { enforcement: { strict: true, direct_source_edit: 'block' } });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
+  it('non-source file outside allowed (e.g. .md outside docs/learnings) → silent (no source rule)', () => {
+    // .md is not in SOURCE_EXTENSIONS, so direct_source_edit doesn't fire.
+    // Phase scope check only triggers when decomposition.yaml declares scope; here it doesn't.
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'README.md'),
+      old_string: 'a',
+      new_string: 'b',
+    });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
+  it('Bash dangerous command still warns (existing behaviour preserved)', () => {
+    const r = runHook('Bash', { command: 'rm -rf /tmp/foo' });
+    assert.strictEqual(r.continue, true);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL SAFETY WARNING/);
+  });
+
+  it('PR #129 review #1: MultiEdit on source file is intercepted (strict → block)', () => {
+    // Reviewer flagged that the previous matcher (Edit|Write|Bash) and the
+    // hook's tool allowlist both excluded MultiEdit, letting orchestrator
+    // bypass strict mode by switching tools.
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      edits: [
+        { old_string: 'a', new_string: 'b' },
+        { old_string: 'c', new_string: 'd' },
+      ],
+    }, { enforcement: { strict: true } });
+    assert.strictEqual(r.decision, 'block');
+    assert.match(r.reason, /MPL DELEGATION NOTICE/);
+    assert.match(r.reason, /MultiEdit/);
+  });
+
+  it('MultiEdit on source file (default warn) → continue + delegation notice', () => {
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      edits: [{ old_string: 'a', new_string: 'b' }],
+    });
+    assert.strictEqual(r.continue, true);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
+    assert.match(r.hookSpecificOutput?.additionalContext || '', /MultiEdit/);
+  });
+
+  it('MultiEdit on allowed .mpl/ path → silent regardless of policy', () => {
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, '.mpl', 'memory', 'working.md'),
+      edits: [{ old_string: 'a', new_string: 'b' }],
+    }, { enforcement: { strict: true, direct_source_edit: 'block' } });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
+  });
+
+  it('MPL inactive → silent regardless of policy', () => {
+    rmSync(join(tmp, '.mpl'), { recursive: true });
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      old_string: 'a',
+      new_string: 'b',
+    });
+    assert.strictEqual(r.continue, true);
+    assert.strictEqual(r.suppressOutput, true);
   });
 });
