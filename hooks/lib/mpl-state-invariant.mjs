@@ -43,7 +43,11 @@ export const VIOLATION_IDS = Object.freeze({
   GATE_EVIDENCE_MISSING: 'I6',
   PHASE_FOLDER_LIFECYCLE: 'I7',
   SCHEMA_VERSION_UNSUPPORTED: 'I8',
-  SESSION_STATUS_CONFLICT: 'I9', // G4 forward-compat: paused_* ⊥ verification_hang
+  // G4 forward-compat — values must match the H1 enum allowlist. New
+  // session_status values added by future writers MUST be registered in
+  // checkI9 before this hook can vouch for them; otherwise unknown values
+  // surface here.
+  SESSION_STATUS_INVALID: 'I9',
 });
 
 const ACTIVE_PHASES = new Set([
@@ -60,6 +64,12 @@ const ACTIVE_PHASES = new Set([
 
 const PAUSE_STATUSES = new Set(['paused_budget', 'paused_checkpoint']);
 const HANG_STATUSES = new Set(['verification_hang']);
+// I3 dispatch-block set. `cancelled` is intentionally NOT included: a
+// cancelled pipeline may need to dispatch cleanup Tasks (e.g. archive
+// artifacts, post-mortem agent) before the session truly exits. If a future
+// writer needs to forbid Task dispatch during cancel, add it here AND extend
+// the resume protocol to cover the new resume direction.
+const DISPATCH_BLOCKED_STATUSES = new Set([...PAUSE_STATUSES, ...HANG_STATUSES]);
 
 /* ────────────────────────── helpers ──────────────────────────────────────── */
 
@@ -146,8 +156,9 @@ function checkI2(state) {
 
 function checkI3(state, trigger) {
   // No new phase dispatch (PreToolUse Task|Agent) while paused/hung.
+  // See DISPATCH_BLOCKED_STATUSES above for why `cancelled` is excluded.
   if (trigger !== TRIGGERS.TASK_DISPATCH) return null;
-  if (PAUSE_STATUSES.has(state.session_status) || HANG_STATUSES.has(state.session_status)) {
+  if (DISPATCH_BLOCKED_STATUSES.has(state.session_status)) {
     return v(VIOLATION_IDS.PAUSED_NEW_DISPATCH,
       `session_status='${state.session_status}' — new Task/Agent dispatches are blocked. Resume the pipeline first (/mpl:mpl-resume).`,
       { session_status: state.session_status });
@@ -237,16 +248,14 @@ function checkI8(state) {
 }
 
 function checkI9(state) {
-  // session_status mutual exclusivity (forward-compat with G4 #109): a
-  // pipeline cannot be intentionally paused AND mid-hang at the same time.
-  // Although session_status is a single field today, future writers might
-  // combine flags or mark transition states; this guards against schema
-  // expansion that breaks the assumption.
-  // Note: the field is a string, so direct combination isn't currently
-  // expressible. We instead validate the value is in the allowed enum.
+  // session_status enum validity (G4 #109 forward-compat). Today the field is
+  // a single-valued string so mutual exclusivity is structurally enforced;
+  // this check guards the value itself. Future writers introducing new
+  // statuses MUST add them to the H1 allowlist (`docs/schemas/state.md`)
+  // before they can be emitted — otherwise unknown values surface as I9.
   const allowed = new Set([null, 'active', 'paused_budget', 'paused_checkpoint', 'verification_hang', 'cancelled']);
   if (!allowed.has(state.session_status ?? null)) {
-    return v(VIOLATION_IDS.SESSION_STATUS_CONFLICT,
+    return v(VIOLATION_IDS.SESSION_STATUS_INVALID,
       `session_status='${state.session_status}' is not in the allowed enum (null|active|paused_budget|paused_checkpoint|verification_hang|cancelled).`,
       { session_status: state.session_status });
   }

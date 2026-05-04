@@ -106,6 +106,17 @@ describe('I3 paused/hung blocks new dispatch', () => {
     );
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.PAUSED_NEW_DISPATCH));
   });
+
+  it("PR #128 nit #1: 'cancelled' session does NOT block dispatch (cleanup Tasks allowed)", () => {
+    // The DISPATCH_BLOCKED_STATUSES set intentionally excludes `cancelled` —
+    // a cancelled pipeline may still need to dispatch cleanup Tasks before
+    // the session truly exits. The exclusion is documented in lib code.
+    const r = checkInvariants(
+      { session_status: 'cancelled' },
+      { cwd: tmp, trigger: TRIGGERS.TASK_DISPATCH },
+    );
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.PAUSED_NEW_DISPATCH));
+  });
 });
 
 describe('I4 phase folder count vs execution.phases.completed', () => {
@@ -250,12 +261,12 @@ describe('I8 schema_version range', () => {
 describe('I9 session_status enum', () => {
   it('flags unknown session_status', () => {
     const r = checkInvariants({ session_status: 'mystery_state' }, { cwd: tmp });
-    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.SESSION_STATUS_CONFLICT));
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.SESSION_STATUS_INVALID));
   });
   for (const valid of [null, 'active', 'paused_budget', 'paused_checkpoint', 'verification_hang', 'cancelled']) {
     it(`accepts ${valid === null ? 'null' : valid}`, () => {
       const r = checkInvariants({ session_status: valid }, { cwd: tmp });
-      assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.SESSION_STATUS_CONFLICT));
+      assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.SESSION_STATUS_INVALID));
     });
   }
 });
