@@ -36,6 +36,11 @@ const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
+// G4 hang detection (#109)
+const { detectHang } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-hang-detector.mjs')).href
+);
+
 /**
  * Check PLAN.md checkbox completion status
  */
@@ -214,6 +219,39 @@ async function main() {
   const state = readState(cwd);
   if (!state) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    return;
+  }
+
+  // G4 (#109) — hang detection. Run before phase routing so a stalled
+  // session is marked even when the phase branch would otherwise return
+  // a generic "in progress" message.
+  //
+  // Three branches:
+  //   (a) Newly detected hang (state.last_tool_at is stale, no exempt status):
+  //       mark `session_status='verification_hang'` and emit the alarm banner.
+  //   (b) Already-marked verification_hang: short-circuit phase routing so
+  //       phase transitions (e.g. phase3-gate → phase5-finalize) cannot
+  //       advance silently while the session is awaiting user triage. The
+  //       resume skill clears the marker only after the user picks resume /
+  //       rollback / cancel — until then every Stop tick re-surfaces the
+  //       triage guidance. (PR #126 review #1 — was previously a fall-through.)
+  //   (c) paused_budget / paused_checkpoint: intentional pauses, untouched.
+  const hangDet = detectHang(state, Date.now());
+  if (hangDet.hung) {
+    try {
+      writeState(cwd, { session_status: 'verification_hang' });
+    } catch { /* best-effort marking — never fail Stop hook on disk error */ }
+    console.log(JSON.stringify({
+      continue: true,
+      stopReason: hangDet.reason,
+    }));
+    return;
+  }
+  if (state.session_status === 'verification_hang') {
+    console.log(JSON.stringify({
+      continue: true,
+      stopReason: '[MPL G4] Session is currently marked verification_hang. Phase routing is paused until user triage. Run /mpl:mpl-resume to choose: resume current phase, roll back, or cancel.',
+    }));
     return;
   }
 

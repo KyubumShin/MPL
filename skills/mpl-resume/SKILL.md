@@ -19,9 +19,24 @@ Expected resumable states:
 - `current_phase = "cancelled"` with `resume_point` (manual cancel)
 - `session_status = "paused_budget"` (F-33 context rotation)
 - `session_status = "paused_checkpoint"` (orchestrator self-pause, v0.14.1 #35)
+- `session_status = "verification_hang"` (G4 hang detection, #109) — Stop hook detected no tool fired in > 15min
 - **Drift**: `current_phase` active but disk artifacts show completed phases beyond `sprint_status.completed_todos`
 
 For `paused_budget` / `paused_checkpoint`: the pipeline was paused, not cancelled. Resume from `resume_from_phase` (or `current_phase` if unset) and clear `session_status`, `pause_reason`, `pause_timestamp`, `budget_at_pause`.
+
+For `verification_hang` (G4, #109): the previous session went silent (typical cause: a verification command without `tool_input.timeout` ran past Claude Code's default kill point, or the orchestrator stalled waiting for a response). Surface the hang to the user before continuing:
+```
+AskUserQuestion({
+  question: "Previous session was marked verification_hang at {state.last_tool_at} (no tool fired for >15min). Resume current_phase={phase} and re-run verification?",
+  header: "G4 hang resume",
+  options: [
+    { label: "Resume from current phase", description: "Re-enter {phase}; rerun the gate/sprint command. Add an explicit timeout if it was missing." },
+    { label: "Roll back to phase2-sprint", description: "Drop the in-progress fix loop and re-plan." },
+    { label: "Cancel pipeline",            description: "/mpl:mpl-cancel — investigate manually before retrying." },
+  ]
+})
+```
+Clear `session_status` and `last_tool_at` only after the user confirms the resume direction (so a subsequent crash can still see the hang record). Carry `fix_loop_count` and `pass_rate_history` through unchanged — convergence trend analysis depends on it.
 
 ## Step 2: Drift Detection (v0.14.1 #35, extended by P2-6)
 

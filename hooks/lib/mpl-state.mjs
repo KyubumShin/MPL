@@ -172,11 +172,17 @@ const DEFAULT_STATE = {
   ambiguity_history: [],
   // F-33: Session budget prediction
   // #35 (v0.14.1): "paused_checkpoint" added for orchestrator verbal pause (self-pause on checkpoint report)
-  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint"
+  // #109 G4 (v0.18.0): "verification_hang" added — Stop hook detects when last_tool_at is older
+  // than the hang threshold (default 15min) and marks the session for resume / user intervention.
+  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint" | "verification_hang"
   pause_reason: null,            // human-readable pause reason
   resume_from_phase: null,       // phase ID to resume from
   pause_timestamp: null,         // ISO timestamp of pause
   budget_at_pause: null,         // { context_pct, estimated_needed_pct }
+  // #109 G4: ISO-8601 timestamp of the most recent PostToolUse event from
+  // mpl-tool-tracker.mjs. Stop hook compares to wall clock; > threshold (default
+  // 15min) without an active "paused_*" flag → verification_hang marking.
+  last_tool_at: null,            // ISO-8601 timestamp | null
   // P2-6: execution-scope state (formerly .mpl/mpl/state.json). Schema mirrors
   // the shape documented in commands/mpl-run.md §"MPL State". Orchestrator
   // prompts (mpl-run-decompose.md, mpl-run-execute.md) update this subtree via
