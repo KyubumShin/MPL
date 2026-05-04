@@ -411,14 +411,22 @@ async function main() {
           continue: true,
           stopReason: `[MPL] Quality Gate failed (source=${gateResults.source}). Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}. Transitioning to Phase 4: Fix Loop.${fallbackWarn}`
         }));
-      } else if (gateResults.missingEvidence.length > 0 && enforcementStrict) {
-        // Strict mode: structured evidence missing → block transition with explicit reason.
+      } else if (gateResults.source === 'structured' && gateResults.missingEvidence.length > 0) {
+        // Partial structured evidence: gate-recorder produced some entries but not all.
+        // Issue #102 spec ("missing → false") + non-strict UX (E-gap from PR #119 smoke):
+        // surface the explicit missing list whether or not strict mode is on. The
+        // wording adapts to whether transition is hard-blocked (strict) or "in progress"
+        // (non-strict — phase will retry on next Stop event after the missing gates record).
+        const verb = enforcementStrict ? '⛔ BLOCKED' : 'in progress';
+        const tail = enforcementStrict
+          ? 'Strict enforcement requires all 3 gates to be recorded by mpl-gate-recorder via real Bash exit codes. Self-reported booleans are not accepted.'
+          : `Run the missing gates so mpl-gate-recorder writes structured evidence; the loop will continue once all 3 ${gateResults.missingEvidence.length === 3 ? 'are' : 'remaining are'} recorded.`;
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] ⛔ Phase 3 BLOCKED: missing structured gate evidence (${gateResults.missingEvidence.join(', ')}). Strict enforcement requires all 3 gates to be recorded by mpl-gate-recorder via real Bash exit codes. Self-reported booleans are not accepted.`
+          stopReason: `[MPL] Phase 3 ${verb}: missing structured gate evidence (${gateResults.missingEvidence.join(', ')}). ${tail}`
         }));
       } else {
-        // Gates not yet evaluated
+        // No gate evidence at all (zero structured + zero legacy).
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.${fallbackWarn}`
