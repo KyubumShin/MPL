@@ -14,7 +14,7 @@
 | Field path | Unit | Notes |
 |---|---|---|
 | `current_phase` | lifecycle marker (string enum) | Not a phase id. Values: `phase1-plan`, `phase1a-research`, `phase1b-plan`, `mpl-decompose`, `mpl-ambiguity-resolve`, `phase2-sprint`, `phase3-gate`, `phase4-fix`, `phase5-finalize`, `completed`, `cancelled`, or a concrete `phase-N` id while inside the sprint. |
-| `execution.phases.*` | per-phase | One entry per phase-runner invocation. `completed` count must match `.mpl/mpl/phases/phase-*` directory count (G3 invariant I4). |
+| `execution.phases.*` | per-phase | One entry per phase-runner invocation. `completed` count must match the number of `.mpl/mpl/phases/phase-*/` directories that carry a `state-summary.md` finalize artifact (G3 invariant I4). Empty pre-created directories from `mpl-run-decompose.md` Step 4 do NOT count. |
 | `execution.phase_details[]` | per-phase | Status/retries/pass_rate per phase id. |
 | `sprint_status.total_todos` | sprint-aggregated | Sum of TODO counts across all phases of the active sprint (typically all of phase2-sprint). |
 | `sprint_status.completed_todos` | sprint-aggregated | Number of TODOs marked complete. |
