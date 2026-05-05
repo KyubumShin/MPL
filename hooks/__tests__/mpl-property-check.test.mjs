@@ -253,9 +253,10 @@ describe('runBatch + CLI', () => {
     // Regression guard. The allow-list documents declarations whose consumer
     // is shipped by a later issue — when that issue lands, the key drops out
     // of unused naturally and any NEW unused declarations surface here.
-    const EXPECTED_UNUSED = [
-      'enforcement.missing_artifact_schema', // P0-K (#115) ships the consumer
-    ];
+    // Empty as of P0-K (#115) — `enforcement.missing_artifact_schema`
+    // gained its consumer in `hooks/mpl-artifact-schema.mjs`. Future
+    // forward-compat keys go here when introduced.
+    const EXPECTED_UNUSED = [];
     const out = execFileSync('node', [CLI_PATH, REAL_PLUGIN_ROOT, 'config/enforcement.json'], {
       encoding: 'utf-8',
     });

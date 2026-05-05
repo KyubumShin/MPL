@@ -154,6 +154,32 @@ Bash("npm run build")
 Bash("npm test")
 ```
 
+### 5.1.1: Artifact schema bulk re-check (P0-K / #115)
+
+Defense-in-depth pass over every phase artifact. The PostToolUse hook
+(`hooks/mpl-artifact-schema.mjs`) already validates each
+write at the moment it lands; this step re-runs the same validator
+across the whole workspace so a write that slipped through (e.g. a
+manual orchestrator edit while the hook was disabled, or an artifact
+that was valid at write time and later truncated) gets caught before
+`finalize_done = true`.
+
+```
+Bash("node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-artifact-schema.mjs $(pwd)", timeout: 10_000)
+```
+
+The CLI exits non-zero when any artifact is invalid and emits a JSON
+verdict (`{ totals: { files, valid, invalid }, results: [...] }`).
+
+- Exit 0 → proceed to Step 5.1.5.
+- Exit 1 → block finalize. Surface the missing-section list per file
+  to the user and re-emit the offending artifacts before retrying.
+  `enforcement.missing_artifact_schema = 'block'` will already have
+  surfaced these earlier; this step is the operator's last sanity
+  check.
+
+The same CLI is consumed by mpl-doctor's Category 6 read-only audit.
+
 ### 5.1.5: Scope Drift Report (V-05, v0.8.0)
 
 Compare declared scope vs actual changes to detect implementation drift:
