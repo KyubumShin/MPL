@@ -80,12 +80,29 @@ describe('G5 (#114) fix_loop_history mirror', () => {
     assert.equal(state.fix_loop_history[0].phase, 'phase-3', 'concrete id beats lifecycle marker');
   });
 
-  it('decrement / reset does not corrupt history', () => {
+  it('PR #133 review #3: reset to 0 clears history (I5 atomic)', () => {
+    // The old "history retained for forensic value" framing left I5 in
+    // a violated state (count=0, sum>0). Forensic value lives in
+    // .mpl/archive/ snapshots taken by archivePreviousRun, not in the
+    // live state file.
     seed({});
     writeState(tmpDir, { fix_loop_count: 3 });
     const after = writeState(tmpDir, { fix_loop_count: 0 });
-    assert.equal(after.fix_loop_history.length, 1, 'history retained for forensic value');
-    assert.equal(after.fix_loop_history[0].count, 3);
+    assert.equal(after.fix_loop_count, 0);
+    assert.deepEqual(after.fix_loop_history, [], 'reset clears history');
+    // I5 holds: 0 == 0
+    const sum = after.fix_loop_history.reduce((acc, e) => acc + (e.count || 0), 0);
+    assert.equal(sum, after.fix_loop_count);
+  });
+
+  it('PR #133 review #3: partial decrement (not reset) refuses both fields', () => {
+    seed({});
+    writeState(tmpDir, { fix_loop_count: 5 });
+    const after = writeState(tmpDir, { fix_loop_count: 3 });
+    // Partial wind-back has no legitimate orchestrator caller → reverted.
+    assert.equal(after.fix_loop_count, 5, 'count reverted');
+    assert.equal(after.fix_loop_history.reduce((acc, e) => acc + e.count, 0), 5,
+      'history reverted to match');
   });
 
   it('non-numeric or absent fix_loop_count → no history change', () => {
@@ -118,6 +135,52 @@ describe('G5 (#114) fix_loop_history mirror', () => {
     // I5 holds: count(0) == sum(0).
     const sum = merged.fix_loop_history.reduce((acc, e) => acc + (e.count || 0), 0);
     assert.equal(sum, merged.fix_loop_count);
+  });
+
+  it('PR #133 review #3: phase-null + patch-supplied history reverts BOTH fields', () => {
+    // Reviewer's repro 1 — caller supplies a parallel history array but
+    // also clears the phase. Old code reverted only the count, leaving
+    // patch's history merged in (I5 desync). New code reverts both.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase4-fix',
+      fix_loop_count: 0,
+      fix_loop_history: [],
+      user_intervention_count: 0,
+    }));
+    const after = writeState(tmpDir, {
+      current_phase: null,
+      fix_loop_count: 5,
+      fix_loop_history: [{ phase: 'manual', count: 5, started_at: 't' }],
+    });
+    assert.equal(after.fix_loop_count, 0, 'count reverted');
+    assert.deepEqual(after.fix_loop_history, [], 'history reverted to pre-merge');
+    // I5: 0 == 0.
+    const sum = after.fix_loop_history.reduce((acc, e) => acc + (e.count || 0), 0);
+    assert.equal(sum, after.fix_loop_count);
+  });
+
+  it('PR #133 review #3: patch with self-inconsistent history triggers final I5 revert', () => {
+    // Caller provides a history whose sum disagrees with the count delta
+    // → final I5 check catches it and reverts both atomically.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase4-fix',
+      fix_loop_count: 2,
+      fix_loop_history: [{ phase: 'phase4-fix', count: 2, started_at: 't0' }],
+      user_intervention_count: 0,
+    }));
+    // Caller bumps count to 3 but supplies a history that sums to 99.
+    const after = writeState(tmpDir, {
+      fix_loop_count: 3,
+      fix_loop_history: [{ phase: 'phase4-fix', count: 99, started_at: 't1' }],
+    });
+    // Both reverted to prev so the live state stays consistent.
+    assert.equal(after.fix_loop_count, 2);
+    assert.equal(after.fix_loop_history[0].count, 2);
+    assert.equal(after.fix_loop_history.length, 1);
   });
 
   it('G3 invariant I5 equality holds across a sequence of writes', () => {

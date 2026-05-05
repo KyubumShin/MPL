@@ -462,30 +462,39 @@ export function writeState(cwd, patch) {
 }
 
 /**
- * G5 (#114): when a write increases `fix_loop_count`, mirror the delta
- * into `fix_loop_history`. Mutates `merged` in place.
+ * G5 (#114): keep `fix_loop_count` and `fix_loop_history` in lockstep so
+ * G3 invariant I5 (`count == sum(history[].count)`) holds atomically on
+ * every `writeState`. Mutates `merged` in place.
+ *
+ * The helper makes I5 **the** contract — there is no "count valid but
+ * history out of sync, surface as I5 later" path. PR #133 review #3
+ * surfaced two ways the old "best-effort mirror" framing leaked:
+ *   (a) caller patch supplies explicit `fix_loop_history` while
+ *       `phase` is null → count was reverted but history wasn't;
+ *   (b) caller patch resets `fix_loop_count: 0` while history retained
+ *       "for forensic value" → count=0, sum>0, I5 fails on next read.
  *
  * Behavior:
- *   - No change to fix_loop_count → no-op (transitions that preserve the
- *     count, e.g. phase3 → phase4-fix on gate failure, do NOT append).
- *   - Decrease/reset (fix_loop_count: 0 on init) → no append; the existing
- *     history is left intact for forensic value.
- *   - Increase under the same active phase as the last open entry →
- *     bump that entry's count by the delta.
- *   - Increase under a different active phase (or no open entry) →
- *     append a new `{ phase, count, started_at }` entry.
- *   - Increase but no determinable active phase (PR #133 review nit) →
- *     **revert the fix_loop_count back to its prior value** so I5 stays
- *     clean. Refusing the increment is safer than fabricating an
- *     `'unknown'` phase entry — the orchestrator will retry the write
- *     once `current_phase` is set, and no I5 desync slips through.
+ *   - No change → no-op.
+ *   - Reset to 0 → also clear history. (Forensic value lives in the
+ *     `.mpl/archive/` snapshot taken by `archivePreviousRun`, not in
+ *     the live state file.)
+ *   - Decrement (0 < next < before) → refuse: revert count + history.
+ *     There is no legitimate "wind back partially" caller; this guards
+ *     against accidental orchestrator math.
+ *   - Increment under a determinable active phase → append/update entry.
+ *   - Increment with no determinable phase → revert count AND restore
+ *     pre-merge history (any patch-supplied history is rolled back too
+ *     so I5 stays clean).
+ *   - Final invariant check: if any code path still leaves
+ *     `count != sum(history)` (e.g. patch supplied a self-inconsistent
+ *     history along with a matching count that breaks our delta math),
+ *     revert both fields to `prev` atomically. Better to drop a write
+ *     than ship a structurally broken state.
  *
  * Active phase derives from `merged.execution.phases.current` (concrete
  * phase id like `phase-3`) and falls back to `merged.current_phase`
  * (lifecycle marker, e.g. `phase4-fix`).
- *
- * Once G3 invariant I5 sees `fix_loop_history` populated it activates
- * the equality check `fix_loop_count == sum(fix_loop_history[].count)`.
  */
 function recordFixLoopHistory(prev, merged) {
   const next = merged?.fix_loop_count;
@@ -493,38 +502,64 @@ function recordFixLoopHistory(prev, merged) {
   const before = (typeof prev?.fix_loop_count === 'number' && Number.isFinite(prev.fix_loop_count))
     ? prev.fix_loop_count
     : 0;
-  if (next <= before) return; // not an increment
+  const prevHistory = Array.isArray(prev?.fix_loop_history) ? prev.fix_loop_history : [];
 
-  const phase = merged?.execution?.phases?.current ?? merged?.current_phase ?? null;
-  if (!phase || typeof phase !== 'string') {
-    // PR #133 review nit: refuse the count bump rather than fabricate a
-    // phase. Otherwise I5 would desync (count↑ but history unchanged).
+  if (next === before) {
+    // No count change. Don't touch history — caller may be patching
+    // unrelated fields. Final I5 check below still validates.
+  } else if (next === 0 && before > 0) {
+    // Reset → clear history so I5 holds (0 == 0).
+    merged.fix_loop_history = [];
+  } else if (next < before) {
+    // Decrement (not a reset) → refuse. Revert both fields atomically.
     merged.fix_loop_count = before;
-    return;
-  }
-
-  const delta = next - before;
-  const history = Array.isArray(merged.fix_loop_history) ? [...merged.fix_loop_history] : [];
-  const last = history[history.length - 1];
-
-  // `ended_at` is reserved for future wiring (G2 / #113 will close
-  // entries when the phase finalizes; G5 itself does not write it).
-  // Treating its absence as "open entry" lets the future close-emit
-  // land without changing this helper.
-  if (last && typeof last === 'object' && last.phase === phase && !last.ended_at) {
-    history[history.length - 1] = {
-      ...last,
-      count: (typeof last.count === 'number' ? last.count : 0) + delta,
-    };
+    merged.fix_loop_history = prevHistory;
   } else {
-    history.push({
-      phase,
-      count: delta,
-      started_at: new Date().toISOString(),
-    });
+    // Increment.
+    const phase = merged?.execution?.phases?.current ?? merged?.current_phase ?? null;
+    if (!phase || typeof phase !== 'string') {
+      // No phase → revert both. Without resetting history we'd let a
+      // patch-supplied `fix_loop_history` slip through with the
+      // increment refused (PR #133 review #3).
+      merged.fix_loop_count = before;
+      merged.fix_loop_history = prevHistory;
+    } else {
+      const delta = next - before;
+      const history = Array.isArray(merged.fix_loop_history) ? [...merged.fix_loop_history] : [];
+      const last = history[history.length - 1];
+      // `ended_at` is reserved for future wiring (G2 / #113 will close
+      // entries when the phase finalizes; G5 itself does not write it).
+      // Treating its absence as "open entry" lets the future close-emit
+      // land without changing this helper.
+      if (last && typeof last === 'object' && last.phase === phase && !last.ended_at) {
+        history[history.length - 1] = {
+          ...last,
+          count: (typeof last.count === 'number' ? last.count : 0) + delta,
+        };
+      } else {
+        history.push({
+          phase,
+          count: delta,
+          started_at: new Date().toISOString(),
+        });
+      }
+      merged.fix_loop_history = history;
+    }
   }
 
-  merged.fix_loop_history = history;
+  // Final I5 check. Anything that didn't end up consistent → revert
+  // both fields to prev. Catches caller-supplied histories that
+  // disagreed with what we computed (e.g. explicit array + delta math
+  // diverged).
+  const finalHistory = Array.isArray(merged.fix_loop_history) ? merged.fix_loop_history : [];
+  const sum = finalHistory.reduce(
+    (acc, e) => acc + ((typeof e?.count === 'number' && Number.isFinite(e.count)) ? e.count : 0),
+    0
+  );
+  if (sum !== merged.fix_loop_count) {
+    merged.fix_loop_count = before;
+    merged.fix_loop_history = prevHistory;
+  }
 }
 
 /**
