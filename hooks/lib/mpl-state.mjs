@@ -346,12 +346,73 @@ export function detectStateDrift(cwd) {
 }
 
 /**
- * Write/merge MPL state to .mpl/state.json (atomic via temp + rename)
+ * Thrown by `writeState` when `.mpl/state.json` already carries a
+ * `schema_version` that exceeds what this plugin supports. Without this
+ * the on-disk state would silently be overwritten with the v2 default
+ * shape + patch (PR #132 review #1) — a fresh-writer state from a newer
+ * plugin would be downgraded and any field outside v2's vocabulary lost.
+ */
+export class UnsupportedSchemaVersionError extends Error {
+  constructor(version, supported) {
+    super(
+      `state.schema_version=${version} exceeds supported MAX=${supported}. ` +
+      `Refusing to overwrite a fresher state with an older shape. ` +
+      `Upgrade the mpl plugin or restore .mpl/state.json from a compatible run. ` +
+      `See docs/schemas/migration-policy.md.`
+    );
+    this.name = 'UnsupportedSchemaVersionError';
+    this.version = version;
+    this.supported = supported;
+  }
+}
+
+/**
+ * Probe the on-disk state.json for a schema_version that this plugin can
+ * not safely round-trip. Returns the offending version if the file
+ * exists, parses, and exceeds CURRENT_SCHEMA_VERSION; null otherwise
+ * (missing, corrupt, parity, or older). Pure read — no mutation.
+ */
+function readPersistedSchemaVersion(cwd) {
+  const statePath = join(cwd, STATE_DIR, STATE_FILE);
+  if (!existsSync(statePath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, 'utf-8'));
+    if (typeof parsed?.schema_version === 'number' && parsed.schema_version > CURRENT_SCHEMA_VERSION) {
+      return parsed.schema_version;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write/merge MPL state to .mpl/state.json (atomic via temp + rename).
+ *
+ * H8 (#116, PR #132 review #1): if the on-disk file declares a
+ * `schema_version` newer than `CURRENT_SCHEMA_VERSION`, throw
+ * `UnsupportedSchemaVersionError` instead of overwriting it. `readState`
+ * already returns `null` for that case (fail-closed read), but
+ * `writeState` previously treated `null` the same as "no file" and
+ * wrote `DEFAULT_STATE` + patch — silently downgrading the fresher
+ * state and dropping any field outside the v2 vocabulary.
+ *
  * @param {string} cwd - Working directory
  * @param {object} patch - Fields to merge into state
  * @returns {object} Merged state
+ * @throws {UnsupportedSchemaVersionError} when on-disk schema_version > CURRENT
  */
 export function writeState(cwd, patch) {
+  const futureVersion = readPersistedSchemaVersion(cwd);
+  if (futureVersion !== null) {
+    process.stderr.write(
+      `[MPL state] writeState refused — on-disk schema_version=${futureVersion} ` +
+      `exceeds supported MAX=${CURRENT_SCHEMA_VERSION}. State left untouched. ` +
+      `See docs/schemas/migration-policy.md.\n`
+    );
+    throw new UnsupportedSchemaVersionError(futureVersion, CURRENT_SCHEMA_VERSION);
+  }
+
   const stateDir = join(cwd, STATE_DIR);
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });

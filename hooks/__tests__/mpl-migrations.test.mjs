@@ -8,6 +8,8 @@ import {
   readState,
   writeState,
   CURRENT_SCHEMA_VERSION,
+  UnsupportedSchemaVersionError,
+  LEGACY_EXECUTION_STATE_PATH,
 } from '../lib/mpl-state.mjs';
 import { MIGRATIONS, runMigrations } from '../lib/migrations/index.mjs';
 
@@ -70,10 +72,11 @@ describe('runMigrations', () => {
     assert.equal(runMigrations(undefined, tmpDir, CURRENT_SCHEMA_VERSION), undefined);
   });
 
-  it('caps iterations defensively even if a migration mis-bumps schema_version', () => {
-    // Synthesize a corrupt registry entry semantics: pass a state whose
-    // current schema_version exceeds CURRENT — runMigrations should refuse
-    // to advance further and return as-is.
+  it('refuses to advance state already past target (early-return, no migration applied)', () => {
+    // Names exactly what is being checked. The fromVersion >= target
+    // early-return at the top of runMigrations — distinct from the
+    // safety cap (`MIGRATIONS.length + 1`) which is harder to exercise
+    // without a stub registry and stays as in-code defense.
     const state = { current_phase: 'phase1-plan', schema_version: 999 };
     const out = runMigrations(state, tmpDir, CURRENT_SCHEMA_VERSION);
     assert.equal(out.schema_version, 999, 'state with version above target is returned untouched');
@@ -163,12 +166,153 @@ describe('readState fail-closed on unsupported schema_version (H8)', () => {
 /* ──────────────────── consistency with G3 invariant I8 ────────────────── */
 
 describe('CURRENT_SCHEMA_VERSION is the single source of truth', () => {
-  it('migration chain terminates at the same constant readState enforces', async () => {
-    const { CURRENT_SCHEMA_VERSION: invariantSV } = await import('../lib/mpl-state-invariant.mjs').then(async (m) => {
-      // mpl-state-invariant re-imports the same constant — confirm both sides agree.
-      const stateMod = await import('../lib/mpl-state.mjs');
-      return { CURRENT_SCHEMA_VERSION: stateMod.CURRENT_SCHEMA_VERSION };
+  it('mpl-state-invariant re-exports the same constant readState enforces', async () => {
+    // Re-export added in PR #132 review fix so the assertion actually
+    // crosses module boundaries instead of comparing the constant to
+    // itself.
+    const invariantMod = await import('../lib/mpl-state-invariant.mjs');
+    assert.equal(invariantMod.CURRENT_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION);
+  });
+});
+
+/* ─────────────── PR #132 review #1: writeState fail-closed ────────────── */
+
+describe('writeState refuses to overwrite a future-schema state (PR #132)', () => {
+  let tmpDir;
+  let originalStderrWrite;
+  let stderrCaptured;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mpl-write-h8-'));
+    stderrCaptured = '';
+    originalStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => {
+      stderrCaptured += chunk;
+      return true;
+    };
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalStderrWrite;
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeRawState(body) {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify(body));
+  }
+
+  it('throws UnsupportedSchemaVersionError when on-disk schema_version > CURRENT', () => {
+    writeRawState({
+      current_phase: 'phase2-sprint',
+      schema_version: CURRENT_SCHEMA_VERSION + 1,
+      sentinel: 'fresh-writer',
     });
-    assert.equal(invariantSV, CURRENT_SCHEMA_VERSION);
+    assert.throws(
+      () => writeState(tmpDir, { session_status: 'active' }),
+      (err) => err instanceof UnsupportedSchemaVersionError
+        && err.version === CURRENT_SCHEMA_VERSION + 1
+        && err.supported === CURRENT_SCHEMA_VERSION,
+    );
+  });
+
+  it('does NOT mutate the on-disk file when refusing the write', () => {
+    writeRawState({
+      current_phase: 'phase2-sprint',
+      schema_version: CURRENT_SCHEMA_VERSION + 2,
+      sentinel: 'fresh-writer',
+      futureField: { nested: 'data' },
+    });
+    try {
+      writeState(tmpDir, { session_status: 'active' });
+    } catch {
+      // expected
+    }
+    const raw = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(raw.schema_version, CURRENT_SCHEMA_VERSION + 2, 'schema_version preserved');
+    assert.equal(raw.sentinel, 'fresh-writer', 'sentinel field preserved');
+    assert.deepEqual(raw.futureField, { nested: 'data' }, 'unknown future field preserved');
+    assert.equal(raw.session_status, undefined, 'patch did NOT land');
+  });
+
+  it('emits a stderr diagnostic referencing the migration policy doc', () => {
+    writeRawState({
+      current_phase: 'phase2-sprint',
+      schema_version: CURRENT_SCHEMA_VERSION + 1,
+    });
+    try { writeState(tmpDir, { session_status: 'active' }); } catch { /* expected */ }
+    assert.match(stderrCaptured, /writeState refused/);
+    assert.match(stderrCaptured, /migration-policy\.md/);
+  });
+
+  it('still writes normally when on-disk schema_version is at parity', () => {
+    writeRawState({
+      current_phase: 'phase2-sprint',
+      schema_version: CURRENT_SCHEMA_VERSION,
+      execution: { task: 'baseline', phases: { total: 0, completed: 0, current: null, failed: 0, circuit_breaks: 0 } },
+    });
+    const merged = writeState(tmpDir, { session_status: 'active' });
+    assert.equal(merged.session_status, 'active');
+    assert.equal(merged.schema_version, CURRENT_SCHEMA_VERSION);
+  });
+
+  it('still writes normally when state file does not exist (fresh init path)', () => {
+    const merged = writeState(tmpDir, { current_phase: 'phase1-plan' });
+    assert.equal(merged.current_phase, 'phase1-plan');
+    assert.equal(merged.schema_version, CURRENT_SCHEMA_VERSION);
+  });
+});
+
+/* ─────── PR #132 review nit #2: corrupt legacy file raw archival ──────── */
+
+describe('v1→v2 migration archives raw bytes when legacy file is corrupt (PR #132 nit #2)', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-corrupt-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('preserves the original bytes in legacy_content_raw when JSON.parse fails', () => {
+    // Unversioned state (v1) with a corrupt legacy execution file.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      pipeline_id: 'mpl-corrupt-test',
+      current_phase: 'phase2-sprint',
+    }));
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    const corruptBytes = '{"task": "broken", "phases":';
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), corruptBytes);
+
+    readState(tmpDir);
+
+    // Source legacy file removed
+    assert.equal(existsSync(join(tmpDir, LEGACY_EXECUTION_STATE_PATH)), false);
+
+    // Archive carries the raw bytes verbatim plus a corrupt flag — no
+    // longer just `null` legacy_content.
+    const archiveDir = join(tmpDir, '.mpl', 'archive');
+    const archiveFile = readdirSync(archiveDir).find((f) => f.endsWith('legacy-execution-state.json'));
+    assert.ok(archiveFile, 'archive file expected');
+    const archive = JSON.parse(readFileSync(join(archiveDir, archiveFile), 'utf-8'));
+    assert.equal(archive.legacy_content, null);
+    assert.equal(archive.legacy_content_raw, corruptBytes, 'raw bytes preserved verbatim');
+    assert.equal(archive.legacy_content_corrupt, true);
+  });
+
+  it('does NOT add raw fields when the legacy file is well-formed', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      pipeline_id: 'mpl-good-legacy',
+      current_phase: 'phase2-sprint',
+    }));
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'state.json'), JSON.stringify({ task: 'ok' }));
+
+    readState(tmpDir);
+
+    const archiveDir = join(tmpDir, '.mpl', 'archive');
+    const archiveFile = readdirSync(archiveDir).find((f) => f.endsWith('legacy-execution-state.json'));
+    const archive = JSON.parse(readFileSync(join(archiveDir, archiveFile), 'utf-8'));
+    assert.equal(archive.legacy_content.task, 'ok');
+    assert.equal(archive.legacy_content_raw, undefined);
+    assert.equal(archive.legacy_content_corrupt, undefined);
   });
 });
