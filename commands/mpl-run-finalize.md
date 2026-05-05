@@ -218,7 +218,7 @@ announce: "[MPL] Scope Drift: {(drift_ratio * 100).toFixed(0)}% ({added_files.le
 // No blocking — data collection for future Gate integration
 ```
 
-### 5.1.6: Codex Audit (F6, #117) — Tier 4 last-mile sweep
+### 5.1.7: Codex Audit (F6, #117) — Tier 4 last-mile sweep
 
 Single dispatch of the codex auditor. Tier 1 (F2 hook scan), Tier 2 (F3
 anti-pattern registry), and Tier 3 (F5 property check) catch ~7/8 of MPL

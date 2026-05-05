@@ -15,8 +15,11 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
+import { execSync } from 'node:child_process';
+
 import {
   enumerateIncludedUserCases,
+  isLegacyContractMode,
   parseDecompositionPhases,
   findMissingCovers,
   findScopeDrift,
@@ -571,3 +574,156 @@ deferred_cases:`,
     assert.equal(report.verdict, 'fail');
   });
 });
+
+/* ────────────────────────── PR #136 review regressions ───────────────────── */
+
+describe('PR #136 review regressions', () => {
+  let tmp;
+  beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), 'mpl-f6-')); });
+  afterEach(() => { rmSync(tmp, { recursive: true, force: true }); });
+
+  /* Codex HIGH ----------------------------------------------------------- */
+
+  it('isLegacyContractMode returns true when user-contract.md is absent', () => {
+    assert.equal(isLegacyContractMode(tmp), true);
+    scaffold(tmp, { '.mpl/requirements/user-contract.md': SAMPLE_USER_CONTRACT });
+    assert.equal(isLegacyContractMode(tmp), false);
+  });
+
+  it('Codex HIGH: legacy mode (no user-contract.md) suppresses dangling covers', () => {
+    // Decomposition claims UC-01 but no user-contract.md exists — pre-fix
+    // emitted a dangling-covers fail; post-fix mirrors mpl-require-covers
+    // graceful-skip semantics and returns no surfaces.
+    scaffold(tmp, {
+      '.mpl/mpl/decomposition.yaml': `phases:
+  - id: phase-1
+    covers: [UC-01]
+    impact:
+      create:
+        - path: src/a.ts
+`,
+    });
+    const report = runCodexAudit(tmp, REAL_PLUGIN_ROOT, { now: 'NOW' });
+    assert.equal(report.contract_mode, 'legacy_skip');
+    assert.equal(report.verdict, 'pass');
+    assert.equal(report.summary.dangling_covers, 0);
+    assert.equal(report.summary.missing_covers, 0);
+  });
+
+  it('Codex HIGH: findMissingCovers honours legacy:true opts flag', () => {
+    const ucs = []; // pretend the file is absent
+    const phases = [{ id: 'p1', covers: ['UC-01', 'UC-99'], impact_files: [] }];
+    const { uncovered, dangling } = findMissingCovers(ucs, phases, { legacy: true });
+    assert.deepStrictEqual(uncovered, []);
+    assert.deepStrictEqual(dangling, []);
+  });
+
+  it('Codex HIGH: enforced mode (file present + empty user_cases) still surfaces dangling', () => {
+    // Distinguish "no contract file" (legacy_skip) from "empty contract" —
+    // the latter is an explicit author choice and dangling claims are real.
+    scaffold(tmp, {
+      '.mpl/requirements/user-contract.md': `# UC
+
+\`\`\`yaml
+schema_version: 1
+user_cases: []
+\`\`\`
+`,
+      '.mpl/mpl/decomposition.yaml': `phases:
+  - id: phase-1
+    covers: [UC-01]
+    impact:
+      create:
+        - path: src/a.ts
+`,
+    });
+    const report = runCodexAudit(tmp, REAL_PLUGIN_ROOT, { now: 'NOW' });
+    assert.equal(report.contract_mode, 'enforced');
+    assert.equal(report.verdict, 'fail');
+    assert.equal(report.summary.dangling_covers, 1);
+  });
+
+  /* Codex MEDIUM --------------------------------------------------------- */
+
+  it('Codex MEDIUM: drift probe sees unstaged created files (finalize-time scenario)', () => {
+    // F6 runs before Git Master commit, so the impl is in the working tree
+    // unstaged. Pre-fix probe chain (merge-base / HEAD~20 / --cached) all
+    // missed unstaged content; declared impact reported as `unimplemented`
+    // even though the file existed.
+    execSync('git init -q', { cwd: tmp });
+    execSync('git config user.email a@b.c', { cwd: tmp });
+    execSync('git config user.name t', { cwd: tmp });
+    writeFileSync(join(tmp, 'README.md'), '# init');
+    execSync('git add README.md && git commit -q -m init', { cwd: tmp });
+
+    scaffold(tmp, {
+      'src/a.ts': 'export const a = 1;\n',
+    });
+    const phases = [{ id: 'p1', covers: ['internal'], impact_files: ['src/a.ts'] }];
+    const drift = findScopeDrift(tmp, phases);
+    assert.ok(!drift.unimplemented.includes('src/a.ts'),
+      `unstaged created file must not be reported as unimplemented; got ${JSON.stringify(drift)}`);
+  });
+
+  it('Codex MEDIUM: drift probe sees staged-but-uncommitted changes', () => {
+    execSync('git init -q', { cwd: tmp });
+    execSync('git config user.email a@b.c', { cwd: tmp });
+    execSync('git config user.name t', { cwd: tmp });
+    writeFileSync(join(tmp, 'README.md'), '# init');
+    execSync('git add README.md && git commit -q -m init', { cwd: tmp });
+
+    scaffold(tmp, { 'src/b.ts': 'export const b = 2;\n' });
+    execSync('git add src/b.ts', { cwd: tmp });
+    const phases = [{ id: 'p1', covers: ['internal'], impact_files: ['src/b.ts'] }];
+    const drift = findScopeDrift(tmp, phases);
+    assert.ok(!drift.unimplemented.includes('src/b.ts'));
+  });
+
+  /* Claude #1 + #2 indent fragility ------------------------------------- */
+
+  it('Claude #1: parseDecompositionPhases tolerates deeper-indented phases', () => {
+    // Future schema may wrap phases under a meta layer (e.g. `task:`).
+    // Pre-fix `^  - id:` (exact 2-space) silently returned [].
+    scaffold(tmp, {
+      '.mpl/mpl/decomposition.yaml': `task:
+  phases:
+    - id: phase-1
+      covers: [internal]
+      impact:
+        create:
+          - path: src/x.ts
+        modify:
+          - path: src/y.ts
+`,
+    });
+    const phases = parseDecompositionPhases(tmp);
+    assert.equal(phases.length, 1);
+    assert.equal(phases[0].id, 'phase-1');
+    assert.deepStrictEqual(phases[0].impact_files.sort(), ['src/x.ts', 'src/y.ts']);
+  });
+
+  /* Claude #3 indent tolerance for user_cases --------------------------- */
+
+  it('Claude #3: enumerateIncludedUserCases tolerates indented user_cases section', () => {
+    // YAML inside a markdown fence with author-added indent.
+    scaffold(tmp, {
+      '.mpl/requirements/user-contract.md': `# UC
+
+\`\`\`yaml
+metadata:
+  schema_version: 1
+
+  user_cases:
+    - id: "UC-01"
+      title: "Indented case"
+      status: "included"
+      covers_pp: ["PP-A"]
+\`\`\`
+`,
+    });
+    const ucs = enumerateIncludedUserCases(tmp);
+    assert.equal(ucs.length, 1);
+    assert.equal(ucs[0].id, 'UC-01');
+  });
+});
+

@@ -43,11 +43,29 @@ import { loadRegistry, scanContent, isInScope } from './anti-pattern-registry.mj
 /* ────────────────────────── User contract parsing ────────────────────────── */
 
 /**
+ * Legacy graceful-skip mode signal. Mirrors `mpl-require-covers.mjs#isLegacyMode`
+ * verbatim — file absence is the canonical signal that the project predates
+ * 0.16 Tier B and never produced a UC contract. Both `findMissingCovers`
+ * surfaces (uncovered + dangling) are suppressed in this mode so an F6 fail
+ * cannot block a finalize that the existing covers hook accepts.
+ *
+ * PR #136 review (Codex HIGH) fix: pre-fix, every non-`internal` phase cover
+ * was reported as dangling when user-contract.md was absent (because the
+ * included set was empty). That contradicted the require-covers contract and
+ * could halt finalize under `enforcement.audit_residual = 'block'` or strict
+ * mode for a legitimately-graceful pipeline.
+ */
+export function isLegacyContractMode(cwd) {
+  return !existsSync(join(cwd, '.mpl/requirements/user-contract.md'));
+}
+
+/**
  * Extract every `included` UC id from `.mpl/requirements/user-contract.md`.
  * The file is YAML embedded inside a markdown wrapper; we use a regex pass
  * keyed on `id: "UC-NN"` lines under the `user_cases:` block. The
  * graceful-skip mode (file absent → empty user_cases) is tolerated by
- * returning an empty array.
+ * returning an empty array — caller must combine with `isLegacyContractMode`
+ * to distinguish "no contract" from "empty contract" semantics.
  *
  * Returns `[{ id, title }]`. `title` is best-effort (next non-empty
  * line containing `title:`) — used only for human-readable surface.
@@ -66,15 +84,25 @@ export function enumerateIncludedUserCases(cwd) {
   // We walk lines to avoid the off-by-one risk of slice(1)+search/m: that
   // pattern matches the leftover `ser_cases:` substring on the very next
   // character of the slice, terminating the block before any UC is read.
+  // PR #136 review #3 (Claude 🟡): allow indented `user_cases:` so an author
+  // who places the YAML inside an indented markdown fence still parses.
   const lines = content.split('\n');
-  const startIdx = lines.findIndex(l => /^user_cases\s*:/.test(l));
+  const startIdx = lines.findIndex(l => /^\s*user_cases\s*:/.test(l));
   if (startIdx < 0) return [];
+
+  // Capture the indent of `user_cases:` so the section-end check stops on a
+  // sibling key at the SAME level rather than any column-0 key.
+  const sectionIndent = (lines[startIdx].match(/^(\s*)/) ?? ['', ''])[1].length;
 
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (/^[a-z_]+\s*:\s*$/.test(lines[i])) { endIdx = i; break; }
+    const line = lines[i];
+    const indentMatch = line.match(/^(\s*)([a-z_]+)\s*:\s*$/);
+    if (indentMatch && indentMatch[1].length === sectionIndent) {
+      endIdx = i; break;
+    }
     // Closing fence ends the YAML block too.
-    if (/^```/.test(lines[i])) { endIdx = i; break; }
+    if (/^\s*```/.test(line)) { endIdx = i; break; }
   }
   const userCasesBlock = lines.slice(startIdx, endIdx).join('\n');
 
@@ -127,8 +155,12 @@ export function parseDecompositionPhases(cwd) {
   try { content = readFileSync(path, 'utf-8'); }
   catch { return []; }
 
+  // PR #136 review #2 (Claude 🟡): allow any indent depth for the phase
+  // entry. Pre-fix `^  - id:\s*` (exact 2-space) silent-broke when the
+  // decomposer wraps `phases:` deeper (future task/meta layer) — every
+  // phase block was missed and the audit returned `phases: []` quietly.
   const phases = [];
-  const blocks = content.split(/^  - id:\s*/m).slice(1);
+  const blocks = content.split(/^\s*-\s+id\s*:\s*/m).slice(1);
 
   for (const block of blocks) {
     const lines = block.split('\n');
@@ -174,22 +206,28 @@ function parseCoversArray(block) {
 
 function parseImpactFiles(block) {
   // Walk `impact:` subsections create/modify only (intent-bearing scope).
-  // Each entry is `      - path: "..."` or bare `      - "..."`.
+  // PR #136 review #1 (Claude 🟡): use indent-tolerant matching with the
+  // captured leading whitespace as the section's anchor depth, then accept
+  // any deeper indent for the bullet entries. Pre-fix `\s{4,6}` literal
+  // silent-broke if the decomposer ever wraps `phases:` in a meta layer.
   const lines = block.split('\n');
   const files = new Set();
-  let activeSection = null; // 'create' | 'modify' | null
+  let activeSection = null;   // 'create' | 'modify' | null
+  let sectionIndent = -1;     // column where active section's key starts
   for (const line of lines) {
-    const sectionMatch = line.match(/^\s{4,6}(create|modify|affected_tests|affected_config)\s*:\s*$/);
+    const sectionMatch = line.match(/^(\s+)(create|modify|affected_tests|affected_config)\s*:\s*$/);
     if (sectionMatch) {
-      activeSection = (sectionMatch[1] === 'create' || sectionMatch[1] === 'modify')
-        ? sectionMatch[1]
-        : null;
+      const isImpactKey = (sectionMatch[2] === 'create' || sectionMatch[2] === 'modify');
+      activeSection = isImpactKey ? sectionMatch[2] : null;
+      sectionIndent = sectionMatch[1].length;
       continue;
     }
     if (!activeSection) continue;
-    // Stop when we hit another sibling key (e.g. `interface_contract:`)
-    if (/^\s{2,4}[a-z_]+\s*:\s*$/.test(line) && !line.includes('  - ')) {
+    // Stop when we hit another sibling key at SAME indent (e.g. `interface_contract:`).
+    const siblingMatch = line.match(/^(\s+)[a-z_]+\s*:\s*$/);
+    if (siblingMatch && siblingMatch[1].length === sectionIndent) {
       activeSection = null;
+      sectionIndent = -1;
       continue;
     }
     const pathInline = line.match(/^\s+-\s+path\s*:\s*["']?([^"'\n]+)["']?/);
@@ -269,10 +307,18 @@ export function auditAntiPatternResidual(cwd, pluginRoot, phases) {
  *
  * The single-escape `["internal"]` is honored — internal-only phases don't
  * contribute to coverage but also don't dangle.
+ *
+ * `opts.legacy = true` (PR #136 review Codex HIGH fix): legacy graceful-skip
+ * mode signal from `isLegacyContractMode`. When set, both surfaces collapse
+ * to empty arrays — the project predates the UC contract and shouldn't be
+ * audited against an empty included set. Mirrors `mpl-require-covers.mjs#isLegacyMode`.
  */
-export function findMissingCovers(includedUCs, phases) {
+export function findMissingCovers(includedUCs, phases, opts = {}) {
+  if (opts.legacy === true) {
+    return { uncovered: [], dangling: [] };
+  }
+
   const includedIds = new Set(includedUCs.map(uc => uc.id));
-  const titleById = new Map(includedUCs.map(uc => [uc.id, uc.title]));
 
   const claimed = new Set();
   const dangling = [];
@@ -334,14 +380,29 @@ export function findScopeDrift(cwd, phases, opts = {}) {
 }
 
 function collectActualChanges(cwd, opts = {}) {
-  // `mpl-state.json` knows how many phase commits have landed (`phases.completed`),
-  // but reading it from here would couple two libs. Use a cheap fallback:
-  // diff against the merge-base with main if available, else last 20 commits,
-  // else cached/staged. Returns null when git itself is unreachable.
+  // F6 runs at finalize-time BEFORE the Git Master commit step (5.3), so
+  // the implementation is typically still in the working tree (unstaged
+  // and/or staged) and not yet committed — and brand-new files are still
+  // untracked (no `git add` yet). Probe order:
+  //
+  //   1. `{ git diff --name-only HEAD; git ls-files --others --exclude-standard; }`
+  //      — tracked-modified-vs-HEAD UNION untracked files. PR #136 review
+  //      (Codex MEDIUM) fix: pre-fix probe chain missed unstaged created
+  //      files entirely; even after switching to `--name-only HEAD` we
+  //      still missed pure untracked files (which are the COMMON case at
+  //      finalize-time since `git add` hasn't happened yet).
+  //   2. `git diff --name-only --cached` — staged-only fallback.
+  //   3. merge-base..HEAD — committed range vs default branch. PR #136
+  //      review #4 (Claude 🟡): dynamic origin/HEAD lookup so master /
+  //      develop / trunk repos aren't penalized.
+  //   4. HEAD~20..HEAD — last-20-commits fallback.
+  //
+  // Returns null when git itself is unreachable.
   const probes = opts.probes ?? [
-    'git diff --name-only $(git merge-base HEAD main 2>/dev/null || echo HEAD~20)..HEAD 2>/dev/null',
+    '{ git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; }',
+    'git diff --name-only --cached 2>/dev/null',
+    'git diff --name-only $(git merge-base HEAD $(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main) 2>/dev/null || echo HEAD~20)..HEAD 2>/dev/null',
     'git diff --name-only HEAD~20..HEAD 2>/dev/null',
-    'git diff --name-only --cached',
   ];
   for (const cmd of probes) {
     try {
@@ -383,9 +444,10 @@ function collectActualChanges(cwd, opts = {}) {
 export function runCodexAudit(cwd, pluginRoot, opts = {}) {
   const phases = parseDecompositionPhases(cwd);
   const includedUCs = enumerateIncludedUserCases(cwd);
+  const legacy = isLegacyContractMode(cwd);
 
   const antiPatternResidual = auditAntiPatternResidual(cwd, pluginRoot, phases);
-  const { uncovered, dangling } = findMissingCovers(includedUCs, phases);
+  const { uncovered, dangling } = findMissingCovers(includedUCs, phases, { legacy });
   const drift = findScopeDrift(cwd, phases, opts);
 
   const verdict = (antiPatternResidual.length === 0
@@ -399,6 +461,7 @@ export function runCodexAudit(cwd, pluginRoot, opts = {}) {
     tier: 4,
     generated_at: opts.now ?? new Date().toISOString(),
     verdict,
+    contract_mode: legacy ? 'legacy_skip' : 'enforced',
     summary: {
       anti_pattern_residual: antiPatternResidual.length,
       missing_covers: uncovered.length,
