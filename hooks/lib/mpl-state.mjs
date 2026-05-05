@@ -12,6 +12,7 @@ import { loadConfig } from './mpl-config.mjs';
 import { deepMerge } from './mpl-state-merge.mjs';
 import { runMigrations } from './migrations/index.mjs';
 import { LEGACY_EXECUTION_STATE_PATH as V1_TO_V2_LEGACY_PATH } from './migrations/v1-to-v2.mjs';
+import { appendRunbookRow, parseRunbookRows, summarizeGates, wallMinutes } from './mpl-runbook.mjs';
 
 export { deepMerge };
 
@@ -458,7 +459,98 @@ export function writeState(cwd, patch) {
   writeFileSync(tmpPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
   renameSync(tmpPath, join(stateDir, STATE_FILE));
 
+  // G2 (#113): RUNBOOK row append on phase transition. Runs AFTER the
+  // state write so a failed RUNBOOK append never blocks the state
+  // mutation. Catches every transition writer (phase-controller hook,
+  // orchestrator mpl_state_write) without each having to remember.
+  recordRunbookTransition(cwd, current, merged);
+
   return merged;
+}
+
+/**
+ * G2 (#113): append a row to `.mpl/mpl/RUNBOOK.md` whenever
+ * `current_phase` actually transitions. Pre-G2, RUNBOOK was written by
+ * the orchestrator only on success paths, so half a sprint could be
+ * missing rows after a context-compaction
+ * (R-OBSERVABILITY-GAP, Evidence A).
+ *
+ * `started_at` is inferred by chaining off the most recent **transition**
+ * row's `ended_at` (sequential timeline). PR #134 review #1 caught the
+ * naïve "rows[0]" version that picked up compaction snapshots and
+ * therefore measured only the post-compaction segment of the active
+ * phase. Compaction snapshots carry a `(compaction-N)` suffix in their
+ * phase column and are now skipped when finding the chain anchor.
+ *
+ * `fix_loops` is the count for *this phase*, summed from
+ * `prev.fix_loop_history` filtered by `prevPhase` (PR #134 Codex
+ * review). The bare `prev.fix_loop_count` would mix earlier phases'
+ * fix loops into this phase's row.
+ *
+ * The first row's `started_at` falls back to `state.started_at`
+ * (pipeline init). A future schema bump can replace this inference with
+ * an explicit `phase_started_at` field; until then the chain is exact
+ * for sequential transitions and approximate only for the very first
+ * row.
+ */
+function recordRunbookTransition(cwd, prev, merged) {
+  const prevPhase = prev?.current_phase;
+  const newPhase = merged?.current_phase;
+  if (!prevPhase || prevPhase === newPhase) return;
+
+  try {
+    const endedAt = new Date().toISOString();
+    const rows = parseRunbookRows(cwd);
+    // Skip compaction-snapshot rows when chaining — they're mid-phase
+    // markers, not transition boundaries.
+    const lastTransitionRow = rows.find((r) => r.phase && !/\(compaction-\d+\)/.test(r.phase));
+    const startedAt = (lastTransitionRow?.ended_at) || prev?.started_at || '';
+
+    // PR #134 review #2 (Codex Medium): align sum key with G5
+    // `recordFixLoopHistory` writer precedence. The writer keys
+    // entries by `execution.phases.current ?? current_phase` (concrete
+    // phase-N id wins). If the row's display phase (`prevPhase`,
+    // lifecycle marker) were used as the sum key, multi-sub-phase
+    // sprints would always sum to 0 because every history entry is
+    // keyed by phase-N concrete ids.
+    const sumKey = prev?.execution?.phases?.current ?? prevPhase;
+    const phaseFixLoops = sumFixLoopsForPhase(prev?.fix_loop_history, sumKey);
+
+    const result = appendRunbookRow(cwd, {
+      phase: prevPhase,
+      started_at: startedAt,
+      ended_at: endedAt,
+      gates: summarizeGates(prev),
+      wall_min: wallMinutes(startedAt, endedAt),
+      fix_loops: phaseFixLoops,
+    });
+    // PR #134 nit #4: surface non-duplicate failures so a missing row
+    // doesn't disappear silently. `duplicate` is the natural retry
+    // result — those stay quiet.
+    if (result && !result.appended && result.reason && result.reason !== 'duplicate') {
+      process.stderr.write(`[mpl-runbook] append refused for ${prevPhase}: ${result.reason}\n`);
+    }
+  } catch {
+    // Non-fatal: RUNBOOK is observability, must not block writes.
+  }
+}
+
+/**
+ * Sum the `count` field of every `fix_loop_history` entry whose `phase`
+ * matches `phaseId`. Bare-number entries (legacy/compat) carry no phase
+ * so they contribute 0 to the per-phase total — they'd be aggregated
+ * into a global counter elsewhere if needed.
+ */
+function sumFixLoopsForPhase(history, phaseId) {
+  if (!Array.isArray(history) || !phaseId) return 0;
+  let sum = 0;
+  for (const entry of history) {
+    if (entry && typeof entry === 'object' && entry.phase === phaseId
+        && typeof entry.count === 'number' && Number.isFinite(entry.count)) {
+      sum += entry.count;
+    }
+  }
+  return sum;
 }
 
 /**
