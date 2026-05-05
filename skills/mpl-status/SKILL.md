@@ -8,10 +8,24 @@ Display the current MPL pipeline status with structured metrics.
 
 ## Protocol
 
-### Step 1: Read State
+### Step 1: Read State (3-source merge — G2 / #113)
 
-Read `.mpl/state.json` to get current pipeline state.
-If no state file exists, report "MPL is not active."
+Pre-G2 the dashboard read only `.mpl/state.json`. R-OBSERVABILITY-GAP
+(Evidence A) showed each source carrying half the timeline by itself.
+G2 makes the dashboard read all three and merge them:
+
+| Source | What it carries | When it lands |
+|---|---|---|
+| `.mpl/state.json` | programmatic pipeline state (current_phase, gate_results, fix_loop_count, fix_loop_history, user_intervention_count, ...) | every `writeState` mutation |
+| `.mpl/mpl/phases/phase-N/state-summary.md` | narrative finalize report per phase | phase-runner finalize |
+| `.mpl/mpl/RUNBOOK.md` | timeline rows (phase, started_at, ended_at, gates, wall_min, fix_loops) | Stop hook on phase transition + PreCompact snapshot |
+
+Procedure:
+
+1. Read `.mpl/state.json`. If absent → report "MPL is not active." and stop.
+2. Read all `.mpl/mpl/phases/phase-*/state-summary.md` files (best-effort; missing files are skipped, not errors).
+3. Read `.mpl/mpl/RUNBOOK.md` table rows (best-effort; absent file = empty timeline).
+4. Cross-reference: each completed phase from state.json should have BOTH a state-summary.md AND at least one RUNBOOK row. Report orphans (missing summary OR missing row) so the operator can spot observability holes during/after a run.
 
 ### Step 2: Read decomposition.yaml
 
@@ -62,8 +76,19 @@ Output a structured dashboard:
 ║  Findings: {count}  Sources: {count}             ║
 ╠══════════════════════════════════════════════════╣
 ║  Fix Loop: {count}/{max}                         ║
+║  Per-phase: {fix_loop_history summary}           ║
 ║  Convergence: {improving|stagnating|regressing}  ║
 ║  Pass Rate History: {rates}                      ║
+╠══════════════════════════════════════════════════╣
+║  User Interventions (auto-mode): {N}             ║
+║  (every prompt during run_mode='auto' counts)    ║
+╠══════════════════════════════════════════════════╣
+║  Phase Timeline (RUNBOOK, newest first):         ║
+║  {phase} {ended_at} gates={H1?H2?H3?} wall={N}m  ║
+║  {phase} {ended_at} gates={H1?H2?H3?} wall={N}m  ║
+║  ...up to last 10 rows...                        ║
+║  Orphans: {N completed phases lack RUNBOOK row}  ║
+║          {N completed phases lack state-summary} ║
 ╠══════════════════════════════════════════════════╣
 ║  Token Profile:                                  ║
 ║  Total Tokens: {total_tokens}                    ║
@@ -75,6 +100,19 @@ Output a structured dashboard:
 ║  Cache:        {HIT|MISS}                        ║
 ╚══════════════════════════════════════════════════╝
 ```
+
+### Step 3.5: G5 + G6 telemetry (#114) — surface fix_loop_history and user_intervention_count
+
+- `state.fix_loop_history[]` — group by `phase`, sum `count` per group, render as `phase-1: 2, phase-3: 4` etc. Falls back to "(none)" when empty.
+- `state.user_intervention_count` — render only when `state.run_mode === 'auto'`. In other run modes the field has no honest interpretation (every prompt is expected) and surfacing 0 would be misleading.
+
+### Step 3.6: G2 timeline view (#113) — RUNBOOK rows + orphan detection
+
+- Render the last 10 rows from RUNBOOK.md table newest-first. Each row: `{phase} | ended_at | gates | wall_min m | fix_loops`.
+- Cross-reference with `state.execution.phase_details[]`:
+  - Phases with `status === 'completed'` whose phase id has NO matching RUNBOOK row → flag as orphan ("missing RUNBOOK row")
+  - Phases with `status === 'completed'` whose phase folder has NO `state-summary.md` → flag as orphan ("missing state-summary")
+- Compaction-snapshot rows are recognizable by the `(compaction-N)` suffix in the phase column; render them with a distinct prefix (e.g. `…`) so the operator sees they're in-flight markers, not finalized transitions.
 
 ### Step 4: Token Profile
 

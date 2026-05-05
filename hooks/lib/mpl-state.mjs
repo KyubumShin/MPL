@@ -12,6 +12,7 @@ import { loadConfig } from './mpl-config.mjs';
 import { deepMerge } from './mpl-state-merge.mjs';
 import { runMigrations } from './migrations/index.mjs';
 import { LEGACY_EXECUTION_STATE_PATH as V1_TO_V2_LEGACY_PATH } from './migrations/v1-to-v2.mjs';
+import { appendRunbookRow, parseRunbookRows, summarizeGates, wallMinutes } from './mpl-runbook.mjs';
 
 export { deepMerge };
 
@@ -458,7 +459,49 @@ export function writeState(cwd, patch) {
   writeFileSync(tmpPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
   renameSync(tmpPath, join(stateDir, STATE_FILE));
 
+  // G2 (#113): RUNBOOK row append on phase transition. Runs AFTER the
+  // state write so a failed RUNBOOK append never blocks the state
+  // mutation. Catches every transition writer (phase-controller hook,
+  // orchestrator mpl_state_write) without each having to remember.
+  recordRunbookTransition(cwd, current, merged);
+
   return merged;
+}
+
+/**
+ * G2 (#113): append a row to `.mpl/mpl/RUNBOOK.md` whenever
+ * `current_phase` actually transitions. Pre-G2, RUNBOOK was written by
+ * the orchestrator only on success paths, so half a sprint could be
+ * missing rows after a context-compaction
+ * (R-OBSERVABILITY-GAP, Evidence A).
+ *
+ * `started_at` is inferred by chaining off the most recent row's
+ * `ended_at` (sequential timeline). The first row's `started_at`
+ * falls back to `state.started_at` (pipeline init) when no prior row
+ * exists. A future schema bump can replace this inference with an
+ * explicit `phase_started_at` field; until then the chain is exact for
+ * sequential transitions and approximate only for the very first row.
+ */
+function recordRunbookTransition(cwd, prev, merged) {
+  const prevPhase = prev?.current_phase;
+  const newPhase = merged?.current_phase;
+  if (!prevPhase || prevPhase === newPhase) return;
+
+  try {
+    const endedAt = new Date().toISOString();
+    const rows = parseRunbookRows(cwd);
+    const startedAt = (rows[0]?.ended_at) || prev?.started_at || '';
+    appendRunbookRow(cwd, {
+      phase: prevPhase,
+      started_at: startedAt,
+      ended_at: endedAt,
+      gates: summarizeGates(prev),
+      wall_min: wallMinutes(startedAt, endedAt),
+      fix_loops: prev?.fix_loop_count ?? 0,
+    });
+  } catch {
+    // Non-fatal: RUNBOOK is observability, must not block writes.
+  }
 }
 
 /**

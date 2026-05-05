@@ -20,6 +20,10 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+const { appendRunbookRow, parseRunbookRows, summarizeGates, wallMinutes } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-runbook.mjs')).href
+);
+
 const PROFILE_DIR = '.mpl/mpl/profile';
 const COMPACTIONS_FILE = 'compactions.jsonl';
 const CHECKPOINTS_DIR = '.mpl/mpl/checkpoints';
@@ -40,6 +44,29 @@ async function main() {
 
   const state = readState(cwd);
   if (!state) return;
+
+  // G2 (#113): RUNBOOK snapshot BEFORE compaction. The Stop hook only
+  // appends on phase transitions; if compaction lands mid-phase the
+  // last-known phase context can be lost without a row to chain off
+  // (R-OBSERVABILITY-GAP). Write an open-ended row marking the
+  // boundary so /mpl-status' timeline view stays continuous after
+  // resume. `ended_at` is left empty: this is an "in-flight" marker,
+  // distinct from a finalized phase transition.
+  try {
+    const rows = parseRunbookRows(cwd);
+    const startedAt = (rows[0]?.ended_at) || state?.started_at || '';
+    const compactionMark = `compaction-${(state.compaction_count || 0) + 1}`;
+    appendRunbookRow(cwd, {
+      phase: `${state.current_phase || 'unknown'} (${compactionMark})`,
+      started_at: startedAt,
+      ended_at: new Date().toISOString(),
+      gates: summarizeGates(state),
+      wall_min: wallMinutes(startedAt, new Date().toISOString()),
+      fix_loops: state.fix_loop_count || 0,
+    });
+  } catch {
+    // Non-fatal: RUNBOOK snapshot is observability, must not block compaction.
+  }
 
   // Increment compaction count in state
   const currentCount = state.compaction_count || 0;
