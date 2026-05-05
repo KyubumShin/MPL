@@ -1,0 +1,41 @@
+{
+  "_comment": "MPL F5 (#112) — verification command ↔ scope manifest. Doctor / property-check consume this so 'spec-citations checks src/ but not scripts/' (R-DOCTOR-SCOPE-LEAK) becomes machine-detectable. Workspace overrides go to .mpl/config/verification-tool-paths.json.",
+  "tools": {
+    "vitest": {
+      "match": ["vitest run", "vitest --run", "npx vitest"],
+      "scope": ["src/**", "tests/**", "test/**", "**/*.{test,spec}.{ts,tsx,js,jsx,mjs}"]
+    },
+    "jest": {
+      "match": ["jest", "npx jest"],
+      "scope": ["src/**", "tests/**", "test/**", "**/*.{test,spec}.{ts,tsx,js,jsx}"]
+    },
+    "playwright": {
+      "match": ["playwright test", "npx playwright test"],
+      "scope": ["e2e/**", "tests/e2e/**", "**/*.spec.{ts,tsx,js}"]
+    },
+    "eslint": {
+      "match": ["eslint", "npx eslint"],
+      "scope": ["src/**", "scripts/**", "hooks/**", "**/*.{ts,tsx,js,jsx,mjs}"]
+    },
+    "tsc-noemit": {
+      "match": ["tsc --noEmit", "npx tsc --noEmit"],
+      "scope": ["src/**/*.{ts,tsx}", "tsconfig*.json"]
+    },
+    "ruff": {
+      "match": ["ruff check"],
+      "scope": ["src/**/*.py", "scripts/**/*.py", "**/*.py"]
+    },
+    "py-compile": {
+      "match": ["python -m py_compile"],
+      "scope": ["src/**/*.py", "scripts/**/*.py"]
+    },
+    "cargo-check": {
+      "match": ["cargo check"],
+      "scope": ["src/**/*.rs", "src-tauri/**/*.rs", "Cargo.toml"]
+    },
+    "go-build": {
+      "match": ["go build"],
+      "scope": ["**/*.go", "go.mod"]
+    }
+  }
+}
