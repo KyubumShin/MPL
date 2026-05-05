@@ -108,11 +108,11 @@ Output a structured dashboard:
 
 ### Step 3.6: G2 timeline view (#113) — RUNBOOK rows + orphan detection
 
-- Render the last 10 rows from RUNBOOK.md table newest-first. Each row: `{phase} | ended_at | gates | wall_min m | fix_loops`.
-- Cross-reference with `state.execution.phase_details[]`:
-  - Phases with `status === 'completed'` whose phase id has NO matching RUNBOOK row → flag as orphan ("missing RUNBOOK row")
-  - Phases with `status === 'completed'` whose phase folder has NO `state-summary.md` → flag as orphan ("missing state-summary")
-- Compaction-snapshot rows are recognizable by the `(compaction-N)` suffix in the phase column; render them with a distinct prefix (e.g. `…`) so the operator sees they're in-flight markers, not finalized transitions.
+- Render the last 10 rows from RUNBOOK.md table newest-first. Each row: `{phase} | ended_at | gates | wall_min m | fix_loops` (per-phase, not sprint cumulative).
+- Cross-reference with `state.execution.phase_details[]`. Treat as **terminal** (i.e. a row was expected) any phase whose status is in `{ 'completed', 'failed', 'circuit_break' }` (PR #134 nit #5):
+  - Terminal phase whose id has NO matching RUNBOOK row → flag as orphan ("missing RUNBOOK row").
+  - Terminal phase whose folder has NO `state-summary.md` → flag as orphan ("missing state-summary").
+- Compaction-snapshot rows are recognizable by the `(compaction-N)` suffix in the phase column; render them with a distinct prefix (e.g. `…`) so the operator sees they're mid-phase markers, not finalized transitions. The `recordRunbookTransition` chain explicitly skips compaction-suffix rows when computing `started_at`, so the wall_min on each transition row reflects the full phase duration, not just the post-compaction segment (PR #134 review #1 fix).
 
 ### Step 4: Token Profile
 

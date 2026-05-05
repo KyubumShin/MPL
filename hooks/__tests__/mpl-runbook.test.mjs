@@ -209,4 +209,53 @@ describe('writeState appends RUNBOOK row on phase transition (G2)', () => {
     const state = readState(tmpDir);
     assert.equal(state.current_phase, 'phase2-sprint');
   });
+
+  it('PR #134 review #1: chains started_at off the previous TRANSITION row, skipping compaction snapshots', () => {
+    seed({});
+    // Simulate a compaction snapshot in the middle of phase1a-research.
+    appendRunbookRow(tmpDir, {
+      phase: 'phase1a-research (compaction-1)',
+      started_at: '2026-05-05T01:00:00Z',
+      ended_at: '2026-05-05T01:00:30Z',
+    });
+    // Now the actual phase transition fires.
+    writeState(tmpDir, { current_phase: 'phase1b-plan' });
+
+    const rows = parseRunbookRows(tmpDir);
+    const phase1Row = rows.find((r) => r.phase === 'phase1a-research');
+    assert.ok(phase1Row, 'transition row created');
+    // Pre-fix: started_at would be the compaction snapshot's ended_at
+    // (T+30s). Post-fix: it falls back to state.started_at (T0) because
+    // the only prior row is a compaction snapshot, which we skip.
+    assert.equal(phase1Row.started_at, '2026-05-05T01:00:00Z',
+      'transition row chains off prior transition (or pipeline init), not compaction snapshot');
+  });
+
+  it('PR #134 Codex review: fix_loops on RUNBOOK row is per-phase, not sprint cumulative', () => {
+    // Sprint has 5 total fix loops, split phase1a=2 / phase2-sprint=3.
+    // Closing phase2-sprint should record 3 in the RUNBOOK row, not 5.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase2-sprint',
+      started_at: '2026-05-05T01:00:00Z',
+      fix_loop_count: 5,
+      fix_loop_history: [
+        { phase: 'phase1a-research', count: 2, started_at: 'a' },
+        { phase: 'phase2-sprint', count: 3, started_at: 'b' },
+      ],
+      user_intervention_count: 0,
+    }));
+    writeState(tmpDir, { current_phase: 'phase3-gate' });
+    const row = parseRunbookRows(tmpDir).find((r) => r.phase === 'phase2-sprint');
+    assert.ok(row);
+    assert.equal(row.fix_loops, '3', 'per-phase sum, not sprint cumulative (5)');
+  });
+
+  it('PR #134 Codex review: phase with no fix_loop_history entries records 0', () => {
+    seed({ fix_loop_count: 4, fix_loop_history: [{ phase: 'unrelated', count: 4, started_at: 't' }] });
+    writeState(tmpDir, { current_phase: 'phase1b-plan' });
+    const row = parseRunbookRows(tmpDir).find((r) => r.phase === 'phase1a-research');
+    assert.equal(row.fix_loops, '0', 'no entries for this phase → 0, not the sprint total');
+  });
 });

@@ -475,12 +475,23 @@ export function writeState(cwd, patch) {
  * missing rows after a context-compaction
  * (R-OBSERVABILITY-GAP, Evidence A).
  *
- * `started_at` is inferred by chaining off the most recent row's
- * `ended_at` (sequential timeline). The first row's `started_at`
- * falls back to `state.started_at` (pipeline init) when no prior row
- * exists. A future schema bump can replace this inference with an
- * explicit `phase_started_at` field; until then the chain is exact for
- * sequential transitions and approximate only for the very first row.
+ * `started_at` is inferred by chaining off the most recent **transition**
+ * row's `ended_at` (sequential timeline). PR #134 review #1 caught the
+ * naïve "rows[0]" version that picked up compaction snapshots and
+ * therefore measured only the post-compaction segment of the active
+ * phase. Compaction snapshots carry a `(compaction-N)` suffix in their
+ * phase column and are now skipped when finding the chain anchor.
+ *
+ * `fix_loops` is the count for *this phase*, summed from
+ * `prev.fix_loop_history` filtered by `prevPhase` (PR #134 Codex
+ * review). The bare `prev.fix_loop_count` would mix earlier phases'
+ * fix loops into this phase's row.
+ *
+ * The first row's `started_at` falls back to `state.started_at`
+ * (pipeline init). A future schema bump can replace this inference with
+ * an explicit `phase_started_at` field; until then the chain is exact
+ * for sequential transitions and approximate only for the very first
+ * row.
  */
 function recordRunbookTransition(cwd, prev, merged) {
   const prevPhase = prev?.current_phase;
@@ -490,18 +501,49 @@ function recordRunbookTransition(cwd, prev, merged) {
   try {
     const endedAt = new Date().toISOString();
     const rows = parseRunbookRows(cwd);
-    const startedAt = (rows[0]?.ended_at) || prev?.started_at || '';
-    appendRunbookRow(cwd, {
+    // Skip compaction-snapshot rows when chaining — they're mid-phase
+    // markers, not transition boundaries.
+    const lastTransitionRow = rows.find((r) => r.phase && !/\(compaction-\d+\)/.test(r.phase));
+    const startedAt = (lastTransitionRow?.ended_at) || prev?.started_at || '';
+
+    // Per-phase fix_loops sum. Falls back to 0 when history is missing.
+    const phaseFixLoops = sumFixLoopsForPhase(prev?.fix_loop_history, prevPhase);
+
+    const result = appendRunbookRow(cwd, {
       phase: prevPhase,
       started_at: startedAt,
       ended_at: endedAt,
       gates: summarizeGates(prev),
       wall_min: wallMinutes(startedAt, endedAt),
-      fix_loops: prev?.fix_loop_count ?? 0,
+      fix_loops: phaseFixLoops,
     });
+    // PR #134 nit #4: surface non-duplicate failures so a missing row
+    // doesn't disappear silently. `duplicate` is the natural retry
+    // result — those stay quiet.
+    if (result && !result.appended && result.reason && result.reason !== 'duplicate') {
+      process.stderr.write(`[mpl-runbook] append refused for ${prevPhase}: ${result.reason}\n`);
+    }
   } catch {
     // Non-fatal: RUNBOOK is observability, must not block writes.
   }
+}
+
+/**
+ * Sum the `count` field of every `fix_loop_history` entry whose `phase`
+ * matches `phaseId`. Bare-number entries (legacy/compat) carry no phase
+ * so they contribute 0 to the per-phase total — they'd be aggregated
+ * into a global counter elsewhere if needed.
+ */
+function sumFixLoopsForPhase(history, phaseId) {
+  if (!Array.isArray(history) || !phaseId) return 0;
+  let sum = 0;
+  for (const entry of history) {
+    if (entry && typeof entry === 'object' && entry.phase === phaseId
+        && typeof entry.count === 'number' && Number.isFinite(entry.count)) {
+      sum += entry.count;
+    }
+  }
+  return sum;
 }
 
 /**

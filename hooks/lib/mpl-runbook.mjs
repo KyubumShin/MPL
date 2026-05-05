@@ -97,8 +97,24 @@ export function parseRunbookRows(cwd) {
 
 /**
  * Append a row to the RUNBOOK table atomically. Idempotent over
- * `(phase, ended_at)` — re-appending the same closed row is a no-op so
- * a Stop hook that fires twice in quick succession doesn't duplicate.
+ * `(phase, ended_at)`.
+ *
+ * Note (PR #134 nit #3): in production the dedup is rarely the actual
+ * defense — `recordRunbookTransition`'s `prevPhase === newPhase`
+ * early-return catches retry-style double-fires before this function
+ * sees them, and `ended_at` uses millisecond precision so two real
+ * appends almost always differ. The dedup is kept as defense-in-depth
+ * for synthetic / programmatic callers that pass the same row twice
+ * with a frozen timestamp (notably tests).
+ *
+ * Empty-`ended_at` rows are NEVER deduped — they're reserved for an
+ * "open entry" pattern (PR #134 nit #2): a future caller may want to
+ * append an open marker, do work, and close it later with the same
+ * phase but a populated `ended_at`. Today no production caller uses
+ * this shape (compaction snapshots populate `ended_at` because they
+ * ARE the compaction event); the branch is documented as reserved
+ * rather than removed so the close-emit can land without changing
+ * this function.
  *
  * Returns `{ appended: boolean, reason?: string }` for caller logging.
  */
