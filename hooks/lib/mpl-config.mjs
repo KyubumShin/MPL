@@ -56,6 +56,7 @@ const ENFORCEMENT_DEFAULTS = {
   anti_pattern_match: 'warn',
   state_invariant_violation: 'warn',
   bash_timeout_violation: 'warn',
+  audit_residual: 'warn',
 };
 
 const DEFAULTS = {

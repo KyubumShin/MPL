@@ -218,6 +218,61 @@ announce: "[MPL] Scope Drift: {(drift_ratio * 100).toFixed(0)}% ({added_files.le
 // No blocking — data collection for future Gate integration
 ```
 
+### 5.1.7: Codex Audit (F6, #117) — Tier 4 last-mile sweep
+
+Single dispatch of the codex auditor. Tier 1 (F2 hook scan), Tier 2 (F3
+anti-pattern registry), and Tier 3 (F5 property check) catch ~7/8 of MPL
+spec violations during execution. F6 is the finalize-time sweep that
+catches the remaining 1/8 by cross-referencing intent (decomposition.yaml
++ user-contract.md) against implementation (declared impact files + git
+diff).
+
+Dispatch via Task to `mpl-codex-auditor`:
+
+```
+Task("mpl-codex-auditor", "Run finalize-time Tier 4 audit. Workspace: $(pwd). Plugin: ${CLAUDE_PLUGIN_ROOT}.")
+```
+
+The agent invokes:
+
+```
+Bash("node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-codex-audit.mjs $(pwd)", timeout: 30_000)
+```
+
+Audit envelope (`.mpl/mpl/audit-report.json`):
+
+```json
+{
+  "schema_version": 1,
+  "tier": 4,
+  "verdict": "pass" | "fail",
+  "summary": { "anti_pattern_residual": N, "missing_covers": N,
+                "dangling_covers": N, "drift_undeclared": N,
+                "drift_unimplemented": N },
+  "surfaces": { ... },
+  "inputs": { "decomposition_phases": N, "included_ucs": N }
+}
+```
+
+Exit code policy (mirrors P0-2 enforcement):
+- Exit 0 → `verdict: pass` OR (`verdict: fail` AND
+  `enforcement.audit_residual !== 'block'`). Continue to Step 5.1.8 with
+  findings surfaced as advisory.
+- Exit 1 → `verdict: fail` AND `enforcement.audit_residual === 'block'`.
+  Halt finalize. User must address residual anti-patterns and missing
+  covers before re-running `/mpl-run-finalize`.
+- Exit 2 → usage error (missing or invalid workspaceRoot). Treat as
+  audit-skip with warning; continue.
+
+Drift surface is INFORMATIONAL only and does not contribute to the FAIL
+verdict — Step 5.1.5 already publishes drift to RUNBOOK; F6 collapses it
+into the audit envelope so Post-Execution Review (5.1.8) and RUNBOOK
+Finalize (5.6) can ingest a single Tier 4 artifact.
+
+The orchestrator surfaces the agent's structured table (residual anti-
+patterns, missing covers, dangling covers) to the user via systemMessage
+and includes the verdict in the Completion Report (Step 5.5).
+
 ### 5.1.8: Post-Execution Review Report (T-10, v3.9)
 
 > **Note**: This step was previously numbered 5.5. Renumbered to 5.1.8 in v0.8.3 to fix ordering
