@@ -9,6 +9,7 @@ import {
   writeState,
   CURRENT_SCHEMA_VERSION,
 } from '../lib/mpl-state.mjs';
+import { checkInvariants, VIOLATION_IDS } from '../lib/mpl-state-invariant.mjs';
 
 let tmpDir;
 beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-fix-loop-')); });
@@ -149,5 +150,59 @@ describe('v2 → v3 migration (#114): additive backfill', () => {
     assert.equal(raw.schema_version, CURRENT_SCHEMA_VERSION);
     assert.deepEqual(raw.fix_loop_history, []);
     assert.equal(raw.user_intervention_count, 0);
+  });
+
+  it('PR #133 review #1: v2 mid-run with fix_loop_count > 0 → conservative aggregate entry, I5 holds', () => {
+    // Pre-fix bug: backfilling [] when fix_loop_count > 0 would instantly
+    // trip G3 I5 (count=N, sum=0) on the first read after upgrade. Migration
+    // must synthesize an aggregate entry so the invariant survives.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: 2,
+      current_phase: 'phase4-fix',
+      fix_loop_count: 4,
+    }));
+    const state = readState(tmpDir);
+
+    assert.equal(state.fix_loop_history.length, 1, 'one aggregate entry created');
+    const entry = state.fix_loop_history[0];
+    assert.equal(entry.count, 4, 'entry count matches fix_loop_count');
+    assert.equal(entry.phase, 'phase4-fix', 'phase attribution from current_phase');
+    assert.equal(entry.migrated_from_v2, true, 'forensic flag set');
+    assert.ok(typeof entry.started_at === 'string', 'started_at populated');
+
+    // The actual reviewer assertion: G3 I5 must NOT fire post-migration.
+    const r = checkInvariants(state, { cwd: tmpDir });
+    assert.ok(
+      !r.violations.some((v) => v.id === VIOLATION_IDS.FIX_LOOP_HISTORY_DESYNC),
+      `expected no I5 violation, got: ${JSON.stringify(r.violations, null, 2)}`,
+    );
+  });
+
+  it('PR #133 review #1: v2 with fix_loop_count = 0 still backfills to []', () => {
+    // Carry-forward only triggers when count > 0 — a fresh / untouched
+    // pipeline keeps the empty array.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: 2,
+      current_phase: 'phase2-sprint',
+      fix_loop_count: 0,
+    }));
+    const state = readState(tmpDir);
+    assert.deepEqual(state.fix_loop_history, []);
+  });
+
+  it('PR #133 review #1: phase attribution prefers execution.phases.current', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: 2,
+      current_phase: 'phase4-fix',
+      fix_loop_count: 2,
+      execution: {
+        phases: { current: 'phase-7', total: 0, completed: 0, failed: 0, circuit_breaks: 0 },
+      },
+    }));
+    const state = readState(tmpDir);
+    assert.equal(state.fix_loop_history[0].phase, 'phase-7');
   });
 });
