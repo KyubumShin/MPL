@@ -95,6 +95,31 @@ describe('G5 (#114) fix_loop_history mirror', () => {
     assert.equal(merged.fix_loop_history[0].count, 2);
   });
 
+  it('PR #133 review nit: increment with no determinable phase → revert to keep I5 clean', () => {
+    // Both current_phase and execution.phases.current absent → helper
+    // refuses the bump. fix_loop_count stays at the prior value, history
+    // is untouched, I5 invariant holds (count == sum == prior).
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase2-sprint',
+      fix_loop_count: 0,
+      fix_loop_history: [],
+      user_intervention_count: 0,
+    }));
+    // Patch sets fix_loop_count but explicitly clears current_phase to
+    // null and provides no execution.phases.current.
+    const merged = writeState(tmpDir, {
+      current_phase: null,
+      fix_loop_count: 5,
+    });
+    assert.equal(merged.fix_loop_count, 0, 'count reverted to prior value');
+    assert.deepEqual(merged.fix_loop_history, [], 'history untouched');
+    // I5 holds: count(0) == sum(0).
+    const sum = merged.fix_loop_history.reduce((acc, e) => acc + (e.count || 0), 0);
+    assert.equal(sum, merged.fix_loop_count);
+  });
+
   it('G3 invariant I5 equality holds across a sequence of writes', () => {
     seed({});
     writeState(tmpDir, { fix_loop_count: 1 });

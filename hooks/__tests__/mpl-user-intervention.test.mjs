@@ -75,6 +75,27 @@ describe('G6 (#114) user_intervention_count', () => {
     assert.equal(readPersistedState().user_intervention_count, 0);
   });
 
+  it('PR #133 review nit: does NOT increment when session_status=cancelled (even if current_phase still set)', () => {
+    // Defense for a desync between current_phase and session_status —
+    // mpl-cancel sets both, but a cancel-soft / race could leave only
+    // session_status=cancelled. Either alone should stop the counter.
+    seedState({ current_phase: 'phase2-sprint', session_status: 'cancelled' });
+    runHook('prompt during cancelled session');
+    assert.equal(readPersistedState().user_intervention_count, 0);
+  });
+
+  it('paused_budget / paused_checkpoint / verification_hang DO count (sleeps + nudges)', () => {
+    // Per spec the auto-mode telemetry counts every operator intervention,
+    // explicitly including sleeps and nudges — those exact statuses
+    // represent "auto-mode tripped, user prompted to resume".
+    for (const status of ['paused_budget', 'paused_checkpoint', 'verification_hang']) {
+      seedState({ session_status: status });
+      runHook(`prompt under ${status}`);
+      assert.equal(readPersistedState().user_intervention_count, 1,
+        `expected increment under session_status=${status}`);
+    }
+  });
+
   it('does NOT throw when no state file exists (fresh workspace)', () => {
     // No seedState — .mpl/state.json absent.
     assert.doesNotThrow(() => runHook('mpl new feature'));

@@ -474,11 +474,15 @@ export function writeState(cwd, patch) {
  *     bump that entry's count by the delta.
  *   - Increase under a different active phase (or no open entry) →
  *     append a new `{ phase, count, started_at }` entry.
+ *   - Increase but no determinable active phase (PR #133 review nit) →
+ *     **revert the fix_loop_count back to its prior value** so I5 stays
+ *     clean. Refusing the increment is safer than fabricating an
+ *     `'unknown'` phase entry — the orchestrator will retry the write
+ *     once `current_phase` is set, and no I5 desync slips through.
  *
  * Active phase derives from `merged.execution.phases.current` (concrete
  * phase id like `phase-3`) and falls back to `merged.current_phase`
- * (lifecycle marker, e.g. `phase4-fix`). When neither is meaningful the
- * helper skips the update.
+ * (lifecycle marker, e.g. `phase4-fix`).
  *
  * Once G3 invariant I5 sees `fix_loop_history` populated it activates
  * the equality check `fix_loop_count == sum(fix_loop_history[].count)`.
@@ -492,12 +496,21 @@ function recordFixLoopHistory(prev, merged) {
   if (next <= before) return; // not an increment
 
   const phase = merged?.execution?.phases?.current ?? merged?.current_phase ?? null;
-  if (!phase || typeof phase !== 'string') return;
+  if (!phase || typeof phase !== 'string') {
+    // PR #133 review nit: refuse the count bump rather than fabricate a
+    // phase. Otherwise I5 would desync (count↑ but history unchanged).
+    merged.fix_loop_count = before;
+    return;
+  }
 
   const delta = next - before;
   const history = Array.isArray(merged.fix_loop_history) ? [...merged.fix_loop_history] : [];
   const last = history[history.length - 1];
 
+  // `ended_at` is reserved for future wiring (G2 / #113 will close
+  // entries when the phase finalizes; G5 itself does not write it).
+  // Treating its absence as "open entry" lets the future close-emit
+  // land without changing this helper.
   if (last && typeof last === 'object' && last.phase === phase && !last.ended_at) {
     history[history.length - 1] = {
       ...last,

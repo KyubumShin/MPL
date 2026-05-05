@@ -34,6 +34,13 @@ function maybeIncrementInterventionCount(cwd) {
     const state = readState(cwd);
     if (!state) return;
     if (state.current_phase === 'completed' || state.current_phase === 'cancelled') return;
+    // PR #133 review nit: also gate on session_status='cancelled' for
+    // symmetry. mpl-cancel sets BOTH current_phase and session_status,
+    // but a future cancel-soft path (or any race that touches only one)
+    // would otherwise keep counting after the pipeline is done. Pause /
+    // hang statuses are intentionally NOT excluded — those prompts ARE
+    // operator interventions per spec ("sleeps, nudges 모두 카운트").
+    if (state.session_status === 'cancelled') return;
     if (state.run_mode !== 'auto') return;
     const before = (typeof state.user_intervention_count === 'number')
       ? state.user_intervention_count
