@@ -506,8 +506,15 @@ function recordRunbookTransition(cwd, prev, merged) {
     const lastTransitionRow = rows.find((r) => r.phase && !/\(compaction-\d+\)/.test(r.phase));
     const startedAt = (lastTransitionRow?.ended_at) || prev?.started_at || '';
 
-    // Per-phase fix_loops sum. Falls back to 0 when history is missing.
-    const phaseFixLoops = sumFixLoopsForPhase(prev?.fix_loop_history, prevPhase);
+    // PR #134 review #2 (Codex Medium): align sum key with G5
+    // `recordFixLoopHistory` writer precedence. The writer keys
+    // entries by `execution.phases.current ?? current_phase` (concrete
+    // phase-N id wins). If the row's display phase (`prevPhase`,
+    // lifecycle marker) were used as the sum key, multi-sub-phase
+    // sprints would always sum to 0 because every history entry is
+    // keyed by phase-N concrete ids.
+    const sumKey = prev?.execution?.phases?.current ?? prevPhase;
+    const phaseFixLoops = sumFixLoopsForPhase(prev?.fix_loop_history, sumKey);
 
     const result = appendRunbookRow(cwd, {
       phase: prevPhase,

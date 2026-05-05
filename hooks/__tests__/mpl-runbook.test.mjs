@@ -258,4 +258,32 @@ describe('writeState appends RUNBOOK row on phase transition (G2)', () => {
     const row = parseRunbookRows(tmpDir).find((r) => r.phase === 'phase1a-research');
     assert.equal(row.fix_loops, '0', 'no entries for this phase → 0, not the sprint total');
   });
+
+  it('PR #134 Codex review #2: sums by execution.phases.current (concrete id) when present, matches G5 writer', () => {
+    // During a multi-sub-phase sprint, current_phase stays at the
+    // lifecycle marker (phase2-sprint) while execution.phases.current
+    // tracks the active concrete sub-phase (phase-3). G5 writes history
+    // entries keyed by the concrete id; the RUNBOOK row's sum key must
+    // align or it returns 0.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase2-sprint',
+      started_at: '2026-05-05T01:00:00Z',
+      fix_loop_count: 3,
+      fix_loop_history: [{ phase: 'phase-3', count: 3, started_at: 't0' }],
+      execution: {
+        phases: { total: 0, completed: 0, current: 'phase-3', failed: 0, circuit_breaks: 0 },
+      },
+      user_intervention_count: 0,
+    }));
+    writeState(tmpDir, { current_phase: 'phase3-gate' });
+    const row = parseRunbookRows(tmpDir).find((r) => r.phase === 'phase2-sprint');
+    assert.ok(row);
+    // Row's display label stays as the lifecycle marker for continuity,
+    // but fix_loops sums by the concrete active phase id (phase-3 → 3).
+    // Pre-fix this returned 0.
+    assert.equal(row.fix_loops, '3',
+      'sum key uses execution.phases.current (matches G5), not current_phase lifecycle marker');
+  });
 });
