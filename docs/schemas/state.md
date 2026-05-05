@@ -19,8 +19,9 @@
 | `sprint_status.total_todos` | sprint-aggregated | Sum of TODO counts across all phases of the active sprint (typically all of phase2-sprint). |
 | `sprint_status.completed_todos` | sprint-aggregated | Number of TODOs marked complete. |
 | `gate_results.hard{1,2,3}_{baseline,coverage,resilience}` | per-pipeline | Structured machine evidence. P0-1 (#102) requires `{command, exit_code, stdout_tail, timestamp}`. |
-| `fix_loop_count` | sprint-aggregated | Total fix-loop iterations across the active sprint. Must equal `sum(fix_loop_history[].count)` (G3 I5; G5 #114 introduces history). |
-| `fix_loop_history[]` | per-phase | `{phase: string, count: number}` entries. Optional in v0.18.0; mandatory once #114 lands. |
+| `fix_loop_count` | sprint-aggregated | Total fix-loop iterations across the active sprint. Equal to `sum(fix_loop_history[].count)` (G3 I5; writers populate via `writeState` mirror in `mpl-state.mjs#recordFixLoopHistory`). |
+| `fix_loop_history[]` | per-phase | `{phase, count, started_at, ended_at?, root_cause_summary?}` entries. Populated by `writeState` whenever `fix_loop_count` increases (G5 / #114). |
+| `user_intervention_count` | per-pipeline | Honest auto-mode telemetry. `mpl-keyword-detector` (UserPromptSubmit) increments by 1 on every prompt while pipeline is active and `run_mode === 'auto'` (G6 / #114). Surfaces in `/mpl-status` once G2 / #113 lands. |
 | `session_status` | per-session | `null \| active \| paused_budget \| paused_checkpoint \| verification_hang \| cancelled`. Single-valued — pause / hang / cancel states are mutually exclusive (G3 I9). |
 | `last_tool_at` | per-session | ISO-8601 stamp from `mpl-tool-tracker.mjs`. Powers G4 (#109). |
 | `enforcement.*` | per-pipeline override | P0-2 (#110) per-rule policy. Top of the precedence chain. |
@@ -55,8 +56,11 @@ strict mode elevates `warn → block`.
 
 ## Schema version
 
-- `CURRENT_SCHEMA_VERSION = 2` (P2-6 — unified state, `execution` subtree absorbs the legacy `.mpl/mpl/state.json`).
+- `CURRENT_SCHEMA_VERSION = 3` (G5+G6 / #114 — additive backfill: `fix_loop_history`, `user_intervention_count`).
+  - v2 (P2-6 / #84) — unified state, `execution` subtree absorbs the legacy `.mpl/mpl/state.json`.
+  - v3 (G5+G6 / #114) — telemetry hygiene fields.
 - The migration registry (`hooks/lib/migrations/`) walks any older state up to current on `readState`. Newer-than-supported writes are **fail-closed** by `readState` (returns `null` + diagnostic stderr) and additionally surfaced by G3 I8.
+- `writeState` also fail-closes (throws `UnsupportedSchemaVersionError`) when on-disk `schema_version > CURRENT` so a stale plugin can't downgrade a fresher state.
 - Bump policy and authoring workflow: `docs/schemas/migration-policy.md`.
 
 ## See also

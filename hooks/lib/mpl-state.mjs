@@ -36,12 +36,15 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  *   prompts.
  * - `2` = unified shape: everything in `.mpl/state.json`, execution-scope
  *   fields under the top-level `execution` subtree.
+ * - `3` = G5 + G6 (#114) telemetry hygiene fields: additive backfill for
+ *   `fix_loop_history` (per-phase fix-loop entries) and
+ *   `user_intervention_count` (auto-mode honesty counter).
  *
  * H8 (#116) routes per-version logic through `hooks/lib/migrations/`. To
  * bump this constant, register a new migration entry; see
  * `docs/schemas/migration-policy.md`.
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
@@ -111,6 +114,16 @@ const DEFAULT_STATE = {
   // test_command. Consumed by finalize Step 5.0 and mpl-require-e2e.mjs hook.
   e2e_results: {},
   fix_loop_count: 0,
+  // G5 (#114): per-phase fix-loop entries appended by mpl-phase-controller
+  // when fix_loop_count changes. Each entry:
+  //   { phase: string, count: number, started_at: ISO, ended_at?: ISO,
+  //     root_cause_summary?: string }
+  // G3 invariant I5 enforces fix_loop_count == sum(fix_loop_history[].count).
+  fix_loop_history: [],
+  // G6 (#114): auto-mode honesty counter. mpl-keyword-detector
+  // (UserPromptSubmit) increments when MPL is active AND
+  // run_mode === 'auto'. Surfaces in /mpl-status (G2 / #113).
+  user_intervention_count: 0,
   max_fix_loops: 10,
   compaction_count: 0,
   last_phase_compaction_count: 0,
@@ -435,12 +448,132 @@ export function writeState(cwd, patch) {
     process.stderr.write(`[mpl-state] ambiguity_history ring-buffer truncated ${dropped} oldest entries (cap=${MAX_AMBIGUITY_HISTORY})\n`);
   }
 
+  // G5 (#114): mirror fix_loop_count increments into fix_loop_history.
+  // Catches both phase-controller writers and orchestrator mpl_state_write
+  // calls without each caller having to remember the bookkeeping.
+  recordFixLoopHistory(current, merged);
+
   // C2: Atomic write via temp file + rename
   const tmpPath = join(stateDir, `.state-${randomBytes(4).toString('hex')}.tmp`);
   writeFileSync(tmpPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
   renameSync(tmpPath, join(stateDir, STATE_FILE));
 
   return merged;
+}
+
+/**
+ * G5 (#114): keep `fix_loop_count` and `fix_loop_history` in lockstep so
+ * G3 invariant I5 (`count == sum(history[].count)`) holds atomically on
+ * every `writeState`. Mutates `merged` in place.
+ *
+ * The helper makes I5 **the** contract — there is no "count valid but
+ * history out of sync, surface as I5 later" path. PR #133 review #3
+ * surfaced two ways the old "best-effort mirror" framing leaked:
+ *   (a) caller patch supplies explicit `fix_loop_history` while
+ *       `phase` is null → count was reverted but history wasn't;
+ *   (b) caller patch resets `fix_loop_count: 0` while history retained
+ *       "for forensic value" → count=0, sum>0, I5 fails on next read.
+ *
+ * Behavior:
+ *   - No change → no-op.
+ *   - Reset to 0 → also clear history. (Forensic value lives in the
+ *     `.mpl/archive/` snapshot taken by `archivePreviousRun`, not in
+ *     the live state file.)
+ *   - Decrement (0 < next < before) → refuse: revert count + history.
+ *     There is no legitimate "wind back partially" caller; this guards
+ *     against accidental orchestrator math.
+ *   - Increment under a determinable active phase → append/update entry.
+ *   - Increment with no determinable phase → revert count AND restore
+ *     pre-merge history (any patch-supplied history is rolled back too
+ *     so I5 stays clean).
+ *   - Final invariant check: if any code path still leaves
+ *     `count != sum(history)` (e.g. patch supplied a self-inconsistent
+ *     history along with a matching count that breaks our delta math),
+ *     revert both fields to `prev` atomically. Better to drop a write
+ *     than ship a structurally broken state.
+ *
+ * Active phase derives from `merged.execution.phases.current` (concrete
+ * phase id like `phase-3`) and falls back to `merged.current_phase`
+ * (lifecycle marker, e.g. `phase4-fix`).
+ */
+function recordFixLoopHistory(prev, merged) {
+  const next = merged?.fix_loop_count;
+  if (typeof next !== 'number' || !Number.isFinite(next)) return;
+  const before = (typeof prev?.fix_loop_count === 'number' && Number.isFinite(prev.fix_loop_count))
+    ? prev.fix_loop_count
+    : 0;
+  const prevHistory = Array.isArray(prev?.fix_loop_history) ? prev.fix_loop_history : [];
+
+  if (next === before) {
+    // No count change. Don't touch history — caller may be patching
+    // unrelated fields. Final I5 check below still validates.
+  } else if (next === 0 && before > 0) {
+    // Reset → clear history so I5 holds (0 == 0).
+    merged.fix_loop_history = [];
+  } else if (next < before) {
+    // Decrement (not a reset) → refuse. Revert both fields atomically.
+    merged.fix_loop_count = before;
+    merged.fix_loop_history = prevHistory;
+  } else {
+    // Increment.
+    const phase = merged?.execution?.phases?.current ?? merged?.current_phase ?? null;
+    if (!phase || typeof phase !== 'string') {
+      // No phase → revert both. Without resetting history we'd let a
+      // patch-supplied `fix_loop_history` slip through with the
+      // increment refused (PR #133 review #3).
+      merged.fix_loop_count = before;
+      merged.fix_loop_history = prevHistory;
+    } else {
+      const delta = next - before;
+      const history = Array.isArray(merged.fix_loop_history) ? [...merged.fix_loop_history] : [];
+      const last = history[history.length - 1];
+      // `ended_at` is reserved for future wiring (G2 / #113 will close
+      // entries when the phase finalizes; G5 itself does not write it).
+      // Treating its absence as "open entry" lets the future close-emit
+      // land without changing this helper.
+      if (last && typeof last === 'object' && last.phase === phase && !last.ended_at) {
+        history[history.length - 1] = {
+          ...last,
+          count: (typeof last.count === 'number' ? last.count : 0) + delta,
+        };
+      } else {
+        history.push({
+          phase,
+          count: delta,
+          started_at: new Date().toISOString(),
+        });
+      }
+      merged.fix_loop_history = history;
+    }
+  }
+
+  // Final I5 check. Mirrors the parsing rules of
+  // `mpl-state-invariant.mjs#sumFixLoopHistory` so the writer accepts
+  // every shape the invariant accepts — including bare-number entries
+  // (legacy/compat). Otherwise legitimate increments on top of a
+  // numeric history get silently dropped (PR #133 review #4).
+  //
+  // Returns null when any entry is unparseable; the writer treats that
+  // as "can't validate" and reverts both fields to `prev`, matching the
+  // invariant's "not measurable" disposition (refuse to vouch).
+  const sum = sumFixLoopHistoryForCheck(merged.fix_loop_history);
+  if (sum === null || sum !== merged.fix_loop_count) {
+    merged.fix_loop_count = before;
+    merged.fix_loop_history = prevHistory;
+  }
+}
+
+function sumFixLoopHistoryForCheck(history) {
+  if (!Array.isArray(history)) return null;
+  let sum = 0;
+  for (const entry of history) {
+    const count = typeof entry === 'number'
+      ? entry
+      : (typeof entry?.count === 'number' ? entry.count : null);
+    if (count === null || !Number.isFinite(count)) return null;
+    sum += count;
+  }
+  return sum;
 }
 
 /**
