@@ -36,12 +36,15 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  *   prompts.
  * - `2` = unified shape: everything in `.mpl/state.json`, execution-scope
  *   fields under the top-level `execution` subtree.
+ * - `3` = G5 + G6 (#114) telemetry hygiene fields: additive backfill for
+ *   `fix_loop_history` (per-phase fix-loop entries) and
+ *   `user_intervention_count` (auto-mode honesty counter).
  *
  * H8 (#116) routes per-version logic through `hooks/lib/migrations/`. To
  * bump this constant, register a new migration entry; see
  * `docs/schemas/migration-policy.md`.
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
@@ -111,6 +114,16 @@ const DEFAULT_STATE = {
   // test_command. Consumed by finalize Step 5.0 and mpl-require-e2e.mjs hook.
   e2e_results: {},
   fix_loop_count: 0,
+  // G5 (#114): per-phase fix-loop entries appended by mpl-phase-controller
+  // when fix_loop_count changes. Each entry:
+  //   { phase: string, count: number, started_at: ISO, ended_at?: ISO,
+  //     root_cause_summary?: string }
+  // G3 invariant I5 enforces fix_loop_count == sum(fix_loop_history[].count).
+  fix_loop_history: [],
+  // G6 (#114): auto-mode honesty counter. mpl-keyword-detector
+  // (UserPromptSubmit) increments when MPL is active AND
+  // run_mode === 'auto'. Surfaces in /mpl-status (G2 / #113).
+  user_intervention_count: 0,
   max_fix_loops: 10,
   compaction_count: 0,
   last_phase_compaction_count: 0,
@@ -435,12 +448,70 @@ export function writeState(cwd, patch) {
     process.stderr.write(`[mpl-state] ambiguity_history ring-buffer truncated ${dropped} oldest entries (cap=${MAX_AMBIGUITY_HISTORY})\n`);
   }
 
+  // G5 (#114): mirror fix_loop_count increments into fix_loop_history.
+  // Catches both phase-controller writers and orchestrator mpl_state_write
+  // calls without each caller having to remember the bookkeeping.
+  recordFixLoopHistory(current, merged);
+
   // C2: Atomic write via temp file + rename
   const tmpPath = join(stateDir, `.state-${randomBytes(4).toString('hex')}.tmp`);
   writeFileSync(tmpPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
   renameSync(tmpPath, join(stateDir, STATE_FILE));
 
   return merged;
+}
+
+/**
+ * G5 (#114): when a write increases `fix_loop_count`, mirror the delta
+ * into `fix_loop_history`. Mutates `merged` in place.
+ *
+ * Behavior:
+ *   - No change to fix_loop_count → no-op (transitions that preserve the
+ *     count, e.g. phase3 → phase4-fix on gate failure, do NOT append).
+ *   - Decrease/reset (fix_loop_count: 0 on init) → no append; the existing
+ *     history is left intact for forensic value.
+ *   - Increase under the same active phase as the last open entry →
+ *     bump that entry's count by the delta.
+ *   - Increase under a different active phase (or no open entry) →
+ *     append a new `{ phase, count, started_at }` entry.
+ *
+ * Active phase derives from `merged.execution.phases.current` (concrete
+ * phase id like `phase-3`) and falls back to `merged.current_phase`
+ * (lifecycle marker, e.g. `phase4-fix`). When neither is meaningful the
+ * helper skips the update.
+ *
+ * Once G3 invariant I5 sees `fix_loop_history` populated it activates
+ * the equality check `fix_loop_count == sum(fix_loop_history[].count)`.
+ */
+function recordFixLoopHistory(prev, merged) {
+  const next = merged?.fix_loop_count;
+  if (typeof next !== 'number' || !Number.isFinite(next)) return;
+  const before = (typeof prev?.fix_loop_count === 'number' && Number.isFinite(prev.fix_loop_count))
+    ? prev.fix_loop_count
+    : 0;
+  if (next <= before) return; // not an increment
+
+  const phase = merged?.execution?.phases?.current ?? merged?.current_phase ?? null;
+  if (!phase || typeof phase !== 'string') return;
+
+  const delta = next - before;
+  const history = Array.isArray(merged.fix_loop_history) ? [...merged.fix_loop_history] : [];
+  const last = history[history.length - 1];
+
+  if (last && typeof last === 'object' && last.phase === phase && !last.ended_at) {
+    history[history.length - 1] = {
+      ...last,
+      count: (typeof last.count === 'number' ? last.count : 0) + delta,
+    };
+  } else {
+    history.push({
+      phase,
+      count: delta,
+      started_at: new Date().toISOString(),
+    });
+  }
+
+  merged.fix_loop_history = history;
 }
 
 /**

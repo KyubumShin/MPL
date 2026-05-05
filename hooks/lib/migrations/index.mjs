@@ -18,6 +18,7 @@
  */
 
 import v1ToV2 from './v1-to-v2.mjs';
+import v2ToV3 from './v2-to-v3.mjs';
 
 /**
  * Ordered registry. Add new entries here when bumping
@@ -25,6 +26,7 @@ import v1ToV2 from './v1-to-v2.mjs';
  */
 export const MIGRATIONS = Object.freeze([
   v1ToV2,
+  v2ToV3,
 ]);
 
 /**

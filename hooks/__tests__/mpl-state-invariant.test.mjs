@@ -11,7 +11,13 @@ import {
   formatViolations,
   TRIGGERS,
   VIOLATION_IDS,
+  CURRENT_SCHEMA_VERSION,
 } from '../lib/mpl-state-invariant.mjs';
+
+// Test fixtures must declare the version they're parameterized for so a
+// future bump doesn't trigger a migration mid-test (which mutates the
+// state file and breaks Edit-simulation lookups via stale old_string).
+const SCHEMA_V = CURRENT_SCHEMA_VERSION;
 
 const __filename = fileURLToPath(import.meta.url);
 const HOOK_PATH = join(dirname(__filename), '..', 'mpl-state-invariant.mjs');
@@ -54,7 +60,7 @@ describe('checkInvariants — basics', () => {
       current_phase: 'phase2-sprint',
       finalize_done: false,
       session_status: 'active',
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       execution: { phases: { completed: 2 } },
       fix_loop_count: 3,
       fix_loop_history: [{ phase: 'p1', count: 2 }, { phase: 'p2', count: 1 }],
@@ -253,7 +259,7 @@ describe('I8 schema_version range', () => {
     assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.SCHEMA_VERSION_UNSUPPORTED));
   });
   it('matches current → ok', () => {
-    const r = checkInvariants({ schema_version: 2 }, { cwd: tmp });
+    const r = checkInvariants({ schema_version: SCHEMA_V }, { cwd: tmp });
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.SCHEMA_VERSION_UNSUPPORTED));
   });
 });
@@ -279,7 +285,7 @@ describe('Multi-violation aggregation (exp15 4-way desync)', () => {
     // so this fixture picks the I1 branch.
     makePhaseFolders(2);
     const r = checkInvariants({
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       session_status: 'paused_budget',
       finalize_done: true,                       // I1
       current_phase: 'phase-7',                  // I7 (no phase-7 folder)
@@ -329,7 +335,7 @@ describe('mpl-state-invariant hook integration', () => {
   }
 
   it('clean state → silent', () => {
-    const r = runHook('Stop', null, {}, { current_phase: 'phase2-sprint', schema_version: 2 });
+    const r = runHook('Stop', null, {}, { current_phase: 'phase2-sprint', schema_version: SCHEMA_V });
     assert.strictEqual(r.continue, true);
     assert.strictEqual(r.suppressOutput, true);
   });
@@ -402,7 +408,7 @@ describe('mpl-state-invariant hook integration', () => {
     const stateJsonPath = join(tmp, '.mpl', 'state.json');
     const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
     const cleanState = {
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: {
         hard1_baseline: ent(0),
@@ -412,7 +418,7 @@ describe('mpl-state-invariant hook integration', () => {
     };
     writeFileSync(stateJsonPath, JSON.stringify(cleanState));
     const proposedDirty = {
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: { hard1_passed: true, hard2_passed: true, hard3_passed: true },
     };
@@ -431,7 +437,7 @@ describe('mpl-state-invariant hook integration', () => {
     const stateJsonPath = join(tmp, '.mpl', 'state.json');
     const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
     const cleanState = {
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: {
         hard1_baseline: ent(0),
@@ -442,7 +448,7 @@ describe('mpl-state-invariant hook integration', () => {
     const cleanText = JSON.stringify(cleanState);
     writeFileSync(stateJsonPath, cleanText);
     const dirtyText = JSON.stringify({
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: { hard1_passed: true, hard2_passed: true, hard3_passed: true },
     });
@@ -463,12 +469,12 @@ describe('mpl-state-invariant hook integration', () => {
     const stateJsonPath = join(tmp, '.mpl', 'state.json');
     const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
     writeFileSync(stateJsonPath, JSON.stringify({
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: {},
     }));
     const proposedClean = {
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: {
         hard1_baseline: ent(0),

@@ -18,9 +18,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Import shared MPL state utility
-const { initState, isMplActive } = await import(
+const { initState, isMplActive, readState, writeState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
+
+/**
+ * G6 (#114): honest auto-mode telemetry. When the pipeline is active
+ * AND run_mode === 'auto', every UserPromptSubmit counts as a user
+ * intervention — sleeps, nudges, cancels, status checks, anything that
+ * required the operator to type. Best-effort; failures are swallowed
+ * because telemetry must never break the user's prompt flow.
+ */
+function maybeIncrementInterventionCount(cwd) {
+  try {
+    const state = readState(cwd);
+    if (!state) return;
+    if (state.current_phase === 'completed' || state.current_phase === 'cancelled') return;
+    if (state.run_mode !== 'auto') return;
+    const before = (typeof state.user_intervention_count === 'number')
+      ? state.user_intervention_count
+      : 0;
+    writeState(cwd, { user_intervention_count: before + 1 });
+  } catch {
+    // Non-fatal — telemetry must not block prompts.
+  }
+}
 
 // Import shared stdin reader
 const { readStdin } = await import(
@@ -94,6 +116,11 @@ async function main() {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
+
+    // G6 (#114): record the intervention BEFORE any of the content-based
+    // branches return. Counting only some prompts would defeat the
+    // "honest auto-mode telemetry" framing.
+    maybeIncrementInterventionCount(cwd);
 
     // v0.14.1 #36: Non-initializing MPL slash commands must NOT reset state.json.
     // These commands read or transform existing state — they never start a new pipeline.
