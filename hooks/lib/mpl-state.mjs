@@ -547,19 +547,33 @@ function recordFixLoopHistory(prev, merged) {
     }
   }
 
-  // Final I5 check. Anything that didn't end up consistent → revert
-  // both fields to prev. Catches caller-supplied histories that
-  // disagreed with what we computed (e.g. explicit array + delta math
-  // diverged).
-  const finalHistory = Array.isArray(merged.fix_loop_history) ? merged.fix_loop_history : [];
-  const sum = finalHistory.reduce(
-    (acc, e) => acc + ((typeof e?.count === 'number' && Number.isFinite(e.count)) ? e.count : 0),
-    0
-  );
-  if (sum !== merged.fix_loop_count) {
+  // Final I5 check. Mirrors the parsing rules of
+  // `mpl-state-invariant.mjs#sumFixLoopHistory` so the writer accepts
+  // every shape the invariant accepts — including bare-number entries
+  // (legacy/compat). Otherwise legitimate increments on top of a
+  // numeric history get silently dropped (PR #133 review #4).
+  //
+  // Returns null when any entry is unparseable; the writer treats that
+  // as "can't validate" and reverts both fields to `prev`, matching the
+  // invariant's "not measurable" disposition (refuse to vouch).
+  const sum = sumFixLoopHistoryForCheck(merged.fix_loop_history);
+  if (sum === null || sum !== merged.fix_loop_count) {
     merged.fix_loop_count = before;
     merged.fix_loop_history = prevHistory;
   }
+}
+
+function sumFixLoopHistoryForCheck(history) {
+  if (!Array.isArray(history)) return null;
+  let sum = 0;
+  for (const entry of history) {
+    const count = typeof entry === 'number'
+      ? entry
+      : (typeof entry?.count === 'number' ? entry.count : null);
+    if (count === null || !Number.isFinite(count)) return null;
+    sum += count;
+  }
+  return sum;
 }
 
 /**

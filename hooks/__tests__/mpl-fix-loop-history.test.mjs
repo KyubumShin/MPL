@@ -161,6 +161,55 @@ describe('G5 (#114) fix_loop_history mirror', () => {
     assert.equal(sum, after.fix_loop_count);
   });
 
+  it('PR #133 review #4: increment ON TOP OF legacy numeric-entry history works', () => {
+    // G3 sumFixLoopHistory accepts bare numbers as legacy/compat entries.
+    // Reviewer's reproducer: history=[1,2] (sum=3), count=3, then
+    // increment to count=4 should add a new entry of count=1, leaving
+    // total sum=4 == count. Pre-fix the writer's final check summed
+    // only {count} objects (ignoring numbers), saw sum=1, mismatched
+    // count=4, and silently reverted.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase4-fix',
+      fix_loop_count: 3,
+      fix_loop_history: [1, 2],
+      user_intervention_count: 0,
+    }));
+    const after = writeState(tmpDir, { fix_loop_count: 4 });
+    assert.equal(after.fix_loop_count, 4, 'increment landed (not silently reverted)');
+    // Last entry appended (we can't merge into a bare number — no phase)
+    assert.equal(after.fix_loop_history.length, 3);
+    assert.equal(after.fix_loop_history[2].phase, 'phase4-fix');
+    assert.equal(after.fix_loop_history[2].count, 1);
+    // I5 invariant equivalence: sum the same way G3 does.
+    const sum = after.fix_loop_history.reduce(
+      (acc, e) => acc + (typeof e === 'number' ? e : (e?.count ?? 0)),
+      0
+    );
+    assert.equal(sum, after.fix_loop_count);
+  });
+
+  it('PR #133 review #4: unparseable entry → revert (matches invariant "not measurable")', () => {
+    // Defensive: if any entry is neither a number nor a {count} object,
+    // sumFixLoopHistoryForCheck returns null and the writer reverts both
+    // fields. Mirrors sumFixLoopHistory's "return null" disposition.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'phase4-fix',
+      fix_loop_count: 0,
+      fix_loop_history: [],
+      user_intervention_count: 0,
+    }));
+    const after = writeState(tmpDir, {
+      fix_loop_count: 5,
+      fix_loop_history: ['garbage', { phase: 'p', count: 5 }],
+    });
+    assert.equal(after.fix_loop_count, 0, 'unparseable entry → revert');
+    assert.deepEqual(after.fix_loop_history, []);
+  });
+
   it('PR #133 review #3: patch with self-inconsistent history triggers final I5 revert', () => {
     // Caller provides a history whose sum disagrees with the count delta
     // → final I5 check catches it and reverts both atomically.
