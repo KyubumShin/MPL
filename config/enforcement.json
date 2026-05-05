@@ -8,7 +8,8 @@
     "missing_artifact_schema": "warn",
     "anti_pattern_match": "warn",
     "state_invariant_violation": "warn",
-    "bash_timeout_violation": "warn"
+    "bash_timeout_violation": "warn",
+    "audit_residual": "warn"
   },
   "overrides": []
 }
