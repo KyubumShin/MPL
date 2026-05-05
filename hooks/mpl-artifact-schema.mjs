@@ -12,8 +12,11 @@
  * `lib/mpl-enforcement.mjs#resolveRuleAction` (P0-2 / #110):
  *   - `warn` (default) → emit a system-reminder listing missing
  *     sections.
- *   - `block` → exit with `decision: 'block'` so the orchestrator
- *     sees the failure and re-emits the artifact.
+ *   - `block` → return `decision: 'block'`. PR #135 nit: PostToolUse
+ *     fires AFTER the write lands on disk, so the offending file is
+ *     already there. `block` stops the orchestrator's NEXT step so it
+ *     re-emits an overwriting valid version — it doesn't prevent the
+ *     original write itself.
  *   - `off` → log to `.mpl/signals/artifact-schema-hits.jsonl` only;
  *     no hook-level surfacing.
  *

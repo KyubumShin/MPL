@@ -13,6 +13,12 @@ import {
   hasKey,
   ARTIFACT_SCHEMAS,
 } from '../lib/mpl-artifact-schema.mjs';
+import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
+
+// PR #135 nit (Claude): use the live schema_version constant in
+// fixtures so a future bump doesn't trigger a migration mid-test.
+// Same pattern as #133's mpl-state-invariant fixtures.
+const SCHEMA_V = CURRENT_SCHEMA_VERSION;
 
 const __filename = fileURLToPath(import.meta.url);
 const HOOK_PATH = join(dirname(__filename), '..', 'mpl-artifact-schema.mjs');
@@ -23,7 +29,7 @@ beforeEach(() => {
   mkdirSync(join(tmp, '.mpl'), { recursive: true });
   // Make MPL "active" so the hook proceeds.
   writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
-    schema_version: 2,
+    schema_version: SCHEMA_V,
     current_phase: 'phase2-sprint',
     started_at: '2026-05-05T01:00:00Z',
   }));
@@ -136,6 +142,59 @@ describe('validateArtifactFile', () => {
     assert.equal(r.valid, false);
     assert.deepEqual(r.missing.sort(), ['PP_id', 'constraint', 'source', 'status'].sort());
   });
+
+  it('PR #135 review #1: validates the actual decomposer output shape (id/scope/impact, not phase_id/impact_scope)', () => {
+    // Reproducer from the Codex review: a decomposition.yaml that
+    // exactly matches `agents/mpl-decomposer.md` <Output_Schema>. The
+    // pre-fix schema required `phase_id` + `impact_scope` and rejected
+    // every valid decomposer output.
+    const content =
+`architecture_anchor:
+  tech_stack: [typescript]
+  directory_pattern: src/
+  naming_convention: camelCase
+  key_decisions: []
+phases:
+  - id: "phase-1"
+    name: "Implement auth"
+    phase_domain: api
+    pp_proximity: pp_core
+    scope: "Add login API"
+    covers: [UC-01]
+    impact:
+      create:
+        - path: src/auth.ts
+          description: auth API
+      modify: []
+      affected_tests: []
+    interface_contract:
+      requires: []
+      produces: []
+      contract_files: []
+    success_criteria:
+      - type: test
+        command: npm test
+`;
+    const r = validateArtifactFile('.mpl/mpl/decomposition.yaml', content);
+    assert.equal(r.artifact, 'decomposition');
+    assert.equal(r.valid, true, `expected valid; missing=${JSON.stringify(r.missing)}`);
+    assert.deepEqual(r.missing, []);
+  });
+
+  it('PR #135 review #1: still rejects decomposition.yaml missing one required key', () => {
+    // Same shape as above but `interface_contract` removed → invalid.
+    const content =
+`phases:
+  - id: "phase-1"
+    scope: "Add login API"
+    covers: [UC-01]
+    impact: { create: [], modify: [], affected_tests: [] }
+    success_criteria: []
+`;
+    const r = validateArtifactFile('.mpl/mpl/decomposition.yaml', content);
+    assert.equal(r.valid, false);
+    assert.ok(r.missing.includes('interface_contract'));
+  });
 });
 
 /* ──────────────── PostToolUse hook integration ──────────────── */
@@ -183,7 +242,7 @@ describe('mpl-artifact-schema PostToolUse hook (P0-K)', () => {
 
   it('block when enforcement.missing_artifact_schema = "block"', () => {
     writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase2-sprint',
       enforcement: { missing_artifact_schema: 'block' },
     }));
@@ -198,7 +257,7 @@ describe('mpl-artifact-schema PostToolUse hook (P0-K)', () => {
 
   it('off → silent + signal logged', () => {
     writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
-      schema_version: 2,
+      schema_version: SCHEMA_V,
       current_phase: 'phase2-sprint',
       enforcement: { missing_artifact_schema: 'off' },
     }));

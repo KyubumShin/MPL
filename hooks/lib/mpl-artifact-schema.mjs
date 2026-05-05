@@ -34,7 +34,12 @@ const ARTIFACTS = [
     artifact: 'decomposition',
     pathMatch: (relPath) => /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/.test(relPath),
     parser: 'yaml',
-    required: ['phase_id', 'impact_scope', 'success_criteria', 'covers', 'interface_contract'],
+    // PR #135 review #1 (Codex HIGH): keys must match the actual
+    // decomposer output (`agents/mpl-decomposer.md` <Output_Schema>):
+    // `id` (not `phase_id`), `scope` + `impact` (not `impact_scope`),
+    // `covers`, `interface_contract`, `success_criteria`. The earlier
+    // schema rejected every valid decomposition.yaml.
+    required: ['id', 'scope', 'impact', 'covers', 'interface_contract', 'success_criteria'],
   },
   {
     artifact: 'state-summary',
@@ -91,13 +96,29 @@ export function matchArtifactSchema(relPath) {
 /**
  * Test the presence of `key` in `content` per the schema's parser kind.
  *
- * - `markdown` → match a heading (`## key`, `### key`, etc.) or a
- *   `**key**:` style label. Case-insensitive. Underscores and spaces
- *   are interchangeable so `## next_phase_context` and
+ * - `markdown` → match a heading (`## key`, `### key`, etc.), a
+ *   `**key**:` bold label, OR a `key: value` line (presence-only;
+ *   the line could be a single-line stub — see "Known limitations"
+ *   below). Case-insensitive. Underscores and spaces are
+ *   interchangeable so `## next_phase_context` and
  *   `## Next Phase Context` both count.
  * - `yaml` → match `key:` at line start (any indentation), or
  *   `- key:` for list-of-objects shapes (decomposition.yaml's phase
  *   entries are list elements).
+ *
+ * **Known limitations** (PR #135 review notes — accepted trade-offs):
+ *   1. **Stub tolerance** (markdown): the `key: value` branch matches
+ *      one-line stubs, not just full sections. Schema validity ≠
+ *      content quality. The hook's job is to catch missing sections,
+ *      not police section depth — section-content review is the
+ *      adversarial reviewer's (P0-A / #103) responsibility.
+ *   2. **Global presence** (yaml): for list-of-objects artifacts like
+ *      `decomposition.yaml`, presence anywhere in the document
+ *      satisfies the check. Per-list-element coverage requires a real
+ *      YAML parser; tracked as a follow-up. Today, a key that any
+ *      single phase carries counts as "present" even when a different
+ *      phase omits it. `mpl-require-covers.mjs` covers the most
+ *      important field (`covers`) per-phase already.
  */
 export function hasKey(content, key, parser) {
   if (typeof content !== 'string' || typeof key !== 'string') return false;

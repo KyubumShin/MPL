@@ -144,7 +144,7 @@
         ]
       },
       {
-        "matcher": "Edit|Write|MultiEdit",
+        "matcher": "Edit|Write|MultiEdit|mcp__.*__write.*",
         "hooks": [
           {
             "type": "command",
