@@ -56,11 +56,14 @@ strict mode elevates `warn → block`.
 ## Schema version
 
 - `CURRENT_SCHEMA_VERSION = 2` (P2-6 — unified state, `execution` subtree absorbs the legacy `.mpl/mpl/state.json`).
-- Migration v1 → v2 runs automatically on `readState`. Newer-than-supported writes raise I8.
+- The migration registry (`hooks/lib/migrations/`) walks any older state up to current on `readState`. Newer-than-supported writes are **fail-closed** by `readState` (returns `null` + diagnostic stderr) and additionally surfaced by G3 I8.
+- Bump policy and authoring workflow: `docs/schemas/migration-policy.md`.
 
 ## See also
 
-- `hooks/lib/mpl-state.mjs` — runtime schema + migration.
+- `hooks/lib/mpl-state.mjs` — runtime schema + `readState` fail-closed guard.
+- `hooks/lib/migrations/` — versioned migration registry (H8 / #116).
+- `docs/schemas/migration-policy.md` — bump policy + authoring workflow.
 - `hooks/lib/mpl-state-invariant.mjs` — invariant checker (this document's mechanical mirror).
 - `commands/mpl-run.md` §"MPL State" — orchestrator protocol view.
 - `docs/config-schema.md` §Enforcement — `state_invariant_violation` policy.

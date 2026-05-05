@@ -21,6 +21,12 @@ import { join } from 'path';
 
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
 
+// Re-export so consumers (and the H8 single-source-of-truth test) can
+// confirm both modules agree on the version constant via a single
+// import. Without this re-export the SSOT test had to reach back into
+// mpl-state.mjs and ended up comparing the constant to itself.
+export { CURRENT_SCHEMA_VERSION };
+
 /**
  * Trigger contexts. Different triggers care about different invariants — for
  * example "no new phase dispatch while paused" only matters when the trigger
@@ -239,6 +245,12 @@ function checkI8(state) {
   // Refuse states with a schema_version newer than this hook supports.
   // Migration handles older versions automatically — newer ones mean the
   // hook is stale relative to the writer.
+  //
+  // Note (H8 / #116): in production, `readState` fail-closes on the same
+  // condition before any caller can build a state object to pass here.
+  // I8 therefore mainly catches synthetic state objects that bypass
+  // readState (test fixtures, future programmatic writers) — defense in
+  // depth for the read path, not the writer-side guard.
   const sv = state?.schema_version;
   if (typeof sv !== 'number') return null;
   if (sv > CURRENT_SCHEMA_VERSION) {

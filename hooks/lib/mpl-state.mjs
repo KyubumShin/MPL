@@ -9,6 +9,11 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, rmSync,
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { loadConfig } from './mpl-config.mjs';
+import { deepMerge } from './mpl-state-merge.mjs';
+import { runMigrations } from './migrations/index.mjs';
+import { LEGACY_EXECUTION_STATE_PATH as V1_TO_V2_LEGACY_PATH } from './migrations/v1-to-v2.mjs';
+
+export { deepMerge };
 
 const STATE_DIR = '.mpl';
 const STATE_FILE = 'state.json';
@@ -32,19 +37,20 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  * - `2` = unified shape: everything in `.mpl/state.json`, execution-scope
  *   fields under the top-level `execution` subtree.
  *
- * readState() transparently migrates v1 → v2 on first access by merging any
- * surviving `.mpl/mpl/state.json` into `state.execution` and archiving the
- * legacy file.
+ * H8 (#116) routes per-version logic through `hooks/lib/migrations/`. To
+ * bump this constant, register a new migration entry; see
+ * `docs/schemas/migration-policy.md`.
  */
 export const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
  * via Write/Edit; v2 stores the same shape under `state.execution` in
- * `.mpl/state.json`. The constant is retained so the migration path can
- * locate and archive the legacy file.
+ * `.mpl/state.json`. The constant is re-exported from the v1-to-v2
+ * migration so existing consumers (resume skill, archive helpers) keep
+ * the import path stable.
  */
-export const LEGACY_EXECUTION_STATE_PATH = '.mpl/mpl/state.json';
+export const LEGACY_EXECUTION_STATE_PATH = V1_TO_V2_LEGACY_PATH;
 
 /**
  * Valid pipeline phase names (v0.13.1).
@@ -217,19 +223,22 @@ const DEFAULT_STATE = {
   },
 };
 
-// Prototype pollution guard keys
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
 /**
  * Read MPL state from .mpl/state.json.
  *
- * P2-6: if the parsed state lacks `schema_version` (legacy v1) AND a legacy
- * `.mpl/mpl/state.json` exists, run the migration before returning. The
- * migration is idempotent — subsequent reads see `schema_version: 2` and
- * skip the check.
+ * Schema-version handling (H8 / #116):
+ *   - `schema_version > CURRENT_SCHEMA_VERSION` → **fail-closed**. The
+ *     plugin is older than the writer; we cannot reason about field
+ *     shapes that may have been renamed or removed. Returns `null` so
+ *     downstream hooks degrade rather than misinterpret. A diagnostic
+ *     line is written to stderr; G3 I8 (defense-in-depth) also catches
+ *     the same condition when invoked.
+ *   - `schema_version < CURRENT_SCHEMA_VERSION` (or absent → treated as
+ *     1) → run the migration registry up to current. Migrations persist
+ *     atomically inside this function so subsequent reads short-circuit.
  *
  * @param {string} cwd - Working directory
- * @returns {object|null} State object or null if not found/invalid
+ * @returns {object|null} State object or null if not found/invalid/unsupported
  */
 export function readState(cwd) {
   try {
@@ -240,11 +249,18 @@ export function readState(cwd) {
     if (typeof parsed !== 'object' || parsed === null) return null;
     if (!parsed.current_phase) return null;
 
-    // P2-6: transparent v1 → v2 migration. Delegates to the pure helper so
-    // writers that bypass readState (direct JSON munging in tests) can
-    // still run the same logic on demand.
+    // H8 fail-closed guard — refuse to act on a state from a newer writer.
+    if (typeof parsed.schema_version === 'number' && parsed.schema_version > CURRENT_SCHEMA_VERSION) {
+      process.stderr.write(
+        `[MPL state] schema_version=${parsed.schema_version} exceeds supported MAX=${CURRENT_SCHEMA_VERSION}. ` +
+        `Upgrade the mpl plugin or restore .mpl/state.json from a compatible run. ` +
+        `See docs/schemas/migration-policy.md.\n`
+      );
+      return null;
+    }
+
     if ((parsed.schema_version ?? 1) < CURRENT_SCHEMA_VERSION) {
-      const migrated = migrateLegacyExecutionState(cwd, parsed);
+      const migrated = applyMigrationChain(cwd, parsed);
       if (migrated) return migrated;
     }
     return parsed;
@@ -254,99 +270,37 @@ export function readState(cwd) {
 }
 
 /**
- * P2-6: one-shot migration from the dual-file v1 layout to the unified v2
- * layout. Reads .mpl/mpl/state.json (if present), merges its fields into
- * `state.execution`, archives the legacy file to
- * `.mpl/archive/legacy-execution-state.json`, and bumps schema_version.
- *
- * Idempotent: callers may invoke freely — if there's nothing to migrate
- * (legacy file absent, already-migrated, or `state.execution` already
- * populated from a newer write) the function still bumps schema_version and
- * persists.
- *
- * Returns the migrated state object, or null on I/O failure (caller keeps
- * the unmigrated state so the pipeline doesn't wedge).
+ * Run the migration registry against `state` and persist the result
+ * atomically. Returns the migrated state, or `null` on I/O failure
+ * (caller falls back to the unmigrated state).
  */
-export function migrateLegacyExecutionState(cwd, currentState) {
+function applyMigrationChain(cwd, state) {
   try {
-    const legacyPath = join(cwd, LEGACY_EXECUTION_STATE_PATH);
+    const migrated = runMigrations(state, cwd, CURRENT_SCHEMA_VERSION);
+    if (!migrated || migrated === state) return migrated || state;
+
     const stateDir = join(cwd, STATE_DIR);
-    const merged = { ...currentState };
-
-    // Treat the DEFAULT_STATE.execution shape as the baseline so the legacy
-    // file only needs to contribute the fields it actually knows about.
-    const baseExecution = {
-      task: null,
-      status: null,
-      started_at: null,
-      phases: { total: 0, completed: 0, current: null, failed: 0, circuit_breaks: 0 },
-      phase_details: [],
-      totals: { total_retries: 0, total_micro_fixes: 0, total_discoveries: 0, elapsed_ms: 0 },
-      cumulative_pass_rate: null,
-      failure_phase: null,
-    };
-
-    let legacyParsed = null;
-    if (existsSync(legacyPath)) {
-      try {
-        legacyParsed = JSON.parse(readFileSync(legacyPath, 'utf-8'));
-      } catch {
-        // Corrupt legacy file — archive verbatim below, proceed with defaults.
-        legacyParsed = null;
-      }
-    }
-
-    // Later writes (v2) may have already populated state.execution. Preserve
-    // them: incoming merge order is base < legacy < already-unified, so a
-    // partial v2 write followed by a v1 read still keeps the newer data.
-    const existingExecution = (currentState && typeof currentState.execution === 'object' && currentState.execution !== null)
-      ? currentState.execution
-      : {};
-
-    merged.execution = deepMerge(
-      deepMerge(baseExecution, legacyParsed && typeof legacyParsed === 'object' ? legacyParsed : {}),
-      existingExecution,
-    );
-    merged.schema_version = CURRENT_SCHEMA_VERSION;
-
-    // Persist the migrated state back to disk so subsequent reads short-circuit.
     if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
     const stateTmp = join(stateDir, `.state-${randomBytes(4).toString('hex')}.tmp`);
-    writeFileSync(stateTmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    writeFileSync(stateTmp, JSON.stringify(migrated, null, 2), { mode: 0o600 });
     renameSync(stateTmp, join(stateDir, STATE_FILE));
-
-    // Archive the legacy file (once per migration). Using the pipeline_id
-    // when available keeps the archive co-located with other pipeline
-    // artifacts; otherwise a single legacy-execution-state.json at the
-    // archive root is sufficient.
-    if (legacyParsed !== null || existsSync(legacyPath)) {
-      const archiveRoot = join(cwd, '.mpl', 'archive');
-      try {
-        mkdirSync(archiveRoot, { recursive: true });
-        const archiveName = currentState?.pipeline_id
-          ? `${currentState.pipeline_id}-legacy-execution-state.json`
-          : 'legacy-execution-state.json';
-        const archivePath = join(archiveRoot, archiveName);
-        writeFileSync(
-          archivePath,
-          JSON.stringify({
-            migrated_at: new Date().toISOString(),
-            pipeline_id: currentState?.pipeline_id ?? null,
-            legacy_content: legacyParsed,
-          }, null, 2),
-          { mode: 0o600 },
-        );
-        if (existsSync(legacyPath)) rmSync(legacyPath, { force: true });
-      } catch {
-        // Archive failure is non-fatal — better to leave the legacy file in
-        // place than to wedge the pipeline.
-      }
-    }
-
-    return merged;
+    return migrated;
   } catch {
     return null;
   }
+}
+
+/**
+ * Public migration entry point. Retained from P2-6 so external consumers
+ * (e.g. `skills/mpl-resume/SKILL.md`) keep working — the body now
+ * delegates to the H8 migration registry, which handles archive +
+ * persistence in `applyMigrationChain`. The returned object is the
+ * migrated state, or `null` on I/O failure (caller keeps the unmigrated
+ * state so the pipeline doesn't wedge).
+ */
+export function migrateLegacyExecutionState(cwd, currentState) {
+  if (!currentState || typeof currentState !== 'object') return null;
+  return applyMigrationChain(cwd, currentState);
 }
 
 /**
@@ -392,12 +346,73 @@ export function detectStateDrift(cwd) {
 }
 
 /**
- * Write/merge MPL state to .mpl/state.json (atomic via temp + rename)
+ * Thrown by `writeState` when `.mpl/state.json` already carries a
+ * `schema_version` that exceeds what this plugin supports. Without this
+ * the on-disk state would silently be overwritten with the v2 default
+ * shape + patch (PR #132 review #1) — a fresh-writer state from a newer
+ * plugin would be downgraded and any field outside v2's vocabulary lost.
+ */
+export class UnsupportedSchemaVersionError extends Error {
+  constructor(version, supported) {
+    super(
+      `state.schema_version=${version} exceeds supported MAX=${supported}. ` +
+      `Refusing to overwrite a fresher state with an older shape. ` +
+      `Upgrade the mpl plugin or restore .mpl/state.json from a compatible run. ` +
+      `See docs/schemas/migration-policy.md.`
+    );
+    this.name = 'UnsupportedSchemaVersionError';
+    this.version = version;
+    this.supported = supported;
+  }
+}
+
+/**
+ * Probe the on-disk state.json for a schema_version that this plugin can
+ * not safely round-trip. Returns the offending version if the file
+ * exists, parses, and exceeds CURRENT_SCHEMA_VERSION; null otherwise
+ * (missing, corrupt, parity, or older). Pure read — no mutation.
+ */
+function readPersistedSchemaVersion(cwd) {
+  const statePath = join(cwd, STATE_DIR, STATE_FILE);
+  if (!existsSync(statePath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, 'utf-8'));
+    if (typeof parsed?.schema_version === 'number' && parsed.schema_version > CURRENT_SCHEMA_VERSION) {
+      return parsed.schema_version;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write/merge MPL state to .mpl/state.json (atomic via temp + rename).
+ *
+ * H8 (#116, PR #132 review #1): if the on-disk file declares a
+ * `schema_version` newer than `CURRENT_SCHEMA_VERSION`, throw
+ * `UnsupportedSchemaVersionError` instead of overwriting it. `readState`
+ * already returns `null` for that case (fail-closed read), but
+ * `writeState` previously treated `null` the same as "no file" and
+ * wrote `DEFAULT_STATE` + patch — silently downgrading the fresher
+ * state and dropping any field outside the v2 vocabulary.
+ *
  * @param {string} cwd - Working directory
  * @param {object} patch - Fields to merge into state
  * @returns {object} Merged state
+ * @throws {UnsupportedSchemaVersionError} when on-disk schema_version > CURRENT
  */
 export function writeState(cwd, patch) {
+  const futureVersion = readPersistedSchemaVersion(cwd);
+  if (futureVersion !== null) {
+    process.stderr.write(
+      `[MPL state] writeState refused — on-disk schema_version=${futureVersion} ` +
+      `exceeds supported MAX=${CURRENT_SCHEMA_VERSION}. State left untouched. ` +
+      `See docs/schemas/migration-policy.md.\n`
+    );
+    throw new UnsupportedSchemaVersionError(futureVersion, CURRENT_SCHEMA_VERSION);
+  }
+
   const stateDir = join(cwd, STATE_DIR);
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
@@ -673,27 +688,3 @@ export function checkConvergence(state) {
   return { status: 'improving', delta: improvement };
 }
 
-/**
- * Deep merge two objects (shallow for arrays, with prototype pollution guard)
- */
-export function deepMerge(target, source) {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    // Prototype pollution guard
-    if (DANGEROUS_KEYS.has(key)) continue;
-
-    if (
-      source[key] &&
-      typeof source[key] === 'object' &&
-      !Array.isArray(source[key]) &&
-      target[key] &&
-      typeof target[key] === 'object' &&
-      !Array.isArray(target[key])
-    ) {
-      result[key] = deepMerge(target[key], source[key]);
-    } else {
-      result[key] = source[key];
-    }
-  }
-  return result;
-}

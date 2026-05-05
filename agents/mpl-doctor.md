@@ -73,6 +73,30 @@ disallowedTools: Write, Edit, Task
     - WARN if missing (setup will create)
     - Check `.mpl/mpl/` subdirectories if pipeline has been run before
 
+    **Schema version sub-check (H8 / #116)**:
+    Doctor surfaces `state.schema_version` against the plugin's
+    `CURRENT_SCHEMA_VERSION` so a stale-plugin / fresh-state mismatch is
+    caught before any other hook trips on it.
+
+    Procedure: read `.mpl/state.json` (skip with `NOT APPLICABLE` if the
+    file is absent) and `MPL/hooks/lib/mpl-state.mjs` to extract the
+    declared constant (line `export const CURRENT_SCHEMA_VERSION = ...`).
+    Compare:
+
+    - PASS — `state.schema_version === CURRENT_SCHEMA_VERSION`.
+    - WARN — `state.schema_version` absent (legacy v1; will auto-migrate
+      on next `readState`) OR `state.schema_version < CURRENT` (older
+      version, migration registry will run).
+    - FAIL — `state.schema_version > CURRENT` (state was written by a
+      newer plugin; `readState` will fail-closed and the pipeline will
+      not progress until the plugin is upgraded). Reference:
+      `docs/schemas/migration-policy.md`.
+
+    Surface the values in the Category 6 output:
+    ```
+    schema_version: state=N plugin=M  → PASS|WARN|FAIL
+    ```
+
     ### Category 7: Tool Availability (Standalone Check)
     - **Scope**: runtime probe (no file scope)
     Detect which tool tiers are available:
