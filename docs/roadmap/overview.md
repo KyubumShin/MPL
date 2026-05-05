@@ -2,7 +2,7 @@
 
 > **Version notation (v0.9.4)**: This file uses legacy major-version notation (v1.0, v3.0, v4.0) from the original roadmap. Actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.x ≈ v0.3.x, v4.x ≈ v0.4.x. See `design.md` for the canonical version reference.
 >
-> **Currency note (2026-05-06)**: Plugin version is `0.18.1` (v0.17.x → v0.18.x = v3.10 P0 enforcement track: P0-1 gate-evidence desync fix, P0-2 enforcement tri-state, P0-3 write-guard hard block, P0-A adversarial reviewer, P0-K artifact schema validator, G1 Bash timeout, G2 RUNBOOK auto-update, G3+H1 state invariant, G4 hang detection, G5+G6 fix-loop history + intervention counter, H8 schema migration registry, F2 hook-tier scan, F3 anti-pattern registry, F4 doctor meta-self, F5 property check, F6 codex auditor). v0.18.0 critical path 10/10 closed (#102~#111), v0.18.1 hardening 5/5 closed (#112~#117). Per-version detail in `docs/design.md` §9.
+> **Currency note (2026-05-06)**: Plugin version is `0.18.1` (v0.17.x → v0.18.x = v3.10 P0 enforcement track: P0-1 gate-evidence desync fix, P0-2 enforcement tri-state, P0-3 write-guard hard block, P0-A adversarial reviewer, P0-K artifact schema validator, G1 Bash timeout, G2 RUNBOOK auto-update, G3+H1 state invariant, G4 hang detection, G5+G6 fix-loop history + intervention counter, H8 schema migration registry, F2 hook-tier scan, F3 anti-pattern registry, F4 doctor meta-self, F5 property check, F6 codex auditor). v0.18.0 critical path 10/10 closed (#102~#111), v0.18.1 hardening 6/6 closed (#112~#117). Per-version detail in `docs/design.md` §9.
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 
