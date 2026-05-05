@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.17.2 (v0.17.1 + decomposer Write authority refactor — `mpl-decomposer` agent now writes `.mpl/mpl/decomposition.yaml` directly; orchestrator no longer authors that file in main context)
-> **Last updated**: 2026-05-02
+> **Version**: v0.18.1 (v0.17.2 + v3.10 P0 enforcement track: P0-1/P0-2/P0-3/P0-A/P0-K + G1~G6 + H8 + F2~F6 — gate-evidence desync fix, enforcement tri-state, write-guard hard block, adversarial reviewer, artifact schema validator, Bash timeout, RUNBOOK auto-update, fix-loop history + intervention counter, hang detection, state invariant, schema migration registry, hook-tier scan, anti-pattern registry, doctor meta-self, property check, codex auditor)
+> **Last updated**: 2026-05-06
 
 ---
 

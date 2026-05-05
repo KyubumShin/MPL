@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.17.2 Design Document
+# MPL (Micro-Phase Loop) v0.18.1 Design Document
 
 ## 1. Overview
 
@@ -484,6 +484,43 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.18.1 — v3.10 P0 Enforcement Track (2026-05-06)
+
+Coherence-recovery release closing the v3.10 §3.1 retrofit findings. Where v0.17.2 made decomposer the sole Writer of decomposition.yaml, v0.18.0 + v0.18.1 wire the Tier 1+2+3+4 enforcement stack that catches what slips through anyway — fake gates, silent fallbacks, gap-as-PASS test patterns, scope drift, missing covers. v0.18.1 ships the `enforced` 16-item baseline.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Enforcement config | Hardcoded warn/block per hook | `config/enforcement.json` 9-key tri-state (warn/block/off) + strict-mode elevation; precedence `state.enforcement` > `.mpl/config.json` > plugin baseline | Hook + config (P0-2 #110, F5 #112) | Single source of truth; per-rule + per-pipeline override; `mpl-property-check` enforces no orphan keys |
+| Anti-pattern coverage | Ad-hoc `mpl-fallback-grep` regex set | `commands/references/anti-patterns.md` registry (BNF parsed) + `mpl-fallback-grep` Tier 1 hook + Tier 3 property check + `commands/anti-patterns.md` self-application | Protocol + hook (F2 #104, F3 #105) | Single registry consumed by 3 tiers; doctor self-audits its own scope |
+| Doctor self-audit | doctor agent excluded from anti-pattern grep | `mpl-doctor-meta-self.mjs` enumerates doctor sources, applies registry, surfaces `inverse_audit_hits` (anti-patterns OUTSIDE registry scope that doctor should still audit) + `R-DOCTOR-SCOPE-LEAK` declaration | Hook (F4 #106) | Closes meta-self exclusion hole |
+| Bash verification timeout | None — long-running build/test could hang phase | `mpl-bash-timeout.mjs` PostToolUse Bash matcher with category-specific budgets (`config/verification-tool-paths.json`) + tier 3 enforcement | Hook (G1 #107) | Hang prevention without false-positive on legitimate long builds |
+| State invariant | None | `mpl-state-invariant.mjs` 8 invariants (I1-I8) verified on every PreToolUse + Stop; hard-block on writeState if violated | Hook (G3+H1 #108) | Catches state corruption before it propagates |
+| Hang detection | None | `mpl-hang-detector.mjs` PreCompact + UserPromptSubmit detection of stalled phases; surfaces banner + counts | Hook (G4 #109) | Diagnostic for "MPL is alive but not progressing" |
+| Write-guard | Edit/Write blocked outside scope (P0-3 / #111) | + MultiEdit + `mcp__.*__write.*` tools matched (closing #129 review #1 bypass class) | Hook (P0-3 #111) | Single matcher across CC's full write surface |
+| Adversarial reviewer | None | `agents/mpl-adversarial-reviewer.md` finalize-time signal-driven dispatch + `parseScore` tri-modal range support + history reason capture | Agent + protocol (P0-A #103) | Tier 4 third-pass on the merge candidate |
+| Schema migration | Inline `mpl-state.mjs` v1→v2 path | `hooks/lib/migrations/` registry — ordered chain runner + per-version migrations + `readState` fail-closed on `state.schema_version > CURRENT` + `writeState` fail-closed on `UnsupportedSchemaVersionError` | Hook (H8 #116) | Forward + backward safety; new bumps drop in as new files |
+| Fix-loop history | `state.fix_loop_count` (single counter) | + `state.fix_loop_history[]` per-phase entries `{phase, count, started_at}` with G3 I5 invariant `fix_loop_count == sum(history.count)`; carry-forward migration v2→v3; archive snapshots preserve forensic value | Hook + state (G5+G6 #114) | Per-phase forensic trail for fix-loop investigation |
+| User intervention counter | Not tracked | `state.user_intervention_count` UserPromptSubmit-time increment iff (MPL active + auto mode + non-cancelled + non-completed) | Hook (G6 #114) | Auto-mode autonomy metric |
+| Observability bundle | RUNBOOK manual + state-summary partial | `RUNBOOK.md` auto-row on phase transition (compaction-snapshot rows skipped from chain inference) + `/mpl-status` 3-source merge view (state.json + per-phase state-summary + RUNBOOK) | Hook + skill (G2 #113) | Single timeline view spanning compaction boundaries |
+| Artifact schema validator | Required fields enforced only by prose | `mpl-artifact-schema.mjs` PostToolUse + finalize bulk re-check; 5 artifact schemas (decomposition, state-summary, verification, pivot-points, user-contract); markdown heading + YAML key presence checks | Hook (P0-K #115) | Closes "valid at write, missing later" failure mode |
+| Codex auditor | None | `agents/mpl-codex-auditor.md` + `mpl-codex-audit.mjs` Tier 4 finalize-time intent-vs-implementation diff: anti-pattern residual on declared impact files + missing covers (uncovered + dangling) + drift; 3-way `contract_mode` (legacy_skip / empty_skip / enforced) honoring Phase 0 graceful protocol | Agent + hook (F6 #117) | Last-mile catch for the ~1/8 that slips Tier 1+2+3 |
+
+**Affected files:**
+
+Hooks: `mpl-bash-timeout.mjs`, `mpl-codex-audit.mjs`, `mpl-fallback-grep.mjs`, `mpl-hang-detector.mjs`, `mpl-doctor-meta-self.mjs`, `mpl-property-check.mjs`, `mpl-state-invariant.mjs`, `mpl-keyword-detector.mjs` (intervention counter), `mpl-write-guard.mjs` (MultiEdit + MCP matcher), `mpl-artifact-schema.mjs`, `mpl-compaction-tracker.mjs` (RUNBOOK in-flight snapshot), plus `lib/anti-pattern-registry.mjs`, `lib/migrations/{index,v1-to-v2,v2-to-v3,v3-to-v4.example}.mjs`, `lib/mpl-codex-audit.mjs`, `lib/mpl-enforcement.mjs`, `lib/mpl-meta-self.mjs`, `lib/mpl-property-check.mjs`, `lib/mpl-runbook.mjs`, `lib/mpl-state-merge.mjs`.
+
+Agents: `mpl-adversarial-reviewer.md`, `mpl-codex-auditor.md` (new), `mpl-doctor.md` (Category 3 expected count 8 → 11, Category 8 enforcement subsection, Category 14 meta-self, Category 15 property check).
+
+Protocols: `mpl-run-finalize.md` (5.1.1 P0-K bulk re-check, 5.1.5 V-05 informational drift, 5.1.7 F6 codex audit dispatch), `mpl-run-execute-gates.md` (state invariant gate), `mpl-run-execute.md` (fix-loop history wiring), `references/anti-patterns.md` (BNF registry).
+
+Skills: `mpl-status` (3-source merge view + G5/G6 metrics).
+
+Config: `config/enforcement.json`, `config/verification-tool-paths.json`.
+
+**Breaking changes:** None at user-facing surface. State `schema_version` bumped 2 → 3 (G5 fix_loop_history) — auto-migrates on first read via H8 registry chain. `enforcement.audit_residual` is a new key with default 'warn' — projects that explicitly set strict mode will now elevate F6 fail to block (per design intent).
+
+**Tests:** 595 → 735 (+140 across the v0.18 stack). Self-run smoke clean: doctor meta-self 0 hits, property-check 9/9 used / 0 unused, codex-audit verdict=pass on plugin self.
 
 ### v0.17.2 — Decomposer Write Authority (2026-05-02)
 
