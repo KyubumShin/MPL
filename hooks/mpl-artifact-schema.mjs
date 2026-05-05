@@ -91,9 +91,14 @@ async function main() {
   try { data = JSON.parse(input); } catch { return silent(); }
 
   const toolName = data.tool_name || data.toolName || '';
-  if (!['Edit', 'edit', 'Write', 'write', 'MultiEdit', 'multiEdit'].includes(toolName)) {
-    return silent();
-  }
+  // PR #135 review #2 (Claude): hooks.json matcher routes
+  // `mcp__*__write*` tools to this hook, but the internal allowlist
+  // also has to accept them or the hook silent-skips. Mirror the
+  // matcher's regex shape here.
+  const isWriteTool =
+    ['Edit', 'edit', 'Write', 'write', 'MultiEdit', 'multiEdit'].includes(toolName)
+    || /^mcp__.*__write/i.test(toolName);
+  if (!isWriteTool) return silent();
 
   const cwd = data.cwd || data.directory || process.cwd();
   if (!isMplActive(cwd)) return silent();

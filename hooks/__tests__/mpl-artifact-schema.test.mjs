@@ -352,4 +352,21 @@ describe('mpl-artifact-schema PostToolUse hook (P0-K)', () => {
     assert.match(r.systemMessage || '', /pivot-points\.md.*PP_id/);
     assert.doesNotMatch(r.systemMessage || '', /state-summary\.md/);
   });
+
+  it('PR #135 review #2: processes mcp__*__write* tool names (matcher coverage)', () => {
+    // hooks.json matcher routes `mcp__.*__write.*` here; the internal
+    // allowlist must accept the toolName too, otherwise the hook
+    // silent-skips MCP filesystem writes (the gap Claude flagged).
+    writeFileSync(join(tmp, '.mpl', 'pivot-points.md'), '## Random Heading\n');
+    const stdin = JSON.stringify({
+      cwd: tmp,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'mcp__filesystem__write_file',
+      tool_input: { file_path: '.mpl/pivot-points.md' },
+    });
+    const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
+    const r = JSON.parse(out);
+    assert.match(r.systemMessage || '', /artifact schema advisory/);
+    assert.match(r.systemMessage || '', /PP_id/);
+  });
 });
