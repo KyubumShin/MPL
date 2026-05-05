@@ -618,15 +618,21 @@ describe('PR #136 review regressions', () => {
     assert.deepStrictEqual(dangling, []);
   });
 
-  it('Codex HIGH: enforced mode (file present + empty user_cases) still surfaces dangling', () => {
-    // Distinguish "no contract file" (legacy_skip) from "empty contract" —
-    // the latter is an explicit author choice and dangling claims are real.
+  it('Codex HIGH follow-up: empty_skip mode (file present + user_cases: []) suppresses dangling', () => {
+    // Phase 0 graceful-skip writes a real `user-contract.md` with
+    // `user_cases: []` for legacy projects (see commands/mpl-run-phase0.md
+    // line 228: "Skip condition: Legacy projects (pre-0.16) ... write
+    // graceful-skip user-contract.md with user_cases: []"). Pre-followup-fix
+    // this case was treated as `enforced` and reported dangling — Codex's
+    // follow-up reproducer flagged that as still conflicting with
+    // mpl-require-covers.mjs graceful semantics.
     scaffold(tmp, {
-      '.mpl/requirements/user-contract.md': `# UC
+      '.mpl/requirements/user-contract.md': `# User Contract
 
 \`\`\`yaml
 schema_version: 1
 user_cases: []
+scenarios: []
 \`\`\`
 `,
       '.mpl/mpl/decomposition.yaml': `phases:
@@ -638,9 +644,19 @@ user_cases: []
 `,
     });
     const report = runCodexAudit(tmp, REAL_PLUGIN_ROOT, { now: 'NOW' });
+    assert.equal(report.contract_mode, 'empty_skip');
+    assert.equal(report.verdict, 'pass');
+    assert.equal(report.summary.dangling_covers, 0);
+    assert.equal(report.summary.missing_covers, 0);
+  });
+
+  it('contract_mode: enforced when at least one UC is included', () => {
+    scaffold(tmp, {
+      '.mpl/requirements/user-contract.md': SAMPLE_USER_CONTRACT,
+      '.mpl/mpl/decomposition.yaml': SAMPLE_DECOMPOSITION,
+    });
+    const report = runCodexAudit(tmp, REAL_PLUGIN_ROOT, { now: 'NOW' });
     assert.equal(report.contract_mode, 'enforced');
-    assert.equal(report.verdict, 'fail');
-    assert.equal(report.summary.dangling_covers, 1);
   });
 
   /* Codex MEDIUM --------------------------------------------------------- */

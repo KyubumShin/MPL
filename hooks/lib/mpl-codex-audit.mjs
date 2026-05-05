@@ -45,15 +45,21 @@ import { loadRegistry, scanContent, isInScope } from './anti-pattern-registry.mj
 /**
  * Legacy graceful-skip mode signal. Mirrors `mpl-require-covers.mjs#isLegacyMode`
  * verbatim — file absence is the canonical signal that the project predates
- * 0.16 Tier B and never produced a UC contract. Both `findMissingCovers`
- * surfaces (uncovered + dangling) are suppressed in this mode so an F6 fail
- * cannot block a finalize that the existing covers hook accepts.
+ * 0.16 Tier B and never produced a UC contract.
  *
- * PR #136 review (Codex HIGH) fix: pre-fix, every non-`internal` phase cover
- * was reported as dangling when user-contract.md was absent (because the
- * included set was empty). That contradicted the require-covers contract and
- * could halt finalize under `enforcement.audit_residual = 'block'` or strict
- * mode for a legitimately-graceful pipeline.
+ * Note: this is one of TWO graceful-skip signals (see `runCodexAudit`). File-
+ * absent is mode `legacy_skip`; file-present with empty `user_cases:` (Phase
+ * 0's graceful-skip output for legacy projects per `commands/mpl-run-phase0.md`
+ * line 228, `Skip condition: Legacy projects (pre-0.16) ... write graceful-skip
+ * user-contract.md with user_cases: []`) is mode `empty_skip`. Both suppress
+ * `findMissingCovers` surfaces.
+ *
+ * PR #136 review (Codex HIGH + follow-up) fix: pre-fix, every non-`internal`
+ * phase cover was reported as dangling when no UC was included (whether due
+ * to file absence OR Phase 0's explicit empty-list graceful skip). That
+ * contradicted the require-covers contract and could halt finalize under
+ * `enforcement.audit_residual = 'block'` or strict mode for a legitimately-
+ * graceful pipeline.
  */
 export function isLegacyContractMode(cwd) {
   return !existsSync(join(cwd, '.mpl/requirements/user-contract.md'));
@@ -444,10 +450,20 @@ function collectActualChanges(cwd, opts = {}) {
 export function runCodexAudit(cwd, pluginRoot, opts = {}) {
   const phases = parseDecompositionPhases(cwd);
   const includedUCs = enumerateIncludedUserCases(cwd);
-  const legacy = isLegacyContractMode(cwd);
+  const fileAbsent = isLegacyContractMode(cwd);
+  // PR #136 Codex follow-up fix: Phase 0 graceful-skip writes a real
+  // `user-contract.md` with `user_cases: []` (see commands/mpl-run-phase0.md
+  // line 228). Treat empty-included as graceful too — same effective contract
+  // as file-absent. The two are surfaced separately in `contract_mode` for
+  // diagnostic clarity but share the same suppression behavior.
+  const emptyIncluded = !fileAbsent && includedUCs.length === 0;
+  const graceful = fileAbsent || emptyIncluded;
+  const contractMode = fileAbsent ? 'legacy_skip'
+    : emptyIncluded ? 'empty_skip'
+    : 'enforced';
 
   const antiPatternResidual = auditAntiPatternResidual(cwd, pluginRoot, phases);
-  const { uncovered, dangling } = findMissingCovers(includedUCs, phases, { legacy });
+  const { uncovered, dangling } = findMissingCovers(includedUCs, phases, { legacy: graceful });
   const drift = findScopeDrift(cwd, phases, opts);
 
   const verdict = (antiPatternResidual.length === 0
@@ -461,7 +477,7 @@ export function runCodexAudit(cwd, pluginRoot, opts = {}) {
     tier: 4,
     generated_at: opts.now ?? new Date().toISOString(),
     verdict,
-    contract_mode: legacy ? 'legacy_skip' : 'enforced',
+    contract_mode: contractMode,
     summary: {
       anti_pattern_residual: antiPatternResidual.length,
       missing_covers: uncovered.length,
