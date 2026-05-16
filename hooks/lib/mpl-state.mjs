@@ -40,12 +40,14 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  * - `3` = G5 + G6 (#114) telemetry hygiene fields: additive backfill for
  *   `fix_loop_history` (per-phase fix-loop entries) and
  *   `user_intervention_count` (auto-mode honesty counter).
+ * - `4` = Goal Contract readiness fields and finalize/security evidence
+ *   backfills.
  *
  * H8 (#116) routes per-version logic through `hooks/lib/migrations/`. To
  * bump this constant, register a new migration entry; see
  * `docs/schemas/migration-policy.md`.
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
@@ -82,6 +84,8 @@ const DEFAULT_STATE = {
   worktree_history: [],      // History of worktree switches
   current_phase: 'phase1-plan',
   started_at: null,
+  completed_at: null,
+  finalized_at: null,
   finalize_done: false,      // Set to true when Step 5 finalization completes
   sprint_status: {
     total_todos: 0,
@@ -114,6 +118,17 @@ const DEFAULT_STATE = {
   // Populated by mpl-gate-recorder.mjs when Bash command matches a scenario's
   // test_command. Consumed by finalize Step 5.0 and mpl-require-e2e.mjs hook.
   e2e_results: {},
+  // Goal Contract (Ouroboros-style Seed / MPL constitution) readiness.
+  // `.mpl/goal-contract.yaml` freezes the goal, project pivot, ontology,
+  // variation axes, acceptance criteria, E2E policy, security policy, and
+  // finalize evidence before decomposition. The ambiguity gate treats the file
+  // as the disk truth and syncs these fields when it is valid.
+  goal_contract_set: false,
+  goal_contract_path: '.mpl/goal-contract.yaml',
+  goal_contract_hash: null,
+  // Structured security evidence consumed by finalize artifact guard when the
+  // goal contract declares `security_policy.required: true`.
+  security_results: {},
   fix_loop_count: 0,
   // G5 (#114): per-phase fix-loop entries appended by mpl-phase-controller
   // when fix_loop_count changes. Each entry:
@@ -700,6 +715,7 @@ const PIPELINE_SCOPE_PATHS = [
   // Root-level pipeline artifacts
   '.mpl/state.json',
   '.mpl/PLAN.md',
+  '.mpl/goal-contract.yaml',
   '.mpl/auto-permit-learned.json',
   // Signals (transient)
   '.mpl/signals',
@@ -756,6 +772,7 @@ function archivePreviousRun(cwd) {
     const toArchive = [
       ['state.json', '.mpl/state.json'],
       ['PLAN.md', '.mpl/PLAN.md'],
+      ['goal-contract.yaml', '.mpl/goal-contract.yaml'],
     ];
 
     for (const [name, relPath] of toArchive) {
@@ -912,4 +929,3 @@ export function checkConvergence(state) {
 
   return { status: 'improving', delta: improvement };
 }
-

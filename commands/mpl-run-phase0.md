@@ -9,7 +9,7 @@ Load this when `current_phase` is in the pre-execution stages (before decomposit
 
 **Structural changes vs v0.16** (see issue #55):
 - Removed: Step -1 LSP warm-up (moved to `hooks/mpl-lsp-warmup.mjs`), Step 0.0.5 artifact freshness + field classification, Step 0.1 Quick Scope Scan + pp_proximity, Step 0.1.5a F-22 routing pattern matching, Step 0.2 interview_depth (light/full dual-track), Step 1-B Pre-Exec gap/tradeoff, Uncertainty Scan (3×3 cross-axis).
-- Moved: Core Scenarios (ex-Step 3 in phase0-analysis.md) → Stage 1.1. Intent Invariants (ex-Step 3.6) → Stage 1.2. User Contract (ex-Step 1.5) → Stage 1.3. Stage 2 Ambiguity Resolution Loop → after Step 2 Codebase (so `codebase_context` is populated).
+- Moved: Core Scenarios (ex-Step 3 in phase0-analysis.md) → Stage 1.1. Intent Invariants (ex-Step 3.6) → Stage 1.2. User Contract (ex-Step 1.5) → Stage 1.3. Goal Contract → Stage 1.4. Stage 2 Ambiguity Resolution Loop → after Step 2 Codebase (so `codebase_context` is populated).
 - Added: Step 2.9 Branch Main State Snapshot (baseline.yaml) — immutable ground-truth checkpoint after Stage 2 closes.
 
 ---
@@ -86,7 +86,7 @@ Load adaptive memory. Details in `mpl-run-phase0-memory.md`.
 
 ## Step 1: Interview Block (PP-derived, codebase-independent)
 
-All four stages below depend only on `pivot-points.md` + accumulated user responses. **None of them consume codebase analysis** — they run before Step 2 so the interview is not biased by existing code.
+All five stages below depend only on the user request, `pivot-points.md`, user contract, and accumulated user responses. **None of them consume codebase analysis** — they run before Step 2 so the interview is not biased by existing code.
 
 ### Stage 1: PP Discovery Interview (mpl-interviewer)
 
@@ -279,6 +279,74 @@ Announce: `[MPL] Stage 1.3 complete. user_cases=${result.user_cases.length} defe
 | `scenarios[*]` | Decomposer Step 3-H, Test Agent | E2E scenario seeds |
 | `ambiguity_hints[]` | Stage 2 Ambiguity Resolution | Targeted questions |
 
+### Stage 1.4: Goal Contract Freeze
+
+Create `.mpl/goal-contract.yaml` as the pipeline constitution. This is the
+MPL equivalent of an Ouroboros Seed: one artifact that ties the Codex goal /
+raw request to the project pivot, ontology, variation axes, acceptance
+criteria, E2E authenticity policy, security policy, and finalize evidence.
+
+```
+goal_contract = {
+  version: 1,
+  source: {
+    codex_goal: active Codex goal text if available else null,
+    user_request: user_request,
+    user_request_hash: sha256(normalize(user_request)),
+  },
+  mission: {
+    goal: one concrete objective,
+    project_pivot: the main importance / success pivot,
+    non_goals: explicit exclusions,
+    must_ship_outcomes: observable outcomes that must exist,
+  },
+  ontology: {
+    entities: core domain/product entities,
+    relationships: key relations between entities,
+    state_transitions: lifecycle transitions that must not drift,
+  },
+  variation_axes: [
+    { id: "AX-1", name, required_coverage: true|false, values: [...] }
+  ],
+  acceptance_criteria: [
+    { id: "AC-1", statement, evidence_required: ["e2e", "unit", "security"] }
+  ],
+  e2e_policy: {
+    real_runtime_required: true,
+    mock_allowed: false,
+    placeholder_assertions_allowed: false,
+  },
+  security_policy: {
+    required: project_has_security_surface,
+    checks: ["dependency_audit", "secret_scan", "injection_review", ...],
+  },
+  completion_evidence: {
+    required_artifacts: [
+      ".mpl/mpl/audit-report.json",
+      ".mpl/mpl/profile/run-summary.json",
+      ".mpl/mpl/RUNBOOK.md",
+    ],
+    require_commit: true,
+    require_finalize_timestamps: true,
+  },
+  deferred_uncertainties: unresolved-but-accepted ambiguity,
+  overrides: [],
+}
+
+Write(".mpl/goal-contract.yaml", serialize(goal_contract))
+mpl_state_write({
+  goal_contract_set: true,
+  goal_contract_path: ".mpl/goal-contract.yaml",
+  goal_contract_hash: sha256(file(".mpl/goal-contract.yaml")),
+})
+```
+
+**Readiness gate**: `hooks/mpl-ambiguity-gate.mjs` blocks
+`Task(mpl-decomposer)` when the goal contract is missing or incomplete. Legacy
+opt-out: `.mpl/config.json { "goal_contract_required": false }`.
+
+See `docs/schemas/goal-contract.md` for the required shape.
+
 ### Stage 1.9: Interview Snapshot Save (F-36)
 
 Back up interview results to file before Step 2. Preserves key information across compaction events during Step 2/2.5.
@@ -299,6 +367,9 @@ Write(".mpl/mpl/interview-snapshot.md"):
 
   ## User Contract Summary
   {user-contract.md UC count + key scenarios}
+
+  ## Goal Contract Summary
+  {goal-contract.yaml goal + project_pivot + AC/AX counts + e2e/security policies}
 
   ## User Request (Original)
   {user_request verbatim}
@@ -491,8 +562,8 @@ while true:
 # end while
 
 # After Stage 2 completes, proceed to Step 2.9 baseline snapshot.
-# Gate enforcement: mpl-ambiguity-gate.mjs allows decomposer dispatch when
-# ambiguity_score <= 0.2 OR ambiguity_override.active.
+# Gate enforcement: mpl-ambiguity-gate.mjs allows decomposer dispatch only when
+# (ambiguity_score <= 0.2 OR ambiguity_override.active) AND the goal contract is ready.
 ```
 
 **Re-entry**: when reached via `mpl-ambiguity-resolve` (router maps it here), this loop resumes. `ambiguity_history` persists across session boundaries, so stagnation detection is robust.
@@ -555,11 +626,15 @@ mpl_state_write(cwd, {
 Announce: "[MPL #59] Step 2.9 baseline.yaml recorded. git_base_sha=${baseline.git.base_sha.slice(0,7)}, artifacts=${countNonNull(baseline.artifacts)}. Advancing to decomposition."
 ```
 
+`buildBaseline()` includes `.mpl/goal-contract.yaml` as
+`artifacts.goal_contract`. Downstream drift/audit must treat that hash as the
+Phase 0 goal truth.
+
 ### Schema
 
 > See [`commands/schemas/baseline.yaml`](schemas/baseline.yaml) for the full schema with field documentation.
 >
-> **Top-level keys**: `created_at` · `pipeline_id` · `git` (base_sha/base_branch/working_tree_clean) · `artifacts` (per Phase 0 artifact: path + sha256, plus `skipped` for codebase_analysis) · `ambiguity` (final_score/threshold_met/override/rounds) · `spec` (user_request_hash + resolved_spec_hash, both normalized SHA-256).
+> **Top-level keys**: `created_at` · `pipeline_id` · `git` (base_sha/base_branch/working_tree_clean) · `artifacts` (per Phase 0 artifact, including `goal_contract`, path + sha256, plus `skipped` for codebase_analysis) · `ambiguity` (final_score/threshold_met/override/rounds) · `spec` (user_request_hash + resolved_spec_hash, both normalized SHA-256).
 
 ### Immutability (write-guard)
 

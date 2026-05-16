@@ -187,6 +187,14 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
+| `e2e_authenticity_required` | boolean | `true` | Blocks `finalize_done=true` when required E2E scenarios are mock/unit/placeholder evidence instead of the real runtime evidence declared by `.mpl/goal-contract.yaml`. Override file: `.mpl/config/e2e-authenticity-override.json`. | `mpl-require-e2e-authenticity.mjs` |
+
+## Goal Contract & Finalize Evidence
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `goal_contract_required` | boolean | `true` | Blocks decomposer dispatch until `.mpl/goal-contract.yaml` freezes source goal, project pivot, ontology, variation axes, acceptance criteria, E2E policy, security policy, and completion evidence. | `mpl-ambiguity-gate.mjs` |
+| `finalize_artifacts_required` | boolean | `true` | Blocks `finalize_done=true` unless the goal contract's required artifacts, RUNBOOK final section, finalize timestamps, security evidence, and optional commit evidence are present. Override file: `.mpl/config/finalize-artifact-override.json`. | `mpl-require-finalize-artifacts.mjs` |
 
 ## Adversarial Reviewer (P0-A, #103)
 

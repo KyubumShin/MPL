@@ -369,6 +369,29 @@ describe('P2-6 unified state: schema_version + execution subtree', () => {
   });
 });
 
+describe('v3 → v4 migration: goal contract fields', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-v4-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('backfills goal contract, finalize timestamp, and security evidence fields', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: 3,
+      current_phase: 'phase5-finalize',
+    }));
+
+    const state = readState(tmpDir);
+    assert.strictEqual(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.strictEqual(state.completed_at, null);
+    assert.strictEqual(state.finalized_at, null);
+    assert.strictEqual(state.goal_contract_set, false);
+    assert.strictEqual(state.goal_contract_path, '.mpl/goal-contract.yaml');
+    assert.strictEqual(state.goal_contract_hash, null);
+    assert.deepStrictEqual(state.security_results, {});
+  });
+});
+
 describe('P2-6 unified state: legacy migration', () => {
   let tmpDir;
   beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-migrate-')); });

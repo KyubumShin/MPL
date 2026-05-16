@@ -2,8 +2,8 @@
 /**
  * MPL Artifact Schema Hook (PostToolUse Edit|Write|MultiEdit) — P0-K / #115.
  *
- * Validates phase artifacts (`decomposition.yaml`, `state-summary.md`,
- * `verification.md`, `pivot-points.md`, `user-contract.md`) against
+ * Validates phase artifacts (`goal-contract.yaml`, `decomposition.yaml`,
+ * `state-summary.md`, `verification.md`, `pivot-points.md`, `user-contract.md`) against
  * required-section schemas immediately after they're written. Closes
  * the consumer gap that left `enforcement.missing_artifact_schema` as
  * a configured-but-unused rule (F5 #112 forward-compat allow-list).
@@ -206,6 +206,8 @@ function enumerateArtifactPaths(root) {
   // Singletons
   if (existsSync(join(root, '.mpl/mpl/decomposition.yaml'))) out.push('.mpl/mpl/decomposition.yaml');
   if (existsSync(join(root, '.mpl/mpl/decomposition.yml'))) out.push('.mpl/mpl/decomposition.yml');
+  if (existsSync(join(root, '.mpl/goal-contract.yaml'))) out.push('.mpl/goal-contract.yaml');
+  if (existsSync(join(root, '.mpl/goal-contract.yml'))) out.push('.mpl/goal-contract.yml');
   if (existsSync(join(root, '.mpl/pivot-points.md'))) out.push('.mpl/pivot-points.md');
   if (existsSync(join(root, '.mpl/requirements/user-contract.md'))) {
     out.push('.mpl/requirements/user-contract.md');

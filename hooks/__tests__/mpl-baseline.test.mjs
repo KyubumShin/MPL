@@ -63,6 +63,7 @@ describe('buildBaseline', () => {
 
   it('captures git base_sha and artifact hashes', () => {
     mkdirSync(join(dir, '.mpl'), { recursive: true });
+    writeFileSync(join(dir, '.mpl/goal-contract.yaml'), 'mission:\n  goal: test\n');
     writeFileSync(join(dir, '.mpl/pivot-points.md'), '## PP-1\nAuth is immutable');
 
     const b = buildBaseline(dir, {
@@ -77,6 +78,8 @@ describe('buildBaseline', () => {
     assert.ok(b.git.base_sha);
     assert.equal(b.git.base_branch.length > 0, true);
     assert.ok(b.artifacts.pivot_points);
+    assert.ok(b.artifacts.goal_contract);
+    assert.equal(b.artifacts.goal_contract.sha256.length, 64);
     assert.equal(b.artifacts.pivot_points.sha256.length, 64);
     assert.equal(b.artifacts.core_scenarios, null);  // file absent
     assert.equal(b.ambiguity.final_score, 0.18);
@@ -120,6 +123,7 @@ describe('serializeBaseline', () => {
       pipeline_id: 'mpl-x',
       git: { base_sha: 'abc123', base_branch: 'main', working_tree_clean: true },
       artifacts: {
+        goal_contract: { path: '.mpl/goal-contract.yaml', sha256: 'hg' },
         pivot_points: { path: '.mpl/pivot-points.md', sha256: 'h1' },
         core_scenarios: null,
         design_intent: null,
@@ -136,6 +140,7 @@ describe('serializeBaseline', () => {
     assert.ok(yaml.includes('base_sha: "abc123"'));
     assert.ok(yaml.includes('working_tree_clean: true'));
     assert.ok(yaml.includes('pivot_points:'));
+    assert.ok(yaml.includes('goal_contract:'));
     assert.ok(yaml.includes('skipped: true'));
     assert.ok(yaml.includes('final_score: 0.18'));
     assert.ok(yaml.includes('user_request_hash: "req-h"'));

@@ -39,6 +39,11 @@ afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 /* ───────────────────── lib unit ─────────────────────────────── */
 
 describe('matchArtifactSchema', () => {
+  it('matches goal-contract.yaml under .mpl/', () => {
+    assert.equal(matchArtifactSchema('.mpl/goal-contract.yaml')?.artifact, 'goal-contract');
+    assert.equal(matchArtifactSchema('.mpl/goal-contract.yml')?.artifact, 'goal-contract');
+  });
+
   it('matches decomposition.yaml under .mpl/mpl/', () => {
     assert.equal(matchArtifactSchema('.mpl/mpl/decomposition.yaml')?.artifact, 'decomposition');
     assert.equal(matchArtifactSchema('.mpl/mpl/decomposition.yml')?.artifact, 'decomposition');

@@ -80,6 +80,8 @@ Task(subagent_type="mpl-decomposer", model="opus",
      {user_request}
      ### Pivot Points
      {pivot_points content from .mpl/pivot-points.md}
+     ### Goal Contract
+     {goal_contract from .mpl/goal-contract.yaml}
      ### Codebase Analysis
      {codebase_analysis JSON from .mpl/mpl/codebase-analysis.json}
 
@@ -99,7 +101,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      per-phase rules. See agents/mpl-decomposer.md Step 5.5 / 5.6.
 
      ## Task
-     Break the user request into ordered phases that cover the ENTIRE scope of the request.
+     Break the user request into ordered phases that cover the ENTIRE scope of the request and the Goal Contract.
      CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. **Write the YAML directly to `.mpl/mpl/decomposition.yaml` using the Write tool**, then return a single confirmation line (e.g., `Wrote .mpl/mpl/decomposition.yaml — 5 phases, 3 tiers.`). Do NOT print the YAML body in your response.
@@ -109,7 +111,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
      phase_lang (F-39, optional: rust|go|python|typescript|java),
      scope, impact (create/modify/affected_tests/affected_config),
-     interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/description),
+     goal_trace (acceptance_criteria/variation_axes/ontology_entities), interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/description),
      estimated_complexity (S/M/L).
 
      **AD-01 (v0.13.0) — contract_files is REQUIRED** for every phase under `interface_contract.contract_files`. Enumerate one entry per cross-layer boundary between impact files (path, boundary_id, caller, callee, framework_rules, params key-type map, returns key-type map). Empty list `[]` only for phases with zero cross-layer boundaries (pure infra/docs). Omission is a validation error. See `agents/mpl-decomposer.md` Step 6.5 for the enumeration procedure and full sub-schema.
@@ -515,6 +517,22 @@ for s in scenarios:
     Hard-fail decomposition:
     announce: "[MPL AD-0008] Scenario {s.id} has placeholder test_command '{s.test_command}'. Decomposer must emit executable commands. Re-running Step 3 with constraint."
     re-run Decomposer with explicit prompt: "No placeholder test_commands."
+
+  if goal_contract.e2e_policy.real_runtime_required == true:
+    require s.runtime_class in ["real_desktop", "real_web", "real_browser", "real_mobile", "real_api"]
+    require s.launcher_evidence is non-empty
+
+  if goal_contract.e2e_policy.mock_allowed == false:
+    require s.mock_allowed != true
+    require s.test_command does not contain mock/stub/fake flags
+
+  if goal_contract.e2e_policy.placeholder_assertions_allowed == false:
+    require s.assertion_evidence is non-empty OR s.test_files contains real test file paths
+
+  if any authenticity requirement fails:
+    Hard-fail decomposition:
+    announce: "[MPL E2E Authenticity] Scenario {s.id} is not admissible real E2E evidence. Re-running Step 3 with runtime_class/launcher_evidence/assertion_evidence fields."
+    re-run Decomposer with explicit prompt: "Every required E2E scenario must satisfy goal_contract.e2e_policy."
 
 announce: "[MPL AD-0008] E2E scenarios written: {scenarios.length} scenarios covering {phases_involved union} phases."
 ```
