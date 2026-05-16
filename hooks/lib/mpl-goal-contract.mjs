@@ -19,6 +19,7 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 
 export const GOAL_CONTRACT_REL_PATH = '.mpl/goal-contract.yaml';
+export const BASELINE_REL_PATH = '.mpl/mpl/baseline.yaml';
 
 const DEFAULT_REQUIRED_ARTIFACTS = [
   '.mpl/mpl/audit-report.json',
@@ -245,6 +246,21 @@ export function readGoalContract(cwd) {
       warnings: [],
       contract: null,
     };
+  }
+}
+
+export function readBaselineGoalContractHash(cwd) {
+  const path = join(cwd, BASELINE_REL_PATH);
+  if (!existsSync(path)) return { exists: false, hash: null };
+  try {
+    const text = readFileSync(path, 'utf-8');
+    const block = extractTopBlock(text, 'artifacts');
+    const goalBlockMatch = block.match(/^\s+goal_contract\s*:\s*\n((?:\s{4}.+\n?)*)/m);
+    const goalBlock = goalBlockMatch ? goalBlockMatch[1] : '';
+    const hash = scalarInBlock(goalBlock, 'sha256');
+    return { exists: true, hash };
+  } catch {
+    return { exists: true, hash: null };
   }
 }
 
