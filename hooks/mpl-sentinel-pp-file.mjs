@@ -2,7 +2,7 @@
 /**
  * MPL Sentinel PP-File — Pivot Point File Modification Detector (PostToolUse)
  *
- * Watches Edit/Write operations and checks if the modified file is referenced
+ * Watches Edit/Write/MultiEdit operations and checks if the modified file is referenced
  * by any active Pivot Point in .mpl/pivot-points.md. On match, injects
  * additionalContext so the Phase Runner knows it's touching PP-constrained code.
  *
@@ -25,6 +25,9 @@ const { isMplActive } = await import(
 
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+const { collectTargetPaths, isFileWriteTool } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
 
 let ppCache = null;
@@ -130,7 +133,7 @@ async function main() {
 
   const toolName = data.tool_name || data.toolName || '';
 
-  if (!['Edit', 'edit', 'Write', 'write'].includes(toolName)) {
+  if (!isFileWriteTool(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -142,8 +145,8 @@ async function main() {
   }
 
   const toolInput = data.tool_input || data.toolInput || {};
-  const filePath = toolInput.file_path || toolInput.filePath || '';
-  if (!filePath) {
+  const filePaths = collectTargetPaths(toolInput);
+  if (filePaths.length === 0) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -154,7 +157,16 @@ async function main() {
     return;
   }
 
-  const matches = matchFileToPP(filePath, ppEntries);
+  const matches = [];
+  const seen = new Set();
+  for (const filePath of filePaths) {
+    for (const match of matchFileToPP(filePath, ppEntries)) {
+      const key = `${match.pp_id}:${match.constraint}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches.push(match);
+    }
+  }
   if (matches.length === 0) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;

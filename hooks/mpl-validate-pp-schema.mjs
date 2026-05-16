@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MPL Validate PP Schema Hook (PreToolUse on Write|Edit)
+ * MPL Validate PP Schema Hook (PreToolUse on Write|Edit|MultiEdit)
  *
  * Guards `.mpl/pivot-points.md` (immutable PP file) from UC-scoped schema
  * leakage. Pivot Points are design invariants; User Cases are mutable feature
@@ -9,8 +9,9 @@
  *   - pivot-points.md               → PP (immutable)
  *   - requirements/user-contract.md → UC (mutable, 0.16 Tier A')
  *
- * If a Write or Edit targets pivot-points.md and the proposed content contains
- * UC-specific schema keys or UC-N identifiers, the hook blocks the write.
+ * If a Write, Edit, or MultiEdit targets pivot-points.md and the proposed
+ * content contains UC-specific schema keys or UC-N identifiers, the hook blocks
+ * the write.
  *
  * This is the reverse of common drift: during interviews or fix loops the
  * orchestrator may mistakenly try to persist UC discoveries into the PP file.
@@ -24,6 +25,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const { collectFileWrites, isFileWriteTool } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
+);
 
 const UC_SCHEMA_PATTERNS = [
   { re: /^user_cases\s*:/m, name: 'user_cases:' },
@@ -41,9 +46,11 @@ export function targetsPivotPointsFile(filePath) {
 
 export function extractProposedContent(toolInput, toolName) {
   if (!toolInput) return '';
-  if (toolName === 'Write') return toolInput.content || '';
-  if (toolName === 'Edit') return toolInput.new_string || '';
-  return '';
+  if (!isFileWriteTool(toolName)) return '';
+  return collectFileWrites(toolInput)
+    .map((entry) => entry.text)
+    .filter(Boolean)
+    .join('\n');
 }
 
 export function detectUcLeakage(content) {
@@ -86,14 +93,15 @@ if (isMain) {
         ok();
         process.exit(0);
       }
-      const toolName = input.tool_name || '';
-      if (toolName !== 'Write' && toolName !== 'Edit') ok();
+      const toolName = input.tool_name || input.toolName || '';
+      if (!isFileWriteTool(toolName)) ok();
       else {
         const toolInput = input.tool_input || {};
-        const target = toolInput.file_path || '';
-        if (!targetsPivotPointsFile(target)) ok();
+        const entries = collectFileWrites(toolInput)
+          .filter((entry) => targetsPivotPointsFile(entry.filePath));
+        if (entries.length === 0) ok();
         else {
-          const content = extractProposedContent(toolInput, toolName);
+          const content = entries.map((entry) => entry.text).filter(Boolean).join('\n');
           if (!content) ok();
           else {
             const hits = detectUcLeakage(content);

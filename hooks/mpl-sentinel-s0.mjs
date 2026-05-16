@@ -35,6 +35,11 @@ const { isMplActive } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { collectFileWrites, isFileWriteTool } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
+);
+
+const SEED_PATH_RE = /\.mpl\/seeds\/[^/]+\.ya?ml$/;
 
 /**
  * Extract contract_snippet keys from Phase Seed YAML text using regex.
@@ -173,7 +178,7 @@ async function main() {
   const toolName = data.tool_name || data.toolName || '';
 
   // Intercept Task/Agent completions and file-write tools (seeds are now inline)
-  if (!['Task', 'task', 'Agent', 'agent', 'Write', 'write', 'Edit', 'edit'].includes(toolName)) {
+  if (!['Task', 'task', 'Agent', 'agent'].includes(toolName) && !isFileWriteTool(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -193,13 +198,16 @@ async function main() {
     : JSON.stringify(toolResponse);
 
   // For file-write tools, check content for seed YAML
-  if (['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
-    const filePath = toolInput.file_path || toolInput.filePath || '';
-    if (!/\.mpl\/seeds\/[^/]+\.ya?ml$/.test(filePath)) {
+  if (isFileWriteTool(toolName)) {
+    const seedTexts = collectFileWrites(toolInput)
+      .filter((entry) => SEED_PATH_RE.test(entry.filePath))
+      .map((entry) => entry.text)
+      .filter(Boolean);
+    if (seedTexts.length === 0) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
-    responseText = toolInput.content || toolInput.new_string || responseText;
+    responseText = seedTexts.join('\n') || responseText;
   }
 
   // For Task/Agent tools, only validate if output contains phase_seed/contract_snippet
