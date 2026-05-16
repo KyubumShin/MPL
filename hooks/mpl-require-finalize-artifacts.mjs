@@ -23,7 +23,7 @@ const { readState, isMplActive } = await import(
 const { loadConfig } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
 );
-const { readGoalContract, defaultRequiredArtifacts } = await import(
+const { readGoalContract, readBaselineGoalContractHash, defaultRequiredArtifacts } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
 );
 const { readStdin } = await import(
@@ -205,6 +205,18 @@ async function main() {
   }
 
   const contract = goal.valid ? goal.contract : null;
+  if (cfg.goal_contract_required !== false && contract?.content_sha256) {
+    const baseline = readBaselineGoalContractHash(cwd);
+    if (baseline.hash && baseline.hash !== contract.content_sha256) {
+      block(
+        `[MPL Finalize Guard] Cannot set finalize_done=true — goal contract drifted from baseline.yaml ` +
+          `(baseline=${baseline.hash.slice(0, 12)}, current=${contract.content_sha256.slice(0, 12)}). ` +
+          `Re-run Phase 0 renewal before finalizing.`
+      );
+      return;
+    }
+  }
+
   const requiredArtifacts = contract?.completion_evidence?.required_artifacts?.length
     ? contract.completion_evidence.required_artifacts
     : defaultRequiredArtifacts();

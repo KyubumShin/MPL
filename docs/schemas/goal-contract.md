@@ -76,10 +76,15 @@ overrides: []
 - `hooks/mpl-ambiguity-gate.mjs` blocks `mpl-decomposer` dispatch when the
   contract is missing or incomplete, unless `.mpl/config.json` sets
   `goal_contract_required: false`.
+- `hooks/mpl-require-goal-trace.mjs` blocks `decomposition.yaml` writes when
+  top-level `goal_contract_hash` is missing/stale, any phase lacks non-empty
+  `goal_trace`, or any Goal Contract AC/AX id is not covered by the phase graph.
 - `hooks/mpl-require-e2e-authenticity.mjs` reads `e2e_policy` before allowing
   `finalize_done=true`.
 - `hooks/mpl-require-finalize-artifacts.mjs` reads `security_policy` and
-  `completion_evidence` before allowing `finalize_done=true`.
+  `completion_evidence` before allowing `finalize_done=true`; it also blocks
+  finalization when the current goal contract hash differs from the Phase 0
+  baseline hash.
 - `.mpl/mpl/baseline.yaml` snapshots the contract hash as Phase 0 ground truth.
 
 ## Parser Contract

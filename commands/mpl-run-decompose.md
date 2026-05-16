@@ -105,13 +105,14 @@ Task(subagent_type="mpl-decomposer", model="opus",
      CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. **Write the YAML directly to `.mpl/mpl/decomposition.yaml` using the Write tool**, then return a single confirmation line (e.g., `Wrote .mpl/mpl/decomposition.yaml — 5 phases, 3 tiers.`). Do NOT print the YAML body in your response.
+     Top-level `goal_contract_hash` is REQUIRED and MUST equal sha256(normalized `.mpl/goal-contract.yaml`). The write is blocked if the hash is stale or if phase `goal_trace` does not cover every Goal Contract AC/AX id.
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
      pp_proximity (pp_core|pp_adjacent|non_pp — see classification rules below),
      phase_subdomain (F-39, optional: tech-stack e.g. react, prisma, langchain),
      phase_task_type (F-39, optional: greenfield|refactor|migration|bugfix|performance|security),
      phase_lang (F-39, optional: rust|go|python|typescript|java),
      scope, impact (create/modify/affected_tests/affected_config),
-     goal_trace (acceptance_criteria/variation_axes/ontology_entities), interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/description),
+     goal_trace (acceptance_criteria/variation_axes/ontology_entities; every phase non-empty and graph-wide AC/AX coverage), interface_contract (requires/produces/**contract_files**), success_criteria (typed: command/test/file_exists/grep/description),
      estimated_complexity (S/M/L).
 
      **AD-01 (v0.13.0) — contract_files is REQUIRED** for every phase under `interface_contract.contract_files`. Enumerate one entry per cross-layer boundary between impact files (path, boundary_id, caller, callee, framework_rules, params key-type map, returns key-type map). Empty list `[]` only for phases with zero cross-layer boundaries (pure infra/docs). Omission is a validation error. See `agents/mpl-decomposer.md` Step 6.5 for the enumeration procedure and full sub-schema.

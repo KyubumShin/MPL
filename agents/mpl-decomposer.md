@@ -307,6 +307,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     Do NOT print the YAML body in the response — it lives on disk now. Validation hooks (`mpl-require-covers.mjs`, future `mpl-require-decomposition-fields.mjs`) run on your Write call; if blocked, surface the hook reason and re-emit a corrected YAML in a follow-up Write. Never re-route the Write through the orchestrator.
 
     ```yaml
+    goal_contract_hash: "sha256(.mpl/goal-contract.yaml)" # REQUIRED. Hook `mpl-require-goal-trace.mjs` blocks stale/missing hashes.
+
     architecture_anchor:
       tech_stack: [string]
       directory_pattern: string
@@ -335,8 +337,10 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           acceptance_criteria: [string] # AC-N ids from .mpl/goal-contract.yaml
           variation_axes: [string]      # AX-N ids this phase addresses or preserves
           ontology_entities: [string]   # goal-contract ontology entities touched
-          # REQUIRED. Use [] only when a phase is pure internal plumbing with no
-          # direct goal-contract surface; explain via covers:[internal] and rationale.
+          # REQUIRED. At least one of the three arrays must be non-empty for every
+          # phase, and the full decomposition must cover every AC/AX id from the
+          # Goal Contract. Hook `mpl-require-goal-trace.mjs` blocks missing,
+          # unknown, stale, or uncovered ids.
 
         impact:
           create:

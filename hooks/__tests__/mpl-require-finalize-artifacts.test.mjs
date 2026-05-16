@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
 import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
+import { readGoalContract } from '../lib/mpl-goal-contract.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const HOOK_PATH = join(dirname(__filename), '..', 'mpl-require-finalize-artifacts.mjs');
@@ -148,5 +149,20 @@ describe('mpl-require-finalize-artifacts hook', () => {
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /state\.completed_at/);
     assert.match(r.reason, /state\.finalized_at/);
+  });
+
+  it('blocks when current goal contract hash drifted from baseline', () => {
+    writeArtifacts();
+    const currentHash = readGoalContract(tmp).contract.content_sha256;
+    assert.equal(currentHash.length, 64);
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  goal_contract:
+    path: ".mpl/goal-contract.yaml"
+    sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+`);
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /goal contract drifted from baseline/);
   });
 });
