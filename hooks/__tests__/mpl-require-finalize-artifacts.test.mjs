@@ -68,7 +68,7 @@ function writeArtifacts() {
   writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
 }
 
-function runHook(content = null) {
+function runHook(content = null, { toolName = 'Write', toolInput = null } = {}) {
   const stateContent = content || JSON.stringify({
     current_phase: 'phase5-finalize',
     finalize_done: true,
@@ -77,8 +77,8 @@ function runHook(content = null) {
   });
   const input = {
     cwd: tmp,
-    tool_name: 'Write',
-    tool_input: {
+    tool_name: toolName,
+    tool_input: toolInput || {
       file_path: '.mpl/state.json',
       content: stateContent,
     },
@@ -100,6 +100,23 @@ describe('mpl-require-finalize-artifacts hook', () => {
     writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
     writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
     const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /run-summary\.json/);
+  });
+
+  it('blocks MultiEdit finalize writes', () => {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    const r = runHook(null, {
+      toolName: 'MultiEdit',
+      toolInput: {
+        file_path: '.mpl/state.json',
+        edits: [{
+          old_string: '"finalize_done": false',
+          new_string: '"finalize_done": true',
+        }],
+      },
+    });
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /run-summary\.json/);
   });

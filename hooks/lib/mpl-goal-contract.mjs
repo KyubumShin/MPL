@@ -7,7 +7,11 @@
  *
  * This intentionally uses a small YAML-shaped parser instead of a dependency.
  * MPL artifact schemas are controlled by the prompts, and the hook only needs
- * presence/boolean/list checks for hard-gate readiness.
+ * presence/boolean/list checks for hard-gate readiness. Supported YAML is a
+ * prompt-controlled subset: scalar keys, block lists, inline scalar lists, and
+ * list-of-object `id:` fields. Block scalars, anchors, aliases, and arbitrary
+ * YAML expressions are out of scope; use the schema examples in
+ * docs/schemas/goal-contract.md to avoid prompt drift.
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -93,10 +97,26 @@ function listAfterKey(block, key) {
 function idsInTopList(text, key, prefixRe) {
   const block = extractTopBlock(text, key);
   const out = [];
-  for (const line of block.split('\n')) {
-    const match = line.match(/^\s*-\s+id:\s*["']?([^"'\s#]+)["']?/);
+  let current = null;
+
+  const flush = () => {
+    if (!current) return;
+    const itemText = current.join('\n');
+    const match = itemText.match(/(?:^|\n)\s*id\s*:\s*["']?([^"'\s#]+)["']?/);
     if (match && (!prefixRe || prefixRe.test(match[1]))) out.push(match[1]);
+    current = null;
+  };
+
+  for (const line of block.split('\n')) {
+    const itemStart = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (itemStart) {
+      flush();
+      current = [itemStart[1]];
+      continue;
+    }
+    if (current) current.push(line);
   }
+  flush();
   return out;
 }
 

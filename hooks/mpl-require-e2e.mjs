@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MPL Require E2E Hook (PreToolUse on Write|Edit targeting state.json)
+ * MPL Require E2E Hook (PreToolUse on Write|Edit|MultiEdit targeting state.json)
  *
  * Guards the transition to `finalize_done: true`. Reads the declared required
  * E2E scenarios from `.mpl/mpl/e2e-scenarios.yaml` and blocks the state write
@@ -295,16 +295,27 @@ export function computeUncoveredUcs(includedUcIds, scenarios) {
  * actually missing, so innocent state edits pass through.
  */
 function isFinalizeDoneWrite(toolInput) {
-  const filePath = toolInput.file_path || toolInput.filePath || '';
-  if (!/\.mpl\/state\.json$/.test(filePath)) return false;
-
-  const newText =
-    toolInput.new_string ||
-    toolInput.newString ||
-    toolInput.content ||
-    '';
-  // Match "finalize_done": true in either quoted-JSON or unquoted source
-  return /"finalize_done"\s*:\s*true/.test(newText);
+  const paths = [];
+  if (toolInput.file_path) paths.push(toolInput.file_path);
+  if (toolInput.filePath) paths.push(toolInput.filePath);
+  const texts = [];
+  for (const key of ['new_string', 'newString', 'content']) {
+    if (typeof toolInput[key] === 'string') texts.push(toolInput[key]);
+  }
+  if (Array.isArray(toolInput.edits)) {
+    for (const edit of toolInput.edits) {
+      if (edit?.file_path) paths.push(edit.file_path);
+      if (edit?.filePath) paths.push(edit.filePath);
+      for (const key of ['new_string', 'newString', 'content']) {
+        if (typeof edit?.[key] === 'string') texts.push(edit[key]);
+      }
+    }
+  }
+  if (!paths.some((p) => /\.mpl\/state\.json$/.test(p))) return false;
+  // Match "finalize_done": true in either quoted-JSON or unquoted source.
+  // Re-serialized writes are intentionally rechecked because E2E evidence can
+  // be deleted or invalidated between final state writes.
+  return texts.some((text) => /"finalize_done"\s*:\s*true/.test(text));
 }
 
 async function runHook() {
@@ -329,7 +340,7 @@ async function runHook() {
   }
 
   const toolName = String(data.tool_name || data.toolName || '');
-  if (!['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
+  if (!['Write', 'write', 'Edit', 'edit', 'MultiEdit', 'multiEdit'].includes(toolName)) {
     ok();
     return;
   }

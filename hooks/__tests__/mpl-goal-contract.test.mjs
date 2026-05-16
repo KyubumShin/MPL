@@ -77,6 +77,15 @@ describe('goal contract parsing', () => {
     assert.equal(c.content_sha256.length, 64);
   });
 
+  it('extracts list ids even when id is not the first key in the list item', () => {
+    const text = validGoalContract()
+      .replace('- id: AX-1\n    name: runtime_mode', '- name: runtime_mode\n    id: AX-1')
+      .replace('- id: AC-1\n    statement: "finalize is blocked without evidence"', '- statement: "finalize is blocked without evidence"\n    id: AC-1');
+    const c = parseGoalContractText(text);
+    assert.deepEqual(c.variation_axes, ['AX-1']);
+    assert.deepEqual(c.acceptance_criteria, ['AC-1']);
+  });
+
   it('validates a complete contract', () => {
     const verdict = validateGoalContractText(validGoalContract());
     assert.equal(verdict.valid, true);

@@ -62,11 +62,11 @@ function writeScenarios(text) {
   writeFileSync(join(tmp, '.mpl', 'mpl', 'e2e-scenarios.yaml'), text);
 }
 
-function runHook() {
+function runHook({ toolName = 'Write', toolInput = null } = {}) {
   const input = {
     cwd: tmp,
-    tool_name: 'Write',
-    tool_input: {
+    tool_name: toolName,
+    tool_input: toolInput || {
       file_path: '.mpl/state.json',
       content: JSON.stringify({ current_phase: 'phase5-finalize', finalize_done: true }),
     },
@@ -123,6 +123,29 @@ e2e_scenarios:
     assertion_evidence: "visible result"
 `);
     const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /runtime_class=missing/);
+  });
+
+  it('blocks MultiEdit finalize writes', () => {
+    writeScenarios(`
+e2e_scenarios:
+  - id: E2E-1
+    required: true
+    test_command: "npm run e2e"
+    launcher_evidence: "playwright chromium"
+    assertion_evidence: "visible result"
+`);
+    const r = runHook({
+      toolName: 'MultiEdit',
+      toolInput: {
+        file_path: '.mpl/state.json',
+        edits: [{
+          old_string: '"finalize_done": false',
+          new_string: '"finalize_done": true',
+        }],
+      },
+    });
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /runtime_class=missing/);
   });

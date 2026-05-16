@@ -1,9 +1,18 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import {
   parseUserContractText,
   computeUncoveredUcs,
 } from '../mpl-require-e2e.mjs';
+import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const HOOK_PATH = join(dirname(__filename), '..', 'mpl-require-e2e.mjs');
 
 describe('parseUserContractText', () => {
   it('extracts included UC ids with explicit status', () => {
@@ -148,5 +157,44 @@ describe('computeUncoveredUcs', () => {
   it('returns empty when no included UCs', () => {
     const uncovered = computeUncoveredUcs([], [{ id: 'SC-1', covers: ['UC-01'] }]);
     assert.deepEqual(uncovered, []);
+  });
+});
+
+describe('mpl-require-e2e hook integration', () => {
+  it('blocks MultiEdit finalize writes when a required scenario never ran', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-require-e2e-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase5-finalize',
+        e2e_results: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'e2e-scenarios.yaml'), `
+e2e_scenarios:
+  - id: E2E-1
+    required: true
+    test_command: "npm run e2e"
+`);
+      const input = {
+        cwd: tmp,
+        tool_name: 'MultiEdit',
+        tool_input: {
+          file_path: '.mpl/state.json',
+          edits: [{
+            old_string: '"finalize_done": false',
+            new_string: '"finalize_done": true',
+          }],
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /E2E-1/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

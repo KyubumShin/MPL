@@ -82,6 +82,20 @@ overrides: []
   `completion_evidence` before allowing `finalize_done=true`.
 - `.mpl/mpl/baseline.yaml` snapshots the contract hash as Phase 0 ground truth.
 
+## Parser Contract
+
+Runtime hooks intentionally parse a small YAML-shaped subset rather than
+shipping a general YAML dependency. Keep `goal-contract.yaml` inside this
+prompt-controlled shape:
+
+- plain scalar values
+- block lists or inline scalar lists
+- list-of-object entries with an `id:` key anywhere inside the item
+- no block scalar (`|`, `>`), anchors, aliases, or arbitrary YAML expressions
+
+Prompt drift outside this subset should be fixed at artifact authoring time,
+not by accepting a looser completion contract.
+
 ## Minimum Readiness
 
 The hook-level readiness check requires:

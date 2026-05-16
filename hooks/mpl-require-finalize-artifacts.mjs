@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MPL Finalize Artifact Guard (PreToolUse on Write|Edit targeting state.json).
+ * MPL Finalize Artifact Guard (PreToolUse on Write|Edit|MultiEdit targeting state.json).
  *
  * E2E pass/fail is necessary but not sufficient for completion. This hook
  * blocks `finalize_done=true` unless the goal contract's declared completion
@@ -38,15 +38,44 @@ function block(reason) {
   console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
+function targetPaths(toolInput) {
+  const paths = [];
+  if (toolInput.file_path) paths.push(toolInput.file_path);
+  if (toolInput.filePath) paths.push(toolInput.filePath);
+  if (Array.isArray(toolInput.edits)) {
+    for (const edit of toolInput.edits) {
+      if (edit?.file_path) paths.push(edit.file_path);
+      if (edit?.filePath) paths.push(edit.filePath);
+    }
+  }
+  return paths;
+}
+
+function proposedTexts(toolInput) {
+  const texts = [];
+  for (const key of ['new_string', 'newString', 'content']) {
+    if (typeof toolInput[key] === 'string') texts.push(toolInput[key]);
+  }
+  if (Array.isArray(toolInput.edits)) {
+    for (const edit of toolInput.edits) {
+      for (const key of ['new_string', 'newString', 'content']) {
+        if (typeof edit?.[key] === 'string') texts.push(edit[key]);
+      }
+    }
+  }
+  return texts;
+}
+
 function isFinalizeDoneWrite(toolInput) {
-  const filePath = toolInput.file_path || toolInput.filePath || '';
-  if (!/\.mpl\/state\.json$/.test(filePath)) return false;
-  const newText = toolInput.new_string || toolInput.newString || toolInput.content || '';
-  return /"finalize_done"\s*:\s*true/.test(newText);
+  if (!targetPaths(toolInput).some((p) => /\.mpl\/state\.json$/.test(p))) return false;
+  // Intentionally re-check any proposed state text that contains
+  // finalize_done=true, including state re-serializations after completion:
+  // evidence can be deleted or invalidated between final writes.
+  return proposedTexts(toolInput).some((text) => /"finalize_done"\s*:\s*true/.test(text));
 }
 
 function incomingText(toolInput) {
-  return String(toolInput.new_string || toolInput.newString || toolInput.content || '');
+  return proposedTexts(toolInput).join('\n');
 }
 
 function hasTimestamp(state, text, key) {
@@ -156,7 +185,7 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const toolName = String(data.tool_name || data.toolName || '');
-  if (!['Write', 'write', 'Edit', 'edit'].includes(toolName)) return ok();
+  if (!['Write', 'write', 'Edit', 'edit', 'MultiEdit', 'multiEdit'].includes(toolName)) return ok();
 
   const toolInput = data.tool_input || data.toolInput || {};
   if (!isFinalizeDoneWrite(toolInput)) return ok();
