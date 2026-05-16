@@ -751,6 +751,37 @@ Append final section to `.mpl/mpl/RUNBOOK.md`:
 - **Completed At**: {ISO timestamp}
 ```
 
+### 5.6.4: Completion Evidence Guard
+
+Before writing `finalize_done = true`, re-check the Goal Contract evidence.
+The hook `hooks/mpl-require-finalize-artifacts.mjs` enforces this on the
+actual state write, but finalize should prepare the evidence explicitly:
+
+```
+goal_contract = Read(".mpl/goal-contract.yaml")
+
+require exists(".mpl/mpl/audit-report.json")        # Step 5.1.7 Codex audit
+require exists(".mpl/mpl/profile/run-summary.json") # Step 5.4 profile
+require ".mpl/mpl/RUNBOOK.md" contains "## Pipeline Complete"
+
+if goal_contract.security_policy.required:
+  for check in goal_contract.security_policy.checks:
+    require state.security_results[check].exit_code == 0
+       OR .mpl/mpl/security-report.json checks[check] PASS
+
+if goal_contract.completion_evidence.require_commit:
+  require git rev-list --count baseline.git.base_sha..HEAD > 0
+
+next_state_update must include:
+  completed_at: now_iso()
+  finalized_at: now_iso()
+  finalize_done: true
+```
+
+Override escape hatch: `.mpl/config/finalize-artifact-override.json` with a
+user-authored `reason`. Overrides are audit debt and must be surfaced in the
+Completion Report.
+
 > **Step 5.6.5 (F-22 Routing Pattern Recording) removed in v0.17 (#60)**:
 > Write side deleted along with the read site (ex-Step 0.1.5a, removed in #55).
 > Jaccard similarity matching on user_request strings was too noisy to drive
@@ -759,7 +790,10 @@ Append final section to `.mpl/mpl/RUNBOOK.md`:
 
 ### 5.7: Update State
 
-Pipeline `current_phase = "completed"`, MPL `status = "completed"`, `completed_at = timestamp`.
+Pipeline `current_phase = "completed"`, MPL `status = "completed"`,
+`completed_at = timestamp`, `finalized_at = timestamp`, `finalize_done = true`.
+The write is blocked unless AD-0008 E2E coverage, E2E authenticity, and
+completion-evidence hooks all pass.
 
 ---
 

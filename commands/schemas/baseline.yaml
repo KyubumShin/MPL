@@ -16,6 +16,7 @@ git:
 
 artifacts:
   # Each entry: { path, sha256 } | null (absent) — sha256 normalized SHA-256
+  goal_contract:    { path: ".mpl/goal-contract.yaml",    sha256: "<hash>" } # required after Goal Contract readiness
   pivot_points:      { path: ".mpl/pivot-points.md",         sha256: "<hash>" } # null if absent
   core_scenarios:    { path: ".mpl/mpl/core-scenarios.yaml", sha256: "<hash>" } # null if absent
   design_intent:     { path: ".mpl/mpl/phase0/design-intent.yaml", sha256: "<hash>" } # null if absent

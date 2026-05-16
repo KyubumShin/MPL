@@ -63,6 +63,9 @@ const DEFAULTS = {
   max_fix_loops: 10,
   gate1_strategy: 'auto',  // 'docker', 'native', 'skip'
   hitl_timeout_seconds: 30,
+  goal_contract_required: true,
+  e2e_authenticity_required: true,
+  finalize_artifacts_required: true,
   convergence: {
     stagnation_window: 3,
     min_improvement: 0.05,

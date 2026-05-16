@@ -185,7 +185,7 @@ disallowedTools: Write, Edit, Task
     - WARN if missing (functional but undocumented)
 
     ### Category 12: Measurement Integrity Audit (AD-0006, v0.15.0)
-    - **Scope**: `.mpl/state.json`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`
+    - **Scope**: `.mpl/state.json`, `.mpl/goal-contract.yaml`, `.mpl/mpl/baseline.yaml`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`
     This category runs only when invoked as `mpl-doctor audit` (not default). Validates that a **completed** pipeline produced machine-evidence gate records and that Anti-rationalization guardrails held. Run against `.mpl/state.json` and `.mpl/mpl/` of a finalized run.
 
     **Preconditions**: `.mpl/state.json.current_phase == "completed"` AND `.mpl/state.json.finalize_done == true`. Otherwise report "NOT APPLICABLE (pipeline not finalized)" and skip.
@@ -228,6 +228,15 @@ disallowedTools: Write, Edit, Task
       - WARN if any override lacks `test_command_hash` AND scenario's current test_command doesn't match the override's recorded form (legacy shape, recommend re-recording)
       - WARN if `<80%` of e2e_scenarios have `composed_from.length >= 2` (weak cross-feature coverage per AD-0008 composition rule)
 
+    - **[i] goal_contract integrity** — enforce the goal-first harness layer:
+      - Read `.mpl/goal-contract.yaml` via `hooks/lib/mpl-goal-contract.mjs#readGoalContract`
+      - FAIL if the file is missing while `.mpl/config.json.goal_contract_required != false`
+      - FAIL if `readGoalContract.valid == false`; evidence is the `missing[]` list
+      - FAIL if `state.goal_contract_hash` exists and differs from `readGoalContract.contract.content_sha256`
+      - FAIL if `.mpl/mpl/baseline.yaml artifacts.goal_contract.sha256` exists and differs from the current contract hash
+      - WARN if `goal_contract_required:false` is configured on a finalized run (legacy opt-out; completion evidence is weaker)
+      - WARN if `deferred_uncertainties` or `overrides` are non-empty; include them in the audit output as accepted goal debt
+
     - **[g] test_agent dispatch coverage (AD-0007, v0.15.1)** — enforce the enforcement:
       - Count `required = decomposition.phases[].filter(p => p.test_agent_required != false)`
       - Count `dispatched = Object.keys(state.test_agent_dispatched)` intersecting required ids
@@ -248,7 +257,9 @@ disallowedTools: Write, Edit, Task
     [e] null state PASS claim:      ✓ 0건     or ✗ 2건: hard3 PASS claimed but state.hard3_resilience=null
     [f] chain_seed integrity:       ✓         or ✗ enabled=true but chain-assignment.yaml missing
     [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} mandatory-domain phases
-    Result: PASS (7/7) / FAIL (X/7) / WARN (Y/7)
+    [h] E2E scenario coverage:      ✓ N건     or ✗ missing/failing E2E-N
+    [i] goal_contract integrity:    ✓ hash ok or ✗ missing fields: mission.goal
+    Result: PASS (9/9) / FAIL (X/9) / WARN (Y/9)
     ```
 
     ### Category 15: Property Check (F5, #112)

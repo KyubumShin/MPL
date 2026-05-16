@@ -22,6 +22,9 @@
 | `fix_loop_count` | sprint-aggregated | Total fix-loop iterations across the active sprint. Equal to `sum(fix_loop_history[].count)` (G3 I5; writers populate via `writeState` mirror in `mpl-state.mjs#recordFixLoopHistory`). |
 | `fix_loop_history[]` | per-phase | `{phase, count, started_at, ended_at?, root_cause_summary?}` entries. Populated by `writeState` whenever `fix_loop_count` increases (G5 / #114). |
 | `user_intervention_count` | per-pipeline | Honest auto-mode telemetry. `mpl-keyword-detector` (UserPromptSubmit) increments by 1 on every prompt while pipeline is active and `run_mode === 'auto'` (G6 / #114). Surfaces in `/mpl-status` once G2 / #113 lands. |
+| `completed_at` / `finalized_at` | per-pipeline | Finalize timestamps required by Goal Contract completion evidence when `require_finalize_timestamps: true`. |
+| `goal_contract_set` / `goal_contract_path` / `goal_contract_hash` | per-pipeline | Goal Contract readiness mirror for `.mpl/goal-contract.yaml`; disk artifact remains the source of truth. |
+| `security_results.*` | per-pipeline | Structured security gate evidence consumed by `mpl-require-finalize-artifacts.mjs`. |
 | `session_status` | per-session | `null \| active \| paused_budget \| paused_checkpoint \| verification_hang \| cancelled`. Single-valued — pause / hang / cancel states are mutually exclusive (G3 I9). |
 | `last_tool_at` | per-session | ISO-8601 stamp from `mpl-tool-tracker.mjs`. Powers G4 (#109). |
 | `enforcement.*` | per-pipeline override | P0-2 (#110) per-rule policy. Top of the precedence chain. |
@@ -56,9 +59,10 @@ strict mode elevates `warn → block`.
 
 ## Schema version
 
-- `CURRENT_SCHEMA_VERSION = 3` (G5+G6 / #114 — additive backfill: `fix_loop_history`, `user_intervention_count`).
+- `CURRENT_SCHEMA_VERSION = 4` (Goal Contract / finalize evidence — additive backfill: `completed_at`, `finalized_at`, `goal_contract_*`, `security_results`).
   - v2 (P2-6 / #84) — unified state, `execution` subtree absorbs the legacy `.mpl/mpl/state.json`.
   - v3 (G5+G6 / #114) — telemetry hygiene fields.
+  - v4 — Goal Contract readiness + finalize/security evidence fields.
 - The migration registry (`hooks/lib/migrations/`) walks any older state up to current on `readState`. Newer-than-supported writes are **fail-closed** by `readState` (returns `null` + diagnostic stderr) and additionally surfaced by G3 I8.
 - `writeState` also fail-closes (throws `UnsupportedSchemaVersionError`) when on-disk `schema_version > CURRENT` so a stale plugin can't downgrade a fresher state.
 - Bump policy and authoring workflow: `docs/schemas/migration-policy.md`.

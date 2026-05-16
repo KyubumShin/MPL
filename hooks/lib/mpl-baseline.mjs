@@ -15,6 +15,7 @@
  *     base_branch: git rev-parse --abbrev-ref HEAD
  *     working_tree_clean: boolean (git status --porcelain empty?)
  *   artifacts:
+ *     goal_contract:      { path, sha256 }
  *     pivot_points:       { path, sha256 }
  *     core_scenarios:     { path, sha256 }
  *     design_intent:      { path, sha256 }
@@ -115,6 +116,7 @@ export function buildBaseline(cwd, {
       working_tree_clean: workingTreeClean,
     },
     artifacts: {
+      goal_contract: artifactFor('.mpl/goal-contract.yaml'),
       pivot_points: artifactFor('.mpl/pivot-points.md'),
       core_scenarios: artifactFor('.mpl/mpl/core-scenarios.yaml'),
       design_intent: artifactFor('.mpl/mpl/phase0/design-intent.yaml'),

@@ -157,6 +157,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
 
     Step 7.5: E2E Scenario Composition (AD-0008, v0.15.2)
       Read `.mpl/mpl/core-scenarios.yaml` (written by Phase 0 Enhanced Step 2.5.3).
+      Also read `.mpl/goal-contract.yaml`; its `e2e_policy` controls whether
+      a scenario is admissible completion evidence.
       If the file is missing OR empty, SKIP this step (pipeline proceeds without
       AD-0008 enforcement; doctor audit [h] will flag as WARN).
 
@@ -171,6 +173,14 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         - test_command MUST be executable (e.g., "pnpm playwright test e2e/
           scenario-1.spec.ts"), NEVER a placeholder like "TODO(integration-ci)"
           or "manual verification"
+        - If goal_contract.e2e_policy.real_runtime_required is true, emit:
+          runtime_class: one of real_desktop|real_web|real_browser|real_mobile|real_api
+          launcher_evidence: the actual launcher/runtime proving this is not a unit/mock run
+        - If goal_contract.e2e_policy.mock_allowed is false, emit mock_allowed: false
+          and do not use mock/stub/fake flags in test_command
+        - If placeholder assertions are forbidden, emit assertion_evidence OR
+          test_files pointing at real assertion files. Placeholder `expect(true)`
+          style tests are not admissible.
 
       Infrastructure detection:
         - Scan provided-specs + decomposition for existing E2E stack:
@@ -320,6 +330,13 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           # phases carry `covers: [internal]`, the hook emits a warn (not block).
           # If no user-contract.md exists (legacy project, graceful skip mode), the hook
           # accepts any non-empty covers (including `["internal"]`) and only warns on ratio.
+
+        goal_trace:
+          acceptance_criteria: [string] # AC-N ids from .mpl/goal-contract.yaml
+          variation_axes: [string]      # AX-N ids this phase addresses or preserves
+          ontology_entities: [string]   # goal-contract ontology entities touched
+          # REQUIRED. Use [] only when a phase is pure internal plumbing with no
+          # direct goal-contract surface; explain via covers:[internal] and rationale.
 
         impact:
           create:
@@ -473,6 +490,11 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         phases_involved: [string]       # phase ids this scenario exercises
         test_command: string            # EXECUTABLE command, NOT "TODO(ci)" placeholder
         acceptance_criteria: string     # observable exit-0 criterion
+        runtime_class: string           # real_desktop|real_web|real_browser|real_mobile|real_api|mock|unit
+        mock_allowed: boolean           # must match goal_contract.e2e_policy
+        launcher_evidence: string       # e.g., "electron.launch", "tauri-driver", "playwright chromium"
+        assertion_evidence: string      # real assertion being made, not "expect(true)"
+        test_files: [string]            # optional file paths scanned by authenticity hook
         required: boolean               # default true when composed_from includes must_work core
         rationale: string               # why this composition matters
     # Composition rule (Step 7.5):

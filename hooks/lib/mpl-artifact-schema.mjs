@@ -31,6 +31,23 @@
 
 const ARTIFACTS = [
   {
+    artifact: 'goal-contract',
+    pathMatch: (relPath) => /(^|\/)\.mpl\/goal-contract\.ya?ml$/.test(relPath),
+    parser: 'yaml',
+    required: [
+      'source',
+      'mission',
+      'goal',
+      'project_pivot',
+      'ontology',
+      'variation_axes',
+      'acceptance_criteria',
+      'e2e_policy',
+      'security_policy',
+      'completion_evidence',
+    ],
+  },
+  {
     artifact: 'decomposition',
     pathMatch: (relPath) => /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/.test(relPath),
     parser: 'yaml',

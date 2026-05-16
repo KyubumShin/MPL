@@ -22,6 +22,9 @@ const __dirname = dirname(__filename);
 const { isMplActive, readState, writeState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
+const { readGoalContract } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
+);
 
 /**
  * 0.16 Tier A' opt-out: legacy projects can disable the user-contract
@@ -33,6 +36,22 @@ function isUserContractRequired(cwd) {
     if (!existsSync(cfgPath)) return true;
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     if (cfg && cfg.user_contract_required === false) return false;
+  } catch {
+    // fall through
+  }
+  return true;
+}
+
+/**
+ * Goal Contract opt-out: legacy projects can disable the readiness gate via
+ * .mpl/config.json { "goal_contract_required": false }. Default true.
+ */
+function isGoalContractRequired(cwd) {
+  try {
+    const cfgPath = join(cwd, '.mpl', 'config.json');
+    if (!existsSync(cfgPath)) return true;
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+    if (cfg && cfg.goal_contract_required === false) return false;
   } catch {
     // fall through
   }
@@ -104,6 +123,33 @@ async function main() {
         'To opt out in legacy projects: set user_contract_required=false in .mpl/config.json.'
     }));
     return;
+  }
+
+  // Goal Contract readiness: the ambiguity score is necessary but not
+  // sufficient. Before decomposition, freeze a contract that carries the
+  // goal/pivot/ontology/variation axes/evidence policy, then validate the disk
+  // artifact. This is the MPL counterpart to a Seed readiness gate.
+  if (isGoalContractRequired(cwd)) {
+    const goal = readGoalContract(cwd);
+    if (!goal.exists || !goal.valid) {
+      writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
+      console.log(JSON.stringify({
+        continue: false,
+        reason: '[MPL] ⛔ Decomposer BLOCKED: goal contract is missing or incomplete. ' +
+          `Write .mpl/goal-contract.yaml before decomposition. Missing: ${goal.missing.join(', ')}. ` +
+          'It must freeze source goal/user request, project pivot, ontology, variation axes, acceptance criteria, E2E policy, security policy, and completion evidence. ' +
+          'To opt out in legacy projects: set goal_contract_required=false in .mpl/config.json.'
+      }));
+      return;
+    }
+
+    if (state.goal_contract_set !== true || state.goal_contract_hash !== goal.contract.content_sha256) {
+      writeState(cwd, {
+        goal_contract_set: true,
+        goal_contract_path: goal.path,
+        goal_contract_hash: goal.contract.content_sha256,
+      });
+    }
   }
 
   // Issue #51: override takes precedence over score. When the orchestrator
