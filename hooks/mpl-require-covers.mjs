@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MPL Require Covers Hook (PreToolUse on Write|Edit)
+ * MPL Require Covers Hook (PreToolUse on Write|Edit|MultiEdit)
  *
  * Validates the Tier B schema on `.mpl/mpl/decomposition.yaml` writes:
  *   - Every phase MUST have non-empty `covers: [...]`.
@@ -23,6 +23,10 @@ import { existsSync, readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const { collectFileWrites, isFileWriteTool } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
+);
 
 const DEFAULT_WARN_THRESHOLD = 0.4;
 const UC_ID_RE = /^UC-\d{2,}$/;
@@ -155,11 +159,10 @@ export function isLegacyMode(cwd) {
   return !existsSync(path);
 }
 
-function extractProposedContent(toolInput, toolName) {
-  if (!toolInput) return '';
-  if (toolName === 'Write') return toolInput.content || '';
-  if (toolName === 'Edit') return toolInput.new_string || '';
-  return '';
+function collectDecompositionContents(toolInput) {
+  return collectFileWrites(toolInput)
+    .filter((entry) => targetsDecompositionFile(entry.filePath) && entry.text)
+    .map((entry) => entry.text);
 }
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
@@ -189,19 +192,16 @@ if (isMain) {
     let input;
     try { input = JSON.parse(raw); } catch { ok(); process.exit(0); }
 
-    const toolName = input.tool_name || '';
-    if (toolName !== 'Write' && toolName !== 'Edit') { ok(); process.exit(0); }
+    const toolName = input.tool_name || input.toolName || '';
+    if (!isFileWriteTool(toolName)) { ok(); process.exit(0); }
 
     const toolInput = input.tool_input || {};
-    const target = toolInput.file_path || '';
-    if (!targetsDecompositionFile(target)) { ok(); process.exit(0); }
-
-    const content = extractProposedContent(toolInput, toolName);
-    if (!content) { ok(); process.exit(0); }
+    const contents = collectDecompositionContents(toolInput);
+    if (contents.length === 0) { ok(); process.exit(0); }
 
     const cwd = input.cwd || process.cwd();
     const legacy = isLegacyMode(cwd);
-    const phases = parsePhaseCovers(content);
+    const phases = contents.flatMap((content) => parsePhaseCovers(content));
 
     if (phases.length === 0) { ok(); process.exit(0); }
 

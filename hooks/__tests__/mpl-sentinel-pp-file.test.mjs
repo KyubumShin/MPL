@@ -1,6 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import { parsePivotPoints, matchFileToPP } from '../mpl-sentinel-pp-file.mjs';
+import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const HOOK_PATH = join(dirname(__filename), '..', 'mpl-sentinel-pp-file.mjs');
 
 describe('parsePivotPoints', () => {
   it('should extract PP entries with file references', () => {
@@ -61,5 +70,39 @@ describe('matchFileToPP', () => {
     ];
     const matches = matchFileToPP('src/shared.ts', entries);
     assert.equal(matches.length, 2);
+  });
+});
+
+describe('mpl-sentinel-pp-file hook integration', () => {
+  it('emits PP context for MultiEdit targets', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-pp-file-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+      }));
+      writeFileSync(join(tmp, '.mpl', 'pivot-points.md'), `
+## PP-1: Auth tokens must use secure storage
+All token handling in \`src/auth/token.ts\` must use SecureStore.
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'MultiEdit',
+        tool_input: {
+          file_path: 'src/auth/token.ts',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      assert.match(r.additionalContext || '', /PP-1/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

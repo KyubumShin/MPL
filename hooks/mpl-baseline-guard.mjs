@@ -2,7 +2,7 @@
 /**
  * MPL Baseline Guard — PreToolUse blocker for immutable baseline.yaml (#59)
  *
- * Blocks Edit/Write operations on `.mpl/mpl/baseline.yaml` after it has been
+ * Blocks Edit/Write/MultiEdit operations on `.mpl/mpl/baseline.yaml` after it has been
  * written, unless the renewal sentinel `.mpl/mpl/.baseline-renewal` exists.
  *
  * The baseline snapshot captured at Step 2.9 is ground truth for downstream
@@ -27,6 +27,9 @@ const { baselineExists, renewalAuthorized, BASELINE_FILE, RENEWAL_FLAG_FILE } = 
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { collectTargetPaths, isFileWriteTool } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
+);
 
 function normalizeRel(cwd, filePath) {
   if (!filePath) return '';
@@ -50,7 +53,7 @@ async function main() {
   }
 
   const toolName = data.tool_name || data.toolName || '';
-  if (!['Edit', 'edit', 'Write', 'write'].includes(toolName)) {
+  if (!isFileWriteTool(toolName)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -62,14 +65,13 @@ async function main() {
   }
 
   const toolInput = data.tool_input || data.toolInput || {};
-  const filePath = toolInput.file_path || toolInput.filePath || '';
-  if (!filePath) {
+  const relTargets = collectTargetPaths(toolInput).map((filePath) => normalizeRel(cwd, filePath));
+  if (relTargets.length === 0) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
 
-  const rel = normalizeRel(cwd, filePath);
-  if (rel !== BASELINE_FILE) {
+  if (!relTargets.includes(BASELINE_FILE)) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }

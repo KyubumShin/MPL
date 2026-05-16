@@ -1,11 +1,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import {
   targetsDecompositionFile,
   parsePhaseCovers,
   validatePhase,
   computeInternalRatio,
 } from '../mpl-require-covers.mjs';
+import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const HOOK_PATH = join(dirname(__filename), '..', 'mpl-require-covers.mjs');
 
 describe('targetsDecompositionFile', () => {
   it('matches .mpl/mpl/decomposition.yaml', () => {
@@ -169,5 +178,40 @@ describe('computeInternalRatio', () => {
   it('returns 0 when no valid phases', () => {
     assert.equal(computeInternalRatio([]), 0);
     assert.equal(computeInternalRatio([{ id: 'a', covers: null }]), 0);
+  });
+});
+
+describe('mpl-require-covers hook integration', () => {
+  it('blocks MultiEdit writes to decomposition.yaml with missing covers', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-covers-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      mkdirSync(join(tmp, '.mpl', 'requirements'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase1-decompose',
+      }));
+      writeFileSync(join(tmp, '.mpl', 'requirements', 'user-contract.md'), 'user_cases: []\n');
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'MultiEdit',
+        tool_input: {
+          file_path: '.mpl/mpl/decomposition.yaml',
+          edits: [{
+            old_string: 'old',
+            new_string: 'phases:\n  - id: phase-1\n    name: Missing covers\n',
+          }],
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /covers field missing/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

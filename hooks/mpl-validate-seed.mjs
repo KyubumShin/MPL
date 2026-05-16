@@ -30,6 +30,9 @@ const { isMplActive } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { collectFileWrites, isFileWriteTool } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
+);
 
 // ---------------------------------------------------------------------------
 // YAML extraction (regex-based, no external parser — MPL minimal deps)
@@ -265,7 +268,7 @@ const SEED_PATH_RE = /\.mpl\/seeds\/[^/]+\.ya?ml$/;
 /**
  * Check whether a tool invocation is related to seed generation/writing.
  * Matches:
- *   1. File-write tools (Write, Edit) targeting a seed YAML path
+ *   1. File-write tools (Write, Edit, MultiEdit) targeting a seed YAML path
  *   2. Task/Agent completions whose output contains phase_seed YAML
  * @param {string} toolName
  * @param {object} toolInput
@@ -274,9 +277,8 @@ const SEED_PATH_RE = /\.mpl\/seeds\/[^/]+\.ya?ml$/;
  */
 export function isSeedRelated(toolName, toolInput, responseText) {
   // Case 1: Direct file write to seed path
-  if (['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
-    const filePath = toolInput.file_path || toolInput.filePath || '';
-    if (SEED_PATH_RE.test(filePath)) return true;
+  if (isFileWriteTool(toolName)) {
+    if (collectFileWrites(toolInput).some((entry) => SEED_PATH_RE.test(entry.filePath))) return true;
   }
 
   // Case 2: Task/Agent output containing phase_seed YAML
@@ -328,8 +330,12 @@ async function main() {
 
   // For file-write tools, the content is in toolInput; for Task tools, in response
   let textToValidate = responseText;
-  if (['Write', 'write', 'Edit', 'edit'].includes(toolName)) {
-    textToValidate = toolInput.content || toolInput.new_string || responseText;
+  if (isFileWriteTool(toolName)) {
+    const seedTexts = collectFileWrites(toolInput)
+      .filter((entry) => SEED_PATH_RE.test(entry.filePath))
+      .map((entry) => entry.text)
+      .filter(Boolean);
+    textToValidate = seedTexts.join('\n') || responseText;
     // Wrap in yaml fence for extractYaml if raw YAML
     if (textToValidate && !textToValidate.includes('```yaml')) {
       textToValidate = '```yaml\n' + textToValidate + '\n```';

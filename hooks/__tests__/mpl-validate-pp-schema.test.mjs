@@ -1,11 +1,19 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import {
   targetsPivotPointsFile,
   extractProposedContent,
   detectUcLeakage,
   formatBlockReason,
 } from '../mpl-validate-pp-schema.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const HOOK_PATH = join(dirname(__filename), '..', 'mpl-validate-pp-schema.mjs');
 
 describe('targetsPivotPointsFile', () => {
   it('matches .mpl/pivot-points.md at repo root', () => {
@@ -43,6 +51,19 @@ describe('extractProposedContent', () => {
 
   it('returns new_string for Edit', () => {
     assert.equal(extractProposedContent({ new_string: 'new body' }, 'Edit'), 'new body');
+  });
+
+  it('returns joined new_string values for MultiEdit', () => {
+    assert.equal(
+      extractProposedContent({
+        file_path: '.mpl/pivot-points.md',
+        edits: [
+          { old_string: 'a', new_string: 'first' },
+          { old_string: 'b', new_string: 'second' },
+        ],
+      }, 'MultiEdit'),
+      'first\nsecond',
+    );
   });
 
   it('returns empty for unknown tool', () => {
@@ -126,5 +147,32 @@ describe('formatBlockReason', () => {
   it('points to user-contract.md as correct location', () => {
     const reason = formatBlockReason([{ name: 'user_cases:' }]);
     assert.ok(reason.includes('user-contract.md'));
+  });
+});
+
+describe('mpl-validate-pp-schema hook integration', () => {
+  it('blocks MultiEdit writes that leak UC schema into pivot-points.md', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-pp-schema-'));
+    try {
+      const input = {
+        cwd: tmp,
+        tool_name: 'MultiEdit',
+        tool_input: {
+          file_path: '.mpl/pivot-points.md',
+          edits: [{
+            old_string: '# Pivot Points',
+            new_string: 'user_cases:\n  - id: UC-01',
+          }],
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /UC-scoped schema/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

@@ -47,7 +47,7 @@ function ok() {
 }
 
 function block(reason) {
-  console.log(JSON.stringify({ continue: true, decision: 'block', reason }));
+  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 /**
