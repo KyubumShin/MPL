@@ -82,6 +82,9 @@ overrides: []
 - `hooks/mpl-require-phase-contract-graph.mjs` blocks decomposition writes that
   lack graph metadata, phase evidence/change policy, or valid phase dependency
   references.
+- `hooks/mpl-require-decomposition-delta.mjs` blocks decomposition rewrites
+  without a matching recomposition delta and one-step `recompose_count`
+  increment.
 - `hooks/mpl-require-e2e-authenticity.mjs` reads `e2e_policy` before allowing
   `finalize_done=true`.
 - `hooks/mpl-require-finalize-artifacts.mjs` reads `security_policy` and

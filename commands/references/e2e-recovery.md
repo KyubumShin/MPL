@@ -75,7 +75,10 @@ while state.e2e_recovery.iter < state.e2e_recovery.max_iter AND failures not emp
     case "A":   # spec gap → decomposer appends phases
       Task(subagent_type="mpl-decomposer", prompt=`
         APPEND-MODE: existing decomposition.yaml remains; append the phases
-        below without modifying existing phase ids. Each appended phase MUST
+        below without modifying existing phase ids. First write
+        .mpl/mpl/decomposition-deltas/recompose-{N}.yaml where N =
+        current recompose_count + 1, then Write the full updated
+        decomposition.yaml with recompose_count: N. Each appended phase MUST
         include covers:[UC-N] per 0.16 Tier B and test_agent_required:true.
 
         Append hints (from mpl_diagnose_e2e_failure):
@@ -164,4 +167,3 @@ Before knowledge extraction, verify all AD (After Decision) markers:
 - Check each AD has: interface definition + minimal implementation
 - Incomplete ADs: report to user (awareness, not blocking)
 - Report: `[MPL] AD Verification: {complete}/{total} ADs verified.`
-

@@ -36,7 +36,7 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
 
     8. **Vertical slice for multi-layer projects**: If 2+ layers detected (frontend/backend/DB/IPC), decompose by feature, not by layer. Each phase implements ONE feature across ALL layers. Scaffold/infrastructure phases remain horizontal.
 
-    9. **APPEND-MODE (0.16 S3-4)**: When the dispatch prompt begins with `APPEND-MODE:`, do NOT re-generate the full decomposition. Instead, keep every existing phase in `.mpl/mpl/decomposition.yaml` intact (ids, contract_files, covers, verification_plan all unchanged) and append 1-3 new phases derived from the supplied `append_phases` hints. Rules: (a) new phase ids must not collide with existing — use the pattern `{anchor}b`, `{anchor}c`, etc. (e.g., `phase-3b` after `phase-3`); (b) each appended phase MUST include `covers:[UC-N]` per 0.16 Tier B and `test_agent_required:true`; (c) preserve `execution_tiers` ordering by inserting the new phase ids immediately after their anchor; (d) emit the FULL updated decomposition.yaml (existing + appended), not a diff. Trigger: Finalize Step 5.0.4 auto-recovery (Classification A) passes `append_phases` from `mpl_diagnose_e2e_failure`.
+    9. **RECOMPOSE-MODE / APPEND-MODE (controlled recomposition)**: When the dispatch prompt begins with `RECOMPOSE-MODE:` or `APPEND-MODE:`, never patch `.mpl/mpl/decomposition.yaml` in place. First read the existing graph, keep existing phases intact unless the delta explicitly names an operation, and write `.mpl/mpl/decomposition-deltas/recompose-{N}.yaml` where `N = existing recompose_count + 1`. Then write the FULL updated `.mpl/mpl/decomposition.yaml` with `recompose_count: N`. APPEND-MODE is a restricted RECOMPOSE-MODE that may only append 1-3 phases from `append_phases` hints. New phase ids must not collide — use `{anchor}b`, `{anchor}c`, etc. (e.g., `phase-3b` after `phase-3`); each appended phase MUST include `covers:[UC-N]` and `test_agent_required:true`; preserve `execution_tiers` by inserting new ids immediately after the anchor.
   </Rules>
 
   <Reasoning_Steps>
@@ -301,10 +301,10 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     **Authoring authority (v0.17.2)**: YOU are the sole writer of `.mpl/mpl/decomposition.yaml`. The orchestrator no longer persists this file — it dispatches you, reads what you wrote, and runs post-processing (contract JSON file extraction, e2e-scenarios.yaml split). Your job:
 
       1. Construct the full YAML below in your reasoning.
-      2. **Write it to `.mpl/mpl/decomposition.yaml`** using the Write tool (overwrite if it exists; APPEND-MODE re-emits the full updated file per Rule 9).
+      2. **Write it to `.mpl/mpl/decomposition.yaml`** using the Write tool. Initial decomposition writes the file once with `recompose_count: 0`. RECOMPOSE-MODE/APPEND-MODE must first write `.mpl/mpl/decomposition-deltas/recompose-{N}.yaml`, then write the full updated graph with `recompose_count: N` per Rule 9.
       3. Return a single-line response confirming the write: `Wrote .mpl/mpl/decomposition.yaml — N phases, M tiers.`
 
-    Do NOT print the YAML body in the response — it lives on disk now. Validation hooks (`mpl-require-covers.mjs`, future `mpl-require-decomposition-fields.mjs`) run on your Write call; if blocked, surface the hook reason and re-emit a corrected YAML in a follow-up Write. Never re-route the Write through the orchestrator.
+    Do NOT print the YAML body in the response — it lives on disk now. Validation hooks (`mpl-require-covers.mjs`, `mpl-require-goal-trace.mjs`, `mpl-require-phase-contract-graph.mjs`, `mpl-require-decomposition-delta.mjs`) run on your Write call; if blocked, surface the hook reason and re-emit a corrected YAML in a follow-up Write. Never re-route the Write through the orchestrator.
 
     ```yaml
     graph_version: 1
@@ -533,6 +533,24 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       re_interview_questions:
         - question: string
           evidence: string
+    ```
+
+    Recomposition delta schema (write this before changing an existing decomposition graph):
+
+    ```yaml
+    delta_version: 1
+    generated_by: mpl-decomposer
+    base_recompose_count: 0
+    target_recompose_count: 1
+    reason: "why the graph must change"
+    change_policy: decomposition_delta_then_recompose
+    operations:
+      - op: append_phase # append_phase|split_phase|modify_phase|retire_phase|reorder_phase|update_dependency|update_evidence
+        target_phase: phase-3b
+        rationale: "what this operation preserves or fixes"
+        goal_trace:
+          acceptance_criteria: [AC-1]
+          variation_axes: [AX-1]
     ```
   </Output_Schema>
 

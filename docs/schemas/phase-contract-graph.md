@@ -52,9 +52,13 @@ phases:
     unknown phase
 - `.mpl/config.json { "phase_contract_graph_required": false }` is an explicit
   migration opt-out.
+- `hooks/mpl-require-decomposition-delta.mjs` blocks changes to an existing
+  graph unless a valid `decomposition-deltas/recompose-N.yaml` exists and
+  `recompose_count` advances by exactly one.
 
 ## Notes
 
 `contract_hash` is reserved for a later post-processing phase that can compute a
 real hash from canonical phase content. Do not ask the decomposer to fabricate a
-cryptographic value.
+cryptographic value. Use `recompose_count` plus decomposition deltas for graph
+change history until canonical phase hashes exist.
