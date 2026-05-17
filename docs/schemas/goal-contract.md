@@ -87,6 +87,9 @@ overrides: []
   increment.
 - `hooks/mpl-require-e2e-authenticity.mjs` reads `e2e_policy` before allowing
   `finalize_done=true`.
+- `hooks/mpl-require-whole-goal-closure.mjs` blocks `finalize_done=true`
+  until completed phases' evidence latches and goal_trace union cover every
+  Goal Contract AC/AX id.
 - `hooks/mpl-require-finalize-artifacts.mjs` reads `security_policy` and
   `completion_evidence` before allowing `finalize_done=true`; it also blocks
   finalization when the current goal contract hash differs from the Phase 0

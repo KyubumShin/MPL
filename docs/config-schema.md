@@ -199,6 +199,7 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 | `decomposition_delta_required` | boolean | `true` | Blocks changes to an existing `decomposition.yaml` unless `recompose_count` increments by one and a matching `.mpl/mpl/decomposition-deltas/recompose-N.yaml` exists. | `mpl-require-decomposition-delta.mjs` |
 | `phase_evidence_latch_required` | boolean | `true` | Blocks phase `verification.md`, `state-summary.md`, or completion state writes unless the phase's `evidence_required` tokens are latched in `verification.md`. | `mpl-require-phase-evidence.mjs` |
 | `completed_phase_immutability_required` | boolean | `true` | Blocks recomposition writes that modify or remove phase blocks already completed by state or state-summary evidence. | `mpl-require-completed-phase-immutability.mjs` |
+| `whole_goal_closure_required` | boolean | `true` | Blocks `finalize_done=true` unless every decomposition phase is completed and completed phase goal_trace/evidence latches cover every Goal Contract AC/AX id. | `mpl-require-whole-goal-closure.mjs` |
 | `finalize_artifacts_required` | boolean | `true` | Blocks `finalize_done=true` unless the goal contract's required artifacts, RUNBOOK final section, finalize timestamps, security evidence, and optional commit evidence are present. Override file: `.mpl/config/finalize-artifact-override.json`. | `mpl-require-finalize-artifacts.mjs` |
 
 ## Adversarial Reviewer (P0-A, #103)

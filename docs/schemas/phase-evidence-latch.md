@@ -40,5 +40,8 @@ token-specific row with `PASS`, `result=pass`, or `exit_code=0`.
   truth for completed phase count.
 - The same hook blocks `.mpl/state.json` writes that newly mark a phase
   `completed` unless that phase already has a valid verification latch.
+- `hooks/mpl-require-whole-goal-closure.mjs` re-checks every completed phase
+  latch at finalize time and requires completed phase goal_trace coverage to
+  close the Goal Contract.
 - `.mpl/config.json { "phase_evidence_latch_required": false }` is an explicit
   migration opt-out.
