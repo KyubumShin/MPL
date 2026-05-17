@@ -35,6 +35,8 @@ Version Reference Checklist:
   ☐ .claude-plugin/plugin.json         → "version" field
   ☐ .claude-plugin/marketplace.json    → "version" field (top-level)
   ☐ .claude-plugin/marketplace.json    → plugins[0].version field
+  ☐ .codex-plugin/plugin.json          → "version" field
+  ☐ .agents/plugins/marketplace.json   → mpl plugin entry present
   ☐ mcp-server/package.json            → "version" field
   ☐ docs/design.md                     → title line "# MPL (Micro-Phase Loop) vX.Y.Z"
   ☐ docs/config-schema.md              → "Version" field in header
@@ -61,6 +63,8 @@ For each mandatory target, update the version. Report each change:
 [MPL-BUMP] ✓ .claude-plugin/plugin.json: 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ .claude-plugin/marketplace.json (top): 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ .claude-plugin/marketplace.json (plugin): 0.8.2 → 0.8.3
+[MPL-BUMP] ✓ .codex-plugin/plugin.json: 0.8.2 → 0.8.3
+[MPL-BUMP] ✓ .agents/plugins/marketplace.json: mpl entry present
 [MPL-BUMP] ✓ mcp-server/package.json: 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ docs/design.md title: 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ README.md title: 0.8.2 → 0.8.3
@@ -91,6 +95,8 @@ Run a final grep to confirm no old version references remain (excluding historic
 ```
 Grep for "{old_version}" in:
   - .claude-plugin/*.json
+  - .codex-plugin/*.json
+  - .agents/plugins/*.json
   - mcp-server/package.json
   - README*.md
   - docs/design.md (title line only)

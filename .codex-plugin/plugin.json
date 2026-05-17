@@ -1,0 +1,46 @@
+{
+  "name": "mpl",
+  "version": "0.18.2",
+  "description": "Micro-Phase Loop - coherence-first autonomous coding pipeline for goal-fixed, phase-scoped implementation and verification.",
+  "author": {
+    "name": "KyubumShin",
+    "url": "https://github.com/KyubumShin"
+  },
+  "homepage": "https://github.com/KyubumShin/MPL",
+  "repository": "https://github.com/KyubumShin/MPL",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "claude-code",
+    "plugin",
+    "micro-phase",
+    "pipeline",
+    "orchestration",
+    "autonomous-coding",
+    "verification"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-plugin/.mcp.json",
+  "interface": {
+    "displayName": "MPL",
+    "shortDescription": "Goal-fixed micro-phase coding pipeline",
+    "longDescription": "MPL decomposes ambitious coding tasks into bounded micro-phases with written contracts, independent execution, gate evidence, and resume-safe state so long-running agent work stays aligned with the original goal.",
+    "developerName": "KyubumShin",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/KyubumShin/MPL",
+    "privacyPolicyURL": "https://github.com/KyubumShin/MPL",
+    "termsOfServiceURL": "https://github.com/KyubumShin/MPL",
+    "defaultPrompt": [
+      "Run MPL for this implementation goal",
+      "Resume the current MPL pipeline",
+      "Diagnose the MPL installation"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

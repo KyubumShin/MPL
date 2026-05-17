@@ -12,22 +12,29 @@ Interactive setup wizard for the MPL plugin. Handles first-time installation, to
 
 Check the current MPL installation state:
 
-1. **Plugin exists?** Check for `MPL/.claude-plugin/plugin.json`
-2. **Hooks registered?** Check for `MPL/hooks/hooks.json` with all 4 events
-3. **State directory?** Check for `.mpl/` directory
-4. **Config exists?** Check for `.mpl/config.json`
-5. **Settings configured?** Check for `MPL/.claude/settings.local.json`
+1. **Plugin exists?** Check for either `MPL/.claude-plugin/plugin.json` or `MPL/.codex-plugin/plugin.json`
+2. **Runtime manifests valid?** If present, validate both Claude (`.claude-plugin/*`) and Codex (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`)
+3. **Hooks registered?** Check for `MPL/hooks/hooks.json` with all 4 events (Claude Code hook surface)
+4. **State directory?** Check for `.mpl/` directory
+5. **Config exists?** Check for `.mpl/config.json`
+6. **Settings configured?** For Claude Code, check `MPL/.claude/settings.local.json`; for Codex, check the Codex plugin manifest and MCP file instead of writing `.claude/`
 
 Classify installation state:
-- **NOT_INSTALLED**: No plugin.json found
+- **NOT_INSTALLED**: No Claude or Codex plugin manifest found
 - **PARTIAL**: Plugin exists but missing hooks, config, or settings
 - **INSTALLED**: All components present
 - **CORRUPTED**: Files exist but are invalid (bad JSON, missing fields)
 
 ### Step 1b: Settings Scope Selection
 
-Determine where MPL should write settings (permissions, statusLine, MCP config).
+Determine the active runtime. If running inside Claude Code, determine where MPL should write settings (permissions, statusLine, MCP config).
 This prevents local-scope plugin installations from polluting global settings.
+
+For Codex CLI:
+- Do not write `.claude/settings*.json`.
+- Verify `.codex-plugin/plugin.json` points to `./skills/` and `./.codex-plugin/.mcp.json`.
+- Verify `.agents/plugins/marketplace.json` exposes `mpl` with `policy.installation: "INSTALLED_BY_DEFAULT"`.
+- Set `SETTINGS_SCOPE = "codex-plugin"` and `SETTINGS_TARGET = ".codex-plugin/plugin.json"` for reporting only.
 
 ```
 AskUserQuestion(
@@ -351,7 +358,8 @@ The MPL MCP Server provides deterministic ambiguity scoring and active state acc
 #### Detection (v0.11.0 — robust dependency recovery)
 
 ```
-mcp_server_dir = "${CLAUDE_PLUGIN_ROOT}/mcp-server"
+plugin_root = runtime == "codex" ? "<Codex plugin root>" : "${CLAUDE_PLUGIN_ROOT}"
+mcp_server_dir = "${plugin_root}/mcp-server"
 mcp_dist_path = "${mcp_server_dir}/dist/index.js"
 
 // Step 1: Check if dist exists
@@ -420,14 +428,28 @@ if NOT mcp_available:
 ```
 if mcp_available:
   // Ensure .mcp.json in plugin root has the server registered
-  mcp_config_path = "${CLAUDE_PLUGIN_ROOT}/.mcp.json"
+  mcp_config_path = runtime == "codex"
+    ? "${plugin_root}/.codex-plugin/.mcp.json"
+    : "${plugin_root}/.mcp.json"
 
   ensure mcp_config contains:
+    // Claude Code
     {
       "mcpServers": {
         "mpl-server": {
           "command": "node",
-          "args": ["mcp-server/dist/index.js"]
+          "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js"]
+        }
+      }
+    }
+
+    // Codex CLI
+    {
+      "mcpServers": {
+        "mpl-server": {
+          "command": "node",
+          "args": ["./tools/mpl-mcp-server-launcher.mjs"],
+          "cwd": "."
         }
       }
     }
@@ -446,6 +468,8 @@ Write to .mpl/config.json:
 ```
 
 ### Step 8: HUD Statusline Setup
+
+If runtime is Codex CLI, skip this step: MPL HUD is Claude statusLine-specific.
 
 AskUserQuestion: "Would you like to enable the MPL HUD (statusline)? You can see pipeline progress, token usage, and Gate status in real time."
   - "Enable (recommended)" → Configure statusLine in Claude settings

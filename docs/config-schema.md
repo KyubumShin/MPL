@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.18.1 (v0.17.2 + v3.10 P0 enforcement track: P0-1/P0-2/P0-3/P0-A/P0-K + G1~G6 + H8 + F2~F6 — gate-evidence desync fix, enforcement tri-state, write-guard hard block, adversarial reviewer, artifact schema validator, Bash timeout, RUNBOOK auto-update, fix-loop history + intervention counter, hang detection, state invariant, schema migration registry, hook-tier scan, anti-pattern registry, doctor meta-self, property check, codex auditor)
-> **Last updated**: 2026-05-06
+> **Version**: v0.18.2 (dual-runtime install metadata: Claude Code + Codex CLI manifests share one version, skills, commands, and MCP server)
+> **Last updated**: 2026-05-17
 
 ---
 
@@ -14,7 +14,7 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 | `max_fix_loops` | number | `10` | Maximum Fix Loop iterations before pipeline failure | `mpl-run-execute-gates.md` |
 | `gate1_strategy` | `"auto"` \| `"docker"` \| `"native"` \| `"skip"` | `"auto"` | Gate 1 test execution strategy | `mpl-run-execute-gates.md` |
 | `hitl_timeout_seconds` | number | `30` | HITL (Human-in-the-Loop) response wait time in seconds | `design.md` |
-| `tool_mode` | `"standalone"` \| `"full"` \| `"partial"` | `"standalone"` | Tool mode — standalone uses native Claude Code tools; full/partial activate LSP tier when available | `docs/standalone.md` |
+| `tool_mode` | `"standalone"` \| `"full"` \| `"partial"` | `"standalone"` | Tool mode — standalone uses native agent tools; full/partial activate LSP tier when available | `docs/standalone.md` |
 
 ## Context & Memory
 

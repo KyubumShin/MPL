@@ -1,8 +1,8 @@
-# MPL (Micro-Phase Loop) v0.18.1
+# MPL (Micro-Phase Loop) v0.18.2
 
 **예방이 치료보다 낫다. 명세가 디버깅보다 낫다.**
 
-Claude Code 플러그인으로, 야심찬 태스크를 마이크로 페이즈로 분해하여 각각 독립적으로 계획-실행-검증한다. 컨텍스트가 오염되지 않고, 실패가 전파되지 않는다.
+Claude Code와 Codex CLI에서 사용할 수 있는 에이전트 워크플로 플러그인이다. 야심찬 태스크를 마이크로 페이즈로 분해하여 각각 독립적으로 계획-실행-검증한다. 컨텍스트가 오염되지 않고, 실패가 전파되지 않는다.
 
 > **[English Documentation](./README.md)**
 
@@ -60,17 +60,35 @@ Phase 0 없음          38% → 디버깅 지옥
 
 ## 빠른 시작
 
-**Step 1 — 프로젝트에 클론:**
+**Step 1 — 사용하는 런타임에 설치:**
+
+Claude Code:
 
 ```bash
-cd /path/to/your-project
-git clone https://github.com/<your-org>/MPL.git
+# 마켓플레이스 등록
+claude plugin marketplace add https://github.com/KyubumShin/MPL.git
+
+# 플러그인 설치
+claude plugin install mpl
 ```
 
-**Step 2 — 런타임 디렉토리 생성:**
+Codex CLI:
 
 ```bash
-mkdir -p .mpl/mpl/{phase0,phases,profile} .mpl/cache/phase0 .mpl/memory
+# 마켓플레이스 등록. MPL은 기본 설치 정책으로 제공된다.
+codex plugin marketplace add KyubumShin/MPL
+```
+
+로컬 개발 중이면 현재 체크아웃을 직접 등록할 수 있다:
+
+```bash
+codex plugin marketplace add /path/to/MPL
+```
+
+**Step 2 — 셋업 실행:**
+
+```
+/mpl:mpl-setup
 ```
 
 **Step 3 — 빌드 시작:**
@@ -368,19 +386,33 @@ MPL/
 
 ## 설치
 
-MPL은 Claude Code 플러그인 구조를 따르며, 별도 의존성 없이 단독으로 설치·실행할 수 있다.
+MPL은 Claude Code 플러그인과 Codex 플러그인 구조를 모두 제공한다. 동일한 `skills/`, `commands/`, MCP 서버 구현을 공유하고, 각 런타임별 manifest만 분리한다.
 
 ### 사전 요구사항
 
 | 항목 | 최소 버전 | 확인 명령 |
 |------|----------|----------|
 | Claude Code CLI | 최신 | `claude --version` |
+| Codex CLI | 최신 | `codex --version` |
 | Node.js | 18+ | `node --version` |
 | Git | 2.x | `git --version` |
 
 ### 자동 설치
 
-클론 후 셋업 위저드에 맡길 수 있다:
+Claude Code:
+
+```bash
+claude plugin marketplace add https://github.com/KyubumShin/MPL.git
+claude plugin install mpl
+```
+
+Codex CLI:
+
+```bash
+codex plugin marketplace add KyubumShin/MPL
+```
+
+설치 후 셋업 위저드에 맡길 수 있다:
 
 ```
 /mpl:mpl-setup
@@ -414,6 +446,8 @@ mpl small 재시도 로직 추가                      # → standard 강제
 # 진단
 /mpl:mpl-doctor
 ```
+
+Codex에서도 같은 MPL 스킬을 감지한다. Codex 세션에서 `mpl ...` 형태로 요청하거나 설치된 MPL 스킬을 직접 선택한다.
 
 ## Standalone 모드
 
