@@ -69,6 +69,7 @@ const DEFAULTS = {
   decomposition_delta_required: true,
   phase_evidence_latch_required: true,
   completed_phase_immutability_required: true,
+  whole_goal_closure_required: true,
   e2e_authenticity_required: true,
   finalize_artifacts_required: true,
   convergence: {

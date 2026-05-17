@@ -763,6 +763,10 @@ goal_contract = Read(".mpl/goal-contract.yaml")
 require exists(".mpl/mpl/audit-report.json")        # Step 5.1.7 Codex audit
 require exists(".mpl/mpl/profile/run-summary.json") # Step 5.4 profile
 require ".mpl/mpl/RUNBOOK.md" contains "## Pipeline Complete"
+require every decomposition phase has:
+  - state-summary.md
+  - verification.md with valid Evidence Latch
+require completed phases' goal_trace union covers every Goal Contract AC/AX id
 
 if goal_contract.security_policy.required:
   for check in goal_contract.security_policy.checks:
@@ -793,7 +797,7 @@ Completion Report.
 Pipeline `current_phase = "completed"`, MPL `status = "completed"`,
 `completed_at = timestamp`, `finalized_at = timestamp`, `finalize_done = true`.
 The write is blocked unless AD-0008 E2E coverage, E2E authenticity, and
-completion-evidence hooks all pass.
+whole-goal closure / completion-evidence hooks all pass.
 
 ---
 
