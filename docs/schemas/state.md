@@ -25,7 +25,7 @@
 | `completed_at` / `finalized_at` | per-pipeline | Finalize timestamps required by Goal Contract completion evidence when `require_finalize_timestamps: true`. |
 | `goal_contract_set` / `goal_contract_path` / `goal_contract_hash` | per-pipeline | Goal Contract readiness mirror for `.mpl/goal-contract.yaml`; disk artifact remains the source of truth. |
 | `security_results.*` | per-pipeline | Structured security gate evidence consumed by `mpl-require-finalize-artifacts.mjs`. |
-| `session_status` | per-session | `null \| active \| paused_budget \| paused_checkpoint \| verification_hang \| cancelled`. Single-valued — pause / hang / cancel states are mutually exclusive (G3 I9). |
+| `session_status` | per-session | `null \| active \| paused_budget \| paused_checkpoint \| verification_hang \| blocked_hook \| cancelled`. Single-valued — pause / hang / explicit hook block / cancel states are mutually exclusive (G3 I9). |
 | `last_tool_at` | per-session | ISO-8601 stamp from `mpl-tool-tracker.mjs`. Powers G4 (#109). |
 | `enforcement.*` | per-pipeline override | P0-2 (#110) per-rule policy. Top of the precedence chain. |
 
@@ -40,7 +40,7 @@ strict mode elevates `warn → block`.
 |---|---|---|---|
 | I1 | `session_status='paused_budget' AND finalize_done=true` is impossible | all | Mutual contradiction. |
 | I2 | `current_phase='completed' AND finalize_done=false` is impossible | all | Completion requires finalize. |
-| I3 | `paused_*` or `verification_hang` AND new Task/Agent dispatch | task-dispatch | Resume the pipeline (`/mpl:mpl-resume`) before dispatching. |
+| I3 | `paused_*` or `verification_hang` AND new Task/Agent dispatch | task-dispatch | Resume the pipeline (`/mpl:mpl-resume`) before dispatching. `blocked_hook` is visible state but does not block dispatch globally; the originating hook remains responsible for the specific blocked action. |
 | I4 | `execution.phases.completed != count(phase-N/state-summary.md)` | all | Disk truth = number of phase directories carrying the `state-summary.md` finalize artifact. Declared count must match. Empty `phase-N/` directories pre-created by `mpl-run-decompose.md` Step 4 do NOT count. Phase 5 additionally requires a valid `verification.md` Evidence Latch before state-summary or completion state writes. |
 | I5 | `fix_loop_count != sum(fix_loop_history)` | all | G5 (#114) writes history; counter must agree. |
 | I6 | phase3-gate state-write missing structured gate evidence | state-write | P0-1 (#102) requirement. |

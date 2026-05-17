@@ -10,7 +10,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,6 +39,7 @@ const REAL_RUNTIME_CLASSES = new Set([
 
 const MOCK_PATTERN = /\b(mock|stub|fake|msw|mockIPC|VITE_E2E_MOCK|__mocks__)\b/i;
 const PLACEHOLDER_PATTERN = /\b(expect\s*\(\s*true\s*\)|assert\s*\(\s*true\s*\)|\.toBe\s*\(\s*true\s*\)|test\.skip\s*\(|it\.skip\s*\(|describe\.skip\s*\()/;
+const FAKE_RUNTIME_E2E_PATTERN = /\bWITHOUT\s+a\s+running\s+Tauri\s+runtime\b|\bwithout\s+a\s+running\s+Tauri\s+runtime\b|\brepo\/db layer directly\b|\brepo layer directly\b|\bbypass(?:es|ing)?\s+Tauri\s+runtime\b/i;
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -200,6 +201,12 @@ function scanTestFiles(cwd, scenario) {
     let text;
     try { text = readFileSync(abs, 'utf-8'); } catch { continue; }
     if (PLACEHOLDER_PATTERN.test(text)) hits.push(`${scenario.id}:placeholder_assertion:${rel}`);
+    if (
+      scenario.runtime_class === 'real_desktop' &&
+      FAKE_RUNTIME_E2E_PATTERN.test(text)
+    ) {
+      hits.push(`${scenario.id}:fake_runtime_e2e:${rel}`);
+    }
     for (const pattern of scenario.forbidden_patterns || []) {
       if (pattern && text.includes(pattern)) hits.push(`${scenario.id}:forbidden_pattern:${pattern}:${rel}`);
     }
@@ -207,9 +214,67 @@ function scanTestFiles(cwd, scenario) {
   return hits;
 }
 
+function walkFiles(root, opts = {}) {
+  const limit = opts.limit ?? 1000;
+  const out = [];
+  const stack = [root];
+  while (stack.length > 0 && out.length < limit) {
+    const dir = stack.pop();
+    let entries = [];
+    try { entries = readdirSync(dir); } catch { continue; }
+    for (const entry of entries) {
+      if (entry === 'node_modules' || entry === 'target' || entry === '.git') continue;
+      const abs = join(dir, entry);
+      let st;
+      try { st = statSync(abs); } catch { continue; }
+      if (st.isDirectory()) {
+        stack.push(abs);
+        continue;
+      }
+      if (st.isFile()) out.push(abs);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+function anyFileMatches(root, pattern) {
+  if (!existsSync(root)) return false;
+  for (const file of walkFiles(root)) {
+    let text;
+    try { text = readFileSync(file, 'utf-8'); } catch { continue; }
+    if (pattern.test(text)) return true;
+  }
+  return false;
+}
+
+function hasCapabilityJson(cwd) {
+  const dir = join(cwd, 'src-tauri', 'capabilities');
+  if (!existsSync(dir)) return false;
+  return walkFiles(dir, { limit: 100 }).some((file) => /\.json$/i.test(file));
+}
+
+function detectTauriCapabilityIssues(cwd) {
+  const conf = join(cwd, 'src-tauri', 'tauri.conf.json');
+  if (!existsSync(conf)) return [];
+
+  const frontendInvokes = anyFileMatches(join(cwd, 'src'), /\binvoke\s*\(|@tauri-apps\/api\/core/);
+  const rustCommands = anyFileMatches(join(cwd, 'src-tauri', 'src'), /#\s*\[\s*tauri::command\s*\]/);
+  if (!frontendInvokes && !rustCommands) return [];
+
+  if (!hasCapabilityJson(cwd)) return ['tauri_capabilities_missing'];
+  return [];
+}
+
 function evaluateScenarioAuthenticity(cwd, scenarios, policy) {
   const issues = [];
   const required = scenarios.filter((s) => s.required !== false && s.test_command);
+  if (policy.real_runtime_required !== false && required.length === 0) {
+    issues.push('required_e2e_scenario_missing');
+  }
+  if (policy.real_runtime_required !== false) {
+    issues.push(...detectTauriCapabilityIssues(cwd));
+  }
 
   for (const scenario of required) {
     if (policy.real_runtime_required !== false && !REAL_RUNTIME_CLASSES.has(scenario.runtime_class)) {

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.18.2 Design Document
+# MPL (Micro-Phase Loop) v0.18.3 Design Document
 
 ## 1. Overview
 
@@ -484,6 +484,24 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.18.3 — Runtime Verification Closure (2026-05-18)
+
+exp19 showed a false-completion class where a Tauri app could pass build/unit gates while missing the runtime boundary that makes the app usable. v0.18.3 closes the immediate gaps without adding a new agent: existing artifact, E2E, and authenticity hooks now fail earlier and on machine evidence.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Decomposition test-agent schema | Missing `test_agent_required` was discovered late by `mpl-require-test-agent`, after sprint execution had already advanced | `decomposition.yaml` artifact validation flags every phase missing `test_agent_required`, and requires `test_agent_rationale` when a phase opts out | Hook + schema | Prevents exp19's fast-path decomposer omission from turning into a silent mid-sprint block |
+| Zero E2E scenario finalize | `mpl-require-e2e` allowed `finalize_done=true` when no required E2E scenario existed | Real-runtime Goal Contracts and included UCs now block finalize when there is no executable E2E scenario | Hook | `real_runtime_required=true` must mean at least one runnable runtime scenario exists and records evidence |
+| E2E authenticity | Existing scenarios were checked for mock/placeholder evidence, but absence of scenarios was not itself an authenticity failure | `mpl-require-e2e-authenticity` reports `required_e2e_scenario_missing` under real-runtime policy | Hook | Avoids "nothing to verify" passing as authentic verification |
+| Tauri v2 runtime prerequisite | No mechanical check for `src-tauri/capabilities/*.json` | Tauri projects with `invoke()`/`#[tauri::command]` surfaces block finalize when no capabilities JSON exists | Hook | Catches exp19's app-brick failure where frontend IPC would be rejected at runtime |
+| Visible hook block state | AD-0007 blocks were returned only as hook output, so harness/UI could see a long silence with `pause_reason:null` | `mpl-require-test-agent` now records `session_status: blocked_hook` plus hook id, phase, reason, resume instruction, and clears it when evidence/override appears | Hook + state enum | Prevents quality guard blocks from presenting as silent deadlocks |
+
+**Affected files:** `hooks/lib/mpl-artifact-schema.mjs`, `hooks/mpl-require-e2e.mjs`, `hooks/mpl-require-e2e-authenticity.mjs`, `hooks/mpl-require-test-agent.mjs`, `hooks/lib/mpl-state.mjs`, `hooks/lib/mpl-state-invariant.mjs`, `hooks/__tests__/mpl-artifact-schema.test.mjs`, `hooks/__tests__/mpl-require-e2e.test.mjs`, `hooks/__tests__/mpl-require-e2e-authenticity.test.mjs`, `hooks/__tests__/mpl-require-test-agent.test.mjs`, `hooks/__tests__/mpl-state-invariant.test.mjs`, version metadata and docs.
+
+**Breaking changes:** Existing projects that set `e2e_policy.real_runtime_required: true` can no longer finalize with zero executable E2E scenarios. Tauri v2 projects using IPC need a capabilities JSON before finalize.
+
+**Tests:** Adds exp19 regression coverage for missing `test_agent_required`, zero E2E scenarios, missing `test_command`, included UC with no executable E2E, missing Tauri capabilities, valid Tauri capabilities, and visible AD-0007 block state.
 
 ### v0.18.2 — Dual Runtime Install Metadata (2026-05-17)
 

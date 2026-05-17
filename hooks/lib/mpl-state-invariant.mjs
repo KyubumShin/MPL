@@ -267,10 +267,10 @@ function checkI9(state) {
   // this check guards the value itself. Future writers introducing new
   // statuses MUST add them to the H1 allowlist (`docs/schemas/state.md`)
   // before they can be emitted — otherwise unknown values surface as I9.
-  const allowed = new Set([null, 'active', 'paused_budget', 'paused_checkpoint', 'verification_hang', 'cancelled']);
+  const allowed = new Set([null, 'active', 'paused_budget', 'paused_checkpoint', 'verification_hang', 'blocked_hook', 'cancelled']);
   if (!allowed.has(state.session_status ?? null)) {
     return v(VIOLATION_IDS.SESSION_STATUS_INVALID,
-      `session_status='${state.session_status}' is not in the allowed enum (null|active|paused_budget|paused_checkpoint|verification_hang|cancelled).`,
+      `session_status='${state.session_status}' is not in the allowed enum (null|active|paused_budget|paused_checkpoint|verification_hang|blocked_hook|cancelled).`,
       { session_status: state.session_status });
   }
   return null;

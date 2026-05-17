@@ -14,6 +14,55 @@ import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const HOOK_PATH = join(dirname(__filename), '..', 'mpl-require-e2e.mjs');
 
+function goalContract({ realRuntimeRequired = true } = {}) {
+  return `
+source:
+  user_request: "Build app"
+  user_request_hash: "req"
+mission:
+  goal: "Build app"
+  project_pivot: "real runtime"
+  must_ship_outcomes:
+    - "usable app"
+ontology:
+  entities:
+    - app
+variation_axes:
+  - id: AX-1
+acceptance_criteria:
+  - id: AC-1
+e2e_policy:
+  real_runtime_required: ${realRuntimeRequired ? 'true' : 'false'}
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/RUNBOOK.md
+  require_commit: false
+  require_finalize_timestamps: true
+`;
+}
+
+function finalizeWriteInput(tmp, toolInput = null) {
+  return {
+    cwd: tmp,
+    tool_name: 'Write',
+    tool_input: toolInput || {
+      file_path: '.mpl/state.json',
+      content: JSON.stringify({ current_phase: 'phase5-finalize', finalize_done: true }),
+    },
+  };
+}
+
+function runHook(tmp, input = null) {
+  return JSON.parse(execFileSync('node', [HOOK_PATH], {
+    input: JSON.stringify(input || finalizeWriteInput(tmp)),
+    encoding: 'utf-8',
+  }));
+}
+
 describe('parseUserContractText', () => {
   it('extracts included UC ids with explicit status', () => {
     const text = `
@@ -161,6 +210,69 @@ describe('computeUncoveredUcs', () => {
 });
 
 describe('mpl-require-e2e hook integration', () => {
+  it('exp19 regression: blocks finalize when real-runtime goal has zero E2E scenarios', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-require-e2e-zero-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase5-finalize',
+        e2e_results: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'), goalContract());
+      const r = runHook(tmp);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /requires real runtime E2E/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks required E2E scenarios missing executable test_command', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-require-e2e-command-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase5-finalize',
+        e2e_results: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'e2e-scenarios.yaml'), `
+e2e_scenarios:
+  - id: E2E-1
+    required: true
+`);
+      const r = runHook(tmp);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /missing executable test_command: E2E-1/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks included UCs when no executable E2E scenario exists', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-require-e2e-uc-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'requirements'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase5-finalize',
+        e2e_results: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'requirements', 'user-contract.md'), `
+user_cases:
+  - id: UC-01
+    status: included
+scenarios: []
+`);
+      const r = runHook(tmp);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /included UC/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('blocks MultiEdit finalize writes when a required scenario never ran', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-require-e2e-'));
     try {
@@ -187,10 +299,7 @@ e2e_scenarios:
           }],
         },
       };
-      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
-        input: JSON.stringify(input),
-        encoding: 'utf-8',
-      }));
+      const r = runHook(tmp, input);
       assert.equal(r.decision, 'block');
       assert.match(r.reason, /E2E-1/);
     } finally {

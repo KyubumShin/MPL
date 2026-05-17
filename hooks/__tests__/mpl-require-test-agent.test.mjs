@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -43,6 +43,52 @@ phases:
       assert.equal(r.continue, false);
       assert.equal(r.decision, 'block');
       assert.match(r.reason, /mpl-test-agent was not dispatched/);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
+      assert.equal(state.blocked_phase, 'phase-1');
+      assert.match(state.resume_instruction, /Dispatch mpl-test-agent for phase-1/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('clears its visible blocked state once test-agent evidence exists', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-clear-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_phase: 'phase-1',
+        block_reason: 'old block',
+        test_agent_dispatched: { 'phase-1': { ts: '2026-05-18T00:00:00Z' } },
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    test_agent_required: true
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, 'active');
+      assert.equal(state.blocked_by_hook, null);
+      assert.equal(state.blocked_phase, null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
