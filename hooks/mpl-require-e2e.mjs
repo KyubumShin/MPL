@@ -39,6 +39,9 @@ const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
 const { readState, isMplActive } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
+const { readGoalContract } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
+);
 const { readStdin } = isMain
   ? await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href)
   : { readStdin: async () => '' };
@@ -288,6 +291,11 @@ export function computeUncoveredUcs(includedUcIds, scenarios) {
   return includedUcIds.filter((id) => !covered.has(id));
 }
 
+function realRuntimeE2ERequired(cwd) {
+  const goal = readGoalContract(cwd);
+  return goal.valid && goal.contract.e2e_policy.real_runtime_required === true;
+}
+
 /**
  * Detect whether the incoming tool input writes `finalize_done: true` to
  * `.mpl/state.json`. Handles Edit (old_string/new_string) and Write (content).
@@ -353,9 +361,44 @@ async function runHook() {
 
   // A finalize_done: true write is imminent. Validate E2E coverage.
   const scenarios = parseScenarios(cwd);
-  const required = scenarios.filter((s) => s.required && s.test_command);
+  const declaredRequired = scenarios.filter((s) => s.required !== false);
+  const missingCommand = declaredRequired.filter((s) => !s.test_command).map((s) => s.id);
+  if (missingCommand.length > 0) {
+    block(
+      `[MPL AD-0008] Cannot set finalize_done=true — required E2E scenario(s) missing executable test_command: ${missingCommand.join(', ')}. ` +
+        `Re-run decomposition Step 3-H and emit executable commands, or mark the scenario required:false with a rationale.`
+    );
+    return;
+  }
+
+  const required = declaredRequired.filter((s) => s.test_command);
+  const contract = parseUserContract(cwd);
+
   if (required.length === 0) {
-    // No declared E2E scenarios — nothing to enforce. Allow.
+    const reasons = [];
+    if (realRuntimeE2ERequired(cwd)) {
+      reasons.push('goal contract requires real runtime E2E');
+    }
+    if (contract.included_uc_ids.length > 0) {
+      reasons.push(`${contract.included_uc_ids.length} included UC(s) have no executable E2E scenario`);
+    }
+
+    if (reasons.length > 0) {
+      const message =
+        `[MPL AD-0008] Cannot set finalize_done=true — ${reasons.join('; ')}. ` +
+        `Emit .mpl/mpl/e2e-scenarios.yaml with at least one required scenario and executable test_command, run it, and let gate-recorder populate state.e2e_results.`;
+      if (realRuntimeE2ERequired(cwd) || isE2EContractStrict(cwd)) {
+        block(message);
+        return;
+      }
+      console.log(JSON.stringify({
+        continue: true,
+        suppressOutput: false,
+        systemMessage: `[MPL AD-0008 WARN] ${message}`,
+      }));
+      return;
+    }
+
     ok();
     return;
   }
@@ -405,7 +448,6 @@ async function runHook() {
   }
 
   // 0.16 Tier C: UC coverage gate.
-  const contract = parseUserContract(cwd);
   if (contract.included_uc_ids.length > 0) {
     const uncovered = computeUncoveredUcs(contract.included_uc_ids, contract.scenarios);
     if (uncovered.length > 0) {

@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.18.2 (dual-runtime install metadata: Claude Code + Codex CLI manifests share one version, skills, commands, and MCP server)
-> **Last updated**: 2026-05-17
+> **Version**: v0.18.3 (runtime verification closure: real-runtime E2E zero-scenario block, Tauri capabilities check, and decomposition test-agent field validation)
+> **Last updated**: 2026-05-18
 
 ---
 
@@ -187,7 +187,7 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `e2e_timeout` | number | `60000` | Timeout per E2E scenario in milliseconds | `mpl-run-finalize.md` Step 5.0 |
-| `e2e_authenticity_required` | boolean | `true` | Blocks `finalize_done=true` when required E2E scenarios are mock/unit/placeholder evidence instead of the real runtime evidence declared by `.mpl/goal-contract.yaml`. Override file: `.mpl/config/e2e-authenticity-override.json`. | `mpl-require-e2e-authenticity.mjs` |
+| `e2e_authenticity_required` | boolean | `true` | Blocks `finalize_done=true` when real-runtime policy has zero executable E2E scenarios, when required scenarios are mock/unit/placeholder evidence instead of the real runtime evidence declared by `.mpl/goal-contract.yaml`, or when a Tauri IPC project lacks `src-tauri/capabilities/*.json`. Override file: `.mpl/config/e2e-authenticity-override.json`. | `mpl-require-e2e-authenticity.mjs` |
 
 ## Goal Contract & Finalize Evidence
 

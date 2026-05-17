@@ -45,7 +45,7 @@ disallowedTools: Write, Edit, Task
     - List all .md files in `MPL/agents/`
     - For each: verify YAML frontmatter has `name`, `description`, `model`
     - Verify `model` is one of: haiku, sonnet, opus
-    - Expected agents (11 total, v0.18.2):
+    - Expected agents (11 total, v0.18.3):
       mpl-adversarial-reviewer, mpl-codebase-analyzer, mpl-codex-auditor,
       mpl-decomposer, mpl-doctor, mpl-git-master, mpl-interviewer,
       mpl-phase-runner, mpl-phase0-analyzer, mpl-seed-generator, mpl-test-agent

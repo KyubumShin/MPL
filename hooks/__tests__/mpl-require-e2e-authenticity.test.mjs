@@ -98,6 +98,12 @@ e2e_scenarios:
 });
 
 describe('mpl-require-e2e-authenticity hook', () => {
+  it('exp19 regression: blocks real-runtime finalize when no E2E scenarios exist', () => {
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /required_e2e_scenario_missing/);
+  });
+
   it('allows real runtime scenarios with assertion evidence', () => {
     writeScenarios(`
 e2e_scenarios:
@@ -183,5 +189,48 @@ e2e_scenarios:
     const r = runHook();
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /placeholder_assertion/);
+  });
+
+  it('blocks Tauri v2 IPC projects without capabilities JSON', () => {
+    mkdirSync(join(tmp, 'src'), { recursive: true });
+    mkdirSync(join(tmp, 'src-tauri', 'src'), { recursive: true });
+    writeFileSync(join(tmp, 'src-tauri', 'tauri.conf.json'), '{"productName":"app"}\n');
+    writeFileSync(join(tmp, 'src', 'App.tsx'), 'import { invoke } from "@tauri-apps/api/core";\ninvoke("project_new");\n');
+    writeFileSync(join(tmp, 'src-tauri', 'src', 'lib.rs'), '#[tauri::command]\nfn project_new() {}\n');
+    writeScenarios(`
+e2e_scenarios:
+  - id: E2E-1
+    required: true
+    test_command: "npm run e2e"
+    runtime_class: real_desktop
+    mock_allowed: false
+    launcher_evidence: "tauri app launch"
+    assertion_evidence: "project_new IPC succeeds from UI"
+`);
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /tauri_capabilities_missing/);
+  });
+
+  it('allows Tauri IPC projects when a capabilities JSON exists', () => {
+    mkdirSync(join(tmp, 'src'), { recursive: true });
+    mkdirSync(join(tmp, 'src-tauri', 'src'), { recursive: true });
+    mkdirSync(join(tmp, 'src-tauri', 'capabilities'), { recursive: true });
+    writeFileSync(join(tmp, 'src-tauri', 'tauri.conf.json'), '{"productName":"app"}\n');
+    writeFileSync(join(tmp, 'src', 'App.tsx'), 'import { invoke } from "@tauri-apps/api/core";\ninvoke("project_new");\n');
+    writeFileSync(join(tmp, 'src-tauri', 'src', 'lib.rs'), '#[tauri::command]\nfn project_new() {}\n');
+    writeFileSync(join(tmp, 'src-tauri', 'capabilities', 'default.json'), '{"identifier":"default","permissions":["core:default"]}\n');
+    writeScenarios(`
+e2e_scenarios:
+  - id: E2E-1
+    required: true
+    test_command: "npm run e2e"
+    runtime_class: real_desktop
+    mock_allowed: false
+    launcher_evidence: "tauri app launch"
+    assertion_evidence: "project_new IPC succeeds from UI"
+`);
+    const r = runHook();
+    assert.equal(r.continue, true);
   });
 });

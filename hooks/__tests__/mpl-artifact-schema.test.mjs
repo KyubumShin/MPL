@@ -176,6 +176,7 @@ phases:
       requires: []
       produces: []
       contract_files: []
+    test_agent_required: true
     success_criteria:
       - type: test
         command: npm test
@@ -199,6 +200,37 @@ phases:
     const r = validateArtifactFile('.mpl/mpl/decomposition.yaml', content);
     assert.equal(r.valid, false);
     assert.ok(r.missing.includes('interface_contract'));
+  });
+
+  it('exp19 regression: rejects decomposition phases missing test_agent_required', () => {
+    const content =
+`phases:
+  - id: "phase-1"
+    scope: "Add editor"
+    covers: [UC-01]
+    impact: { create: [], modify: [], affected_tests: [] }
+    interface_contract: { requires: [], produces: [], contract_files: [] }
+    success_criteria: []
+`;
+    const r = validateArtifactFile('.mpl/mpl/decomposition.yaml', content);
+    assert.equal(r.valid, false);
+    assert.ok(r.missing.includes('phase-1.test_agent_required'));
+  });
+
+  it('requires rationale when a phase opts out of test-agent dispatch', () => {
+    const content =
+`phases:
+  - id: "phase-docs"
+    scope: "Document install"
+    covers: [UC-01]
+    impact: { create: [], modify: [], affected_tests: [] }
+    interface_contract: { requires: [], produces: [], contract_files: [] }
+    test_agent_required: false
+    success_criteria: []
+`;
+    const r = validateArtifactFile('.mpl/mpl/decomposition.yaml', content);
+    assert.equal(r.valid, false);
+    assert.ok(r.missing.includes('phase-docs.test_agent_rationale'));
   });
 });
 

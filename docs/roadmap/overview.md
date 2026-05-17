@@ -2,7 +2,7 @@
 
 > **Version notation (v0.9.4)**: This file uses legacy major-version notation (v1.0, v3.0, v4.0) from the original roadmap. Actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.x ≈ v0.3.x, v4.x ≈ v0.4.x. See `design.md` for the canonical version reference.
 >
-> **Currency note (2026-05-17)**: Plugin version is `0.18.2`. v0.18.0/v0.18.1 closed the v3.10 P0 enforcement track; v0.18.2 adds dual-runtime install metadata so the same MPL plugin can be installed by Claude Code and Codex CLI while sharing one skills/commands/MCP implementation. Per-version detail in `docs/design.md` §9.
+> **Currency note (2026-05-18)**: Plugin version is `0.18.3`. v0.18.0/v0.18.1 closed the v3.10 P0 enforcement track; v0.18.2 added dual-runtime install metadata; v0.18.3 closes exp19 runtime-verification false completion gaps. Per-version detail in `docs/design.md` §9.
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 

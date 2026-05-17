@@ -269,7 +269,7 @@ describe('I9 session_status enum', () => {
     const r = checkInvariants({ session_status: 'mystery_state' }, { cwd: tmp });
     assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.SESSION_STATUS_INVALID));
   });
-  for (const valid of [null, 'active', 'paused_budget', 'paused_checkpoint', 'verification_hang', 'cancelled']) {
+  for (const valid of [null, 'active', 'paused_budget', 'paused_checkpoint', 'verification_hang', 'blocked_hook', 'cancelled']) {
     it(`accepts ${valid === null ? 'null' : valid}`, () => {
       const r = checkInvariants({ session_status: valid }, { cwd: tmp });
       assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.SESSION_STATUS_INVALID));

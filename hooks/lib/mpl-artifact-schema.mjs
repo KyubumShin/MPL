@@ -57,6 +57,7 @@ const ARTIFACTS = [
     // `covers`, `interface_contract`, `success_criteria`. The earlier
     // schema rejected every valid decomposition.yaml.
     required: ['id', 'scope', 'impact', 'covers', 'interface_contract', 'success_criteria'],
+    customValidate: validateDecompositionContract,
   },
   {
     artifact: 'state-summary',
@@ -177,11 +178,64 @@ export function validateAgainstSchema(content, schema) {
       missingAnyOf.push(group);
     }
   }
+  if (typeof schema.customValidate === 'function') {
+    const custom = schema.customValidate(content);
+    missing.push(...(custom.missing ?? []));
+    missingAnyOf.push(...(custom.missingAnyOf ?? []));
+  }
   return {
     valid: missing.length === 0 && missingAnyOf.length === 0,
     missing,
     missingAnyOf,
   };
+}
+
+function parseDecompositionPhases(content) {
+  const phases = [];
+  let cur = null;
+
+  for (const rawLine of String(content || '').split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    const idMatch = line.match(/^\s*-\s+id:\s*["']?([^"'\s#]+)["']?/);
+    if (idMatch) {
+      if (cur) phases.push(cur);
+      cur = {
+        id: idMatch[1],
+        hasTestAgentRequired: false,
+        hasTestAgentRationale: false,
+        testAgentRequired: null,
+      };
+      continue;
+    }
+    if (!cur) continue;
+
+    const reqMatch = line.match(/^\s+test_agent_required\s*:\s*(true|false)\b/i);
+    if (reqMatch) {
+      cur.hasTestAgentRequired = true;
+      cur.testAgentRequired = reqMatch[1].toLowerCase() === 'true';
+      continue;
+    }
+
+    if (/^\s+test_agent_rationale\s*:/.test(line)) {
+      cur.hasTestAgentRationale = true;
+    }
+  }
+
+  if (cur) phases.push(cur);
+  return phases;
+}
+
+function validateDecompositionContract(content) {
+  const missing = [];
+  for (const phase of parseDecompositionPhases(content)) {
+    if (!phase.hasTestAgentRequired) {
+      missing.push(`${phase.id}.test_agent_required`);
+    }
+    if (phase.testAgentRequired === false && !phase.hasTestAgentRationale) {
+      missing.push(`${phase.id}.test_agent_rationale`);
+    }
+  }
+  return { missing, missingAnyOf: [] };
 }
 
 /**

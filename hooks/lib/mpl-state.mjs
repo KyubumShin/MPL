@@ -209,7 +209,8 @@ const DEFAULT_STATE = {
   // #35 (v0.14.1): "paused_checkpoint" added for orchestrator verbal pause (self-pause on checkpoint report)
   // #109 G4 (v0.18.0): "verification_hang" added — Stop hook detects when last_tool_at is older
   // than the hang threshold (default 15min) and marks the session for resume / user intervention.
-  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint" | "verification_hang"
+  // v0.18.3: "blocked_hook" makes explicit hook blocks visible to harnesses.
+  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint" | "verification_hang" | "blocked_hook"
   pause_reason: null,            // human-readable pause reason
   resume_from_phase: null,       // phase ID to resume from
   pause_timestamp: null,         // ISO timestamp of pause

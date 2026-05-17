@@ -35,7 +35,7 @@ import { existsSync, readFileSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const { readState, isMplActive } = await import(
+const { readState, writeState, isMplActive } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 const { readStdin } = await import(
@@ -48,6 +48,46 @@ function ok() {
 
 function block(reason) {
   console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
+}
+
+const HOOK_ID = 'mpl-require-test-agent';
+
+function recordBlockedHook(cwd, phaseId, reason) {
+  try {
+    writeState(cwd, {
+      session_status: 'blocked_hook',
+      blocked_by_hook: HOOK_ID,
+      blocked_phase: phaseId,
+      block_reason: reason,
+      resume_instruction:
+        `Dispatch mpl-test-agent for ${phaseId}, or record a user-approved ${phaseId} override in .mpl/config/test-agent-override.json, then retry the blocked phase transition.`,
+      blocked_at: new Date().toISOString(),
+    });
+  } catch {
+    // Visibility is best-effort; the hook block itself remains authoritative.
+  }
+}
+
+function clearBlockedHook(cwd, phaseId) {
+  try {
+    const state = readState(cwd) || {};
+    if (
+      state.session_status === 'blocked_hook' &&
+      state.blocked_by_hook === HOOK_ID &&
+      state.blocked_phase === phaseId
+    ) {
+      writeState(cwd, {
+        session_status: 'active',
+        blocked_by_hook: null,
+        blocked_phase: null,
+        block_reason: null,
+        resume_instruction: null,
+        blocked_at: null,
+      });
+    }
+  } catch {
+    // Best-effort cleanup only.
+  }
 }
 
 /**
@@ -191,6 +231,7 @@ try {
   const override = loadOverride(cwd);
   if (override[phaseId] || override['*']) {
     // Override accepted — the reason is logged but we do not block.
+    clearBlockedHook(cwd, phaseId);
     ok();
     process.exit(0);
   }
@@ -199,6 +240,7 @@ try {
   const state = readState(cwd) || {};
   const dispatched = state.test_agent_dispatched || {};
   if (dispatched[phaseId]) {
+    clearBlockedHook(cwd, phaseId);
     ok();
     process.exit(0);
   }
@@ -207,14 +249,15 @@ try {
   const rationale = phase.test_agent_rationale
     ? ` (rationale: ${phase.test_agent_rationale})`
     : '';
-  block(
+  const reason =
     `[MPL AD-0007] Phase ${phaseId} is marked test_agent_required=true${rationale} ` +
       `but mpl-test-agent was not dispatched. You MUST run Task(subagent_type="mpl-test-agent", ` +
       `model="sonnet", prompt=...) with the phase's interface_contract + impact files ` +
       `BEFORE proceeding to the next phase. code_author == test_author is a tautology, ` +
       `not a verification (AD-0004). To bypass with user consent, add ${phaseId} to ` +
-      `.mpl/config/test-agent-override.json with a reason.`
-  );
+      `.mpl/config/test-agent-override.json with a reason.`;
+  recordBlockedHook(cwd, phaseId, reason);
+  block(reason);
 } catch {
   // Hook must never wedge the pipeline.
   ok();
