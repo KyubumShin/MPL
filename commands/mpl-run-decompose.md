@@ -23,11 +23,11 @@ Load this when transitioning from pre-execution analysis to phase decomposition.
 
 The orchestrator never holds a Write authority on `decomposition.yaml` for the **initial creation path** (3.0 → 3.1 → "After Receiving Output"). If validation fails, surface the failure and re-dispatch the agent with the diagnostics; do not patch the file by hand.
 
-**Known carve-out (Step 3-F mechanical patches)**: the feedback path at Step 3-F currently performs surgical in-place patches (Types A/C/E: phase_domain swap, risk_notes append, ai_complexity default) without re-dispatching the agent. These are deterministic field-level edits informed by Pre-Execution feedback, not fabricated decompositions. They remain orchestrator-Write for now to avoid full re-dispatch cost. Treat this as an inherited exception to be revisited (TODO: route 3-F through the agent for purity). Type B (phase split) and Type D (unmapped requirements) already re-dispatch the agent.
+**Recomposition path**: once `.mpl/mpl/decomposition.yaml` exists, every graph change is a decomposer-owned recomposition. The decomposer must first write `.mpl/mpl/decomposition-deltas/recompose-{N}.yaml`, then write the full updated `.mpl/mpl/decomposition.yaml` with `recompose_count: N`. The orchestrator must not perform Step 3-F field patches, phase splits, or APPEND-MODE recovery edits itself.
 
 **Why this rule exists**: an earlier autonomous-mode shortcut had the orchestrator write a 5-phase decomposition itself ("pragmatic decomposition"). It was caught by `mpl-require-covers.mjs` (covers missing) but only because covers happened to be missing — main-context fabrications can also pass schema-checks while silently omitting the agent's Step 5.5 / 5.6 / 6.5 / 9.7 synthesis (type_policy, error_spec, contract_files, intent invariants). Moving the Write into the agent removes the orchestrator's ability to fabricate at all.
 
-**How this rule applies under autonomous mandates**: a user instruction like "no questions, run autonomously" authorizes the agent to skip *user-facing prompts*, never to skip *agent dispatches*. Phase 0 artifacts (PP, core-scenarios, design-intent, user-contract) remain orchestrator-authored; everything from Step 3 onward is agent-authored. APPEND-MODE (3.1 dispatch with `APPEND-MODE:` prefix) is also agent-authored end-to-end — the agent re-Writes the full updated file per `agents/mpl-decomposer.md` Rule 9.
+**How this rule applies under autonomous mandates**: a user instruction like "no questions, run autonomously" authorizes the agent to skip *user-facing prompts*, never to skip *agent dispatches*. Phase 0 artifacts (PP, core-scenarios, design-intent, user-contract) remain orchestrator-authored; everything from Step 3 onward is agent-authored. APPEND-MODE/RECOMPOSE-MODE is also agent-authored end-to-end — the agent writes the delta artifact and then re-Writes the full updated file per `agents/mpl-decomposer.md` Rule 9.
 
 ### 3.0: Ambiguity Gate — Delegated to Stage 2 Re-Entry (Issue #51)
 
@@ -105,7 +105,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      CRITICAL: Do NOT scope down. Every feature, requirement, and component in the user's spec must be covered by at least one phase. If the spec describes 10 features, all 10 must appear in the decomposition. Create as many phases as needed — there is no hard cap on phase count.
 
      Use Phase 0 artifacts to inform decomposition decisions — they contain pre-analyzed API contracts, usage patterns, type policies, and error specifications. Use the Pre-Execution Analysis's Recommended Execution Order (section 7) to guide phase ordering, and its Gap Analysis (sections 1-4) to catch missing requirements. **Write the YAML directly to `.mpl/mpl/decomposition.yaml` using the Write tool**, then return a single confirmation line (e.g., `Wrote .mpl/mpl/decomposition.yaml — 5 phases, 3 tiers.`). Do NOT print the YAML body in your response.
-     Top-level graph metadata is REQUIRED: `graph_version`, `generated_by: mpl-decomposer`, `recompose_count`, `completed_phase_policy`, and `goal_contract_hash` (MUST equal sha256(normalized `.mpl/goal-contract.yaml`)). The write is blocked if graph metadata is missing, the hash is stale, phase `goal_trace` does not cover every Goal Contract AC/AX id, or any `interface_contract.requires[].from_phase` points to an unknown/self phase.
+     Top-level graph metadata is REQUIRED: `graph_version`, `generated_by: mpl-decomposer`, `recompose_count`, `completed_phase_policy`, and `goal_contract_hash` (MUST equal sha256(normalized `.mpl/goal-contract.yaml`)). The write is blocked if graph metadata is missing, the hash is stale, phase `goal_trace` does not cover every Goal Contract AC/AX id, any `interface_contract.requires[].from_phase` points to an unknown/self phase, or an existing graph changes without a matching `.mpl/mpl/decomposition-deltas/recompose-N.yaml`.
      Each phase: id, name, phase_domain (F-28: db|api|ui|algorithm|test|ai|infra|general),
      pp_proximity (pp_core|pp_adjacent|non_pp — see classification rules below),
      phase_subdomain (F-39, optional: tech-stack e.g. react, prisma, langchain),
@@ -398,36 +398,29 @@ if feedback_conditions is empty:
   Report: "[MPL] Step 3-F: No feedback conditions. Proceeding to verification planning."
   -> proceed to Step 3-B
 
-type_a_or_c = feedback_conditions.filter(fc => fc.type in ["A", "C", "E"])
-type_b = feedback_conditions.filter(fc => fc.type == "B")
-type_d = feedback_conditions.filter(fc => fc.type == "D")
+recompose_feedback = feedback_conditions.filter(fc => fc.type in ["A", "B", "C", "D", "E"])
 
-// Type A/C/E: Lightweight fixes — patch decomposition in-place
-for each fc in type_a_or_c:
-  apply_patch(decomposition, fc)
-  // A: change phase_domain from infra/algorithm to ai
-  // C: append to risk_notes
-  // E: add default ai_complexity field
-Save patched decomposition to .mpl/mpl/decomposition.yaml
-
-// Type B: Phase split — patch in-place (no re-invocation)
-for each fc in type_b:
-  split_phase(decomposition, fc.phase_id)
-Save updated decomposition
-
-// Type D: Re-invoke Decomposer (expensive, max 1 time)
-if type_d is not empty AND state.step3f_count == 0:
+// All graph-affecting feedback: Recompose through decomposer (delta-first, no orchestrator patch)
+if recompose_feedback is not empty AND state.step3f_count == 0:
   state.step3f_count = 1
-  Report: "[MPL] Step 3-F: {type_d.length} unmapped requirements. Re-invoking Decomposer."
-  // Re-run Step 3 with additional constraint:
-  //   "The following requirements from Pre-Execution Analysis are NOT covered: {type_d}"
-  -> return to Step 3 with feedback constraints
+  Report: "[MPL] Step 3-F: recomposing graph for {recompose_feedback.length} feedback conditions."
+  Task(subagent_type="mpl-decomposer", prompt=`
+    RECOMPOSE-MODE:
+    Existing decomposition.yaml must remain coherent. Do not Edit/MultiEdit it.
+    First write .mpl/mpl/decomposition-deltas/recompose-{N}.yaml where
+    N = current recompose_count + 1, then Write the full updated
+    .mpl/mpl/decomposition.yaml with recompose_count: N.
 
-elif type_d is not empty AND state.step3f_count >= 1:
-  Report: "[MPL] Step 3-F: Unmapped requirements remain but feedback loop exhausted. Logging as caveats."
+    Apply these Step 3-F feedback conditions:
+    ${JSON.stringify(recompose_feedback, null, 2)}
+  `)
+  -> proceed to Step 3-B after reading the recomposed graph
+
+elif recompose_feedback is not empty AND state.step3f_count >= 1:
+  Report: "[MPL] Step 3-F: recomposition feedback remains after one attempt. Logging as caveats."
   // Log as READY_WITH_CAVEATS
 
-Report: "[MPL] Step 3-F: Applied {feedback_conditions.length} feedback conditions ({type_a_or_c.length} patches, {type_b.length} splits, {type_d.length} re-invocations)."
+Report: "[MPL] Step 3-F: Applied {feedback_conditions.length} feedback conditions via recomposition."
 ```
 
 ---

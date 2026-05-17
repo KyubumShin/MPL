@@ -126,6 +126,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-require-decomposition-delta.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-baseline-guard.mjs\"",
             "timeout": 3
           }
