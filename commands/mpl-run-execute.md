@@ -528,19 +528,31 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
 ```
 1. Validate state_summary required sections: ["What was implemented", "Phase Decisions", "Verification results"]
    - Missing -> request supplement (1 attempt). Still missing -> warn, proceed (non-blocking)
-2. Save state_summary to .mpl/mpl/phases/phase-N/state-summary.md
-2.5. Generate and save code diff for N-1 context transfer (v0.7.0):
+2. Build `verification.md` with a mandatory `## Evidence Latch` section. For every
+   token in this phase's `evidence_required`, include a PASS row backed by the
+   machine source used by that token:
+   - `command`: command string + `exit_code=0`
+   - `test_agent`: `state.test_agent_dispatched.{phase_id}.timestamp`
+   - `goal_trace`: covered AC/AX ids from `goal_trace`
+   - any other token: token-specific PASS evidence, command, file, or result
+3. Save verification to .mpl/mpl/phases/phase-N/verification.md
+   - `hooks/mpl-require-phase-evidence.mjs` blocks this write if the latch is
+     missing or stale.
+4. Save state_summary to .mpl/mpl/phases/phase-N/state-summary.md
+   - This happens after verification because state-summary is disk-truth for
+     completed phase count; the hook blocks summary writes until verification
+     latch exists.
+4.5. Generate and save code diff for N-1 context transfer (v0.7.0):
      diff = Bash("git diff HEAD~1 --stat --patch -- {phase_impact_files}", timeout=10000)
      Write(".mpl/mpl/phases/phase-N/changes.diff", diff)
      // If git diff fails (no commits yet, etc.), skip silently — diff is optional context
-3. Save verification to .mpl/mpl/phases/phase-N/verification.md
-4. Update phase-decisions.md with result.new_decisions
-5. Process discoveries (see Discovery Processing section)
-5.5. **Process warnings (HA-04, v0.12.0)**: If result.warnings is non-empty, store warnings for next Seed generation:
+5. Update phase-decisions.md with result.new_decisions
+6. Process discoveries (see Discovery Processing section)
+6.5. **Process warnings (HA-04, v0.12.0)**: If result.warnings is non-empty, store warnings for next Seed generation:
      - Append to `.mpl/mpl/phases/phase-N/warnings.json` (for traceability)
      - When generating the next Phase Seed, include relevant warnings in the `prior_summaries` context
      - Warnings that affect adjacent phases (dependency substitutions, platform constraints) → inject into next Seed's constraints section
-6. **Update execution state (P2-6 — unified `.mpl/state.json.execution`)**:
+7. **Update execution state (P2-6 — unified `.mpl/state.json.execution`)**:
    ```
    mpl_state_write(cwd, {
      execution: {

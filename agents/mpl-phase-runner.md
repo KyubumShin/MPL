@@ -152,6 +152,11 @@ disallowedTools: []
         "pass_rate": 100,
         "total_tests": 0,
         "passed_tests": 0,
+        "evidence_latch": [
+          { "type": "command", "status": "PASS", "evidence": "command + exit_code=0" },
+          { "type": "test_agent", "status": "PASS", "evidence": "state.test_agent_dispatched.phase-N.timestamp" },
+          { "type": "goal_trace", "status": "PASS", "evidence": "AC/AX ids covered by this phase" }
+        ],
         "criteria_results": [
           { "criterion": "str", "pass": true, "evidence": "str" }
         ]
@@ -190,6 +195,7 @@ disallowedTools: []
     - **AP-RUNNER-02 · False verification**: claiming `success_criteria` pass without running commands. Always run the actual command and record real evidence (exit code + output tail) — self-report without execution is the dominant verification-failure shape.
     - **AP-RUNNER-03 · Weak state summary**: omitting required sections. The next phase has no other source of truth about what happened here; missing sections force later phases to re-discover context and drift.
     - **AP-RUNNER-04 · Silent invariant violation (#50)**: committing code that violates a `verification_plan.invariants[]` entry without filing a Discovery. Teleological invariants are verbatim user-confirmed ground truth — rationalizing around them defeats the mechanical enforcement model.
+    - **AP-RUNNER-05 · Unlatched completion**: writing state-summary.md or marking `.mpl/state.json.execution.phase_details[].status="completed"` before `verification.md` has a `## Evidence Latch` row for every phase `evidence_required` token. The hook blocks this because state-summary.md is disk-truth for completed phase count.
   </Failure_Modes_To_Avoid>
 
   <Anti_Patterns_Prohibited>
