@@ -1,8 +1,8 @@
-# MPL (Micro-Phase Loop) v0.18.1
+# MPL (Micro-Phase Loop) v0.18.2
 
 **Prevention over cure. Specification over debugging.**
 
-A Claude Code plugin that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
+An agent workflow plugin for Claude Code and Codex CLI that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
 [Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-eight-minds) · [Under the Hood](#under-the-hood)
 
@@ -62,7 +62,9 @@ The moment the orchestrator touches source files, it becomes invested in its own
 
 ## Quick Start
 
-**Step 1 — Add marketplace & install:**
+**Step 1 — Install for your agent runtime:**
+
+Claude Code:
 
 ```bash
 # Register the MPL marketplace (one-time)
@@ -77,6 +79,19 @@ Or from inside Claude Code:
 ```
 /plugin marketplace add https://github.com/KyubumShin/MPL.git
 /plugin install mpl
+```
+
+Codex CLI:
+
+```bash
+# Register the MPL marketplace. The marketplace entry installs MPL by default.
+codex plugin marketplace add KyubumShin/MPL
+```
+
+For local development, point Codex at this checkout:
+
+```bash
+codex plugin marketplace add /path/to/MPL
 ```
 
 <details>
@@ -104,6 +119,7 @@ The setup wizard automatically:
 - Detects available tools (LSP, AST)
 - Configures standalone fallbacks if needed
 - Optionally enables the HUD statusline
+- Registers the MPL MCP server for the active runtime when available
 
 **Step 3 — Start building:**
 
@@ -468,6 +484,8 @@ mpl small add retry logic                     # → forces Standard
 # Diagnostics
 /mpl:mpl-doctor
 ```
+
+Codex also discovers the same MPL skills from the plugin. Use `mpl ...` in a Codex session, or invoke the installed MPL skill by name from the skills menu.
 
 ## Testing
 

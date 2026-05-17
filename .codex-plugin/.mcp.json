@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mpl-server": {
+      "command": "node",
+      "args": ["./tools/mpl-mcp-server-launcher.mjs"],
+      "cwd": "."
+    }
+  }
+}

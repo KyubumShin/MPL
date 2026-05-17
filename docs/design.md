@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.18.1 Design Document
+# MPL (Micro-Phase Loop) v0.18.2 Design Document
 
 ## 1. Overview
 
@@ -484,6 +484,24 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.18.2 — Dual Runtime Install Metadata (2026-05-17)
+
+MPL now publishes first-class install metadata for both Claude Code and Codex CLI while keeping one shared implementation for skills, commands, hooks, agents, and the MCP server. This mirrors the Ouroboros install surface pattern: each runtime gets its own manifest, but the workflow contract stays local-first and shared.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Codex plugin manifest | None | `.codex-plugin/plugin.json` with skills + MCP server metadata and Codex UI interface fields | Install metadata | Makes MPL discoverable/installable by Codex without forking the runtime files |
+| Codex marketplace | None | `.agents/plugins/marketplace.json` exposes `mpl` with `INSTALLED_BY_DEFAULT` policy | Install metadata | Enables one-command `codex plugin marketplace add KyubumShin/MPL` onboarding |
+| Codex MCP config | Claude-only `.mcp.json` used `${CLAUDE_PLUGIN_ROOT}` | `.codex-plugin/.mcp.json` uses plugin-root relative `node ./tools/mpl-mcp-server-launcher.mjs` with `cwd: "."` | MCP config | Avoids Claude-specific env expansion in Codex and bootstraps `mcp-server/` on first use without MCP stdout noise |
+| Setup/doctor docs | Claude-only manifest assumptions | Setup and doctor protocols check Claude and Codex manifests and keep runtime-specific settings separate | Skill + agent docs | Prevents Codex install from being reported as partially installed only because `.claude/` settings are absent |
+| Version alignment | Version checklist covered Claude + MCP only | Tests and bump checklist cover Claude, Codex, marketplace, MCP package, and README/docs headings | Test + process | Prevents stale version drift across dual-runtime metadata |
+
+**Affected files:** `.codex-plugin/plugin.json`, `.codex-plugin/.mcp.json`, `.agents/plugins/marketplace.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `tools/mpl-mcp-server-launcher.mjs`, `mcp-server/package.json`, `mcp-server/package-lock.json`, `README.md`, `README_ko.md`, `docs/standalone.md`, `docs/config-schema.md`, `docs/roadmap/overview.md`, `skills/mpl-setup/SKILL.md`, `skills/mpl-doctor/SKILL.md`, `skills/mpl-version-bump/SKILL.md`, `agents/mpl-doctor.md`, `hooks/__tests__/mpl-install-metadata.test.mjs`.
+
+**Breaking changes:** None. Existing Claude Code install commands and runtime paths remain unchanged.
+
+**Tests:** Adds install metadata/version alignment coverage in `hooks/__tests__/mpl-install-metadata.test.mjs`.
 
 ### v0.18.1 — v3.10 P0 Enforcement Track (2026-05-06)
 

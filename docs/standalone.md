@@ -1,7 +1,8 @@
 # MPL Standalone Mode
 
 MPL can operate without LSP tools installed. When LSP tools
-(lsp_*, ast_grep_*) are unavailable, MPL falls back to built-in Claude Code tools.
+(lsp_*, ast_grep_*) are unavailable, MPL falls back to built-in agent tools in
+the active runtime (Claude Code or Codex CLI).
 
 ## Tool Fallback Matrix
 
@@ -56,8 +57,20 @@ writeState(cwd, { tool_mode: tool_mode })
 Run `/mpl:mpl-setup` to configure MPL. The setup wizard:
 1. Detects available tools (LSP, ast_grep, MCP servers)
 2. Sets tool_mode in `.mpl/config.json`
-3. Installs recommended MCP servers if missing
-4. Reports readiness status
+3. Verifies the runtime manifest (`.claude-plugin` or `.codex-plugin`)
+4. Installs recommended MCP servers if missing
+5. Reports readiness status
+
+## Runtime Manifests
+
+MPL uses the same runtime files across both supported agents:
+
+| Runtime | Install metadata | MCP config |
+|---------|------------------|------------|
+| Claude Code | `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` | `.mcp.json` |
+| Codex CLI | `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json` | `.codex-plugin/.mcp.json` |
+
+The Codex MCP config uses a plugin-root relative launcher (`node ./tools/mpl-mcp-server-launcher.mjs` with `cwd: "."`). The launcher builds `mcp-server/` on first use without writing to MCP stdout. The Claude config keeps `${CLAUDE_PLUGIN_ROOT}` because Claude MCP commands resolve from the user workspace unless the plugin root is explicit.
 
 ## Diagnostics
 

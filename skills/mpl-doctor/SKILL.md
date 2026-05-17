@@ -11,8 +11,8 @@ Run comprehensive diagnostics on the MPL installation and report health status.
 ### Step 1: Locate MPL Root
 
 Find the MPL plugin root directory:
-1. Check if `MPL/.claude-plugin/plugin.json` exists relative to the project root
-2. If not found, search for `.claude-plugin/plugin.json` in parent directories
+1. Check if `MPL/.claude-plugin/plugin.json` or `MPL/.codex-plugin/plugin.json` exists relative to the project root
+2. If not found, search for `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` in parent directories
 3. If not found, report: "MPL plugin not found. Run `/mpl:mpl-setup` to install."
 
 Record the MPL root path for all subsequent checks.

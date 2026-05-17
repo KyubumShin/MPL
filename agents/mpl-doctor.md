@@ -22,10 +22,13 @@ disallowedTools: Write, Edit, Task
     Run all 11 categories in order. For each, report PASS / WARN / FAIL with evidence.
 
     ### Category 1: Plugin Structure
-    - **Scope**: `.claude-plugin/plugin.json`
-    - Check `MPL/.claude-plugin/plugin.json` exists and is valid JSON
-    - Verify fields: name, version, description, commands, skills, hooks
-    - FAIL if missing or invalid JSON
+    - **Scope**: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`
+    - Check at least one runtime manifest exists and is valid JSON
+    - If `.claude-plugin/plugin.json` exists, verify fields: name, version, description, commands, skills, hooks
+    - If `.codex-plugin/plugin.json` exists, verify fields: name, version, description, skills, mcpServers, interface
+    - If both Claude and Codex manifests exist, verify their `name` and `version` match
+    - If `.agents/plugins/marketplace.json` exists, verify it exposes plugin `mpl` and the entry points at the local plugin root
+    - FAIL if all runtime manifests are missing or invalid JSON
     - WARN if optional fields missing
 
     ### Category 2: Hooks
@@ -42,7 +45,7 @@ disallowedTools: Write, Edit, Task
     - List all .md files in `MPL/agents/`
     - For each: verify YAML frontmatter has `name`, `description`, `model`
     - Verify `model` is one of: haiku, sonnet, opus
-    - Expected agents (11 total, v0.18.1):
+    - Expected agents (11 total, v0.18.2):
       mpl-adversarial-reviewer, mpl-codebase-analyzer, mpl-codex-auditor,
       mpl-decomposer, mpl-doctor, mpl-git-master, mpl-interviewer,
       mpl-phase-runner, mpl-phase0-analyzer, mpl-seed-generator, mpl-test-agent
@@ -104,7 +107,7 @@ disallowedTools: Write, Edit, Task
 
     **Tier 1 (Built-in, always available):**
     - Read, Write, Edit, Bash, Glob, Grep, Task, Agent
-    - These are Claude Code native tools. Always PASS.
+    - These are native agent tools on Claude Code and/or Codex equivalents. Always PASS when the runtime exposes them.
 
     **Tier 2 (LSP tools, optional):**
     - lsp_hover, lsp_goto_definition, lsp_find_references,
@@ -164,12 +167,13 @@ disallowedTools: Write, Edit, Task
 
     ### Category 10: MCP Server (v0.8.1)
     - **Scope**: `mcp-server/**`
-    - Check `${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js` exists
-    - Check `${CLAUDE_PLUGIN_ROOT}/mcp-server/node_modules/@modelcontextprotocol` exists
+    - Resolve plugin root from the runtime manifest location; do not assume Claude-only `${CLAUDE_PLUGIN_ROOT}`
+    - Check `<plugin_root>/mcp-server/dist/index.js` exists
+    - Check `<plugin_root>/mcp-server/node_modules/@modelcontextprotocol` exists
     - If dist exists but node_modules missing:
       - FAIL: "MCP Server dependencies not installed. Run: cd mcp-server && npm install"
     - If both exist:
-      - Verify server can load: `node -e "import('${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.js')"`
+      - Verify server can load: `node -e "import('<plugin_root>/mcp-server/dist/index.js')"`
       - PASS if loads successfully
       - FAIL if import error
     - If dist missing but source exists:
