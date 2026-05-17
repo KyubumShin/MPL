@@ -407,6 +407,7 @@ if recompose_feedback is not empty AND state.step3f_count == 0:
   Task(subagent_type="mpl-decomposer", prompt=`
     RECOMPOSE-MODE:
     Existing decomposition.yaml must remain coherent. Do not Edit/MultiEdit it.
+    Completed phase blocks are immutable; copy them byte-for-byte.
     First write .mpl/mpl/decomposition-deltas/recompose-{N}.yaml where
     N = current recompose_count + 1, then Write the full updated
     .mpl/mpl/decomposition.yaml with recompose_count: N.

@@ -68,6 +68,7 @@ const DEFAULTS = {
   phase_contract_graph_required: true,
   decomposition_delta_required: true,
   phase_evidence_latch_required: true,
+  completed_phase_immutability_required: true,
   e2e_authenticity_required: true,
   finalize_artifacts_required: true,
   convergence: {

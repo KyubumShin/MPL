@@ -78,8 +78,9 @@ while state.e2e_recovery.iter < state.e2e_recovery.max_iter AND failures not emp
         below without modifying existing phase ids. First write
         .mpl/mpl/decomposition-deltas/recompose-{N}.yaml where N =
         current recompose_count + 1, then Write the full updated
-        decomposition.yaml with recompose_count: N. Each appended phase MUST
-        include covers:[UC-N] per 0.16 Tier B and test_agent_required:true.
+        decomposition.yaml with recompose_count: N. Completed phase blocks are
+        immutable; copy them byte-for-byte. Each appended phase MUST include
+        covers:[UC-N] per 0.16 Tier B and test_agent_required:true.
 
         Append hints (from mpl_diagnose_e2e_failure):
         ${JSON.stringify(diag.append_phases, null, 2)}

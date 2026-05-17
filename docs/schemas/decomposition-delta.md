@@ -43,6 +43,8 @@ Allowed `operations[].op` values:
   - a matching `.mpl/mpl/decomposition-deltas/recompose-N.yaml`
   - a valid delta whose `base_recompose_count` and `target_recompose_count`
     match the old and new graph counts
+- Completed phase blocks remain immutable even during a valid recomposition.
+  Append or change incomplete phases instead of editing completed contracts.
 - Delta writes are also validated against the current graph count.
 - `.mpl/config.json { "decomposition_delta_required": false }` is an explicit
   migration opt-out.
