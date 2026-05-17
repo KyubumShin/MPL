@@ -197,6 +197,7 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 | `goal_trace_required` | boolean | `true` | Blocks `decomposition.yaml` writes unless top-level `goal_contract_hash` matches the frozen Goal Contract and phase `goal_trace` covers every AC/AX id. | `mpl-require-goal-trace.mjs` |
 | `phase_contract_graph_required` | boolean | `true` | Blocks `decomposition.yaml` writes unless graph metadata, per-phase evidence/change policy, and non-dangling phase dependencies are present. | `mpl-require-phase-contract-graph.mjs` |
 | `decomposition_delta_required` | boolean | `true` | Blocks changes to an existing `decomposition.yaml` unless `recompose_count` increments by one and a matching `.mpl/mpl/decomposition-deltas/recompose-N.yaml` exists. | `mpl-require-decomposition-delta.mjs` |
+| `phase_evidence_latch_required` | boolean | `true` | Blocks phase `verification.md`, `state-summary.md`, or completion state writes unless the phase's `evidence_required` tokens are latched in `verification.md`. | `mpl-require-phase-evidence.mjs` |
 | `finalize_artifacts_required` | boolean | `true` | Blocks `finalize_done=true` unless the goal contract's required artifacts, RUNBOOK final section, finalize timestamps, security evidence, and optional commit evidence are present. Override file: `.mpl/config/finalize-artifact-override.json`. | `mpl-require-finalize-artifacts.mjs` |
 
 ## Adversarial Reviewer (P0-A, #103)

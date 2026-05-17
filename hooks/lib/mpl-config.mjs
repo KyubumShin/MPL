@@ -67,6 +67,7 @@ const DEFAULTS = {
   goal_trace_required: true,
   phase_contract_graph_required: true,
   decomposition_delta_required: true,
+  phase_evidence_latch_required: true,
   e2e_authenticity_required: true,
   finalize_artifacts_required: true,
   convergence: {

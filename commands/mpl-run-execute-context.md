@@ -210,6 +210,10 @@ Phase Runner MUST structure state-summary.md with these sections in order:
 
 ## Verification Results
 {pass/fail details — L2 only}
+
+## Evidence Latch
+{copy the PASS rows from verification.md; each phase `evidence_required` token
+must have a latch row before state-summary.md can be written}
 ```
 
 This structure enables mechanical L0/L1 extraction without LLM re-summarization.
@@ -383,4 +387,3 @@ Reference risk_level from the current Phase info in state.json:
 - Maintain only 1 worktree at a time (no parallel worktrees)
 - Do not copy `.mpl/` directory to worktree (reference original)
 - Phase Runner's Read/Grep scope inside worktree is remapped to the worktree path
-

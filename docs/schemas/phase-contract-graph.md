@@ -55,6 +55,9 @@ phases:
 - `hooks/mpl-require-decomposition-delta.mjs` blocks changes to an existing
   graph unless a valid `decomposition-deltas/recompose-N.yaml` exists and
   `recompose_count` advances by exactly one.
+- `hooks/mpl-require-phase-evidence.mjs` consumes each phase's
+  `evidence_required` list and blocks phase completion artifacts/state until
+  `verification.md` contains a matching Evidence Latch.
 
 ## Notes
 
