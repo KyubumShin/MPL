@@ -282,15 +282,32 @@ Announce: `[MPL] Stage 1.3 complete. user_cases=${result.user_cases.length} defe
 ### Stage 1.4: Goal Contract Freeze
 
 Create `.mpl/goal-contract.yaml` as the pipeline constitution. This is the
-MPL equivalent of an Ouroboros Seed: one artifact that ties the Codex goal /
+MPL equivalent of an Ouroboros Seed: one artifact that ties the runtime goal /
 raw request to the project pivot, ontology, variation axes, acceptance
 criteria, E2E authenticity policy, security policy, and finalize evidence.
+
+Runtime source naming:
+- Detect active runtime as `codex`, `claude`, or `unknown`.
+  - `claude` when `${CLAUDE_PLUGIN_ROOT}` is available or the active plugin
+    manifest is `.claude-plugin/plugin.json`.
+  - `codex` when the active plugin manifest is `.codex-plugin/plugin.json` or
+    `CODEX_HOME`/Codex plugin marketplace context is present.
+  - `unknown` when neither signal is reliable.
+- Prefer `runtime_goal` as the canonical goal text field.
+- Also write the runtime-specific compatibility alias:
+  - Codex: `codex_goal: runtime_goal`
+  - Claude Code: `claude_goal: runtime_goal`
+- Do not force `codex_goal` in Claude-only sessions. For old consumers,
+  `hooks/lib/mpl-goal-contract.mjs` still accepts legacy `codex_goal`.
 
 ```
 goal_contract = {
   version: 1,
   source: {
-    codex_goal: active Codex goal text if available else null,
+    runtime: "codex" | "claude" | "unknown",
+    runtime_goal: active runtime goal text if available else null,
+    codex_goal: runtime == "codex" ? runtime_goal : null,
+    claude_goal: runtime == "claude" ? runtime_goal : null,
     user_request: user_request,
     user_request_hash: sha256(normalize(user_request)),
   },

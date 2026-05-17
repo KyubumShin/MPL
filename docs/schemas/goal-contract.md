@@ -4,7 +4,7 @@ File: `.mpl/goal-contract.yaml`
 
 The Goal Contract is the MPL pipeline constitution. Phase 0 freezes it before
 decomposition, and hooks use it to decide whether a later completion claim is
-admissible. It is the bridge from a Codex goal or raw user request to machine
+admissible. It is the bridge from a runtime goal or raw user request to machine
 evidence.
 
 ## Required Shape
@@ -12,7 +12,10 @@ evidence.
 ```yaml
 version: 1
 source:
-  codex_goal: "string or null"
+  runtime: "codex | claude | unknown"
+  runtime_goal: "goal text from the active runtime, or null"
+  codex_goal: "compatibility alias when runtime == codex, or null"
+  claude_goal: "compatibility alias when runtime == claude, or null"
   user_request: "string"
   user_request_hash: "sha256 of normalized user request"
 
@@ -114,7 +117,7 @@ not by accepting a looser completion contract.
 
 The hook-level readiness check requires:
 
-- source goal or user request plus `user_request_hash`
+- runtime goal or user request plus `user_request_hash`
 - `mission.goal`, `mission.project_pivot`, and at least one
   `must_ship_outcomes` entry
 - at least one ontology entity

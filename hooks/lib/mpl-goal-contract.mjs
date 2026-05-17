@@ -135,7 +135,10 @@ export function parseGoalContractText(text) {
 
   return {
     source: {
+      runtime: scalarInBlock(source, 'runtime'),
+      runtime_goal: scalarInBlock(source, 'runtime_goal'),
       codex_goal: scalarInBlock(source, 'codex_goal'),
+      claude_goal: scalarInBlock(source, 'claude_goal'),
       user_request: scalarInBlock(source, 'user_request'),
       user_request_hash: scalarInBlock(source, 'user_request_hash'),
     },
@@ -175,8 +178,13 @@ export function validateGoalContractText(text) {
   const missing = [];
   const warnings = [];
 
-  if (!contract.source.codex_goal && !contract.source.user_request) {
-    missing.push('source.codex_goal_or_user_request');
+  if (
+    !contract.source.runtime_goal
+    && !contract.source.codex_goal
+    && !contract.source.claude_goal
+    && !contract.source.user_request
+  ) {
+    missing.push('source.runtime_goal_or_user_request');
   }
   if (!contract.source.user_request_hash) missing.push('source.user_request_hash');
   if (!contract.mission.goal) missing.push('mission.goal');
