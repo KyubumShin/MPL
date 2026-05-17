@@ -307,6 +307,10 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     Do NOT print the YAML body in the response — it lives on disk now. Validation hooks (`mpl-require-covers.mjs`, future `mpl-require-decomposition-fields.mjs`) run on your Write call; if blocked, surface the hook reason and re-emit a corrected YAML in a follow-up Write. Never re-route the Write through the orchestrator.
 
     ```yaml
+    graph_version: 1
+    generated_by: mpl-decomposer
+    recompose_count: 0
+    completed_phase_policy: immutable_by_default
     goal_contract_hash: "sha256(.mpl/goal-contract.yaml)" # REQUIRED. Hook `mpl-require-goal-trace.mjs` blocks stale/missing hashes.
 
     architecture_anchor:
@@ -322,6 +326,11 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         pp_proximity: string        # pp_core|pp_adjacent|non_pp
         scope: string               # 1-2 sentence scope
         rationale: string           # why this position
+        evidence_required:          # REQUIRED. What proof latches phase completion.
+          - command
+          - test_agent
+          - goal_trace
+        change_policy: append_delta_only # REQUIRED. Phase contract changes go through decomposition-delta/recompose.
 
         covers:                     # 0.16 Tier B: which UCs this phase advances (REQUIRED)
           - string                  # UC-NN id from .mpl/requirements/user-contract.md, or "internal"

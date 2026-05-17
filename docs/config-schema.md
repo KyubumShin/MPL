@@ -195,6 +195,7 @@ the immutable post-Phase-0 snapshot consumed by delta calculation and rollback.
 |-------|------|---------|-------------|--------|
 | `goal_contract_required` | boolean | `true` | Blocks decomposer dispatch until `.mpl/goal-contract.yaml` freezes source goal, project pivot, ontology, variation axes, acceptance criteria, E2E policy, security policy, and completion evidence. | `mpl-ambiguity-gate.mjs` |
 | `goal_trace_required` | boolean | `true` | Blocks `decomposition.yaml` writes unless top-level `goal_contract_hash` matches the frozen Goal Contract and phase `goal_trace` covers every AC/AX id. | `mpl-require-goal-trace.mjs` |
+| `phase_contract_graph_required` | boolean | `true` | Blocks `decomposition.yaml` writes unless graph metadata, per-phase evidence/change policy, and non-dangling phase dependencies are present. | `mpl-require-phase-contract-graph.mjs` |
 | `finalize_artifacts_required` | boolean | `true` | Blocks `finalize_done=true` unless the goal contract's required artifacts, RUNBOOK final section, finalize timestamps, security evidence, and optional commit evidence are present. Override file: `.mpl/config/finalize-artifact-override.json`. | `mpl-require-finalize-artifacts.mjs` |
 
 ## Adversarial Reviewer (P0-A, #103)

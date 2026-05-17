@@ -79,6 +79,9 @@ overrides: []
 - `hooks/mpl-require-goal-trace.mjs` blocks `decomposition.yaml` writes when
   top-level `goal_contract_hash` is missing/stale, any phase lacks non-empty
   `goal_trace`, or any Goal Contract AC/AX id is not covered by the phase graph.
+- `hooks/mpl-require-phase-contract-graph.mjs` blocks decomposition writes that
+  lack graph metadata, phase evidence/change policy, or valid phase dependency
+  references.
 - `hooks/mpl-require-e2e-authenticity.mjs` reads `e2e_policy` before allowing
   `finalize_done=true`.
 - `hooks/mpl-require-finalize-artifacts.mjs` reads `security_policy` and
