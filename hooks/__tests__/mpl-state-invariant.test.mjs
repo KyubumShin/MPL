@@ -277,6 +277,78 @@ describe('I9 session_status enum', () => {
   }
 });
 
+describe('I10 completion execution freshness', () => {
+  it('flags completed pipelines whose execution accounting stayed at defaults', () => {
+    const r = checkInvariants({
+      current_phase: 'completed',
+      finalize_done: true,
+      execution: {
+        status: null,
+        phases: { total: 0, completed: 0, current: null },
+      },
+    }, { cwd: tmp });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.COMPLETION_EXECUTION_STALE);
+    assert.ok(v);
+    assert.ok(v.issues.includes('execution.phases.total<=0_or_missing'));
+    assert.ok(v.issues.includes('execution.phases.completed<=0_or_missing'));
+    assert.ok(v.issues.includes('execution.status_not_completed'));
+  });
+
+  it('flags finalize_done writes that still point at an active phase id', () => {
+    const r = checkInvariants({
+      current_phase: 'phase5-finalize',
+      finalize_done: true,
+      execution: {
+        status: 'completed',
+        phases: { total: 2, completed: 2, current: 'phase-2' },
+      },
+    }, { cwd: tmp });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.COMPLETION_EXECUTION_STALE);
+    assert.ok(v);
+    assert.ok(v.issues.includes('execution.phases.current_not_null_at_completion'));
+  });
+
+  it('accepts fresh completion accounting', () => {
+    const r = checkInvariants({
+      current_phase: 'completed',
+      finalize_done: true,
+      execution: {
+        status: 'completed',
+        phases: { total: 2, completed: 2, current: null },
+      },
+    }, { cwd: tmp });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.COMPLETION_EXECUTION_STALE));
+  });
+});
+
+describe('I11 blocked_hook companion fields', () => {
+  it('flags blocked_hook with no active reason/instruction', () => {
+    const r = checkInvariants({
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-require-test-agent',
+      blocked_phase: 'phase-1',
+      block_reason: null,
+      resume_instruction: '',
+      blocked_at: '2026-05-19T00:00:00Z',
+    }, { cwd: tmp });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.BLOCKED_HOOK_STALE);
+    assert.ok(v);
+    assert.deepStrictEqual(v.missing.sort(), ['block_reason', 'resume_instruction']);
+  });
+
+  it('accepts a fully actionable blocked_hook state', () => {
+    const r = checkInvariants({
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-require-test-agent',
+      blocked_phase: 'phase-1',
+      block_reason: 'missing test-agent dispatch',
+      resume_instruction: 'dispatch mpl-test-agent for phase-1',
+      blocked_at: '2026-05-19T00:00:00Z',
+    }, { cwd: tmp });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.BLOCKED_HOOK_STALE));
+  });
+});
+
 describe('Multi-violation aggregation (exp15 4-way desync)', () => {
   it('surfaces 4 simultaneous violations', () => {
     // Realistic desync — I1 (paused+finalize), I4 (folder mismatch), I5

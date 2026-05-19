@@ -77,7 +77,7 @@ function clearBlockedHook(cwd, phaseId) {
       state.blocked_phase === phaseId
     ) {
       writeState(cwd, {
-        session_status: 'active',
+        session_status: null,
         blocked_by_hook: null,
         blocked_phase: null,
         block_reason: null,

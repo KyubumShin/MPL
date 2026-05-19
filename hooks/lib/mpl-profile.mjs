@@ -2,17 +2,59 @@
  * MPL Token Profile Analyzer
  *
  * Parses phases.jsonl and run-summary.json to produce aggregate statistics,
- * anomaly detection, and text-based reports.
+ * anomaly detection, and text-based reports. Also exposes a best-effort
+ * telemetry-errors.jsonl health channel for profile/RUNBOOK telemetry failures.
  *
  * Profile directory: .mpl/mpl/profile/
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 const PROFILE_DIR = '.mpl/mpl/profile';
 const PHASES_FILE = 'phases.jsonl';
 const SUMMARY_FILE = 'run-summary.json';
+const TELEMETRY_ERRORS_FILE = 'telemetry-errors.jsonl';
+
+/**
+ * Append a non-blocking telemetry health record.
+ *
+ * This channel is intentionally best-effort and independent from state.json:
+ * telemetry failures should be visible during post-run analysis, but they must
+ * not wedge the pipeline while trying to report themselves.
+ *
+ * @param {string} cwd - Project root directory
+ * @param {string} source - Component/function that observed the failure
+ * @param {unknown} error - Error object or message
+ * @param {object} [details] - Small serializable context object
+ */
+export function recordTelemetryError(cwd, source, error, details = {}) {
+  try {
+    const profileDir = join(cwd, PROFILE_DIR);
+    if (!existsSync(profileDir)) mkdirSync(profileDir, { recursive: true });
+    const message = error instanceof Error
+      ? error.message
+      : String(error || 'unknown telemetry error');
+    const entry = {
+      timestamp: new Date().toISOString(),
+      source: source || 'unknown',
+      message: message.slice(0, 1000),
+      details: safeDetails(details),
+    };
+    appendFileSync(join(profileDir, TELEMETRY_ERRORS_FILE), JSON.stringify(entry) + '\n');
+  } catch {
+    // Never throw from the telemetry health channel.
+  }
+}
+
+function safeDetails(details) {
+  if (!details || typeof details !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(details));
+  } catch {
+    return { unserializable: true };
+  }
+}
 
 /**
  * Parse a JSONL file into an array of objects.
@@ -139,7 +181,8 @@ export function readRunSummary(cwd) {
   if (!existsSync(summaryPath)) return null;
   try {
     return JSON.parse(readFileSync(summaryPath, 'utf-8'));
-  } catch {
+  } catch (err) {
+    recordTelemetryError(cwd, 'mpl-profile:readRunSummary', err, { path: summaryPath });
     return null;
   }
 }

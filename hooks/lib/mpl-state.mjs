@@ -13,6 +13,7 @@ import { deepMerge } from './mpl-state-merge.mjs';
 import { runMigrations } from './migrations/index.mjs';
 import { LEGACY_EXECUTION_STATE_PATH as V1_TO_V2_LEGACY_PATH } from './migrations/v1-to-v2.mjs';
 import { appendRunbookRow, parseRunbookRows, summarizeGates, wallMinutes } from './mpl-runbook.mjs';
+import { recordTelemetryError } from './mpl-profile.mjs';
 
 export { deepMerge };
 
@@ -210,7 +211,12 @@ const DEFAULT_STATE = {
   // #109 G4 (v0.18.0): "verification_hang" added — Stop hook detects when last_tool_at is older
   // than the hang threshold (default 15min) and marks the session for resume / user intervention.
   // v0.18.3: "blocked_hook" makes explicit hook blocks visible to harnesses.
-  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint" | "verification_hang" | "blocked_hook"
+  session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint" | "verification_hang" | "blocked_hook" | "cancelled"
+  blocked_by_hook: null,          // hook id that set session_status="blocked_hook"
+  blocked_phase: null,            // phase id associated with the active hook block
+  block_reason: null,             // user-visible block reason
+  resume_instruction: null,       // concrete instruction for clearing the block
+  blocked_at: null,               // ISO timestamp when hook block was recorded
   pause_reason: null,            // human-readable pause reason
   resume_from_phase: null,       // phase ID to resume from
   pause_timestamp: null,         // ISO timestamp of pause
@@ -469,6 +475,8 @@ export function writeState(cwd, patch) {
   // Catches both phase-controller writers and orchestrator mpl_state_write
   // calls without each caller having to remember the bookkeeping.
   recordFixLoopHistory(current, merged);
+  deriveLegacyGateBooleans(merged);
+  normalizeBlockedHookState(merged);
 
   // C2: Atomic write via temp file + rename
   const tmpPath = join(stateDir, `.state-${randomBytes(4).toString('hex')}.tmp`);
@@ -545,10 +553,61 @@ function recordRunbookTransition(cwd, prev, merged) {
     // result — those stay quiet.
     if (result && !result.appended && result.reason && result.reason !== 'duplicate') {
       process.stderr.write(`[mpl-runbook] append refused for ${prevPhase}: ${result.reason}\n`);
+      recordTelemetryError(cwd, 'mpl-state:recordRunbookTransition', result.reason, {
+        phase: prevPhase,
+        next_phase: newPhase,
+      });
     }
-  } catch {
+  } catch (err) {
+    recordTelemetryError(cwd, 'mpl-state:recordRunbookTransition', err, {
+      phase: prevPhase,
+      next_phase: newPhase,
+    });
     // Non-fatal: RUNBOOK is observability, must not block writes.
   }
+}
+
+/**
+ * Structured gate evidence is the source of truth, but legacy display fields
+ * remain in the public state shape for compatibility. Derive those booleans
+ * from structured exit codes on every write so HUD/status displays cannot drift
+ * to null or contradict the machine evidence. Once any structured gate signal
+ * exists, legacy values for missing/malformed structured gates are cleared
+ * instead of mixing self-report with machine evidence.
+ */
+function deriveLegacyGateBooleans(state) {
+  const gr = state?.gate_results;
+  if (!gr || typeof gr !== 'object') return;
+  const pairs = [
+    ['hard1_baseline', 'hard1_passed'],
+    ['hard2_coverage', 'hard2_passed'],
+    ['hard3_resilience', 'hard3_passed'],
+  ];
+  const hasStructuredSignal = pairs.some(([structuredKey]) => gr[structuredKey] !== null && gr[structuredKey] !== undefined);
+  if (!hasStructuredSignal) return;
+  for (const [structuredKey, legacyKey] of pairs) {
+    const entry = gr[structuredKey];
+    if (entry && typeof entry === 'object'
+        && typeof entry.exit_code === 'number' && Number.isFinite(entry.exit_code)) {
+      gr[legacyKey] = entry.exit_code === 0;
+    } else {
+      gr[legacyKey] = null;
+    }
+  }
+}
+
+/**
+ * Keep hook-block metadata atomic. Once session_status is no longer
+ * "blocked_hook", the companion fields must clear in the same write; otherwise
+ * later telemetry can look blocked while the actionable reason has vanished.
+ */
+function normalizeBlockedHookState(state) {
+  if (!state || state.session_status === 'blocked_hook') return;
+  state.blocked_by_hook = null;
+  state.blocked_phase = null;
+  state.block_reason = null;
+  state.resume_instruction = null;
+  state.blocked_at = null;
 }
 
 /**

@@ -100,6 +100,7 @@ layout.
 |------|---------|
 | `phases.jsonl` | Per-phase token/timing profile (append-only, JSONL) |
 | `run-summary.json` | Complete run profile (generated at finalize) |
+| `telemetry-errors.jsonl` | Non-blocking health log for profile/RUNBOOK telemetry write/read failures |
 
 ### Routing Memory: `.mpl/memory/`
 

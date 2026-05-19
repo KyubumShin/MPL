@@ -22,6 +22,10 @@ const { isMplActive, readState, writeState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 
+const { recordTelemetryError } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-profile.mjs')).href
+);
+
 // Import shared stdin reader
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
@@ -151,7 +155,11 @@ function logPhaseProfile(cwd, state, agentType, estimatedTokens) {
       timestamp: new Date().toISOString(),
     };
     appendFileSync(join(profileDir, 'phases.jsonl'), JSON.stringify(phaseRecord) + '\n');
-  } catch {
+  } catch (err) {
+    recordTelemetryError(cwd, 'mpl-validate-output:logPhaseProfile', err, {
+      agent_type: agentType || null,
+      phase: state?.current_phase || null,
+    });
     // Profile logging is best-effort
   }
 }
@@ -180,13 +188,20 @@ function trackTokenUsage(cwd, agentType, responseText) {
             timestamp: new Date().toISOString(),
             tokens: estimatedTokens,
           }) + '\n');
-        } catch { /* best-effort */ }
+        } catch (err) {
+          recordTelemetryError(cwd, 'mpl-validate-output:weeklyUsage', err, {
+            agent_type: agentType || null,
+          });
+        }
 
         // Experiment: append compaction_count to phases.jsonl for correlation analysis
         logPhaseProfile(cwd, currentState, agentType, estimatedTokens);
       }
     }
-  } catch {
+  } catch (err) {
+    recordTelemetryError(cwd, 'mpl-validate-output:trackTokenUsage', err, {
+      agent_type: agentType || null,
+    });
     // Token tracking is best-effort; do not block on failure
   }
 }

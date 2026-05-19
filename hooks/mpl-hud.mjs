@@ -222,6 +222,21 @@ function formatGate(hard1, hard2, hard3) {
   return `${g(hard1)}${g(hard2)}${g(hard3)}`;
 }
 
+function hasStructuredGateSignal(gr) {
+  return ['hard1_baseline', 'hard2_coverage', 'hard3_resilience']
+    .some((key) => gr?.[key] !== null && gr?.[key] !== undefined);
+}
+
+function gateBool(gr, structuredKey, legacyKey, structuredMode = false) {
+  const entry = gr?.[structuredKey];
+  if (entry && typeof entry === 'object'
+      && typeof entry.exit_code === 'number' && Number.isFinite(entry.exit_code)) {
+    return entry.exit_code === 0;
+  }
+  if (structuredMode) return null;
+  return gr?.[legacyKey];
+}
+
 function formatContext(contextPercent) {
   if (contextPercent == null) return null;
   const pct = Math.round(contextPercent);
@@ -355,8 +370,14 @@ async function main() {
 
     // Gates (Hard gates)
     const gr = state.gate_results;
-    if (gr && (gr.hard1_passed != null || gr.hard2_passed != null || gr.hard3_passed != null)) {
-      parts2.push(`${c.blue}Gate:${c.reset}${formatGate(gr.hard1_passed, gr.hard2_passed, gr.hard3_passed)}`);
+    if (gr) {
+      const structuredMode = hasStructuredGateSignal(gr);
+      const hard1 = gateBool(gr, 'hard1_baseline', 'hard1_passed', structuredMode);
+      const hard2 = gateBool(gr, 'hard2_coverage', 'hard2_passed', structuredMode);
+      const hard3 = gateBool(gr, 'hard3_resilience', 'hard3_passed', structuredMode);
+      if (hard1 != null || hard2 != null || hard3 != null) {
+        parts2.push(`${c.blue}Gate:${c.reset}${formatGate(hard1, hard2, hard3)}`);
+      }
     }
 
     // Fix loop

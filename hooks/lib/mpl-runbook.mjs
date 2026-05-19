@@ -193,11 +193,15 @@ export function appendRunbookRow(cwd, row) {
 export function summarizeGates(state) {
   const gr = state?.gate_results;
   if (!gr || typeof gr !== 'object') return '';
+  const hasStructuredSignal = ['hard1_baseline', 'hard2_coverage', 'hard3_resilience']
+    .some((k) => gr[k] !== null && gr[k] !== undefined);
   const cells = [];
   for (const [k, label] of [['hard1_baseline', 'H1'], ['hard2_coverage', 'H2'], ['hard3_resilience', 'H3']]) {
     const ent = gr[k];
     if (ent && typeof ent === 'object' && typeof ent.exit_code === 'number') {
       cells.push(`${label}${ent.exit_code === 0 ? '✓' : '✗'}`);
+    } else if (hasStructuredSignal) {
+      cells.push(`${label}?`);
     } else {
       const legacy = gr[`${label.toLowerCase().replace('h', 'hard')}_passed`];
       if (legacy === true) cells.push(`${label}✓`);
