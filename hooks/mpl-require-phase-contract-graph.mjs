@@ -81,7 +81,7 @@ async function main() {
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
     block(
       `[MPL Phase Contract Graph] decomposition.yaml is not a valid phase contract graph: ${shown}${more}. ` +
-        `Add graph metadata, per-phase evidence_required/change_policy, and valid interface requires.from_phase refs.`
+        `Add graph metadata, execution_tiers, per-phase evidence_required/change_policy/resource_locks, and valid interface requires.from_phase refs.`
     );
     return;
   }

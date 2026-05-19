@@ -37,6 +37,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     8. **Vertical slice for multi-layer projects**: If 2+ layers detected (frontend/backend/DB/IPC), decompose by feature, not by layer. Each phase implements ONE feature across ALL layers. Scaffold/infrastructure phases remain horizontal.
 
     9. **RECOMPOSE-MODE / APPEND-MODE (controlled recomposition)**: When the dispatch prompt begins with `RECOMPOSE-MODE:` or `APPEND-MODE:`, never patch `.mpl/mpl/decomposition.yaml` in place. First read the existing graph, keep every completed phase block byte-for-byte intact, and write `.mpl/mpl/decomposition-deltas/recompose-{N}.yaml` where `N = existing recompose_count + 1`. Then write the FULL updated `.mpl/mpl/decomposition.yaml` with `recompose_count: N`. APPEND-MODE is a restricted RECOMPOSE-MODE that may only append 1-3 phases from `append_phases` hints. New phase ids must not collide — use `{anchor}b`, `{anchor}c`, etc. (e.g., `phase-3b` after `phase-3`); each appended phase MUST include `covers:[UC-N]` and `test_agent_required:true`; preserve `execution_tiers` by inserting new ids immediately after the anchor.
+
+    10. **Execution tiers are a scheduler contract (v0.18.5)**: Top-level `execution_tiers` is REQUIRED and consumed by the executor. It is not a hint. Only set `parallel: true` when phases have no file overlap, no dependency edge between them, and no shared `resource_locks`. Do NOT emit `parallel_with`; executor ignores it.
   </Rules>
 
   <Reasoning_Steps>
@@ -363,6 +365,12 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
             - path: string
               reason: string
 
+        resource_locks:             # REQUIRED (v0.18.5). Empty [] allowed.
+          - string                  # package_manager | dev_server | db_migration
+          # Use when the phase changes dependency manifests/lockfiles, starts or
+          # reconfigures a dev server, or runs DB migrations/schema writes. Phases
+          # with the same lock cannot share a parallel execution wave.
+
         interface_contract:
           requires:
             - type: string
@@ -482,6 +490,11 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           # the test-agent dispatch (e.g., "focus on boundary invariants of X").
 
     execution_tiers:
+      # REQUIRED scheduler contract (v0.18.5). Executor consumes this directly.
+      # Sort by tier ascending. Every phase id must appear exactly once.
+      # `parallel: true` means the executor must try a conflict-free parallel wave
+      # under `parallelism.max_phase_workers`; do not use it for merely "could be
+      # parallel later" ideas.
       - tier: number
         phases: [string]
         parallel: boolean

@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.18.3 Design Document
+# MPL (Micro-Phase Loop) v0.18.5 Design Document
 
 ## 1. Overview
 
@@ -475,6 +475,7 @@ The following options are supported in `.mpl/config.json`:
 |------|--------|------|
 | `max_fix_loops` | `10` | Maximum Fix Loop iterations |
 | `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
+| `parallelism.max_phase_workers` | `2` | Maximum concurrent phase workers for `execution_tiers[].parallel: true`; runtime clamps to max 3 |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |
 | `convergence.stagnation_window` | `3` | Fix attempts to evaluate for stagnation (see `config-schema.md`) |
@@ -485,6 +486,19 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.18.5 — Execution Tier Scheduler Contract (2026-05-19)
+
+v0.18.5 makes phase-level parallelism reachable by treating decomposer
+`execution_tiers` as the executor scheduler contract instead of relying on the
+legacy `parallel_with` field.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Phase scheduling input | Executor looked for legacy `parallel_with`, while decomposer emitted top-level `execution_tiers` | Executor Step 4.0 consumes sorted `execution_tiers` directly and ignores `parallel_with` | Prompt contract | Fixes the branch reachability bug that made phase-level parallel worktree execution mostly unreachable |
+| Phase worker cap | Parallel phase fan-out was hard-coded at 3 | `.mpl/config.json:parallelism.max_phase_workers` defaults to 2 and clamps to max 3 | Config + tests | Lets dogfood runs start conservatively without exceeding UI stability limits |
+| Resource locks | Decomposition could not declare package manager, dev server, or DB migration conflicts | Each phase must include `resource_locks`; graph validation blocks omission | Hook + schema | Prevents scheduler waves from parallelizing mutually exclusive resources |
+| Join reconciliation | Parallel branch only performed ad hoc boundary verification | Every parallel tier writes a join reconciliation artifact with changed files, contracts, exported symbols, test-agent findings, PASS/FAIL, and targeted fixes | Prompt contract | Makes parallel joins auditable before the next tier starts |
 
 ### v0.18.3 — Runtime Verification Closure (2026-05-18)
 
