@@ -46,52 +46,68 @@ Benefits over mini-plan.md:
 Backward compatibility: mini-plan.md is still written as a human-readable artifact,
 but Task tool is the SSOT for TODO state during execution.
 
-### 4.2.4: Background Execution for Independent TODOs (F-13)
+### 4.2.4: Slot Streaming for Independent TODOs (F-13, v0.18.6)
 
-When Phase Runner identifies independent TODOs (no file overlap), implement them in parallel batches:
+When Phase Runner identifies independent TODOs, implement them with a streaming
+slot scheduler. Do not batch-then-wait. As soon as one active worker completes,
+fill the freed slot with the next ready TODO.
 
 ```
-// File conflict detection (v3.1):
-for each pair of pending TODOs:
-  files_a = todo_a.impact_files
-  files_b = todo_b.impact_files
-  if intersection(files_a, files_b) is EMPTY:
-    -> mark as independent, eligible for parallel dispatch
+// Ready queue eligibility (v0.18.6):
+for each pending TODO:
+  ready = all todo.depends_on ids are completed
+  no_file_conflict = todo.files_to_modify does not overlap any active worker
+  no_resource_conflict = todo.resource_locks does not overlap any active worker
+  if ready && no_file_conflict && no_resource_conflict:
+    -> eligible for streaming dispatch
 
-// Parallel dispatch with HARD LIMIT (F-36):
+// Streaming dispatch with HARD LIMIT (F-36):
 MAX_CONCURRENT_TODOS = 3  // Hard limit for UI stability
 
-independent_todos = todos.filter(independent)
-batches = chunk(independent_todos, MAX_CONCURRENT_WORKERS)  // batches of 3
+active = new Map()
+pending = todos in dependency order
+completed = new Set()
+failed = new Set()
 
-for each batch in batches:
-  // Parallel dispatch workers within the batch
-  for each todo in batch:
+while pending.length > 0 || active.size > 0:
+  while active.size < MAX_CONCURRENT_TODOS:
+    todo = next_ready_todo(pending, completed, active,
+      conflict_keys: ["files_to_modify", "resource_locks"])
+    if no todo:
+      break
     worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
-    Task(subagent_type="mpl-phase-runner", model=worker_model,
-         prompt="...", run_in_background=true)
+    handle = Task(subagent_type="mpl-phase-runner", model=worker_model,
+                  prompt="...", run_in_background=true)
+    active.set(handle.id, { todo, handle })
+    pending.remove(todo)
+    TaskUpdate(id=todo.task_id, status="in_progress")
 
-  // Wait for all workers in current batch to complete
-  // Next batch only starts after current batch completes
-  for each background task in batch:
-    result = await task completion
-    TaskUpdate(id=task_id, status=result.status)
+  if active.size == 0:
+    // Deadlock: remaining TODOs depend on failed/missing predecessors.
+    fail remaining pending TODOs with ready_blocked reason
+    break
 
-// Sequential fallback (TODOs with file conflicts):
-for each TODO with file conflicts:
-  worker_model = (todo.retry_count >= 3 || todo.tags.includes("architecture")) ? "opus" : "sonnet"
-  Task(subagent_type="mpl-phase-runner", model=worker_model,
-       prompt="...", run_in_background=false)
+  result = wait_any_completion(active)
+  active.delete(result.handle_id)
+  if result.status == "completed":
+    completed.add(result.todo.id)
+    TaskUpdate(id=result.todo.task_id, status="completed")
+  else:
+    failed.add(result.todo.id)
+    TaskUpdate(id=result.todo.task_id, status="failed")
+    // Dependent TODOs remain pending but not ready; fix cycle consumes failed graph.
 ```
 
 Constraints:
 - **HARD LIMIT: max 3 concurrent background workers** — excess queued for later
   (Claude Code UI stability restriction. Not adjustable via config)
-- Batch execution: 3 complete → next 3 start (concurrent count never exceeds 3)
-- File conflict detection uses v3.1's existing overlap logic
+- Slot streaming: one completion immediately opens a slot for the next ready TODO
+- File conflict detection uses `files_to_modify`; resource conflict detection uses `resource_locks`
 - If any parallel worker fails, remaining workers continue
 - Failed worker results feed into fix cycle (existing behavior)
-- Phase Runner must wait for ALL workers in current batch before starting next batch
+- Phase Runner must join all active TODO workers before phase verification/final summary
+- Seed TODOs MUST include `depends_on`, `files_to_modify`, and `resource_locks`.
+  Missing fields invalidate the seed via `mpl-validate-seed.mjs`.
 
 
 ### 4.3.7: Orchestrator Context Cleanup (Sliding Window)

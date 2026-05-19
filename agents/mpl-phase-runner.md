@@ -14,7 +14,7 @@ disallowedTools: []
 
   <Constraints>
     - **Scope discipline**: ONLY work within this phase's scope and impact files. Do not implement features from other phases.
-    - **Concurrent limit**: max 3 TODOs in parallel. Batch if more.
+    - **Concurrent limit**: max 3 TODOs in parallel. Use slot streaming: when one TODO worker finishes, immediately dispatch the next ready TODO.
     - **Max 3 retries** on verification failure. After 3 failures → circuit_break.
     - **No state.json modification** — orchestrator manages pipeline state.
     - **PD Override**: never silently change a prior phase's decision. Create an explicit override request.
@@ -46,19 +46,21 @@ disallowedTools: []
     Use `mini_plan_seed.todo_structure` as the canonical mini-plan:
     - TODOs are pre-determined — do NOT generate new ones
     - `depends_on` graph defines execution order
+    - `files_to_modify` defines TODO-level write conflicts
+    - `resource_locks` defines TODO-level mutexes (`package_manager`, `dev_server`, `db_migration`)
     - `acceptance_link` maps each TODO to success criteria
-    - Build parallel execution tiers from `mini_plan_seed.execution_tiers`
+    - Build a ready queue from `depends_on`, then stream independent TODOs into up to 3 active slots
     - Use `exit_conditions` as formal completion criteria
 
     **If no Seed (legacy):**
     Create 1-7 TODOs scoped to this phase. Check against PP constraints and Phase Decisions.
-    For parallel TODOs, verify no file overlap (force sequential if conflict detected).
+    For parallel TODOs, declare `depends_on`, `files_to_modify`, and `resource_locks`; verify no active file/resource overlap before dispatch.
 
     **Working Memory**: Write initial TODO list to `.mpl/memory/working.md`.
 
     ### Step 3: Direct Implementation (Build-Test-Fix Cycles)
 
-    For each TODO (in dependency order):
+    For each ready TODO (streamed by dependency order and conflict-free active slots):
 
     **3a. Build** — Read target files, implement using Edit/Write. Reference Phase 0 artifacts and seed's `acceptance_link`.
 

@@ -2,7 +2,7 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.18.5 (execution_tiers scheduler contract and phase worker cap)
+> **Version**: v0.18.6 (dependency-frontier verification pipelining and TODO slot streaming)
 > **Last updated**: 2026-05-19
 
 ---
@@ -76,7 +76,7 @@ Runner waits for Test Agent result vs terminates based on cache TTL.
 | `test_wait.cache_mode` | `"default"` \| `"extended"` | `"default"` | Prompt cache TTL mode (default=5min, extended=1h) | `commands/mpl-run-execute.md` |
 | `test_wait.threshold_default_sec` | number | `270` | Runner waits if test_duration < this (default cache, 4.5min safety margin) | `commands/mpl-run-execute.md` |
 | `test_wait.threshold_extended_sec` | number | `3300` | Runner waits if test_duration < this (extended cache, 55min margin) | `commands/mpl-run-execute.md` |
-| `test_wait.pipelining_enabled` | boolean | `false` | Allow Runner to proceed to next phase while Test Agent verifies prev (non_pp opt-in) | `commands/mpl-run-execute.md` |
+| `test_wait.pipelining_enabled` | boolean | `true` | Allow Test Agent and adversarial reviewer verification to run in the background only until a dependency frontier, Gate entry, or finalize join boundary. Set `false` to force immediate joins after every phase. | `commands/mpl-run-execute.md` |
 
 ## Discovery Pipeline (#34, Stage 2)
 
@@ -280,6 +280,9 @@ Per-project override for the global `~/.mpl/cache/sessions.json` TTL. The cache 
   "context_cleanup_window": 3,
   "parallelism": {
     "max_phase_workers": 2
+  },
+  "test_wait": {
+    "pipelining_enabled": true
   },
   "hat": {
     "default_level": "auto",

@@ -26,7 +26,11 @@ phases:
     goal: string                   # 이 phase의 구체 목표
     acceptance_criteria: [string]  # 검증 기준
     todo_structure:                # Phase Runner가 따를 TODO
-      - { id, description, depends_on: [ids] }
+      - id: string
+        description: string
+        depends_on: [ids]          # 선행 TODO ids, [] 허용
+        files_to_modify: [path]    # 이 TODO가 수정할 파일, read-only면 []
+        resource_locks: [string]   # package_manager | dev_server | db_migration, 없으면 []
     exit_conditions: [object]      # 완료 판정 (command/test/file_exists/grep 등)
     contract_snippet:              # 해당 phase의 contract 상세
       edges:
@@ -58,6 +62,9 @@ phases:
 2. **Phase 순서 인식**: 후행 phase가 선행 phase의 결과물(`depends_on_prev`)을 명시적 참조
 3. **Discovery 예비**: probing_hints는 adversarial edge case용 (Test Agent가 소비)
 4. **Runner 자가완결성**: Runner는 chain-seed + handoff만 있으면 Seed 재호출 없이 모든 phase 실행 가능
+5. **Slot scheduler metadata**: 모든 TODO는 `depends_on`, `files_to_modify`,
+   `resource_locks`를 명시한다. Phase Runner는 이 세 필드로 ready queue,
+   file conflict, resource mutex를 판단한다. 필드 누락은 seed validation 실패다.
 
 ## 부분 재생성 (Discovery-Triggered)
 
@@ -82,3 +89,4 @@ regeneration_trigger: "discovery-patch-001"
 - contract_snippet의 edges가 decomposition.yaml에 존재
 - depends_on_prev가 실제 prev phase의 produces와 매칭
 - 필수 필드 존재 (goal, acceptance_criteria, todo_structure, exit_conditions)
+- 모든 todo_structure 항목에 depends_on/files_to_modify/resource_locks 존재

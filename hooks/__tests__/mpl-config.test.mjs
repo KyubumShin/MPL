@@ -42,3 +42,18 @@ describe('loadConfig parallelism', () => {
     assert.strictEqual(loadConfig(tmp).parallelism.max_phase_workers, 2);
   });
 });
+
+describe('loadConfig test_wait', () => {
+  it('defaults dependency-frontier verification pipelining on', () => {
+    const cfg = loadConfig(tmp);
+    assert.strictEqual(cfg.test_wait.cache_mode, 'default');
+    assert.strictEqual(cfg.test_wait.threshold_default_sec, 270);
+    assert.strictEqual(cfg.test_wait.threshold_extended_sec, 3300);
+    assert.strictEqual(cfg.test_wait.pipelining_enabled, true);
+  });
+
+  it('allows workspace opt-out of verification pipelining', () => {
+    writeUserConfig({ test_wait: { pipelining_enabled: false } });
+    assert.strictEqual(loadConfig(tmp).test_wait.pipelining_enabled, false);
+  });
+});

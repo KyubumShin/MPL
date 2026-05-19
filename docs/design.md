@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.18.5 Design Document
+# MPL (Micro-Phase Loop) v0.18.6 Design Document
 
 ## 1. Overview
 
@@ -476,6 +476,7 @@ The following options are supported in `.mpl/config.json`:
 | `max_fix_loops` | `10` | Maximum Fix Loop iterations |
 | `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
 | `parallelism.max_phase_workers` | `2` | Maximum concurrent phase workers for `execution_tiers[].parallel: true`; runtime clamps to max 3 |
+| `test_wait.pipelining_enabled` | `true` | Allow Test Agent/reviewer background verification until a dependency frontier, Gate, or finalize join boundary |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
 | `hitl_timeout_seconds` | `30` | HITL response wait time |
 | `convergence.stagnation_window` | `3` | Fix attempts to evaluate for stagnation (see `config-schema.md`) |
@@ -486,6 +487,20 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+### v0.18.6 — Pipeline Pipelining (2026-05-19)
+
+v0.18.6 removes the remaining batch wait points after phase-level scheduler
+reachability: TODO workers now stream through bounded slots, and independent
+verification can run behind a dependency frontier with mandatory joins before
+any consumer, Gate, or finalize step.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| TODO parallelism | Independent TODOs ran in fixed batches; the next batch waited for all active workers | Phase Runner uses slot streaming: a completed worker immediately opens a slot for the next ready TODO, capped at 3 active workers | Prompt contract | Reduces idle worker slots without raising the UI stability limit |
+| Seed TODO scheduling metadata | Seed TODOs only required `depends_on`, leaving file/resource conflicts implicit | `mpl-validate-seed` requires every TODO to declare `depends_on`, `files_to_modify`, and `resource_locks` | Hook + schema | Gives the ready queue machine-checkable dependency, file conflict, and resource mutex inputs |
+| Seed path validation | Seed validation watched legacy `.mpl/seeds/*.yaml` paths but missed actual phase/chain seed paths | The hook now validates `.mpl/mpl/phases/{phase}/phase-seed.yaml` and `.mpl/mpl/chains/{chain}/chain-seed.yaml` | Hook | Makes SEED-03 enforcement cover the paths the executor actually writes |
+| Verification pipelining | Test Agent and adversarial reviewer were blocking joins after every phase | Verification may run in background when `test_wait.pipelining_enabled` and no dependency frontier consumes the phase; joins are required before dependent phases, Gate, or finalize | Prompt contract + config | Preserves quality gates while overlapping independent verification latency |
 
 ### v0.18.5 — Execution Tier Scheduler Contract (2026-05-19)
 

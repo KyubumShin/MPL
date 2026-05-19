@@ -407,11 +407,13 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-01 | Phase 내 Streaming Dispatch | ❌ Not implemented | 🟠 Medium | v1.1.0+ |
+| PAR-01 | Phase 내 Streaming Dispatch | ✅ Implemented | 🟠 Medium | v0.18.6 |
 
 **현재**: batch-then-wait (3개 TODO 배치 완료 대기 후 다음 배치). `mpl-run-execute-parallel.md:57` MAX_CONCURRENT_TODOS=3 하드코딩.
 
 **합의안**: 슬롯 기반 streaming — 완료된 슬롯에 즉시 다음 ready TODO 투입. `while (remaining > 0) { wait_any_completion(); dispatch_next_ready(); }`. MAX=3 유지 (플랫폼 제약).
+
+**v0.18.6 구현**: Phase Runner prompt가 batch-then-wait 대신 slot streaming을 사용한다. Seed TODO는 `depends_on`, `files_to_modify`, `resource_locks`를 필수로 가져야 하며 hook이 누락을 차단한다.
 
 **전제조건**: PAR-03 (Decomposer depends_on 정확도) 선행 필수
 
@@ -435,11 +437,13 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-03 | depends_on 그래프 정확도 강화 | ❌ Not implemented | 🔴 High | v1.0.0+ |
+| PAR-03 | depends_on 그래프 정확도 강화 | 🟡 In progress | 🔴 High | v0.18.6+ |
 
 **근거**: "더 똑똑한 스케줄러보다 더 좋은 TODO 분해가 먼저다." depends_on이 부정확하면 streaming dispatch의 ready queue도 무의미.
 
 **범위**: Decomposer 프롬프트에서 TODO 간 의존성 선언의 정밀도 개선. 파일 수준 충돌 감지는 유지 (심볼 수준 도입하지 않음).
+
+**v0.18.6 진행**: Seed Generator가 TODO별 `depends_on`, `files_to_modify`, `resource_locks`를 반드시 emit하고, `mpl-validate-seed`가 실제 phase/chain seed 경로에서 이를 검증한다. Decomposer-level graph precision은 후속 측정 대상으로 유지.
 
 ### PAR-04: Phase 실행 메트릭 수집
 
@@ -455,14 +459,16 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-05 | 조건부 Cross-Phase Pipelining | ❌ Not implemented | 🟡 Low | v1.2.0+ |
+| PAR-05 | 조건부 Cross-Phase Pipelining | 🟡 In progress | 🟡 Low | v0.18.6+ |
 
 **활성화 3중 조건** (하나라도 미충족 시 비활성):
 1. Gate 통과율 ≥ 80% (최소 10회 연속 실행 기준)
 2. 선행 Phase의 완료된 TODO에만 의존 (read-only 의존성)
-3. 명시적 opt-in 설정
+3. `test_wait.pipelining_enabled`가 true (v0.18.6 기본값 true, workspace opt-out 가능)
 
 **안전장치**: CORE Phase 순차 유지, impact_files 충돌 시 순차 fallback (킬 스위치), Gate 실패 시 해당 TODO만 cancel.
+
+**v0.18.6 진행**: Test Agent와 adversarial reviewer는 `test_wait.pipelining_enabled`가 켜져 있고 dependency frontier가 비어 있을 때만 background verification으로 보낼 수 있다. dependent phase, Gate, finalize 진입 전에는 반드시 join한다.
 
 **아키텍처**: 하이브리드 2계층 — Phase DAG(스케줄링/롤백 단위) + impact_files 교차 그래프(검증 단위)
 
