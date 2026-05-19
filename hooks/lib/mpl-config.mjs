@@ -65,6 +65,13 @@ const PARALLELISM_DEFAULTS = {
 
 const MAX_PHASE_WORKERS_LIMIT = 3;
 
+const TEST_WAIT_DEFAULTS = {
+  cache_mode: 'default',
+  threshold_default_sec: 270,
+  threshold_extended_sec: 3300,
+  pipelining_enabled: true,
+};
+
 const DEFAULTS = {
   max_fix_loops: 10,
   gate1_strategy: 'auto',  // 'docker', 'native', 'skip'
@@ -84,6 +91,7 @@ const DEFAULTS = {
     regression_threshold: -0.1
   },
   parallelism: PARALLELISM_DEFAULTS,
+  test_wait: TEST_WAIT_DEFAULTS,
   enforcement: ENFORCEMENT_DEFAULTS,
   overrides: [],
 };

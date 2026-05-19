@@ -49,6 +49,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     7. **No invention**: If a required piece of information is not in inputs (design-intent, Decomposer edges, PP, phase0 artifacts), mark `ambiguity_notes` rather than guess.
 
     8. **Discovery-mode regeneration**: When invoked with a discovery-patch, ONLY regenerate the phases listed in `affected_phases`. Preserve unchanged phases exactly. Add `regenerated_at`, `regenerated_phases`, `regeneration_trigger` fields.
+
+    9. **TODO scheduling contract (v0.18.6)**: Every `todo_structure[]` item MUST include `depends_on`, `files_to_modify`, and `resource_locks`. Empty arrays are valid. These fields are consumed by the Phase Runner slot scheduler; omission makes the seed invalid.
   </Rules>
 
   <Inputs>
@@ -98,6 +100,7 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     Step 5: Derive todo_structure per phase
       - Break phase work into 1-7 TODOs (MPL phase size rule)
       - Order topologically within phase (no intra-phase cycles)
+      - Populate each TODO's `depends_on`, `files_to_modify`, and `resource_locks`
       - Include exit_conditions references
 
     Step 6: Resolve ambiguities
@@ -137,6 +140,8 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
           - id: string
             description: string
             depends_on: [string]
+            files_to_modify: [string]   # exact paths this TODO may edit; [] only for read-only verification
+            resource_locks: [string]    # package_manager | dev_server | db_migration; [] when none
         exit_conditions:
           - type: "command" | "test" | "file_exists" | "grep"
             # type-specific fields

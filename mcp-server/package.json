@@ -1,6 +1,6 @@
 {
   "name": "mpl-mcp-server",
-  "version": "0.18.5",
+  "version": "0.18.6",
   "description": "MPL MCP Server — deterministic scoring + active state access",
   "type": "module",
   "main": "dist/index.js",

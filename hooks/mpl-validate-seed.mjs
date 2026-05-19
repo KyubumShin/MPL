@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
 
 // Import shared MPL state utility
 const { isMplActive } = await import(
@@ -165,6 +166,82 @@ export function validateMappingValues(yaml, parentKey) {
   return { valid: invalidKeys.length === 0, invalidKeys };
 }
 
+function countIndent(line) {
+  return (line.match(/^[ \t]*/) || [''])[0].length;
+}
+
+function extractTodoStructureBlocks(yaml) {
+  const blocks = [];
+  const lines = String(yaml || '').split('\n').map((line) => line.replace(/\r$/, ''));
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^([ \t]*)todo_structure\s*:\s*(.*)$/);
+    if (!match) continue;
+
+    const baseIndent = match[1].length;
+    const inline = match[2].trim();
+    const blockLines = [];
+    if (inline) blockLines.push(inline);
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (line.trim() && countIndent(line) <= baseIndent) break;
+      blockLines.push(line);
+    }
+
+    blocks.push(blockLines.join('\n'));
+  }
+
+  return blocks;
+}
+
+function splitTodoItems(block) {
+  const items = [];
+  let current = null;
+
+  for (const line of String(block || '').split('\n')) {
+    if (/^[ \t]*-\s+(?:id\s*:|\{)/.test(line)) {
+      if (current) items.push(current.join('\n'));
+      current = [line];
+      continue;
+    }
+    if (current) current.push(line);
+  }
+  if (current) items.push(current.join('\n'));
+
+  return items;
+}
+
+function hasTodoField(item, key) {
+  const escaped = escapeRegex(key);
+  return new RegExp(`(^|[\\s,{])${escaped}\\s*:`, 'm').test(String(item || ''));
+}
+
+function extractTodoId(item, index) {
+  const match = String(item || '').match(/(^|[\s,{])id\s*:\s*["']?([^"',}\]\s]+)/m);
+  return match ? match[2] : `#${index + 1}`;
+}
+
+export function validateTodoSchedulingFields(yamlText) {
+  const missing = [];
+  const blocks = extractTodoStructureBlocks(yamlText);
+
+  for (const block of blocks) {
+    const items = splitTodoItems(block);
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      const todoId = extractTodoId(item, index);
+      for (const field of ['depends_on', 'files_to_modify', 'resource_locks']) {
+        if (!hasTodoField(item, field)) {
+          missing.push(`phase_seed.mini_plan_seed.todo_structure[${todoId}].${field}`);
+        }
+      }
+    }
+  }
+
+  return missing;
+}
+
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -200,6 +277,8 @@ export function validateSeed(yamlText, options = {}) {
   if (!hasNonEmptyArray(yamlText, 'todo_structure')) {
     missing.push('phase_seed.mini_plan_seed.todo_structure');
   }
+
+  missing.push(...validateTodoSchedulingFields(yamlText));
 
   // 4. phase_seed.exit_conditions — non-empty array
   if (!hasNonEmptyArray(yamlText, 'exit_conditions')) {
@@ -262,8 +341,13 @@ export function hasContractFilesContext(promptText) {
 // Seed file path detection
 // ---------------------------------------------------------------------------
 
-/** Seed file path pattern: .mpl/seeds/*.yaml or .mpl/seeds/*.yml */
-const SEED_PATH_RE = /\.mpl\/seeds\/[^/]+\.ya?ml$/;
+/**
+ * Seed file path patterns:
+ * - Legacy: .mpl/seeds/*.yaml
+ * - Inline phase seed: .mpl/mpl/phases/{phase_id}/phase-seed.yaml
+ * - Chain seed: .mpl/mpl/chains/{chain_id}/chain-seed.yaml
+ */
+const SEED_PATH_RE = /(?:^|\/)\.mpl\/(?:seeds\/[^/]+|mpl\/phases\/[^/]+\/phase-seed|mpl\/chains\/[^/]+\/chain-seed)\.ya?ml$/;
 
 /**
  * Check whether a tool invocation is related to seed generation/writing.
@@ -410,7 +494,9 @@ Do NOT proceed to Phase Runner until all required Seed fields are present and va
   }));
 }
 
-main().catch(() => {
-  // On error: allow (fail-open for safety)
-  console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-});
+if (isMain) {
+  main().catch(() => {
+    // On error: allow (fail-open for safety)
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+  });
+}

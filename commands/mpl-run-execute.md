@@ -486,7 +486,7 @@ If you are about to skip this step for ANY reason (complexity, time, proximity),
 The skip is the bug. AD-0003 restored mpl-test-agent specifically because this dispatch
 was broken. AD-0004 Option A baseline depends on F-40 running on every mandatory-domain phase.
 
-After Phase Runner completes with status `"complete"`, the Test Agent is dispatched as a **mandatory gate** based on phase_domain rules.
+After Phase Runner completes with status `"complete"`, the Test Agent is dispatched as a **mandatory gate** based on phase_domain rules. In v0.18.6, the dispatch may run in the background only when the dependency frontier proves no next phase can consume unverified behavior.
 
 #### Domain-Based Invocation Rules
 
@@ -521,8 +521,15 @@ if is_conditional:
     Report: "[MPL] Phase {phase_id}: {domain} domain — no source changes, Test Agent skipped."
     -> proceed to 4.2.3
 
+// Dependency-frontier pipelining decision (v0.18.6)
+can_pipeline_verification =
+  config.test_wait?.pipelining_enabled == true
+  AND no not-yet-started phase has interface_contract.requires[].from_phase == phase_id
+  AND next scheduler tier does not read phase_id contract_files
+  AND phase_id is not immediately entering phase3-gate or phase5-finalize
+
 // Dispatch Test Agent (mandatory or conditional-triggered)
-test_result = Task(subagent_type="mpl-test-agent", model="sonnet",
+test_handle_or_result = Task(subagent_type="mpl-test-agent", model="sonnet",
      prompt="""
      ## Phase: {phase_id} - {phase_name}
      ## Phase Domain: {domain}
@@ -537,7 +544,32 @@ test_result = Task(subagent_type="mpl-test-agent", model="sonnet",
 
      Write and run tests for this phase's implementation.
      ALL S-items MUST have corresponding executable tests.
-     """)
+     """,
+     run_in_background=can_pipeline_verification)
+
+if can_pipeline_verification:
+  record_pending_verification(
+    phase_id,
+    kind: "test_agent",
+    handle: test_handle_or_result.handle,
+    join_before: ["dependent_phase", "phase3-gate", "phase5-finalize"]
+  )
+  Report: "[MPL] Phase {phase_id}: Test Agent pipelined behind dependency frontier."
+else:
+  test_result = test_handle_or_result
+```
+
+#### Verification Join Boundary
+
+Before starting any phase that depends on `{phase_id}`, before entering Gate
+execution, and before finalize, join every pending Test Agent result for the
+frontier:
+
+```
+for each pending verification where join_before condition is met:
+  test_result = await pending.handle
+  merge_test_agent_result(test_result)
+  apply Zero-Test Enforcement Gate and Result Merging below
 ```
 
 #### Zero-Test Enforcement Gate
@@ -677,9 +709,12 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
     ```
 
 12. **Adversarial Review (P0-A redesign, #103)** — dispatch the reviewer
-    BEFORE advancing to the next phase:
+    before the dependency frontier can consume this phase. In v0.18.6, this may
+    run in the background under the same `can_pipeline_verification` predicate
+    used for Test Agent; it MUST join before a dependent phase, Gate entry, or
+    finalize:
     ```
-    Task({
+    reviewer_handle_or_result = Task({
       subagent_type: "mpl-adversarial-reviewer",
       prompt: `Audit phase ${phase.id}.
         - phase_definition: ${JSON.stringify(phase_definition)}
@@ -689,8 +724,19 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
         - prior_history: ${JSON.stringify(state.quality_score_history)}
 
         Write the score JSON to .mpl/signals/quality-score.json per
-        agents/mpl-adversarial-reviewer.md spec. Return a one-paragraph summary.`
+        agents/mpl-adversarial-reviewer.md spec. Return a one-paragraph summary.`,
+      run_in_background: can_pipeline_verification
     })
+
+    if can_pipeline_verification:
+      record_pending_verification(
+        phase.id,
+        kind: "adversarial_reviewer",
+        handle: reviewer_handle_or_result.handle,
+        join_before: ["dependent_phase", "phase3-gate", "phase5-finalize"]
+      )
+    else:
+      wait reviewer_handle_or_result now
     ```
 
     `hooks/mpl-quality-gate.mjs` (PostToolUse Task) reads the JSON, mutates
