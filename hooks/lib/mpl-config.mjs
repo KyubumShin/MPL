@@ -59,6 +59,12 @@ const ENFORCEMENT_DEFAULTS = {
   audit_residual: 'warn',
 };
 
+const PARALLELISM_DEFAULTS = {
+  max_phase_workers: 2,
+};
+
+const MAX_PHASE_WORKERS_LIMIT = 3;
+
 const DEFAULTS = {
   max_fix_loops: 10,
   gate1_strategy: 'auto',  // 'docker', 'native', 'skip'
@@ -77,9 +83,34 @@ const DEFAULTS = {
     min_improvement: 0.05,
     regression_threshold: -0.1
   },
+  parallelism: PARALLELISM_DEFAULTS,
   enforcement: ENFORCEMENT_DEFAULTS,
   overrides: [],
 };
+
+function normalizeMaxPhaseWorkers(value) {
+  if (!Number.isInteger(value)) return PARALLELISM_DEFAULTS.max_phase_workers;
+  return Math.min(MAX_PHASE_WORKERS_LIMIT, Math.max(1, value));
+}
+
+function normalizeConfig(config) {
+  const parallelism = (
+    config?.parallelism &&
+    typeof config.parallelism === 'object' &&
+    !Array.isArray(config.parallelism)
+  )
+    ? config.parallelism
+    : {};
+
+  return {
+    ...config,
+    parallelism: {
+      ...PARALLELISM_DEFAULTS,
+      ...parallelism,
+      max_phase_workers: normalizeMaxPhaseWorkers(parallelism.max_phase_workers),
+    },
+  };
+}
 
 /**
  * Load MPL config from .mpl/config.json, falling back to defaults.
@@ -88,11 +119,11 @@ const DEFAULTS = {
  */
 export function loadConfig(cwd) {
   const configPath = join(cwd, '.mpl', 'config.json');
-  if (!existsSync(configPath)) return { ...DEFAULTS };
+  if (!existsSync(configPath)) return normalizeConfig(DEFAULTS);
   try {
     const userConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
-    return deepMergeConfig(DEFAULTS, userConfig);
+    return normalizeConfig(deepMergeConfig(DEFAULTS, userConfig));
   } catch {
-    return { ...DEFAULTS };
+    return normalizeConfig(DEFAULTS);
   }
 }

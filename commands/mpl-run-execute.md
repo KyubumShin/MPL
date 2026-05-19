@@ -15,45 +15,91 @@ Load this when `current_phase` is `phase2-sprint`.
 
 ### 4.0: Phase Execution Dispatch
 
-For each phase in decomposition order:
+`execution_tiers` in `.mpl/mpl/decomposition.yaml` is the scheduler contract.
+Do not consume `parallel_with`; that legacy field is ignored even when present.
 
-If phase has `parallel_with` field AND parallel phases have no file overlap:
-  ```
-  // Parallel execution for independent phases
-  announce: "[MPL] Executing {parallel_phases.length} phases in parallel"
+Before executing phases:
 
-  results = parallel_map(parallel_phases, fn(phase_id):
+```
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+config = loadConfig(".mpl/config.json")
+max_phase_workers = min(config.parallelism?.max_phase_workers ?? 2, 3)
+phase_map = index_by_id(decomposition.phases)
+tiers = decomposition.execution_tiers
+
+if tiers is missing or empty:
+  // Legacy fallback only. Prefer fixing decomposition output.
+  tiers = decomposition.phases.map((phase, index) => ({
+    tier: index + 1,
+    phases: [phase.id],
+    parallel: false
+  }))
+```
+
+For each tier in ascending `tier` order:
+
+```
+phase_ids = tier.phases.filter(id => !is_completed(id))
+
+if phase_ids.length == 0:
+  continue
+
+if tier.parallel != true or phase_ids.length == 1:
+  for each phase_id in phase_ids:
+    execute_single_phase(phase_id)  // normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
+  continue
+
+waves = split_into_conflict_free_waves(phase_ids, rules:
+  - no overlapping impact.create/impact.modify/impact.affected_tests paths
+  - no shared resource_locks entries among ["package_manager", "dev_server", "db_migration"]
+  - every interface_contract.requires[].from_phase is already completed or in an earlier tier
+)
+
+for each wave in waves:
+  announce: "[MPL] Tier {tier.tier}: executing {wave.length} phase(s) with max {max_phase_workers} workers"
+
+  ready_but_blocked = phase_ids - wave when blocked by file overlap, resource lock, or dependency frontier
+  record ready_but_blocked_reason for each blocked phase in the tier reconciliation artifact
+
+  // Multi-worktree pool. Reuse up to max_phase_workers isolated slots after
+  // verifying each worktree has the current base branch commit reachable.
+  worktree_pool = ensure_worktree_pool(size: min(max_phase_workers, wave.length))
+
+  results = parallel_map(wave, fn(phase_id, slot):
     seed = generate_phase_seed(phase_id, all_prior_summaries)
     context = assemble_context(phase_id, seed)
-    return execute_phase(context, isolation: "worktree")
-  , max_concurrent: 3)
+    return execute_phase(context, isolation: worktree_pool[slot])
+  , max_concurrent: min(max_phase_workers, wave.length))
 
-  // Merge worktree results sequentially
-  for each result in results:
+  // Merge worktree results sequentially in decomposition order.
+  for each result in sort_by_decomposition_order(results):
     merge_worktree(result)
     save_state_summary(result)
 
-  // Post-Join Semantic Boundary Verification — L2 (CB-08)
-  // Mechanical key extraction for boundary conflicts
-  if parallel_phases.length > 1:
-    all_contracts = collect_contract_files(parallel_phases)
-    if all_contracts.length > 0:
-      reconciliation_issues = verify_boundary_keys(all_contracts)
-      if reconciliation_issues.length > 0:
-        announce: "[MPL] CB-08 L2: {reconciliation_issues.length} boundary conflicts after parallel join"
-        → Dispatch targeted boundary fix
-      else:
-        announce: "[MPL] CB-08 L2: Post-join verification clean."
+// Required after every tier whose original `parallel` flag is true.
+write_join_reconciliation_artifact(
+  path: ".mpl/mpl/phases/tier-{tier.tier}-join-reconciliation.md",
+  fields: {
+    changed_files_by_phase,
+    contract_files_by_phase,
+    exported_symbols_by_phase,
+    test_agent_findings_by_phase,
+    resource_locks_and_blocked_reasons,
+    verdict: "PASS" | "FAIL",
+    targeted_fix_instructions
+  }
+)
 
-  // Cumulative test run
-  run_cumulative_tests(parallel_phases)
-
+if join_reconciliation.verdict == "FAIL":
+  announce: "[MPL] Tier {tier.tier}: post-join reconciliation failed"
+  dispatch targeted boundary/resource fix instructions before the next tier
 else:
-  // Sequential execution (default)
-  // Normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
-  ```
+  announce: "[MPL] Tier {tier.tier}: post-join reconciliation PASS"
 
-For each phase in order:
+run_cumulative_tests(phase_ids)
+```
+
+For each single phase execution:
 
 ### 4.0.5: Phase Seed Generation
 

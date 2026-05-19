@@ -14,6 +14,10 @@ generated_by: mpl-decomposer
 recompose_count: 0
 completed_phase_policy: immutable_by_default
 goal_contract_hash: "<sha256 .mpl/goal-contract.yaml>"
+execution_tiers:
+  - tier: 1
+    phases: [phase-1]
+    parallel: false
 ```
 
 ## Required Per-Phase Surface
@@ -26,6 +30,7 @@ phases:
       - test_agent
       - goal_trace
     change_policy: append_delta_only
+    resource_locks: [] # package_manager | dev_server | db_migration
     goal_trace:
       acceptance_criteria: [AC-1]
       variation_axes: [AX-1]
@@ -46,8 +51,12 @@ phases:
   `decomposition.yaml` writes when:
   - top-level graph metadata is missing
   - `generated_by` is not `mpl-decomposer`
+  - top-level `execution_tiers` is missing or empty
+  - `execution_tiers` references an unknown phase, duplicates a phase id, or
+    omits any declared phase
   - any phase lacks non-empty `evidence_required`
   - any phase lacks non-empty `change_policy`
+  - any phase omits `resource_locks` (empty `[]` is valid)
   - `interface_contract.requires[].from_phase` points to the same phase or an
     unknown phase
 - `.mpl/config.json { "phase_contract_graph_required": false }` is an explicit

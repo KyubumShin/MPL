@@ -39,6 +39,7 @@ phases:
       - command
       - goal_trace
     change_policy: append_delta_only
+    resource_locks: []
     interface_contract:
       requires: []
       produces:
@@ -47,12 +48,20 @@ phases:
   - id: phase-2
     evidence_required: [command, test_agent]
     change_policy: append_delta_only
+    resource_locks: [dev_server]
     interface_contract:
       requires:
         - type: artifact
           name: bootstrap
           from_phase: phase-1
       produces: []
+execution_tiers:
+  - tier: 1
+    phases: [phase-1]
+    parallel: false
+  - tier: 2
+    phases: [phase-2]
+    parallel: false
 `;
 }
 
@@ -81,7 +90,10 @@ describe('phase contract graph parser', () => {
     assert.equal(graph.generated_by, 'mpl-decomposer');
     assert.equal(graph.recompose_count, '0');
     assert.equal(graph.completed_phase_policy, 'immutable_by_default');
+    assert.equal(graph.has_execution_tiers, true);
+    assert.deepEqual(graph.execution_tier_phase_refs, ['phase-1', 'phase-2']);
     assert.equal(graph.phases.length, 2);
+    assert.equal(graph.phases[0].has_resource_locks, true);
     assert.deepEqual(graph.phases[1].requires_from_phases, ['phase-1']);
   });
 
@@ -103,9 +115,27 @@ phases:
     assert.equal(verdict.valid, false);
     assert.ok(verdict.issues.includes('graph_version:missing'));
     assert.ok(verdict.issues.includes('generated_by:orchestrator'));
+    assert.ok(verdict.issues.includes('execution_tiers:missing'));
     assert.ok(verdict.issues.includes('phase-1:evidence_required:missing'));
     assert.ok(verdict.issues.includes('phase-1:change_policy:missing'));
+    assert.ok(verdict.issues.includes('phase-1:resource_locks:missing'));
     assert.ok(verdict.issues.includes('phase-1:requires:unknown:phase-99'));
+  });
+
+  it('reports execution_tiers unknown, duplicate, and missing phase refs', () => {
+    const graph = parsePhaseContractGraphText(validGraph().replace(
+      `  - tier: 2
+    phases: [phase-2]
+    parallel: false`,
+      `  - tier: 2
+    phases: [phase-1, phase-404]
+    parallel: true`,
+    ));
+    const verdict = validatePhaseContractGraph(graph);
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('execution_tiers:duplicate:phase-1'));
+    assert.ok(verdict.issues.includes('execution_tiers:unknown:phase-404'));
+    assert.ok(verdict.issues.includes('phase-2:execution_tiers:missing'));
   });
 });
 

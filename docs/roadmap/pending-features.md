@@ -5,7 +5,7 @@
 > **⚠ v0.17 (#55) 반영**: Triage / `interview_depth` / `pp_proximity` / Hat model / F-22 routing-pattern recall 모두 삭제됨. 본 문서 내 위 개념을 가정한 설계(특히 `interview_depth` 분기를 활용하는 PM 설계, F-20→F-22 라우터 의존 항목)는 **재기준선화 필요**. 측정 대기 항목(F-25/F-28/F-39)은 `docs/roadmap/0.16-exp12-plan.md` exp12 데이터로 결정 보류 중.
 
 > **Status**: Pending implementation (for review)
-> **Last updated**: 2026-04-26
+> **Last updated**: 2026-05-19
 > **Purpose**: Consolidated list of all features not yet implemented. Completed items have been moved to `overview.md`.
 
 ### Recently Completed (Post-v0.16 — 2026-04-21 ~ 2026-04-26)
@@ -423,11 +423,13 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-02 | execution_tiers Scheduler Contract | ❌ Not implemented | 🔴 High | v0.18.5 |
+| PAR-02 | execution_tiers Scheduler Contract | ✅ Implemented | 🔴 High | v0.18.5 |
 
 **현재**: Decomposer가 `execution_tiers`를 생성하지만 Phase Runner가 무시 (`mpl-decomposer.md:156`).
 
 **exp20 이후 수정**: Executor가 `parallel_with`가 아니라 `execution_tiers`를 스케줄러 입력으로 소비해야 한다. `parallel: true` tier는 max worker/resource lock/reconciliation 규칙을 거쳐 실제 병렬 branch에 도달해야 하며, 무시 가능한 soft hint가 아니다.
+
+**v0.18.5 구현**: executor Step 4.0은 top-level `execution_tiers`를 직접 소비하고, phase graph hook은 `execution_tiers`/`resource_locks` 존재를 decomposition write 단계에서 검증한다. `parallelism.max_phase_workers` 기본값은 2, 상한은 3이다.
 
 ### PAR-03: Decomposer depends_on 정확도 강화
 
@@ -443,7 +445,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-04 | Phase별 실행 메트릭/무결성 수집 | 🟡 In progress | 🔴 Blocker | v0.18.4 |
+| PAR-04 | Phase별 실행 메트릭/무결성 수집 | ✅ Implemented | 🔴 Blocker | v0.18.4 |
 
 **수집 항목**: Phase별 실행 시간, Gate 통과율, TODO 유휴 시간 비율, API 비용, completion freshness, `run-summary.json`, telemetry error channel.
 

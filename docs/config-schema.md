@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.18.3 (runtime verification closure: real-runtime E2E zero-scenario block, Tauri capabilities check, and decomposition test-agent field validation)
-> **Last updated**: 2026-05-18
+> **Version**: v0.18.5 (execution_tiers scheduler contract and phase worker cap)
+> **Last updated**: 2026-05-19
 
 ---
 
@@ -21,6 +21,16 @@ All fields for `.mpl/config.json`. Single source of truth for configuration.
 | Field | Type | Default | Description | Source |
 |-------|------|---------|-------------|--------|
 | `context_cleanup_window` | number | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) | `mpl-run-execute-parallel.md` |
+
+## Phase Parallelism
+
+`execution_tiers` in `.mpl/mpl/decomposition.yaml` is the phase scheduler
+contract. This config only caps worker fan-out after the executor has selected a
+conflict-free parallel tier/wave.
+
+| Field | Type | Default | Description | Source |
+|-------|------|---------|-------------|--------|
+| `parallelism.max_phase_workers` | integer `1..3` | `2` | Maximum concurrent phase workers for `execution_tiers[].parallel: true`; values above `3` are clamped to `3`. | `commands/mpl-run-execute.md` |
 
 ## Convergence Detection
 
@@ -268,6 +278,9 @@ Per-project override for the global `~/.mpl/cache/sessions.json` TTL. The cache 
 {
   "max_fix_loops": 10,
   "context_cleanup_window": 3,
+  "parallelism": {
+    "max_phase_workers": 2
+  },
   "hat": {
     "default_level": "auto",
     "pp_weight": 0.40,
