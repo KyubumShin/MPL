@@ -500,6 +500,21 @@ legacy `parallel_with` field.
 | Resource locks | Decomposition could not declare package manager, dev server, or DB migration conflicts | Each phase must include `resource_locks`; graph validation blocks omission | Hook + schema | Prevents scheduler waves from parallelizing mutually exclusive resources |
 | Join reconciliation | Parallel branch only performed ad hoc boundary verification | Every parallel tier writes a join reconciliation artifact with changed files, contracts, exported symbols, test-agent findings, PASS/FAIL, and targeted fixes | Prompt contract | Makes parallel joins auditable before the next tier starts |
 
+### v0.18.4 — Measurement Integrity Recovery (2026-05-19)
+
+v0.18.4 restores trustworthy state/profile accounting before phase-level
+parallelism work. exp20 completed successfully, but its telemetry drift made
+throughput conclusions unreliable; this release makes those drift classes
+visible or self-healing.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Completion freshness invariant | Pipelines could reach `completed` while `execution.phases.total/completed/current` stayed at defaults | I10 requires completed/finalized state to have nonzero phase accounting, no active current phase, and `execution.status === completed` | State invariant | Prevents false completion metrics from hiding stale execution state |
+| Blocked hook atomicity | `session_status: blocked_hook` could remain after reason/instruction fields were cleared | I11 requires all companion fields when blocked, and `writeState` clears all companions when status clears | State writer + invariant | Prevents silent hook blocks from turning into unactionable zombie state |
+| Gate evidence compatibility | Structured gate evidence and legacy `hardN_passed` booleans could disagree or mix | `writeState` derives legacy booleans from structured exits and clears unknown legacy values; HUD/RUNBOOK avoid legacy PASS in partial structured mode | State writer + display | Keeps public summaries tied to machine evidence instead of stale self-report |
+| Telemetry health channel | RUNBOOK/profile append failures were best-effort and mostly invisible | `recordTelemetryError()` appends non-blocking JSONL records under `.mpl/mpl/profile/telemetry-errors.jsonl` | Observability | Makes measurement write failures discoverable without blocking user work |
+| Test-agent cleanup consistency | AD-0007 cleanup wrote `session_status: active` and could leave companion drift | Cleanup writes `session_status: null` and clears blocked-hook companion fields atomically | Hook cleanup | Aligns recovery flow with I11 and avoids fake active sessions |
+
 ### v0.18.3 — Runtime Verification Closure (2026-05-18)
 
 exp19 showed a false-completion class where a Tauri app could pass build/unit gates while missing the runtime boundary that makes the app usable. v0.18.3 closes the immediate gaps without adding a new agent: existing artifact, E2E, and authenticity hooks now fail earlier and on machine evidence.
