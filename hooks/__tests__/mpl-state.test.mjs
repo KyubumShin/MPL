@@ -101,6 +101,59 @@ describe('readState / writeState', () => {
     assert.strictEqual(state.fix_loop_count, 5);
   });
 
+  it('derives legacy gate booleans from structured machine evidence', () => {
+    const ent = (exit_code) => ({ command: 'npm test', exit_code, stdout_tail: '', timestamp: 'now' });
+    writeState(tmpDir, {
+      current_phase: 'phase3-gate',
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_coverage: ent(1),
+        hard3_resilience: ent(0),
+        hard2_passed: true,
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.gate_results.hard1_passed, true);
+    assert.strictEqual(state.gate_results.hard2_passed, false);
+    assert.strictEqual(state.gate_results.hard3_passed, true);
+  });
+
+  it('does not mix legacy PASS values into partial structured gate evidence', () => {
+    const ent = (exit_code) => ({ command: 'npm test', exit_code, stdout_tail: '', timestamp: 'now' });
+    writeState(tmpDir, {
+      current_phase: 'phase3-gate',
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_passed: true,
+        hard3_passed: true,
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.gate_results.hard1_passed, true);
+    assert.strictEqual(state.gate_results.hard2_passed, null);
+    assert.strictEqual(state.gate_results.hard3_passed, null);
+  });
+
+  it('clears hook-block companion fields when blocked_hook status clears', () => {
+    writeState(tmpDir, {
+      current_phase: 'phase2-sprint',
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-require-test-agent',
+      blocked_phase: 'phase-1',
+      block_reason: 'missing test agent',
+      resume_instruction: 'dispatch test agent',
+      blocked_at: '2026-05-19T00:00:00Z',
+    });
+    writeState(tmpDir, { session_status: null });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.session_status, null);
+    assert.strictEqual(state.blocked_by_hook, null);
+    assert.strictEqual(state.blocked_phase, null);
+    assert.strictEqual(state.block_reason, null);
+    assert.strictEqual(state.resume_instruction, null);
+    assert.strictEqual(state.blocked_at, null);
+  });
+
   it('should create .mpl directory if missing', () => {
     writeState(tmpDir, { current_phase: 'phase1-plan' });
     assert.ok(existsSync(join(tmpDir, '.mpl')));

@@ -1,11 +1,18 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 
-import { parseJsonl, analyzeProfile, detectAnomalies, readRunSummary, formatReport } from '../lib/mpl-profile.mjs';
+import {
+  parseJsonl,
+  analyzeProfile,
+  detectAnomalies,
+  readRunSummary,
+  formatReport,
+  recordTelemetryError,
+} from '../lib/mpl-profile.mjs';
 
 function createTempDir() {
   const dir = join(tmpdir(), `mpl-profile-test-${randomUUID()}`);
@@ -150,6 +157,44 @@ describe('readRunSummary', () => {
     const result = readRunSummary(tempDir);
     assert.equal(result.run_id, 'mpl-123');
     assert.equal(result.complexity.grade, 'Complex');
+  });
+
+  it('records a telemetry error when summary JSON is malformed', () => {
+    const profileDir = join(tempDir, '.mpl', 'mpl', 'profile');
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, 'run-summary.json'), 'not json');
+    assert.equal(readRunSummary(tempDir), null);
+    const telemetry = parseJsonl(join(profileDir, 'telemetry-errors.jsonl'));
+    assert.equal(telemetry.length, 1);
+    assert.equal(telemetry[0].source, 'mpl-profile:readRunSummary');
+    assert.match(telemetry[0].message, /JSON/);
+  });
+});
+
+describe('recordTelemetryError', () => {
+  let tempDir;
+  beforeEach(() => { tempDir = createTempDir(); });
+  afterEach(() => { rmSync(tempDir, { recursive: true, force: true }); });
+
+  it('appends non-blocking telemetry health records', () => {
+    recordTelemetryError(tempDir, 'unit-test', new Error('profile write failed'), {
+      phase: 'phase-1',
+    });
+    const path = join(tempDir, '.mpl', 'mpl', 'profile', 'telemetry-errors.jsonl');
+    assert.ok(existsSync(path));
+    const entries = parseJsonl(path);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].source, 'unit-test');
+    assert.equal(entries[0].message, 'profile write failed');
+    assert.deepEqual(entries[0].details, { phase: 'phase-1' });
+  });
+
+  it('does not throw when details are not serializable', () => {
+    const details = {};
+    details.self = details;
+    assert.doesNotThrow(() => recordTelemetryError(tempDir, 'unit-test', 'boom', details));
+    const raw = readFileSync(join(tempDir, '.mpl', 'mpl', 'profile', 'telemetry-errors.jsonl'), 'utf-8');
+    assert.match(raw, /unserializable/);
   });
 });
 

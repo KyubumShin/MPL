@@ -401,6 +401,7 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 > **Source**: 3건의 구조화 토론 (Pro/Con/Mutant 3자)
 > **Decision records**: `~/project/decision/2026-04-06-mpl-*.md` (3건)
 > **Status**: ❌ Not implemented — 합의 완료, 구현 대기
+> **Update 2026-05-19**: `docs/roadmap/parallelism-exp20-research.md` reprioritizes this backlog. Measurement integrity (`PAR-04`) is now the v0.18.4 blocker before aggressive parallelism; `PAR-02` must become an executor contract over `execution_tiers`, not a soft hint.
 
 ### PAR-01: Intra-Phase Streaming Dispatch
 
@@ -422,11 +423,11 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-02 | execution_tiers Soft Hint 활용 | ❌ Not implemented | 🟠 Medium | v1.1.0+ |
+| PAR-02 | execution_tiers Scheduler Contract | ❌ Not implemented | 🔴 High | v0.18.5 |
 
 **현재**: Decomposer가 `execution_tiers`를 생성하지만 Phase Runner가 무시 (`mpl-decomposer.md:156`).
 
-**합의안**: Phase Runner가 tier를 soft 힌트로 참조하여 TODO dispatch 순서에 반영. 강제 아님 — 무시해도 동작에 영향 없음. 실패 시 기존 Phase 단위 fix cycle 유지 (부분 재시작 없음).
+**exp20 이후 수정**: Executor가 `parallel_with`가 아니라 `execution_tiers`를 스케줄러 입력으로 소비해야 한다. `parallel: true` tier는 max worker/resource lock/reconciliation 규칙을 거쳐 실제 병렬 branch에 도달해야 하며, 무시 가능한 soft hint가 아니다.
 
 ### PAR-03: Decomposer depends_on 정확도 강화
 
@@ -442,11 +443,11 @@ gstack `/benchmark` — Core Web Vitals baseline + bundle size regression detect
 
 | ID | Feature | Status | Priority | Version Target |
 |----|---------|--------|----------|----------------|
-| PAR-04 | Phase별 실행 메트릭 수집 | ❌ Not implemented | 🟠 Medium | v1.1.0+ |
+| PAR-04 | Phase별 실행 메트릭/무결성 수집 | 🟡 In progress | 🔴 Blocker | v0.18.4 |
 
-**수집 항목**: Phase별 실행 시간, Gate 통과율, TODO 유휴 시간 비율, API 비용. 로그 기반 수동 집계로 시작.
+**수집 항목**: Phase별 실행 시간, Gate 통과율, TODO 유휴 시간 비율, API 비용, completion freshness, `run-summary.json`, telemetry error channel.
 
-**근거**: PAR-05 (cross-phase) 진입 조건이 메트릭 기반. 메트릭 없으면 Stage 2가 영원히 사장됨 (Mutant 유보).
+**근거**: exp20에서 `execution.phases.*`, `last_tool_at`, `profile/phases.jsonl`, `profile/run-summary.json`, `blocked_hook` cleanup drift가 관측되었다. PAR-05뿐 아니라 PAR-02 효과도 이 무결성이 없으면 측정할 수 없다.
 
 ### PAR-05: 조건부 Cross-Phase Pipelining (Stage 2)
 
@@ -521,9 +522,9 @@ interface_contract:
 | 2 | CTX-01 | Pull 기반 컨텍스트 전달 | cross-boundary 결함의 근본 해결 |
 | 3 | CTX-02 | Contract verbatim 보존 | CTX-01과 함께 즉시 적용 가능 |
 | 4 | CTX-03 | boundary_checks | 검증 Gate 활성화 |
-| 5 | PAR-01 | Streaming Dispatch | PAR-03 이후 경량 변경 |
-| 6 | PAR-02 | execution_tiers 활용 | PAR-01과 병행 가능 |
-| 7 | PAR-04 | 메트릭 수집 | PAR-05 진입 조건 |
+| 5 | PAR-04 | 메트릭/상태 무결성 수집 | exp21 측정 신뢰성의 선행 조건 |
+| 6 | PAR-01 | Streaming Dispatch | PAR-03 이후 경량 변경 |
+| 7 | PAR-02 | execution_tiers scheduler contract | 실제 phase 병렬 branch reachability |
 | 8 | PAR-05 | Cross-Phase Pipelining | 메트릭 확보 + 3중 조건 충족 시 |
 
 ---

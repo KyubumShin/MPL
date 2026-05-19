@@ -86,9 +86,12 @@ phases:
       }));
       assert.equal(r.continue, true);
       const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
-      assert.equal(state.session_status, 'active');
+      assert.equal(state.session_status, null);
       assert.equal(state.blocked_by_hook, null);
       assert.equal(state.blocked_phase, null);
+      assert.equal(state.block_reason, null);
+      assert.equal(state.resume_instruction, null);
+      assert.equal(state.blocked_at, null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

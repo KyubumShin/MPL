@@ -54,6 +54,8 @@ export const VIOLATION_IDS = Object.freeze({
   // checkI9 before this hook can vouch for them; otherwise unknown values
   // surface here.
   SESSION_STATUS_INVALID: 'I9',
+  COMPLETION_EXECUTION_STALE: 'I10',
+  BLOCKED_HOOK_STALE: 'I11',
 });
 
 const ACTIVE_PHASES = new Set([
@@ -276,6 +278,60 @@ function checkI9(state) {
   return null;
 }
 
+function checkI10(state) {
+  // Completion freshness: exp20 reached current_phase='completed' while
+  // execution.phases stayed at its zero/null defaults. At completion/finalize
+  // time, the execution subtree must show that real phase accounting survived.
+  if (state.current_phase !== 'completed' && state.finalize_done !== true) return null;
+
+  const phases = state?.execution?.phases || {};
+  const issues = [];
+  const total = phases.total;
+  const completed = phases.completed;
+  const current = phases.current;
+
+  if (typeof total !== 'number' || !Number.isFinite(total) || total <= 0) {
+    issues.push('execution.phases.total<=0_or_missing');
+  }
+  if (typeof completed !== 'number' || !Number.isFinite(completed) || completed <= 0) {
+    issues.push('execution.phases.completed<=0_or_missing');
+  }
+  if (
+    typeof total === 'number' && Number.isFinite(total) &&
+    typeof completed === 'number' && Number.isFinite(completed) &&
+    completed > total
+  ) {
+    issues.push('execution.phases.completed>total');
+  }
+  if (current !== null && current !== undefined) {
+    issues.push('execution.phases.current_not_null_at_completion');
+  }
+  if (state?.execution?.status !== 'completed') {
+    issues.push('execution.status_not_completed');
+  }
+
+  if (issues.length === 0) return null;
+  return v(VIOLATION_IDS.COMPLETION_EXECUTION_STALE,
+    `completion state is stale: ${issues.join(', ')}. Final completion requires fresh execution.phases accounting.`,
+    { issues });
+}
+
+function checkI11(state) {
+  // A visible hook block is actionable only when all companion fields remain
+  // present. Missing reason/instruction was the exp20 blocked_hook cleanup
+  // failure mode.
+  if (state.session_status !== 'blocked_hook') return null;
+  const required = ['blocked_by_hook', 'blocked_phase', 'block_reason', 'resume_instruction', 'blocked_at'];
+  const missing = required.filter((key) => {
+    const value = state[key];
+    return typeof value !== 'string' || value.trim() === '';
+  });
+  if (missing.length === 0) return null;
+  return v(VIOLATION_IDS.BLOCKED_HOOK_STALE,
+    `session_status='blocked_hook' but companion field(s) are missing: ${missing.join(', ')}. Hook block cleanup/recording must be atomic.`,
+    { missing });
+}
+
 /* ────────────────────────── aggregator ──────────────────────────────────── */
 
 /**
@@ -303,6 +359,8 @@ export function checkInvariants(state, opts = {}) {
     () => checkI7(state, cwd),
     () => checkI8(state),
     () => checkI9(state),
+    () => checkI10(state),
+    () => checkI11(state),
   ];
 
   const violations = [];

@@ -417,7 +417,8 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
     ├── RUNBOOK.md                # Integrated execution log — current state, milestones, decisions, issues, resume info (F-10)
     ├── profile/                  # Token profiling
     │   ├── phases.jsonl          # Per-phase token/time (append-only)
-    │   └── run-summary.json     # Full execution profile
+    │   ├── run-summary.json      # Full execution profile
+    │   └── telemetry-errors.jsonl # Non-blocking telemetry health channel
     ├── metrics.json              # Final metrics
     └── ../memory/                # Routing memory (F-22) — (v0.17 REMOVED: routing-patterns.jsonl no longer recorded or recalled; learnings.md still in use via F-11)
         ├── routing-patterns.jsonl # (v0.17 REMOVED) Past execution patterns — Triage gone; no consumer

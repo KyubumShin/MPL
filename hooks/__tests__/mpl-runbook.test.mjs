@@ -120,6 +120,18 @@ describe('summarizeGates', () => {
     assert.equal(s, 'H1✓ H2✗ H3?');
   });
 
+  it('does not mix legacy PASS values into partial structured summaries', () => {
+    const ent = (e) => ({ command: 'x', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    const s = summarizeGates({
+      gate_results: {
+        hard1_baseline: ent(0),
+        hard2_passed: true,
+        hard3_passed: true,
+      },
+    });
+    assert.equal(s, 'H1✓ H2? H3?');
+  });
+
   it('handles missing gate_results', () => {
     assert.equal(summarizeGates({}), '');
     assert.equal(summarizeGates(null), '');
