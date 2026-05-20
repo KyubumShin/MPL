@@ -51,7 +51,10 @@ function passingEvidence() {
     tests_failed: 0,
     tests_skipped: 0,
     test_files_created: ['tests/phase-1.test.ts'],
+    test_files_created_count: 1,
     bugs_found_count: 0,
+    command_exit_codes_count: 1,
+    command_exit_codes_nonzero_count: 0,
   };
 }
 

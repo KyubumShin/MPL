@@ -235,4 +235,18 @@ describe('mpl-gate-recorder test-agent evidence', () => {
       command_exit_codes: [0],
     }), false);
   });
+
+  it('rejects legacy array-only PASS evidence without scalar counts', () => {
+    assert.equal(isPassingTestAgentEvidence({
+      valid_json: true,
+      verdict: 'PASS',
+      invalid_reason: null,
+      tests_total: 1,
+      tests_failed: 0,
+      tests_skipped: 0,
+      test_files_created: ['tests/phase-1.test.ts'],
+      command_exit_codes: [0],
+      bugs_found_count: 0,
+    }), false);
+  });
 });

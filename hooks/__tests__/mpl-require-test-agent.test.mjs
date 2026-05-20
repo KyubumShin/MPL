@@ -21,7 +21,10 @@ function passingEvidence() {
     tests_failed: 0,
     tests_skipped: 0,
     test_files_created: ['tests/phase-1.test.ts'],
+    test_files_created_count: 1,
     bugs_found_count: 0,
+    command_exit_codes_count: 1,
+    command_exit_codes_nonzero_count: 0,
   };
 }
 
@@ -159,6 +162,53 @@ phases:
             valid_json: true,
             verdict: 'PASS',
             command_exit_codes: [0],
+          },
+        },
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    test_agent_required: true
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, false);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /recorded mpl-test-agent evidence is verdict=PASS/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks legacy array-only PASS evidence without scalar counts', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-array-only-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        test_agent_dispatched: {
+          'phase-1': {
+            valid_json: true,
+            verdict: 'PASS',
+            invalid_reason: null,
+            tests_total: 1,
+            tests_failed: 0,
+            tests_skipped: 0,
+            test_files_created: ['tests/phase-1.test.ts'],
+            command_exit_codes: [0],
+            bugs_found_count: 0,
           },
         },
       }));

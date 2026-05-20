@@ -159,24 +159,14 @@ export function parseTestAgentEvidence({
   return evidence;
 }
 
-function evidenceCount(evidence, countKey, arrayKey) {
-  const counted = numeric(evidence?.[countKey], null);
-  if (counted !== null) return counted;
-  return Array.isArray(evidence?.[arrayKey]) ? evidence[arrayKey].length : 0;
-}
-
 function commandExitCodesPass(evidence) {
   const counted = numeric(evidence?.command_exit_codes_count, null);
   const nonzeroCount = numeric(evidence?.command_exit_codes_nonzero_count, null);
-  if (counted !== null || nonzeroCount !== null) {
-    return counted > 0 && nonzeroCount === 0;
-  }
-  return Array.isArray(evidence?.command_exit_codes) &&
-    evidence.command_exit_codes.length > 0 &&
-    evidence.command_exit_codes.every((code) => code === 0);
+  return counted > 0 && nonzeroCount === 0;
 }
 
 export function isPassingTestAgentEvidence(evidence) {
+  const testFilesCreatedCount = numeric(evidence?.test_files_created_count, null);
   return Boolean(
     evidence &&
     evidence.valid_json === true &&
@@ -188,7 +178,7 @@ export function isPassingTestAgentEvidence(evidence) {
     evidence.tests_failed === 0 &&
     typeof evidence.tests_skipped === 'number' &&
     evidence.tests_skipped === 0 &&
-    evidenceCount(evidence, 'test_files_created_count', 'test_files_created') > 0 &&
+    testFilesCreatedCount > 0 &&
     commandExitCodesPass(evidence) &&
     evidence.bugs_found_count === 0
   );

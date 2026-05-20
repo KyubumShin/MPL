@@ -61,19 +61,24 @@ a dispatch timestamp. PASS evidence requires:
 - `tests_total > 0`
 - `tests_failed == 0`
 - `tests_skipped == 0`
-- `test_files_created_count > 0` (or legacy `test_files_created[]` length > 0)
+- `test_files_created_count > 0`
 - `command_exit_codes_count > 0` and `command_exit_codes_nonzero_count == 0`
-  (or legacy `command_exit_codes[]` length > 0, all `0`)
 - `bugs_found_count == 0`
 
 `test_files_created[]` and `command_exit_codes[]` are bounded previews to keep
 `.mpl/state.json` small. The scalar count fields are the lossless gate inputs:
 large responses retain total counts and nonzero command-exit counts even when
-the preview is truncated.
+the preview is truncated. Preview arrays are not gate inputs and do not satisfy
+PASS evidence on their own.
 
 Legacy timestamp-only records are treated as non-PASS and cannot satisfy Hard 2
 or a phase `evidence_required: [test_agent]` latch. Records missing an explicit
 `verdict` are `INVALID`; a PASS-shaped partial state object is not enough.
+
+Legacy pre-count records that contain only `test_files_created[]` and
+`command_exit_codes[]` are also non-PASS as of v0.18.7 (#157). Re-dispatch
+`mpl-test-agent` for that phase to record scalar count fields; MPL does not
+infer lossless counts from arrays because post-v0.18.6 arrays are previews.
 
 ## Trigger registration
 
