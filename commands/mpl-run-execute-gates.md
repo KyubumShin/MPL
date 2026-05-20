@@ -250,7 +250,14 @@ missing = []
 for phase in required_phases:
   if override[phase.id] or override["*"]:
     continue                                    # user-explicit bypass
-  if not dispatched[phase.id] or dispatched[phase.id].verdict != "PASS" or not dispatched[phase.id].valid_json:
+  ev = dispatched[phase.id]
+  if not ev or ev.valid_json != true or ev.verdict != "PASS" \
+      or ev.tests_total <= 0 \
+      or ev.tests_failed != 0 or ev.tests_skipped != 0 \
+      or len(ev.test_files_created or []) == 0 \
+      or len(ev.command_exit_codes or []) == 0 \
+      or any(code != 0 for code in ev.command_exit_codes) \
+      or ev.bugs_found_count != 0:
     missing.push(phase.id)
 
 if missing.length > 0:

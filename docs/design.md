@@ -790,7 +790,7 @@ ygg-exp11 (Opus 4.7) produced 83 phase-runner dispatches and 1 test-agent dispat
 | F-40 dispatch enforcement | orchestrator prompt + Anti-rationalization only | `hooks/mpl-require-test-agent.mjs` (PostToolUse on Task\|Agent) blocks phase-runner completion advancement when `test_agent_required=true` AND `state.test_agent_dispatched[phase_id]` is missing or not structured PASS evidence AND no override | Hook (new) | Prompt-level enforcement insufficient (exp11 skipped 62/63); exp21 showed dispatch-only evidence is also too weak |
 | Zero-Test Block | phase_domain∈{ui,api,algorithm,db,ai} trigger | field-driven `test_agent_required` trigger; legacy domain fallback retained for pre-v0.15.1 decompositions | Skill behaviour | Field-based is explicit, per-phase, bypass-resistant |
 | Override mechanism | none | `.mpl/config/test-agent-override.json` with explicit per-phase user reason; blanket `"*"` accepted but flagged by doctor audit | Config | User has final say; anti-patterns surfaced mechanically |
-| doctor audit `[g]` | "at least one test-agent dispatch" | coverage ratio: required minus dispatched minus overridden must equal 0; warns on blanket override and short reason strings | Agent | Enforce the enforcement itself |
+| doctor audit `[g]` | "at least one test-agent dispatch" | coverage ratio: required minus structured PASS evidence minus overridden must equal 0; warns on blanket override and short reason strings | Agent | Enforce the enforcement itself |
 
 **Affected files:**
 - New hook: `hooks/mpl-require-test-agent.mjs`
