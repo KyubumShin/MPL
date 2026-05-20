@@ -189,7 +189,7 @@ disallowedTools: Write, Edit, Task
     - WARN if missing (functional but undocumented)
 
     ### Category 12: Measurement Integrity Audit (AD-0006, v0.15.0)
-    - **Scope**: `.mpl/state.json`, `.mpl/goal-contract.yaml`, `.mpl/mpl/baseline.yaml`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`
+    - **Scope**: `.mpl/state.json`, `.mpl/goal-contract.yaml`, `.mpl/mpl/baseline.yaml`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`, `src-tauri/target/**`
     This category runs only when invoked as `mpl-doctor audit` (not default). Validates that a **completed** pipeline produced machine-evidence gate records and that Anti-rationalization guardrails held. Run against `.mpl/state.json` and `.mpl/mpl/` of a finalized run.
 
     **Preconditions**: `.mpl/state.json.current_phase == "completed"` AND `.mpl/state.json.finalize_done == true`. Otherwise report "NOT APPLICABLE (pipeline not finalized)" and skip.
@@ -251,6 +251,15 @@ disallowedTools: Write, Edit, Task
       - WARN if any phase has `test_agent_required: false` without a `test_agent_rationale` (schema violation; gate-recorder allowed it through but doctor flags it)
       - FAIL if `required > 0 AND dispatched == 0` (AD-0004 empirical gap — the original exp11 pattern)
 
+    - **[j] Tauri/Rust resource risk (exp21)** — surface build artifact growth before long verification loops:
+      - Invoke the resource-risk CLI:
+        `node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-resource-risk.mjs ${CWD}`
+      - Parse JSON fields: `status`, `measurements[]`, `warnings[]`.
+      - NOT APPLICABLE if the workspace has no `src-tauri/Cargo.toml` and no `src-tauri/target`.
+      - PASS when Tauri/Rust is present but no warning thresholds are exceeded.
+      - WARN when `warnings[]` is non-empty. Include measured size, threshold, and recommendation for each warning.
+      - This is advisory in v0.18.x; do not fail a pipeline solely on resource size until thresholds are calibrated.
+
     **Output format for Category 13**:
     ```
     ### Measurement Integrity Audit
@@ -263,7 +272,8 @@ disallowedTools: Write, Edit, Task
     [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} mandatory-domain phases
     [h] E2E scenario coverage:      ✓ N건     or ✗ missing/failing E2E-N
     [i] goal_contract integrity:    ✓ hash ok or ✗ missing fields: mission.goal
-    Result: PASS (9/9) / FAIL (X/9) / WARN (Y/9)
+    [j] Tauri/Rust resource risk:   ✓ clean   or ⚠️ src-tauri/target=16.0 GiB over 8.0 GiB
+    Result: PASS (10/10) / FAIL (X/10) / WARN (Y/10)
     ```
 
     ### Category 15: Property Check (F5, #112)
