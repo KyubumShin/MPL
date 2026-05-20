@@ -11,6 +11,8 @@ function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+// Keep enough context for debugging while preventing large sharded verifier
+// responses from bloating .mpl/state.json.
 export const TEST_AGENT_EVIDENCE_PREVIEW_LIMIT = 20;
 
 function firstJsonCandidate(text) {
