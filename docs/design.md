@@ -450,20 +450,47 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ## 7. Hook System
 
-> **Drift note (v0.17.0)**: This table captures the original 8-hook lineup from v0.13.x. Subsequent releases added enforcement + sentinel hooks: `mpl-gate-recorder` (v0.15.0), `mpl-require-test-agent` (v0.15.1), `mpl-require-e2e` (v0.15.2), `mpl-require-covers` + `mpl-validate-pp-schema` (v0.16.0), `mpl-require-chain-assignment` (v0.17.0 P1-4d), `mpl-lsp-warmup` (v0.17.0). For the authoritative live list see `hooks/hooks.json` and the per-release version history below.
+`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 37 registered hook commands:
 
-MPL maintains pipeline integrity with 8 hooks:
-
-| Hook | Event | Purpose |
-|----|--------|------|
-| `mpl-compaction-tracker` | PreCompact | Track compaction events and create checkpoints (F-31) |
-| `mpl-auto-permit` | PreToolUse | Learning-based automatic permission allow (F-34) |
-| `mpl-write-guard` | PreToolUse (Edit/Write) | Warns against orchestrator directly editing source files when MPL is active |
-| `mpl-validate-output` | PostToolUse (Task) | Validates required sections of agent output and tracks token usage |
-| `mpl-permit-learner` | PostToolUse | Learn permission allow patterns (F-34) |
-| `mpl-phase-controller` | Stop | Manages phase transitions based on state |
-| `mpl-session-init` | SessionStart | Initialize Context Rotation at session start (F-38) |
-| `mpl-keyword-detector` | UserPromptSubmit | Detects "mpl" keyword in user input and initializes pipeline state; ignores `<task-notification>` completion XML |
+| Hook | Event / matcher | Purpose | Introduced |
+|----|--------|------|------------|
+| `mpl-compaction-tracker` | PreCompact | Track compaction events and create checkpoints (F-31). | v0.13.x baseline |
+| `mpl-auto-permit` | PreToolUse | Apply learned safe permission decisions (F-34). | v0.13.x baseline |
+| `mpl-write-guard` | PreToolUse: Edit/Write/MultiEdit/Bash | Warn or block unsafe direct source edits and dangerous shell commands while MPL is active. | v0.13.x baseline; MultiEdit/MCP hardening v0.18.1 |
+| `mpl-bash-timeout` | PreToolUse: Bash | Enforce timeout budgets on build, lint, test, and verification commands. | v0.18.1 |
+| `mpl-state-invariant` | PreToolUse: Task/Agent/Edit/Write/MultiEdit; Stop | Validate state schema, gate evidence, pause/block status, and completion invariants before state can drift. | v0.18.1; I10/I11 recovery v0.18.4 |
+| `mpl-require-e2e` | PreToolUse: Edit/Write/MultiEdit | Block finalize when required E2E scenarios or UC coverage are missing, failing, or explicitly uncovered. | v0.15.2; UC coverage v0.16.0 |
+| `mpl-require-e2e-authenticity` | PreToolUse: Edit/Write/MultiEdit | Reject mock, placeholder, or absent real-runtime E2E evidence before finalize. | v0.18.3 |
+| `mpl-require-finalize-artifacts` | PreToolUse: Edit/Write/MultiEdit | Require goal-contract completion artifacts, RUNBOOK final section, security evidence, and optional commit evidence before `finalize_done=true`. | v0.18.3 guard stream |
+| `mpl-require-whole-goal-closure` | PreToolUse: Edit/Write/MultiEdit | Require completed phase evidence and goal traces to cover every Goal Contract AC/AX before finalize. | v0.18.3 guard stream |
+| `mpl-validate-pp-schema` | PreToolUse: Edit/Write/MultiEdit | Keep mutable User Contract fields out of immutable `pivot-points.md`. | v0.16.0 |
+| `mpl-require-covers` | PreToolUse: Edit/Write/MultiEdit | Require decomposition phases to declare valid `covers` mappings to UC ids or `internal`. | v0.16.0 |
+| `mpl-require-goal-trace` | PreToolUse: Edit/Write/MultiEdit | Ensure decomposition goal traces cover the frozen Goal Contract hash and AC/AX ids. | v0.18.3 guard stream |
+| `mpl-require-phase-contract-graph` | PreToolUse: Edit/Write/MultiEdit | Enforce graph metadata, evidence policy, resource locks, and valid phase dependencies in `decomposition.yaml`. | v0.18.3 guard stream; resource locks v0.18.5 |
+| `mpl-require-decomposition-delta` | PreToolUse: Edit/Write/MultiEdit | Require recomposition deltas for existing decomposition graph rewrites. | v0.18.3 guard stream |
+| `mpl-require-completed-phase-immutability` | PreToolUse: Edit/Write/MultiEdit | Prevent completed phase blocks from being mutated or removed during recomposition. | v0.18.3 guard stream |
+| `mpl-require-phase-evidence` | PreToolUse: Edit/Write/MultiEdit | Require phase Evidence Latches before completion artifacts or completion state writes. | v0.18.3 guard stream |
+| `mpl-baseline-guard` | PreToolUse: Edit/Write/MultiEdit | Protect `.mpl/mpl/baseline.yaml` after creation unless an explicit renewal sentinel exists. | v0.17.0 P2 stream (#59) |
+| `mpl-ambiguity-gate` | PreToolUse: Task/Agent | Block decomposer dispatch until ambiguity and user-contract readiness gates pass. | v0.11.2; UC readiness v0.16.0 |
+| `mpl-require-chain-assignment` | PreToolUse: Task/Agent | Require `chain-assignment.yaml` before seed-generator dispatch when chain seed is enabled. | v0.17.0 P1-4d |
+| `mpl-tool-tracker` | PostToolUse: Bash/Edit/Write/MultiEdit/Task/Agent/Read/Grep/Glob/TodoWrite/NotebookEdit/WebFetch/WebSearch/SlashCommand/BashOutput/KillShell/ExitPlanMode/mcp__.* | Stamp `state.last_tool_at` for hang detection and telemetry freshness. | v0.18.1 |
+| `mpl-gate-recorder` | PostToolUse: Bash/Task/Agent | Record structured gate, E2E, sprint, and test-agent PASS evidence from real tool results. | v0.15.0; blocked-hook cleanup v0.18.3/v0.18.4 |
+| `mpl-fallback-grep` | PostToolUse: Edit/Write/MultiEdit | Run anti-pattern registry checks against edited files as a fallback static guard. | v0.18.1 |
+| `mpl-artifact-schema` | PostToolUse: Edit/Write/MultiEdit/mcp__.*__write.* | Validate MPL artifacts against required markdown headings and YAML key schemas. | v0.18.1 |
+| `mpl-require-test-agent` | PostToolUse: Task/Agent | Block phase-runner completion until required test-agent PASS evidence or override exists. | v0.15.1; structured PASS hardening v0.18.3 |
+| `mpl-quality-gate` | PostToolUse: Task/Agent | Consume adversarial reviewer quality scores and trigger retry/escalation decisions. | v0.18.1 |
+| `mpl-validate-output` | PostToolUse: Task/Agent | Validate required sections of agent output and track token usage. | v0.13.x baseline |
+| `mpl-validate-seed` | PostToolUse: Task/Agent/Write/Edit/MultiEdit | Validate phase and chain seed YAML, contract snippets, TODO dependencies, files, and resource locks. | v0.10.0; registered v0.11.3; scheduling metadata v0.18.6 |
+| `mpl-sentinel-s0` | PostToolUse: Task/Agent/Write/Edit/MultiEdit | Fact-check seed contract snippets against known contract keys. | v0.10.0; registered v0.11.3 |
+| `mpl-sentinel-s1` | PostToolUse: Task/Agent | Validate runner export-manifest symbols against generated files. | v0.10.0; registered v0.11.3 |
+| `mpl-sentinel-s3` | PostToolUse: Task/Agent | Validate test-agent import paths against actual files. | v0.10.0; registered v0.11.3 |
+| `mpl-permit-learner` | PostToolUse | Learn permission allow patterns from safe tool usage (F-34). | v0.13.x baseline |
+| `mpl-sentinel-pp-file` | PostToolUse: Edit/Write/MultiEdit | Inject PP context for edits touching files referenced by Pivot Points. | v0.13.0 AD-04 |
+| `mpl-context-monitor` | PostToolUse: Task/Agent | Track token and dispatch context signals for baton-pass and measurement. | v0.14.0 #34 Stage 1 |
+| `mpl-discovery-scanner` | PostToolUse: Task/Agent | Mechanically filter runner discovery candidates before later review steps. | v0.14.0 #34 Stage 1 |
+| `mpl-phase-controller` | Stop | Route phases, enforce structured gate evidence, surface hook blocks, and pause routing on verification hangs. | v0.13.x baseline; hang/block routing v0.18.1/v0.18.4 |
+| `mpl-session-init` | SessionStart | Initialize context rotation and MCP bootstrap state at session start (F-38). | v0.13.x baseline |
+| `mpl-keyword-detector` | UserPromptSubmit | Detect MPL entry prompts, initialize pipeline state, count user intervention, and ignore `<task-notification>` completion XML. | v0.13.x baseline; intervention counter v0.18.1; task-notification guard #153 |
 
 ---
 
