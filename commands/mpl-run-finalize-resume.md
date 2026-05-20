@@ -168,7 +168,8 @@ if state.session_status == "blocked_hook":
 This processing is a self-healing path, not a bypass. A dispatch timestamp alone
 does not clear the block; `state.test_agent_dispatched[phase_id].verdict` must be
 explicitly `PASS` with executable tests, zero failed/skipped tests, at least one
-test file, zero command exit-code evidence, and zero reported bugs.
+test file, non-empty `command_exit_codes[]` with every code `0`, and zero
+reported bugs.
 
 #### Watcher-Based Auto-Resume (F-33, v3.9)
 
