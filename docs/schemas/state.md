@@ -61,9 +61,15 @@ a dispatch timestamp. PASS evidence requires:
 - `tests_total > 0`
 - `tests_failed == 0`
 - `tests_skipped == 0`
-- at least one `test_files_created[]`
-- at least one `command_exit_codes[]`, all `0`
+- `test_files_created_count > 0` (or legacy `test_files_created[]` length > 0)
+- `command_exit_codes_count > 0` and `command_exit_codes_nonzero_count == 0`
+  (or legacy `command_exit_codes[]` length > 0, all `0`)
 - `bugs_found_count == 0`
+
+`test_files_created[]` and `command_exit_codes[]` are bounded previews to keep
+`.mpl/state.json` small. The scalar count fields are the lossless gate inputs:
+large responses retain total counts and nonzero command-exit counts even when
+the preview is truncated.
 
 Legacy timestamp-only records are treated as non-PASS and cannot satisfy Hard 2
 or a phase `evidence_required: [test_agent]` latch. Records missing an explicit

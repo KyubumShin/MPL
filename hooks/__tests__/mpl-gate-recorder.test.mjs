@@ -9,6 +9,7 @@ import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 import {
   isPassingTestAgentEvidence,
   parseTestAgentEvidence,
+  TEST_AGENT_EVIDENCE_PREVIEW_LIMIT,
 } from '../lib/mpl-test-agent-evidence.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,7 +48,7 @@ function runHook(dir, toolResponse, prompt = 'Verify phase-1 from the contract.'
 function responsePayload(overrides = {}) {
   const payload = {
     phase_id: 'phase-1',
-    test_files_created: ['tests/phase-1.test.ts'],
+    test_files_created: overrides.test_files_created || ['tests/phase-1.test.ts'],
     test_results: {
       total: 2,
       passed: 2,
@@ -55,7 +56,7 @@ function responsePayload(overrides = {}) {
       skipped: overrides.skipped ?? 0,
       pass_rate: 100,
     },
-    commands_run: [{
+    commands_run: overrides.commands_run || [{
       command: 'npm test -- tests/phase-1.test.ts',
       exit_code: overrides.exit_code ?? 0,
     }],
@@ -88,6 +89,58 @@ describe('mpl-gate-recorder test-agent evidence', () => {
       assert.deepEqual(ev.command_exit_codes, [0]);
       assert.equal(ev.tests_total, 2);
       assert.equal(ev.bugs_found_count, 0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds oversized test-agent arrays while preserving PASS semantics', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-bounded-'));
+    try {
+      seedState(tmp);
+      const testFiles = Array.from(
+        { length: TEST_AGENT_EVIDENCE_PREVIEW_LIMIT + 5 },
+        (_, i) => `tests/generated-${i}.test.ts`
+      );
+      const commandsRun = Array.from(
+        { length: TEST_AGENT_EVIDENCE_PREVIEW_LIMIT + 7 },
+        (_, i) => ({ command: `npm test -- shard=${i}`, exit_code: 0 })
+      );
+
+      runHook(tmp, responseJson({ test_files_created: testFiles, commands_run: commandsRun }));
+      const ev = readState(tmp).test_agent_dispatched['phase-1'];
+
+      assert.equal(ev.test_files_created.length, TEST_AGENT_EVIDENCE_PREVIEW_LIMIT);
+      assert.equal(ev.test_files_created_count, testFiles.length);
+      assert.equal(ev.test_files_created_truncated, true);
+      assert.equal(ev.command_exit_codes.length, TEST_AGENT_EVIDENCE_PREVIEW_LIMIT);
+      assert.equal(ev.command_exit_codes_count, commandsRun.length);
+      assert.equal(ev.command_exit_codes_nonzero_count, 0);
+      assert.equal(ev.command_exit_codes_truncated, true);
+      assert.equal(isPassingTestAgentEvidence(ev), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('does not hide nonzero command exits outside the stored preview', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-bounded-fail-'));
+    try {
+      seedState(tmp);
+      const commandsRun = Array.from(
+        { length: TEST_AGENT_EVIDENCE_PREVIEW_LIMIT + 1 },
+        (_, i) => ({ command: `npm test -- shard=${i}`, exit_code: i < TEST_AGENT_EVIDENCE_PREVIEW_LIMIT ? 0 : 1 })
+      );
+
+      runHook(tmp, responseJson({ commands_run: commandsRun }));
+      const ev = readState(tmp).test_agent_dispatched['phase-1'];
+
+      assert.deepEqual(ev.command_exit_codes, Array(TEST_AGENT_EVIDENCE_PREVIEW_LIMIT).fill(0));
+      assert.equal(ev.command_exit_codes_count, commandsRun.length);
+      assert.equal(ev.command_exit_codes_nonzero_count, 1);
+      assert.equal(ev.verdict, 'FAIL');
+      assert.match(ev.invalid_reason, /nonzero_command_exit_code/);
+      assert.equal(isPassingTestAgentEvidence(ev), false);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
