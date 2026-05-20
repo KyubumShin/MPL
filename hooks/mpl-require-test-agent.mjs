@@ -4,7 +4,8 @@
  *
  * Blocks the orchestrator from proceeding past a phase-runner completion if the
  * completed phase was marked `test_agent_required: true` in decomposition.yaml
- * and `state.test_agent_dispatched[phase_id]` is empty.
+ * and `state.test_agent_dispatched[phase_id]` is missing or not structured
+ * PASS evidence.
  *
  * Fixes the F-40 self-disabling pattern observed in ygg-exp11 (Opus 4.7):
  *   - 83 phase-runner dispatches, 1 test-agent dispatch (1.2% coverage)
@@ -16,9 +17,9 @@
  *   1. Decomposer emits `test_agent_required: true|false` + `test_agent_rationale`
  *      for every phase (boundary/e2e/db/algorithm/ai → true by default).
  *   2. This hook fires on phase-runner completion. It reads decomposition.yaml
- *      for the completed phase, and state.test_agent_dispatched for dispatch
+ *      for the completed phase, and state.test_agent_dispatched for PASS
  *      evidence (written by mpl-gate-recorder.mjs).
- *   3. If required AND not dispatched AND not overridden → emit block decision
+ *   3. If required AND no PASS evidence AND not overridden → emit block decision
  *      so the orchestrator must dispatch test-agent before continuing.
  *   4. Override: `.mpl/config/test-agent-override.json` with explicit phase-id +
  *      user-supplied reason. Blanket overrides ("all-phases": "trivial") are
@@ -40,6 +41,9 @@ const { readState, writeState, isMplActive } = await import(
 );
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+const { isPassingTestAgentEvidence } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-evidence.mjs')).href
 );
 
 function ok() {
@@ -239,20 +243,26 @@ try {
   // Check dispatch record
   const state = readState(cwd) || {};
   const dispatched = state.test_agent_dispatched || {};
-  if (dispatched[phaseId]) {
+  if (isPassingTestAgentEvidence(dispatched[phaseId])) {
     clearBlockedHook(cwd, phaseId);
     ok();
     process.exit(0);
   }
 
   // Not overridden, required, not dispatched → BLOCK
+  const prior = dispatched[phaseId];
+  const missingOrBad = prior
+    ? `but the recorded mpl-test-agent evidence is verdict=${prior.verdict || 'UNKNOWN'} ` +
+      `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'})`
+    : 'but mpl-test-agent was not dispatched';
   const rationale = phase.test_agent_rationale
     ? ` (rationale: ${phase.test_agent_rationale})`
     : '';
   const reason =
     `[MPL AD-0007] Phase ${phaseId} is marked test_agent_required=true${rationale} ` +
-      `but mpl-test-agent was not dispatched. You MUST run Task(subagent_type="mpl-test-agent", ` +
+      `${missingOrBad}. You MUST run Task(subagent_type="mpl-test-agent", ` +
       `model="sonnet", prompt=...) with the phase's interface_contract + impact files ` +
+      `and obtain valid JSON with verdict=PASS, executable tests, and command exit_code=0 ` +
       `BEFORE proceeding to the next phase. code_author == test_author is a tautology, ` +
       `not a verification (AD-0004). To bypass with user consent, add ${phaseId} to ` +
       `.mpl/config/test-agent-override.json with a reason.`;

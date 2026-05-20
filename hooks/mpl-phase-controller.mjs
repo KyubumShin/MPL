@@ -254,6 +254,18 @@ async function main() {
     }));
     return;
   }
+  if (state.session_status === 'blocked_hook') {
+    const hook = state.blocked_by_hook || 'unknown hook';
+    const blockedPhase = state.blocked_phase || state.current_phase || 'unknown phase';
+    const instruction = state.resume_instruction || 'Resolve the recorded hook block, then retry the transition.';
+    console.log(JSON.stringify({
+      continue: true,
+      stopReason:
+        `[MPL] Phase routing is paused by ${hook} for ${blockedPhase}. ` +
+        `${instruction} Run /mpl:mpl-resume to continue once the missing evidence is restored.`,
+    }));
+    return;
+  }
 
   const phase = state.current_phase;
 

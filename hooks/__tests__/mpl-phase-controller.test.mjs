@@ -518,4 +518,25 @@ describe('G4 hang detection (#109) Stop hook integration', () => {
     assert.strictEqual(state.current_phase, 'phase3-gate', 'phase must NOT transition');
     assert.strictEqual(state.session_status, 'verification_hang');
   });
+
+  it('blocked_hook pre-mark on phase2 complete → blocks Phase 3 transition', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `
+### [x] Task 1
+`);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-require-test-agent',
+      blocked_phase: 'phase-1',
+      block_reason: 'missing test-agent',
+      resume_instruction: 'Dispatch mpl-test-agent for phase-1',
+      blocked_at: '2026-05-18T00:00:00Z',
+    });
+    assert.match(out.stopReason, /Phase routing is paused by mpl-require-test-agent/);
+    assert.doesNotMatch(out.stopReason, /Transitioning to Phase 3/);
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase2-sprint');
+    assert.strictEqual(state.session_status, 'blocked_hook');
+  });
 });

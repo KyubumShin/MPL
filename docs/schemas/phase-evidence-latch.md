@@ -20,7 +20,7 @@ command, test_agent, goal_trace
 
 ## Evidence Latch
 - command: PASS command="npm test" exit_code=0
-- test_agent: PASS state.test_agent_dispatched.phase-1.timestamp=...
+- test_agent: PASS state.test_agent_dispatched.phase-1.verdict=PASS command_exit_codes=[0]
 - goal_trace: PASS AC-1 AX-1
 ```
 
@@ -33,7 +33,7 @@ token-specific row with `PASS`, `result=pass`, or `exit_code=0`.
   - `## Evidence Latch` is missing
   - any declared `evidence_required` token has no PASS latch
   - `command` evidence lacks `exit_code=0`
-  - `test_agent` evidence lacks `state.test_agent_dispatched[phase_id]`
+  - `test_agent` evidence lacks structured PASS evidence in `state.test_agent_dispatched[phase_id]`
   - `goal_trace` evidence is not backed by decomposition goal trace
 - The same hook blocks `state-summary.md` writes until a valid
   `verification.md` exists. This matters because `state-summary.md` is disk

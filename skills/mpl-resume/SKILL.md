@@ -20,6 +20,7 @@ Expected resumable states:
 - `session_status = "paused_budget"` (F-33 context rotation)
 - `session_status = "paused_checkpoint"` (orchestrator self-pause, v0.14.1 #35)
 - `session_status = "verification_hang"` (G4 hang detection, #109) — Stop hook detected no tool fired in > 15min
+- `session_status = "blocked_hook"` with actionable companion fields — a hook blocked phase/gate/finalize transition until missing evidence is restored
 - **Drift**: `current_phase` active but disk artifacts show completed phases beyond `sprint_status.completed_todos`
 
 For `paused_budget` / `paused_checkpoint`: the pipeline was paused, not cancelled. Resume from `resume_from_phase` (or `current_phase` if unset) and clear `session_status`, `pause_reason`, `pause_timestamp`, `budget_at_pause`.
@@ -37,6 +38,8 @@ AskUserQuestion({
 })
 ```
 Clear `session_status` and `last_tool_at` only after the user confirms the resume direction (so a subsequent crash can still see the hang record). Carry `fix_loop_count` and `pass_rate_history` through unchanged — convergence trend analysis depends on it.
+
+For `blocked_hook`: the pipeline is intentionally paused at a transition guard. Show `blocked_by_hook`, `blocked_phase`, `block_reason`, and `resume_instruction` in the resume summary. If `blocked_by_hook == "mpl-require-test-agent"`, self-resume by dispatching `mpl-test-agent` for `blocked_phase` with that phase's interface contract, impact files, probing hints, and verification plan. The dispatch must return valid JSON with `verdict:"PASS"`, at least one executable test, `commands_run[].exit_code == 0`, no skipped/failed tests, and no bugs. `mpl-gate-recorder` clears the block automatically when PASS evidence lands; otherwise keep `blocked_hook` intact and surface override/cancel choices.
 
 ## Step 2: Drift Detection (v0.14.1 #35, extended by P2-6)
 

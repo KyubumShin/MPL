@@ -97,6 +97,9 @@ disallowedTools: Task
         "skipped": 0,
         "pass_rate": 90
       },
+      "commands_run": [
+        { "command": "npm test -- tests/path/to/test.ts", "exit_code": 0, "stdout_tail": "10 passed" }
+      ],
       "a_item_coverage": [
         { "id": "A-1", "test": "test description", "status": "PASS|FAIL", "evidence": "output" }
       ],
@@ -110,9 +113,13 @@ disallowedTools: Task
         "lines": "80%",
         "branches": "75%",
         "functions": "90%"
-      }
+      },
+      "verdict": "PASS|FAIL"
     }
     ```
+    The hook treats missing `commands_run`, invalid JSON, zero executable tests,
+    skipped/failed tests, nonzero exit codes, uncovered A/S-items, or non-empty
+    `bugs_found` as non-PASS evidence. A dispatch timestamp alone is not enough.
   </Output_Schema>
 
   <Adversarial_Verification_HA02>

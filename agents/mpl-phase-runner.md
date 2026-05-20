@@ -156,7 +156,7 @@ disallowedTools: []
         "passed_tests": 0,
         "evidence_latch": [
           { "type": "command", "status": "PASS", "evidence": "command + exit_code=0" },
-          { "type": "test_agent", "status": "PASS", "evidence": "state.test_agent_dispatched.phase-N.timestamp" },
+          { "type": "test_agent", "status": "PASS", "evidence": "state.test_agent_dispatched.phase-N.verdict=PASS; command_exit_codes=[0]" },
           { "type": "goal_trace", "status": "PASS", "evidence": "AC/AX ids covered by this phase" }
         ],
         "criteria_results": [

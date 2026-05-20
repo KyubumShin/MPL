@@ -10,6 +10,20 @@ import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const HOOK_PATH = join(dirname(__filename), '..', 'mpl-require-test-agent.mjs');
 
+function passingEvidence() {
+  return {
+    timestamp: '2026-05-18T00:00:00Z',
+    valid_json: true,
+    verdict: 'PASS',
+    command_exit_codes: [0],
+    tests_total: 2,
+    tests_passed: 2,
+    tests_failed: 0,
+    tests_skipped: 0,
+    test_files_created: ['tests/phase-1.test.ts'],
+  };
+}
+
 describe('mpl-require-test-agent hook integration', () => {
   it('returns a real block decision when required test-agent evidence is missing', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-'));
@@ -53,7 +67,7 @@ phases:
     }
   });
 
-  it('clears its visible blocked state once test-agent evidence exists', () => {
+  it('clears its visible blocked state once PASS test-agent evidence exists', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-clear-'));
     try {
       mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
@@ -64,7 +78,7 @@ phases:
         blocked_by_hook: 'mpl-require-test-agent',
         blocked_phase: 'phase-1',
         block_reason: 'old block',
-        test_agent_dispatched: { 'phase-1': { ts: '2026-05-18T00:00:00Z' } },
+        test_agent_dispatched: { 'phase-1': passingEvidence() },
       }));
       writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
 phases:
@@ -92,6 +106,41 @@ phases:
       assert.equal(state.block_reason, null);
       assert.equal(state.resume_instruction, null);
       assert.equal(state.blocked_at, null);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks timestamp-only legacy dispatch evidence', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-legacy-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        test_agent_dispatched: { 'phase-1': { timestamp: '2026-05-18T00:00:00Z' } },
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    test_agent_required: true
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, false);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /recorded mpl-test-agent evidence is verdict=UNKNOWN/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

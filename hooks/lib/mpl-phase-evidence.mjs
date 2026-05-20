@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { isPassingTestAgentEvidence } from './mpl-test-agent-evidence.mjs';
 
 function normalizeToken(value) {
   return String(value || '')
@@ -147,7 +148,9 @@ export function validatePhaseEvidenceLatch({ phase, phaseId, verificationText, s
       continue;
     }
     if (token === 'test_agent') {
-      if (!state?.test_agent_dispatched?.[phaseId]) issues.push(`${phaseId}:test_agent:missing_dispatch`);
+      if (!isPassingTestAgentEvidence(state?.test_agent_dispatched?.[phaseId])) {
+        issues.push(`${phaseId}:test_agent:missing_pass_evidence`);
+      }
       continue;
     }
     if (token === 'goal_trace') {

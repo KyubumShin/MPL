@@ -109,6 +109,9 @@ const DEFAULT_STATE = {
   },
   // AD-0006 (AD-0004 bridge): test-agent dispatch record per phase.
   // Populated by mpl-gate-recorder.mjs hook on Task|Agent(mpl-test-agent) completion.
+  // Entries must be structured PASS evidence (valid_json, verdict, tests_*,
+  // command_exit_codes) before Hard 2 / phase evidence latches treat them as
+  // satisfying independent verification. A dispatch timestamp alone is not enough.
   test_agent_dispatched: {},
   // AD-0006: verification contract captured by Phase 0 Enhanced Step 4.
   // "verify_script" | "explicit" | "heuristic" | null (pre-Phase-0 default).

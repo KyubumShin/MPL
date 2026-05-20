@@ -243,9 +243,9 @@ disallowedTools: Write, Edit, Task
 
     - **[g] test_agent dispatch coverage (AD-0007, v0.15.1)** — enforce the enforcement:
       - Count `required = decomposition.phases[].filter(p => p.test_agent_required != false)`
-      - Count `dispatched = Object.keys(state.test_agent_dispatched)` intersecting required ids
+      - Count `passed = required ids whose state.test_agent_dispatched[id] has valid_json=true, verdict="PASS", tests_total>0, tests_failed=0, tests_skipped=0, command_exit_codes all 0`
       - Count `overridden = Object.keys(.mpl/config/test-agent-override.json or {})`
-      - FAIL if `required - dispatched - overridden > 0` (AD-0007 block should have caught these)
+      - FAIL if `required - passed - overridden > 0` (AD-0007 block should have caught these)
       - WARN if `"*"` blanket override is active (anti-pattern)
       - WARN if any override reason string has length < 20 (e.g., `"trivial"`, `"skip"` — low-quality bypass)
       - WARN if any phase has `test_agent_required: false` without a `test_agent_rationale` (schema violation; gate-recorder allowed it through but doctor flags it)
