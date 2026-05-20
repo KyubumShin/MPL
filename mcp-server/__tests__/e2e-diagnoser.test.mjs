@@ -182,6 +182,33 @@ describe('appendRecoveryMetric', () => {
   });
 });
 
+describe('recovery metrics public schema docs', () => {
+  it('document the emitted path, fields, and prompt version', () => {
+    const doc = readFileSync(new URL('../../docs/schemas/recovery-metrics.md', import.meta.url), 'utf-8');
+
+    assert.ok(doc.includes(`\`${RECOVERY_METRICS_PATH}\``));
+    assert.ok(doc.includes(`\`${PROMPT_VERSION}\``));
+
+    for (const field of ['ts', 'classification', 'confidence', 'iter', 'prompt_version']) {
+      const rowPattern = new RegExp(`^\\|\\s*\`${field}\`\\s*\\|`, 'm');
+      assert.match(doc, rowPattern, `missing field table row for ${field}`);
+    }
+
+    for (const classification of ['"A"', '"B"', '"C"', '"D"']) {
+      assert.ok(doc.includes(classification), `missing classification ${classification}`);
+    }
+  });
+
+  it('keeps the E2E recovery protocol linked to the public schema', () => {
+    const recoveryProtocol = readFileSync(
+      new URL('../../commands/references/e2e-recovery.md', import.meta.url),
+      'utf-8',
+    );
+
+    assert.match(recoveryProtocol, /docs\/schemas\/recovery-metrics\.md/);
+  });
+});
+
 describe('neutralDiagnosis', () => {
   it('defaults to D (flake) to avoid false phase appends', () => {
     const r = neutralDiagnosis();

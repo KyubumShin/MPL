@@ -160,7 +160,9 @@ side effect of the tool handler (`mcp-server/src/tools/e2e-diagnose.ts`),
 so any pipeline that runs E2E recovery accumulates a per-call record
 without orchestrator-side bookkeeping. The file is the substrate for
 exp12 Metric 4 (diagnostician behavior) and Metric 5 (Q8 agreement
-rate); routine projects can also read it for post-hoc inspection.
+rate); routine projects can also read it for post-hoc inspection. The
+stable public schema is documented in
+`docs/schemas/recovery-metrics.md`.
 
 ### 5.0.5: AD Final Verification
 
