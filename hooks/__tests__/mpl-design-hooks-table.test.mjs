@@ -40,13 +40,33 @@ function hookSection() {
   return match[1];
 }
 
+function splitMarkdownRow(row) {
+  return row
+    .split(/(?<!\\)\|/)
+    .slice(1, -1)
+    .map((cell) => cell.trim().replaceAll('\\|', '|'));
+}
+
+function hookRows(section) {
+  return section.split('\n').filter((line) => /^\| `mpl-/.test(line));
+}
+
 describe('docs/design.md Hook System table', () => {
+  it('parses escaped pipes inside table cells', () => {
+    assert.deepEqual(
+      splitMarkdownRow('| `mpl-example` | PreToolUse | A \\| B | v0.test |'),
+      ['`mpl-example`', 'PreToolUse', 'A | B', 'v0.test']
+    );
+  });
+
   it('lists every registered hook command from hooks/hooks.json', () => {
     const section = hookSection();
     const live = liveHooks();
-    const documented = [...new Set(
-      [...section.matchAll(/`(mpl-[^`]+)`/g)].map((match) => match[1])
-    )].sort();
+    const documented = hookRows(section)
+      .map((row) => splitMarkdownRow(row)[0])
+      .map((cell) => cell.match(/^`(mpl-[^`]+)`$/)?.[1])
+      .filter(Boolean)
+      .sort();
 
     assert.deepEqual(documented, [...live.keys()]);
     assert.match(
@@ -60,11 +80,11 @@ describe('docs/design.md Hook System table', () => {
   it('keeps one table row and an Introduced value per live hook', () => {
     const section = hookSection();
     const live = liveHooks();
-    const rows = section.split('\n').filter((line) => /^\| `mpl-/.test(line));
+    const rows = hookRows(section);
 
     assert.equal(rows.length, live.size);
     for (const row of rows) {
-      const cells = row.split('|').slice(1, -1).map((cell) => cell.trim());
+      const cells = splitMarkdownRow(row);
       assert.equal(cells.length, 4, row);
       assert.match(cells[0], /^`mpl-[^`]+`$/);
       const hookName = cells[0].slice(1, -1);
