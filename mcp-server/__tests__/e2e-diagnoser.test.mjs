@@ -182,6 +182,23 @@ describe('appendRecoveryMetric', () => {
   });
 });
 
+describe('recovery metrics public schema docs', () => {
+  it('document the emitted path, fields, and prompt version', () => {
+    const doc = readFileSync(new URL('../../docs/schemas/recovery-metrics.md', import.meta.url), 'utf-8');
+
+    assert.ok(doc.includes(`\`${RECOVERY_METRICS_PATH}\``));
+    assert.ok(doc.includes(`\`${PROMPT_VERSION}\``));
+
+    for (const field of ['ts', 'classification', 'confidence', 'iter', 'prompt_version']) {
+      assert.ok(doc.includes(`| \`${field}\` |`), `missing field row for ${field}`);
+    }
+
+    for (const classification of ['"A"', '"B"', '"C"', '"D"']) {
+      assert.ok(doc.includes(classification), `missing classification ${classification}`);
+    }
+  });
+});
+
 describe('neutralDiagnosis', () => {
   it('defaults to D (flake) to avoid false phase appends', () => {
     const r = neutralDiagnosis();
