@@ -30,13 +30,28 @@ function baseState(extra = {}) {
     schema_version: CURRENT_SCHEMA_VERSION,
     current_phase: 'phase2-sprint',
     test_agent_dispatched: {
-      'phase-1': { timestamp: '2026-05-17T00:00:00Z' },
+      'phase-1': passingEvidence(),
     },
     execution: {
       phases: { total: 1, completed: 0, current: 'phase-1', failed: 0, circuit_breaks: 0 },
       phase_details: [{ id: 'phase-1', name: 'One', status: 'in_progress' }],
     },
     ...extra,
+  };
+}
+
+function passingEvidence() {
+  return {
+    timestamp: '2026-05-17T00:00:00Z',
+    valid_json: true,
+    verdict: 'PASS',
+    command_exit_codes: [0],
+    tests_total: 2,
+    tests_passed: 2,
+    tests_failed: 0,
+    tests_skipped: 0,
+    test_files_created: ['tests/phase-1.test.ts'],
+    bugs_found_count: 0,
   };
 }
 
@@ -78,7 +93,7 @@ command, test_agent, goal_trace, security
 
 ## Evidence Latch
 - command: PASS command="npm test" exit_code=0
-- test_agent: PASS state.test_agent_dispatched.phase-1.timestamp=2026-05-17T00:00:00Z
+- test_agent: PASS state.test_agent_dispatched.phase-1.verdict=PASS command_exit_codes=[0]
 - goal_trace: PASS AC-1 AX-1
 - security: PASS dependency audit completed
 `;
@@ -166,7 +181,52 @@ describe('mpl-require-phase-evidence hook integration', () => {
       content: validVerification(),
     });
     assert.equal(r.decision, 'block');
-    assert.match(r.reason, /phase-1:test_agent:missing_dispatch/);
+    assert.match(r.reason, /phase-1:test_agent:missing_pass_evidence/);
+  });
+
+  it('blocks test_agent evidence when dispatch record is timestamp-only', () => {
+    writeState(baseState({ test_agent_dispatched: { 'phase-1': { timestamp: '2026-05-17T00:00:00Z' } } }));
+    const r = runHook({
+      file_path: '.mpl/mpl/phases/phase-1/verification.md',
+      content: validVerification(),
+    });
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /phase-1:test_agent:missing_pass_evidence/);
+  });
+
+  it('blocks test_agent evidence when dispatch record is only verdict-shaped', () => {
+    writeState(baseState({
+      test_agent_dispatched: {
+        'phase-1': {
+          valid_json: true,
+          verdict: 'PASS',
+          command_exit_codes: [0],
+        },
+      },
+    }));
+    const r = runHook({
+      file_path: '.mpl/mpl/phases/phase-1/verification.md',
+      content: validVerification(),
+    });
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /phase-1:test_agent:missing_pass_evidence/);
+  });
+
+  it('blocks test_agent evidence when tests were skipped', () => {
+    writeState(baseState({
+      test_agent_dispatched: {
+        'phase-1': {
+          ...passingEvidence(),
+          tests_skipped: 1,
+        },
+      },
+    }));
+    const r = runHook({
+      file_path: '.mpl/mpl/phases/phase-1/verification.md',
+      content: validVerification(),
+    });
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /phase-1:test_agent:missing_pass_evidence/);
   });
 
   it('blocks state-summary completion artifact until verification latch exists', () => {

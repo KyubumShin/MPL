@@ -473,8 +473,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         # AD-0007 (v0.15.1): F-40 dispatch contract per-phase.
         # REQUIRED on every phase. `hooks/mpl-require-test-agent.mjs` blocks pipeline
         # advancement past a phase-runner completion when test_agent_required is true
-        # (or missing — absence defaults to true) and no mpl-test-agent dispatch is
-        # recorded in state.test_agent_dispatched[phase_id].
+        # (or missing — absence defaults to true) and no structured PASS
+        # mpl-test-agent evidence is recorded in state.test_agent_dispatched[phase_id].
         test_agent_required: boolean
           # Default: true for ANY phase that touches code paths. Only set false for:
           #   - pure documentation edits (docs/*.md only, no src changes)

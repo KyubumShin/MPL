@@ -12,8 +12,9 @@
  *    record `state.gate_results[gate_name] = {command, exit_code, stdout_tail, timestamp}`.
  *
  * 2. **Task|Agent** with `subagent_type == "mpl-test-agent"` — record
- *    `state.test_agent_dispatched[phase_id] = {timestamp, prompt_len, response_len}`
- *    so AD-0004's empirical gap becomes observable.
+ *    `state.test_agent_dispatched[phase_id] = {timestamp, prompt_len,
+ *    response_len, valid_json, verdict, command_exit_codes, ...}` so AD-0004's
+ *    empirical gap becomes observable and AD-0007 can require a real PASS.
  *
  * 3. **Task|Agent** with `subagent_type == "mpl-phase-runner"` and a completed state-summary
  *    file on disk — increment `state.sprint_status.completed_todos` to match disk truth
@@ -40,6 +41,9 @@ const { readState, writeState, isMplActive } = await import(
 );
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+const { parseTestAgentEvidence, isPassingTestAgentEvidence } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-evidence.mjs')).href
 );
 
 function ok() {
@@ -319,17 +323,30 @@ try {
 
     // Branch 2: test-agent dispatch record (AD-0004 empirical gap)
     if (/mpl-test-agent$/.test(agentType)) {
-      const phaseId =
-        extractPhaseId(toolInput.prompt || toolInput.description || '') || 'unknown';
-      const respStr =
-        typeof toolResponse === 'string' ? toolResponse : JSON.stringify(toolResponse);
-      const dispatched = state.test_agent_dispatched || {};
-      dispatched[phaseId] = {
-        timestamp: new Date().toISOString(),
-        prompt_len: (toolInput.prompt || '').length,
-        response_len: respStr.length,
-      };
-      patch.test_agent_dispatched = dispatched;
+      const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
+      if (phaseId) {
+        const dispatched = state.test_agent_dispatched || {};
+        const evidence = parseTestAgentEvidence({
+          phaseId,
+          prompt: toolInput.prompt || toolInput.description || '',
+          response: toolResponse,
+        });
+        dispatched[phaseId] = evidence;
+        patch.test_agent_dispatched = dispatched;
+        if (
+          state.session_status === 'blocked_hook' &&
+          state.blocked_by_hook === 'mpl-require-test-agent' &&
+          state.blocked_phase === phaseId &&
+          isPassingTestAgentEvidence(evidence)
+        ) {
+          patch.session_status = null;
+          patch.blocked_by_hook = null;
+          patch.blocked_phase = null;
+          patch.block_reason = null;
+          patch.resume_instruction = null;
+          patch.blocked_at = null;
+        }
+      }
     }
 
     // Branch 3: phase-runner completion → sync completed_todos with disk truth

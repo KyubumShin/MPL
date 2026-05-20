@@ -26,7 +26,7 @@
 | `goal_contract_set` / `goal_contract_path` / `goal_contract_hash` | per-pipeline | Goal Contract readiness mirror for `.mpl/goal-contract.yaml`; disk artifact remains the source of truth. |
 | `security_results.*` | per-pipeline | Structured security gate evidence consumed by `mpl-require-finalize-artifacts.mjs`. |
 | `session_status` | per-session | `null \| active \| paused_budget \| paused_checkpoint \| verification_hang \| blocked_hook \| cancelled`. Single-valued — pause / hang / explicit hook block / cancel states are mutually exclusive (G3 I9). |
-| `blocked_by_hook` / `blocked_phase` / `block_reason` / `resume_instruction` / `blocked_at` | per-session | Required companion fields while `session_status='blocked_hook'`. `writeState` clears all five when the blocked status clears so stale half-blocked state cannot survive. |
+| `blocked_by_hook` / `blocked_phase` / `block_reason` / `resume_instruction` / `blocked_at` | per-session | Required companion fields while `session_status='blocked_hook'`. Phase routing is paused until the originating hook's missing evidence is restored. `writeState` clears all five when the blocked status clears so stale half-blocked state cannot survive. |
 | `last_tool_at` | per-session | ISO-8601 stamp from `mpl-tool-tracker.mjs`. Powers G4 (#109). |
 | `enforcement.*` | per-pipeline override | P0-2 (#110) per-rule policy. Top of the precedence chain. |
 
@@ -50,6 +50,24 @@ strict mode elevates `warn → block`.
 | I9 | `session_status` outside the allowed enum | all | Forward-compat with G4 / #109 future fields. |
 | I10 | completion/finalize state with stale `execution.phases` accounting | all | At `finalize_done=true` or `current_phase='completed'`, `execution.status` must be completed, `total/completed` must be positive, `completed <= total`, and `current` must be null. |
 | I11 | `session_status='blocked_hook'` without all companion fields | all | A visible hook block must keep hook id, phase, reason, resume instruction, and timestamp together. |
+
+## Test-Agent Evidence
+
+`state.test_agent_dispatched[phase_id]` is a structured evidence record, not just
+a dispatch timestamp. PASS evidence requires:
+
+- `valid_json: true`
+- `verdict: "PASS"`
+- `tests_total > 0`
+- `tests_failed == 0`
+- `tests_skipped == 0`
+- at least one `test_files_created[]`
+- at least one `command_exit_codes[]`, all `0`
+- `bugs_found_count == 0`
+
+Legacy timestamp-only records are treated as non-PASS and cannot satisfy Hard 2
+or a phase `evidence_required: [test_agent]` latch. Records missing an explicit
+`verdict` are `INVALID`; a PASS-shaped partial state object is not enough.
 
 ## Trigger registration
 

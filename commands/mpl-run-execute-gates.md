@@ -228,10 +228,13 @@ and C3 (schema) defect recall was structurally zero under same-author testing.
 A 100% pass rate on author-generated tests is a tautology, not evidence.
 
 Before marking Hard 2 PASS: for every phase whose `test_agent_required` is
-not explicitly `false`, `state.test_agent_dispatched[phase_id]` must exist
-with a real verdict. Missing dispatches trigger the F-40 Required-Phase Block
-below; do not interpret pre-existing tests as a reason to skip — their authorship
-is what AP-TEST-01 is about, not their existence.
+not explicitly `false`, `state.test_agent_dispatched[phase_id]` must contain
+structured PASS evidence (`valid_json:true`, `verdict:"PASS"`, executable tests,
+`command_exit_codes[]` all zero, and no reported bugs). Missing verdict, FAIL,
+INVALID, partial PASS-shaped state, or timestamp-only dispatch records trigger
+the F-40 Required-Phase Block below; do not interpret pre-existing tests as a
+reason to skip — their authorship is what AP-TEST-01 is about, not their
+existence.
 
 **F-40 Required-Phase Block (AD-0007, v0.15.1):**
 
@@ -247,13 +250,20 @@ missing = []
 for phase in required_phases:
   if override[phase.id] or override["*"]:
     continue                                    # user-explicit bypass
-  if not dispatched[phase.id]:
+  ev = dispatched[phase.id]
+  if not ev or ev.valid_json != true or ev.verdict != "PASS" \
+      or ev.tests_total <= 0 \
+      or ev.tests_failed != 0 or ev.tests_skipped != 0 \
+      or len(ev.test_files_created or []) == 0 \
+      or len(ev.command_exit_codes or []) == 0 \
+      or any(code != 0 for code in ev.command_exit_codes) \
+      or ev.bugs_found_count != 0:
     missing.push(phase.id)
 
 if missing.length > 0:
   Hard 2 = FAIL
-  announce: "[MPL AD-0007] Hard 2 FAIL: {missing.length} required phases never dispatched test-agent: {missing}"
-  announce: "[MPL AD-0007] Forcing Test Agent dispatch for missing phases."
+  announce: "[MPL AD-0007] Hard 2 FAIL: {missing.length} required phases lack PASS test-agent evidence: {missing}"
+  announce: "[MPL AD-0007] Forcing Test Agent dispatch for missing/failed/invalid phases."
 
   for phase_id in missing:
     phase = decomposition.phases.find(p => p.id == phase_id)
@@ -268,7 +278,7 @@ if missing.length > 0:
       Rationale from decomposer: {phase.test_agent_rationale or ''}
       Write and run tests. Return test results.")
 
-  // After dispatch, mpl-gate-recorder writes state.test_agent_dispatched[phase_id]
+  // After dispatch, mpl-gate-recorder writes structured state.test_agent_dispatched[phase_id]
   // Re-run Hard 2
   re-execute test suite → check pass_rate again
 

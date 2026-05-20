@@ -5,3 +5,4 @@ mcp-server/dist/
 node_modules/
 .omc/
 .resume/
+.pr-review-state/

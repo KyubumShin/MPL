@@ -133,6 +133,44 @@ This processing runs **before** the existing Resume logic, cleans up `session_st
 
 v0.14.1 (#35) added `paused_checkpoint` handling: orchestrator verbal pauses (checkpoint report + carryover) write the same pause fields as F-33, so the same resume path clears them.
 
+#### Blocked Hook Self-Resume (v0.18.x, exp21 follow-up)
+
+```python
+if state.session_status == "blocked_hook":
+    print(f"[MPL] Resuming from hook block: {state.blocked_by_hook} on {state.blocked_phase}")
+    print(state.block_reason)
+    print(state.resume_instruction)
+
+    if state.blocked_by_hook == "mpl-require-test-agent":
+        phase = decomposition.phases.find(p => p.id == state.blocked_phase)
+        Task(subagent_type="mpl-test-agent", model="sonnet",
+          prompt=f"""
+          Resume blocked MPL transition for {phase.id}.
+          Required: independent verification PASS before phase routing may continue.
+          Interface contract: {phase.interface_contract}
+          Impact files: {phase.impact}
+          Probing hints: {phase.probing_hints or []}
+          Verification plan / success criteria: {phase.success_criteria}
+
+          Write and run executable tests. Return valid JSON with:
+          - verdict: "PASS" only when all checks pass
+          - test_results.total > 0
+          - test_results.failed == 0 and skipped == 0
+          - commands_run[] with exit_code 0 for every command
+          - bugs_found: []
+          """)
+        # mpl-gate-recorder records state.test_agent_dispatched[phase_id].
+        # On PASS evidence it clears blocked_hook atomically. If evidence is
+        # FAIL/INVALID, keep blocked_hook and ask the user whether to retry,
+        # override with .mpl/config/test-agent-override.json, or cancel.
+```
+
+This processing is a self-healing path, not a bypass. A dispatch timestamp alone
+does not clear the block; `state.test_agent_dispatched[phase_id].verdict` must be
+explicitly `PASS` with executable tests, zero failed/skipped tests, at least one
+test file, non-empty `command_exit_codes[]` with every code `0`, and zero
+reported bugs.
+
 #### Watcher-Based Auto-Resume (F-33, v3.9)
 
 For hands-free operation, run the session watcher in a separate terminal:
