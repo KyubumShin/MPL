@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -71,6 +71,53 @@ describe('detectTauriRustResourceRisk', () => {
       assert.ok(r.measurements.find((m) => m.id === 'src_tauri_target_deps' && m.bytes === 80));
       assert.match(r.warnings.find((w) => w.id === 'tauri_target_size_warn').recommendation, /cargo clean/);
       assert.match(r.warnings.find((w) => w.id === 'tauri_static_lib_size_warn').recommendation, /multi-crate/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces partial scan errors without treating the scan as clean', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-resource-risk-partial-'));
+    try {
+      const blocked = join(tmp, 'src-tauri', 'target', 'blocked');
+      mkdirSync(blocked, { recursive: true });
+      writeFileSync(join(tmp, 'src-tauri', 'Cargo.toml'), '[package]\nname = "app"\n');
+      const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      const fsImpl = {
+        existsSync,
+        lstatSync,
+        readdirSync(path) {
+          if (path === blocked) throw denied;
+          return readdirSync(path);
+        },
+      };
+
+      const r = detectTauriRustResourceRisk(tmp, {}, { fs: fsImpl });
+      assert.equal(r.status, 'warn');
+      assert.equal(r.scan_error_count, 1);
+      assert.equal(r.scan_errors[0].path, 'src-tauri/target/blocked');
+      assert.equal(r.scan_errors[0].code, 'EACCES');
+      assert.ok(r.warnings.find((w) => w.id === 'tauri_scan_partial_warn'));
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('deduplicates target warning when deps dominate the target size', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-resource-risk-dedup-'));
+    try {
+      mkdirSync(join(tmp, 'src-tauri', 'target', 'debug', 'deps'), { recursive: true });
+      writeFileSync(join(tmp, 'src-tauri', 'Cargo.toml'), '[package]\nname = "app"\n');
+      writeSizedFile(join(tmp, 'src-tauri', 'target', 'debug', 'deps', 'libdep.rlib'), 95);
+      writeSizedFile(join(tmp, 'src-tauri', 'target', 'debug', 'other.o'), 5);
+
+      const r = detectTauriRustResourceRisk(tmp, {
+        targetWarnBytes: '90 B',
+        depsWarnBytes: '50 B',
+        staticLibWarnBytes: '1 KiB',
+      });
+      const warningIds = r.warnings.map((w) => w.id);
+      assert.deepEqual(warningIds, ['tauri_deps_size_warn']);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
