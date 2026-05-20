@@ -110,6 +110,10 @@ function parseProfileCategoryEntries(sections) {
 describe('framework-specific prompt literals', () => {
   it('keeps framework policy literals in the profile registry, not runtime prompts', () => {
     const guardLiterals = parsePromptGuardLiterals(readRepoFile(PROFILE_REGISTRY));
+    assert.ok(
+      guardLiterals.length > 0,
+      `${PROFILE_REGISTRY} must define at least one concrete prompt_guard_literals entry`,
+    );
     const forbiddenRuntimeLiterals = guardLiterals.map(literalPattern);
     const files = SCAN_ROOTS.flatMap((root) => walkMarkdown(repoPath(root)))
       .filter((file) => file !== PROFILE_REGISTRY);
