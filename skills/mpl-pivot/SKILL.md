@@ -1,5 +1,5 @@
 ---
-description: "Thin wrapper for Pivot Point discovery. Delegates interview logic to agents/mpl-interviewer.md; use for /mpl:mpl-pivot or when the user explicitly asks to define core constraints, Pivot Points, PP, or immutable project boundaries."
+description: "Thin wrapper for Pivot Point discovery. Delegates interview logic to agents/mpl-interviewer.md; use for /mpl:mpl-pivot or when the user asks to define core constraints, Pivot Points, PP, immutable boundaries, PP 정리, 피벗 포인트, or 제약조건."
 ---
 
 # MPL Pivot Points
@@ -28,6 +28,7 @@ Use this skill when:
 - The user explicitly invokes `/mpl:mpl-pivot`.
 - The user asks to define PP, Pivot Points, immutable constraints, or project
   boundaries without running the full MPL pipeline.
+- The user asks in Korean for "PP 정리", "피벗 포인트", or "제약조건".
 - A full `/mpl:mpl` run needs PP discovery and calls this entrypoint as a
   convenience wrapper.
 

@@ -11,6 +11,8 @@ describe('#99 mpl-pivot / interviewer boundary', () => {
     assert.match(pivotSkill, /agents\/mpl-interviewer\.md/);
     assert.match(pivotSkill, /commands\/mpl-run-phase0\.md/);
     assert.match(pivotSkill, /must not duplicate any of those stages/);
+    assert.match(pivotSkill, /PP 정리/);
+    assert.match(pivotSkill, /제약조건/);
   });
 
   it('keeps stale pre-v0.17 routing language out of mpl-pivot', () => {
