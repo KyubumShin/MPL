@@ -233,6 +233,11 @@ phases:
       assert.equal(r.continue, false);
       assert.equal(r.decision, 'block');
       assert.match(r.reason, /recorded mpl-test-agent evidence is verdict=PASS/);
+      assert.match(r.reason, /missing scalar count fields/);
+      assert.match(r.reason, /pre-v0\.18\.7 legacy record/);
+      assert.match(r.reason, /Re-run mpl-test-agent for phase-1/);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.match(state.block_reason, /missing scalar count fields/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

@@ -94,6 +94,53 @@ function clearBlockedHook(cwd, phaseId) {
   }
 }
 
+function finiteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function missingScalarCountFields(evidence) {
+  const fields = [
+    'test_files_created_count',
+    'command_exit_codes_count',
+    'command_exit_codes_nonzero_count',
+  ];
+  return fields.filter((field) => !finiteNumber(evidence?.[field]));
+}
+
+function isLegacyArrayOnlyPassEvidence(evidence) {
+  if (!evidence) return false;
+  const missingFields = missingScalarCountFields(evidence);
+  return Boolean(
+    missingFields.length > 0 &&
+    evidence.valid_json === true &&
+    evidence.verdict === 'PASS' &&
+    (evidence.invalid_reason === null || evidence.invalid_reason === undefined) &&
+    finiteNumber(evidence.tests_total) &&
+    evidence.tests_total > 0 &&
+    finiteNumber(evidence.tests_failed) &&
+    evidence.tests_failed === 0 &&
+    finiteNumber(evidence.tests_skipped) &&
+    evidence.tests_skipped === 0 &&
+    Array.isArray(evidence.test_files_created) &&
+    evidence.test_files_created.length > 0 &&
+    Array.isArray(evidence.command_exit_codes) &&
+    evidence.command_exit_codes.length > 0 &&
+    evidence.command_exit_codes.every((code) => code === 0) &&
+    evidence.bugs_found_count === 0
+  );
+}
+
+function describePriorEvidence(prior, phaseId) {
+  if (!prior) return 'but mpl-test-agent was not dispatched';
+  const summary = `but the recorded mpl-test-agent evidence is verdict=${prior.verdict || 'UNKNOWN'} ` +
+    `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'})`;
+  if (!isLegacyArrayOnlyPassEvidence(prior)) return summary;
+
+  return `${summary}; missing scalar count fields (${missingScalarCountFields(prior).join(', ')}) ` +
+    `in a pre-v0.18.7 legacy record. Re-run mpl-test-agent for ${phaseId} so MPL records ` +
+    `lossless scalar counts`;
+}
+
 /**
  * Extract phase id from the phase-runner prompt. Looks for "phase-N" / "phase N".
  * Returns null if no match — the hook conservatively allows such dispatches (the
@@ -251,10 +298,7 @@ try {
 
   // Not overridden, required, not dispatched → BLOCK
   const prior = dispatched[phaseId];
-  const missingOrBad = prior
-    ? `but the recorded mpl-test-agent evidence is verdict=${prior.verdict || 'UNKNOWN'} ` +
-      `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'})`
-    : 'but mpl-test-agent was not dispatched';
+  const missingOrBad = describePriorEvidence(prior, phaseId);
   const rationale = phase.test_agent_rationale
     ? ` (rationale: ${phase.test_agent_rationale})`
     : '';
