@@ -2,6 +2,9 @@
 /**
  * Machine-readable Tauri/Rust resource-risk probe for doctor audit.
  *
+ * This is a manually invoked diagnostic CLI under hooks/ for plugin packaging
+ * compatibility. It is not registered as a Claude hook event.
+ *
  * Emits JSON and never blocks by itself; policy consumers decide whether WARN
  * should remain advisory or become an enforcement signal.
  */

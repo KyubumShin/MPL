@@ -254,10 +254,13 @@ disallowedTools: Write, Edit, Task
     - **[j] Tauri/Rust resource risk (exp21)** — surface build artifact growth before long verification loops:
       - Invoke the resource-risk CLI:
         `node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-resource-risk.mjs ${CWD}`
-      - Parse JSON fields: `status`, `measurements[]`, `warnings[]`.
+      - This CLI is manually invoked by doctor and is not a registered Claude hook event.
+      - Parse JSON fields: `status`, `measurements[]`, `warnings[]`, `scan_errors[]`, `scan_error_count`.
       - NOT APPLICABLE if the workspace has no `src-tauri/Cargo.toml` and no `src-tauri/target`.
       - PASS when Tauri/Rust is present but no warning thresholds are exceeded.
-      - WARN when `warnings[]` is non-empty. Include measured size, threshold, and recommendation for each warning.
+      - WARN when `warnings[]` is non-empty. Include measured size, threshold, and recommendation for size warnings.
+      - If `scan_error_count > 0`, report partial scan as WARN with representative `scan_errors[]` paths before treating the resource measurement as clean.
+      - When deps dominate the target tree, prefer the deps warning over a redundant whole-target warning so the output points at the likely root cause.
       - This is advisory in v0.18.x; do not fail a pipeline solely on resource size until thresholds are calibrated.
 
     **Output format for Category 13**:

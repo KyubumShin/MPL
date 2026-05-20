@@ -4,6 +4,8 @@ import { extname, join, relative, sep } from 'path';
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
+const DEFAULT_DEPS_DOMINANCE_RATIO = 0.9;
+const MAX_SCAN_ERRORS = 25;
 
 export const DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS = {
   targetWarnBytes: 8 * GIB,
@@ -11,6 +13,7 @@ export const DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS = {
   staticLibWarnBytes: 512 * MIB,
 };
 
+// Keep threshold config human-readable once config/env wiring is added.
 export function parseByteSize(value) {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
     return Math.round(value);
@@ -53,32 +56,69 @@ function isDepsPath(filePath) {
   return filePath.split(sep).includes('deps');
 }
 
-function scanTargetTree(targetDir, cwd) {
+function normalizeThresholds(thresholds = DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS) {
+  const overrides = thresholds && typeof thresholds === 'object' ? thresholds : {};
+  const t = { ...DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS, ...overrides };
+  const ratio = Number(t.depsDominanceRatio);
+  return {
+    targetWarnBytes: parseByteSize(t.targetWarnBytes) ?? DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.targetWarnBytes,
+    depsWarnBytes: parseByteSize(t.depsWarnBytes) ?? DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.depsWarnBytes,
+    staticLibWarnBytes: parseByteSize(t.staticLibWarnBytes) ?? DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.staticLibWarnBytes,
+    depsDominanceRatio: Number.isFinite(ratio) && ratio > 0 && ratio <= 1
+      ? ratio
+      : DEFAULT_DEPS_DOMINANCE_RATIO,
+  };
+}
+
+function scanError(cwd, filePath, err) {
+  return {
+    path: posixRel(cwd, filePath),
+    code: err?.code || err?.name || 'SCAN_ERROR',
+    message: err?.message || String(err),
+  };
+}
+
+function scanTargetTree(targetDir, cwd, fsImpl = { existsSync, lstatSync, readdirSync }) {
   const result = {
     targetBytes: 0,
     depsBytes: 0,
     largestStaticLib: null,
+    scanErrorCount: 0,
+    scanErrors: [],
   };
 
-  function walk(filePath) {
+  function recordScanError(filePath, err) {
+    result.scanErrorCount += 1;
+    if (result.scanErrors.length < MAX_SCAN_ERRORS) {
+      result.scanErrors.push(scanError(cwd, filePath, err));
+    }
+  }
+
+  if (!fsImpl.existsSync(targetDir)) return result;
+
+  const stack = [targetDir];
+  while (stack.length > 0) {
+    const filePath = stack.pop();
     let st;
     try {
-      st = lstatSync(filePath);
-    } catch {
-      return;
+      st = fsImpl.lstatSync(filePath);
+    } catch (err) {
+      recordScanError(filePath, err);
+      continue;
     }
-    if (st.isSymbolicLink()) return;
+    if (st.isSymbolicLink()) continue;
     if (st.isDirectory()) {
       let entries = [];
       try {
-        entries = readdirSync(filePath);
-      } catch {
-        return;
+        entries = fsImpl.readdirSync(filePath);
+      } catch (err) {
+        recordScanError(filePath, err);
+        continue;
       }
-      for (const entry of entries) walk(join(filePath, entry));
-      return;
+      for (const entry of entries) stack.push(join(filePath, entry));
+      continue;
     }
-    if (!st.isFile()) return;
+    if (!st.isFile()) continue;
 
     result.targetBytes += st.size;
     if (isDepsPath(filePath)) result.depsBytes += st.size;
@@ -94,7 +134,6 @@ function scanTargetTree(targetDir, cwd) {
     }
   }
 
-  if (existsSync(targetDir)) walk(targetDir);
   return result;
 }
 
@@ -112,25 +151,29 @@ function warning({ id, measurement, path, bytes, thresholdBytes, recommendation 
   };
 }
 
-export function detectTauriRustResourceRisk(cwd, thresholds = DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS) {
+export function detectTauriRustResourceRisk(cwd, thresholds = DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS, options = {}) {
+  const fsImpl = options.fs || { existsSync, lstatSync, readdirSync };
+  const effectiveThresholds = normalizeThresholds(thresholds);
   const root = cwd || process.cwd();
   const tauriRoot = join(root, 'src-tauri');
   const targetDir = join(tauriRoot, 'target');
-  const isTauriRust = existsSync(join(tauriRoot, 'Cargo.toml')) || existsSync(targetDir);
+  const isTauriRust = fsImpl.existsSync(join(tauriRoot, 'Cargo.toml')) || fsImpl.existsSync(targetDir);
   if (!isTauriRust) {
     return {
       kind: 'tauri_rust_resource_risk',
       status: 'not_applicable',
       measurements: [],
       warnings: [],
+      scan_errors: [],
+      scan_error_count: 0,
     };
   }
 
-  const scan = scanTargetTree(targetDir, root);
+  const scan = scanTargetTree(targetDir, root, fsImpl);
   const measurements = [];
   const warnings = [];
 
-  if (existsSync(targetDir)) {
+  if (fsImpl.existsSync(targetDir)) {
     measurements.push({
       id: 'src_tauri_target',
       path: posixRel(root, targetDir),
@@ -151,33 +194,48 @@ export function detectTauriRustResourceRisk(cwd, thresholds = DEFAULT_TAURI_RUST
     });
   }
 
-  if (scan.targetBytes >= thresholds.targetWarnBytes) {
+  const depsDominatesTarget = scan.targetBytes > 0
+    && scan.depsBytes >= effectiveThresholds.depsWarnBytes
+    && scan.depsBytes / scan.targetBytes >= effectiveThresholds.depsDominanceRatio;
+
+  if (scan.scanErrorCount > 0) {
+    warnings.push({
+      id: 'tauri_scan_partial_warn',
+      severity: 'warn',
+      measurement: 'scan_errors',
+      path: 'src-tauri/target',
+      count: scan.scanErrorCount,
+      shown: scan.scanErrors.length,
+      recommendation: 'Inspect unreadable target paths and rerun the doctor audit so resource-risk measurements are not treated as clean when the scan was partial.',
+    });
+  }
+  if (scan.targetBytes >= effectiveThresholds.targetWarnBytes && !depsDominatesTarget) {
     warnings.push(warning({
       id: 'tauri_target_size_warn',
       measurement: 'src_tauri_target',
       path: 'src-tauri/target',
       bytes: scan.targetBytes,
-      thresholdBytes: thresholds.targetWarnBytes,
+      thresholdBytes: effectiveThresholds.targetWarnBytes,
       recommendation: 'Run cargo clean when safe, lower build/test concurrency, or split large Rust/Tauri work into smaller crates/phases.',
     }));
   }
-  if (scan.depsBytes >= thresholds.depsWarnBytes) {
+  if (scan.depsBytes >= effectiveThresholds.depsWarnBytes) {
     warnings.push(warning({
       id: 'tauri_deps_size_warn',
       measurement: 'src_tauri_target_deps',
       path: 'src-tauri/target/**/deps',
       bytes: scan.depsBytes,
-      thresholdBytes: thresholds.depsWarnBytes,
+      thresholdBytes: effectiveThresholds.depsWarnBytes,
       recommendation: 'Reduce duplicate dependency builds, prefer workspace-level crate boundaries, and clean stale target deps before long verification loops.',
     }));
   }
-  if (scan.largestStaticLib && scan.largestStaticLib.bytes >= thresholds.staticLibWarnBytes) {
+  if (scan.largestStaticLib && scan.largestStaticLib.bytes >= effectiveThresholds.staticLibWarnBytes) {
     warnings.push(warning({
       id: 'tauri_static_lib_size_warn',
       measurement: 'largest_static_lib',
       path: scan.largestStaticLib.path,
       bytes: scan.largestStaticLib.bytes,
-      thresholdBytes: thresholds.staticLibWarnBytes,
+      thresholdBytes: effectiveThresholds.staticLibWarnBytes,
       recommendation: 'Consider multi-crate decomposition or smaller Rust module boundaries before continuing long Tauri verification runs.',
     }));
   }
@@ -187,5 +245,7 @@ export function detectTauriRustResourceRisk(cwd, thresholds = DEFAULT_TAURI_RUST
     status: warnings.length > 0 ? 'warn' : 'pass',
     measurements,
     warnings,
+    scan_errors: scan.scanErrors,
+    scan_error_count: scan.scanErrorCount,
   };
 }
