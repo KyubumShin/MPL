@@ -1,199 +1,108 @@
 ---
-description: "Pivot Point discovery through structured interview — define immutable constraints before planning. Usually called internally by /mpl:mpl before Phase 1. May also trigger when the user explicitly asks to define constraints: 'pivot point', 'PP 정리', '제약조건 잡아줘'."
+description: "Thin wrapper for Pivot Point discovery. Delegates interview logic to agents/mpl-interviewer.md; use for /mpl:mpl-pivot or when the user asks to define core constraints, Pivot Points, PP, immutable boundaries, PP 정리, 피벗 포인트, or 제약조건."
 ---
 
-# MPL Pivot Points Interview
+# MPL Pivot Points
 
-Pivot Points (PP) are **constraints that never change** throughout the entire project.
-This skill discovers and defines PPs through a structured interview.
+Pivot Points (PPs) are immutable project constraints. They define what must not
+change while MPL plans and executes the work.
 
-## When to Use
+This skill is an entrypoint wrapper only. It does not own the interview
+questions, scoring loop, or downstream Phase 0 artifacts. The canonical PP
+interview protocol lives in `agents/mpl-interviewer.md`; the canonical pipeline
+placement lives in `commands/mpl-run-phase0.md` Stage 1.
 
-- Before starting the MPL pipeline (before Phase 1)
-- When PPs are not clearly defined
-- When starting a new project or making a large directional change
-- When running `/mpl:mpl` and no PP exists, this skill runs automatically first
+## Responsibility Boundary
 
-## Triage Integration *(v0.17 REMOVED — Triage step deleted; `interview_depth` is no longer set by the pipeline. Treat all invocations as `full`. Section preserved as historical reference until rewrite.)*
+| Component | Owns | Must not own |
+|---|---|---|
+| `/mpl:mpl-pivot` skill | Standalone entrypoint, existing PP check, interviewer dispatch, persistence of `.mpl/pivot-points.md` | Interview question design, ambiguity scoring, user contract, goal contract, planning |
+| `agents/mpl-interviewer.md` | Structured PP discovery questions, PP conformance checks, final PP specification, `user_responses_summary` | File writes, codebase analysis, implementation, decomposition |
+| `commands/mpl-run-phase0.md` | Full pipeline ordering: Stage 1.1 core scenarios through Stage 1.9 interview snapshot, then Stage 2 ambiguity loop | Duplicating interviewer prompt logic |
+| `mpl_score_ambiguity` loop | Stage 2 ambiguity scoring and repair after PPs exist | Initial PP interview |
 
-When invoked from the MPL pipeline, the Triage step determines interview depth:
+## When To Use
 
-| Triage Result | Interview Behavior |
-|---------------|-------------------|
-| `interview_depth: "full"` | All 4 rounds (default behavior) |
-| `interview_depth: "light"` | Round 1 (What) + Round 2 (What NOT) only. Skip Either/Or and How to Judge. This is the minimum depth — `light` cannot be reduced further (F-35). |
+Use this skill when:
 
-When `interview_depth` is provided in the invocation context, respect it:
-- `"light"`: After Round 2, generate PP candidates and skip to Output. This is the minimum interview depth; `skip` is not supported.
+- The user explicitly invokes `/mpl:mpl-pivot`.
+- The user asks to define PP, Pivot Points, immutable constraints, or project
+  boundaries without running the full MPL pipeline.
+- The user asks in Korean for "PP 정리", "피벗 포인트", or "제약조건".
+- A full `/mpl:mpl` run needs PP discovery and calls this entrypoint as a
+  convenience wrapper.
 
-## Interview Protocol
+Do not use this skill to run a second interview after `agents/mpl-interviewer.md`
+already produced current PPs. If `.mpl/pivot-points.md` exists, ask whether to
+keep, refine, or regenerate it before dispatching the interviewer again.
 
-### Round 1: Core Exploration (What)
+## Runtime Protocol
 
-Identify the core identity of the project.
+1. Check whether `.mpl/pivot-points.md` exists.
+2. If it exists, show a short summary and ask the user whether to keep, refine,
+   or regenerate it.
+3. Dispatch `agents/mpl-interviewer.md` with full-equivalent Stage 1 mode.
+4. Save the returned PP specification to `.mpl/pivot-points.md`.
+5. Save or pass through `user_responses_summary` for Stage 2 when the full
+   pipeline is running.
+6. Stop after reporting `.mpl/pivot-points.md` in standalone mode. In full
+   pipeline mode, return control to `commands/mpl-run-phase0.md` Stage 1.1.
 
-```
-AskUserQuestion: "What is the core identity of this project?"
-Options:
-  1. {Identity A inferred from project description}
-  2. {Identity B inferred from project description}
-  3. (User input)
-```
+Dispatch shape:
 
-**Inference method**: Pre-identify candidates through codebase exploration (explore agent) + README/CLAUDE.md analysis.
-
-Followed by:
-```
-AskUserQuestion: "What is the most important value in this project?"
-Options:
-  1. "User Experience (UX)"
-  2. "Performance/Speed"
-  3. "Stability/Reliability"
-  4. (User input)
-```
-
-### Round 2: Boundary Exploration (What NOT)
-
-Find what must not change.
-
-```
-AskUserQuestion: "What must absolutely not be lost while adding this feature?"
-Options:
-  1. {Constraint A inferred from Round 1 answers}
-  2. {Constraint B inferred from Round 1 answers}
-  3. {Core pattern discovered in codebase}
-  4. (User input)
+```text
+Task(subagent_type="mpl-interviewer", model="opus", prompt=`
+  user_request: ${user_request}
+  provided_specs: ${provided_specs}
+  existing_pivot_points: ${existing_pivot_points_or_empty}
+  invocation: "/mpl:mpl-pivot"
+`)
 ```
 
-```
-AskUserQuestion: "What changes could break this project?"
-Options:
-  1. {Inferred risk scenario A}
-  2. {Inferred risk scenario B}
-  3. (User input)
-```
+## Persistence Contract
 
-### Round 3: Tradeoff Exploration (Either/Or)
-
-Confirm priorities between PPs.
-
-```
-AskUserQuestion: "If {PP-A} and {PP-B} conflict, which takes priority?"
-Options:
-  1. "{PP-A} first"
-  2. "{PP-B} first"
-  3. "Depends on the situation" → follow-up question to define judgment criteria
-```
-
-This round only runs when there are 2 or more PPs.
-Confirm priority for all PP pairs (N*(N-1)/2 pairs).
-
-### Round 4: Concretization (How to Judge)
-
-Concretize the violation judgment criteria for each PP.
-
-```
-AskUserQuestion: "How can we judge '{PP-1 principle}'?"
-Options:
-  1. {Inferred judgment criterion A} (e.g., "Violation if click count increases")
-  2. {Inferred judgment criterion B} (e.g., "Violation if loading time exceeds 2 seconds")
-  3. (User input)
-```
-
-**When judgment criteria are ambiguous**: Use the following strategy if the user cannot answer clearly.
-
-### Unclear PP Handling Strategy
-
-When a PP is not clear, approach in 3 stages:
-
-#### Strategy 1: Example-Based Concretization
-```
-AskUserQuestion: "Which of the following violates the {PP principle}?"
-Options:
-  1. "Splitting the settings menu into 3 levels" → Violation?
-  2. "Adding keyboard shortcuts" → Violation?
-  3. "Always showing the sidebar" → Violation?
-```
-Extract the judgment criteria in reverse by analyzing the user's violation/non-violation judgments.
-
-#### Strategy 2: Proceed with Provisional PP
-```
-PP-2: Preserve Editor Essence (PROVISIONAL)
-- Principle: Text editing is the core and must not be overshadowed by supplementary features
-- Judgment criteria: [TBD — revisit when Discovery occurs in Phase 2]
-- Status: PROVISIONAL (soft constraint until confirmed)
-```
-
-PROVISIONAL PPs:
-- **Do not auto-reject on Discovery conflict — escalate to HITL**
-- When concrete cases emerge during Phase 2 execution, finalize judgment criteria
-- Must be converted to CONFIRMED before entering Phase 3
-
-#### Strategy 3: Start Without PP
-In early exploration stages where a PP cannot be defined:
-```json
-{
-  "pivot_points": [],
-  "pp_status": "deferred"
-}
-```
-Start without PP, and extract PP candidates from patterns discovered during Phase 2.
-
-## Output
-
-After the interview, create `.mpl/pivot-points.md`:
+The interviewer returns a PP specification. Persist it as:
 
 ```markdown
 # Pivot Points
 
-## PP-1: {title}
-- Principle: {what must not change}
-- Judgment criteria: {specific violation conditions}
-- Priority: 1 (highest)
-- Status: CONFIRMED
-- Violation example: {example}
-- Allowed example: {example}
+### PP-1: {title}
+- Principle: {the immutable principle}
+- User Value: {what user gains from this principle}
+- Judgment Criteria: {concrete violation condition}
+- Priority: 1
+- Status: CONFIRMED | PROVISIONAL
+- Violation Example: {scenario where user would say "this is broken"}
+- Compliance Example: {scenario where user would say "this works"}
 
-## PP-2: {title}
-- Principle: ...
-- Judgment criteria: ...
-- Priority: 2
-- Status: PROVISIONAL (judgment criteria not finalized)
-- Violation example: {example}
-- Allowed example: {example}
-
-## Priority Order
+### Priority Order
 PP-1 > PP-2 > PP-3
-(Higher PP takes priority on conflict)
+
+### Interview Metadata
+- Depth: full
+- Rounds completed: {1-4}
+- Provisional PPs: {count}
 ```
 
-And insert the same content into the `## Pivot Points` section of PLAN.md.
+Do not insert User Contract fields into `.mpl/pivot-points.md`. UC data belongs
+in `.mpl/requirements/user-contract.md`; the PP schema guard will block leakage.
 
-## Integration with MPL Pipeline
+## Standalone Output
 
-```
-/mpl:mpl-pivot (this skill)
-     │
-     ▼
-.mpl/pivot-points.md created
-     │
-     ▼
-/mpl:mpl (Phase 1)
-     │
-     ├── PM references pivot-points.md to write PLAN.md
-     ├── PLAN.md includes ## Pivot Points section
-     │
-     ▼
-Phase 2: Worker discoveries → PP conflict check
-     │
-     ├── CONFIRMED PP conflict → auto-reject
-     ├── PROVISIONAL PP conflict → request HITL judgment
-     └── No PP (explore) → all discoveries allowed
-```
+When invoked outside the full MPL pipeline, report only:
 
-## Standalone Usage
+- Path written: `.mpl/pivot-points.md`
+- Number of PPs and their status counts
+- Any PROVISIONAL PP that needs later confirmation
+- That planning has not started yet
 
-Can be used without the MPL pipeline:
-- Define initial project direction
-- Formalize implicit constraints in existing projects
-- Generate core principles document for team onboarding
+## Pipeline Handoff
+
+When invoked inside `/mpl:mpl`, return control to Phase 0 after Stage 1:
+
+- Stage 1.1 derives core scenarios from confirmed PPs.
+- Stage 1.2 through Stage 1.8 derive intent, contracts, and goal evidence.
+- Stage 1.9 saves the interview snapshot.
+- Stage 2 runs the orchestrator-driven ambiguity loop with `mpl_score_ambiguity`.
+
+The skill must not duplicate any of those stages.
