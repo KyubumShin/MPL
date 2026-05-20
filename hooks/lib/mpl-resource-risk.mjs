@@ -4,13 +4,13 @@ import { extname, join, relative, sep } from 'path';
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
-const DEFAULT_DEPS_DOMINANCE_RATIO = 0.9;
 const MAX_SCAN_ERRORS = 25;
 
 export const DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS = {
   targetWarnBytes: 8 * GIB,
   depsWarnBytes: 8 * GIB,
   staticLibWarnBytes: 512 * MIB,
+  depsDominanceRatio: 0.9,
 };
 
 // Keep threshold config human-readable once config/env wiring is added.
@@ -66,7 +66,7 @@ function normalizeThresholds(thresholds = DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS
     staticLibWarnBytes: parseByteSize(t.staticLibWarnBytes) ?? DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.staticLibWarnBytes,
     depsDominanceRatio: Number.isFinite(ratio) && ratio > 0 && ratio <= 1
       ? ratio
-      : DEFAULT_DEPS_DOMINANCE_RATIO,
+      : DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.depsDominanceRatio,
   };
 }
 
