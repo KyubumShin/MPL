@@ -52,7 +52,7 @@ function escapeRegExp(literal) {
 
 function literalPattern(literal) {
   const escaped = escapeRegExp(literal).replace(/\\ /g, '\\s+');
-  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}(?=$|[^A-Za-z0-9_])`, 'i');
+  return new RegExp(`(?<![A-Za-z0-9_])${escaped}(?=$|[^A-Za-z0-9_])`, 'i');
 }
 
 function topLevelSectionLines(markdown, heading) {
@@ -62,6 +62,7 @@ function topLevelSectionLines(markdown, heading) {
 
   for (const line of lines) {
     if (line === heading) {
+      if (inSection) break;
       inSection = true;
       continue;
     }
@@ -207,6 +208,7 @@ describe('framework-specific prompt literals', () => {
 
     assert.equal(scopedPackage.test('load @scope/pkg profile'), true);
     assert.equal(scopedPackage.test('email@scope/pkg.com'), false);
+    assert.equal('load @scope/pkg profile'.match(scopedPackage)?.[0], '@scope/pkg');
   });
 
   it('keeps the framework profile registry structurally complete', () => {
@@ -282,5 +284,18 @@ describe('framework-specific prompt literals', () => {
         body: ['`prompt_guard_literals`', '- `Synthetic`'].join('\n'),
       },
     ]);
+  });
+
+  it('uses the first matching top-level section only', () => {
+    const registry = [
+      '## Profile Contract',
+      '### `prompt_guard_literals`',
+      '## Profile Contract',
+      '### `ignored_duplicate`',
+      '## Profiles',
+      '',
+    ].join('\n');
+
+    assert.deepEqual(parseContractCategories(registry), ['prompt_guard_literals']);
   });
 });
