@@ -1,7 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractPrompt, sanitize, extractFeatureName } from '../mpl-keyword-detector.mjs';
+import {
+  extractPrompt,
+  isTaskNotificationPrompt,
+  sanitize,
+  extractFeatureName,
+} from '../mpl-keyword-detector.mjs';
 
 describe('extractFeatureName', () => {
   it('should extract English feature name', () => {
@@ -106,5 +111,24 @@ describe('extractPrompt', () => {
 
   it('should return empty string for empty object', () => {
     assert.strictEqual(extractPrompt('{}'), '');
+  });
+});
+
+describe('isTaskNotificationPrompt', () => {
+  it('detects Claude Code task-notification XML', () => {
+    const prompt = `
+<task-notification>
+<status>completed</status>
+<summary>mpl-phase-runner completed</summary>
+</task-notification>`;
+    assert.equal(isTaskNotificationPrompt(prompt), true);
+  });
+
+  it('does not treat ordinary MPL prompts as task notifications', () => {
+    assert.equal(isTaskNotificationPrompt('mpl fix task notification handling'), false);
+  });
+
+  it('does not match mentions of the XML tag outside the leading position', () => {
+    assert.equal(isTaskNotificationPrompt('please inspect <task-notification> output in mpl'), false);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -30,10 +30,14 @@ function seedState(state) {
 }
 
 function runHook(promptText) {
+  runHookPayload({ prompt: promptText });
+}
+
+function runHookPayload(payload) {
   const stdin = JSON.stringify({
     cwd: tmp,
     hook_event_name: 'UserPromptSubmit',
-    prompt: promptText,
+    ...payload,
   });
   execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
 }
@@ -111,5 +115,42 @@ describe('G6 (#114) user_intervention_count', () => {
     runHook('/mpl:mpl-resume');
     runHook('/mpl:mpl-cancel reason');
     assert.equal(readPersistedState().user_intervention_count, 3);
+  });
+});
+
+describe('#43 task-notification guard', () => {
+  const notificationPrompt = `<task-notification>
+<task-id>agent-123</task-id>
+<status>completed</status>
+<summary>mpl-phase-runner completed</summary>
+<result>MPL implementation finished.</result>
+</task-notification>`;
+
+  it('does NOT initialize a fresh pipeline from a Task completion notification', () => {
+    runHook(notificationPrompt);
+    assert.equal(existsSync(join(tmp, '.mpl', 'state.json')), false);
+  });
+
+  it('does NOT reset a completed pipeline snapshot', () => {
+    seedState({
+      pipeline_id: 'mpl-20260415-yggdrasil-novel-writing-app',
+      feature_name: 'yggdrasil-novel-writing-app',
+      current_phase: 'completed',
+      session_status: 'completed',
+      user_intervention_count: 4,
+    });
+    const before = readPersistedState();
+
+    runHook(notificationPrompt);
+
+    assert.deepEqual(readPersistedState(), before);
+  });
+
+  it('does NOT count Task completion notifications as user interventions', () => {
+    seedState({});
+
+    runHook(notificationPrompt);
+
+    assert.equal(readPersistedState().user_intervention_count, 0);
   });
 });
