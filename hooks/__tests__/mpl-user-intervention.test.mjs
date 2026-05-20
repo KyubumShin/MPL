@@ -33,6 +33,8 @@ function runHook(promptText) {
   runHookPayload({ prompt: promptText });
 }
 
+// Keep payload-level entry available for notification-shaped regression tests
+// that need to exercise hook input fields beyond plain prompt text.
 function runHookPayload(payload) {
   const stdin = JSON.stringify({
     cwd: tmp,
