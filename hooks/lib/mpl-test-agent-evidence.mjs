@@ -11,6 +11,8 @@ function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+export const TEST_AGENT_EVIDENCE_PREVIEW_LIMIT = 20;
+
 function firstJsonCandidate(text) {
   if (typeof text !== 'string') return null;
   const fenced = text.match(/```json\s*([\s\S]*?)```/i);
@@ -50,6 +52,15 @@ function commandExitCodes(body) {
     .filter((n) => n !== null);
 }
 
+function boundedPreview(values, limit = TEST_AGENT_EVIDENCE_PREVIEW_LIMIT) {
+  const items = Array.isArray(values) ? values : [];
+  return {
+    preview: items.slice(0, limit),
+    count: items.length,
+    truncated: items.length > limit,
+  };
+}
+
 function coverageStatuses(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.map((r) => normalizeStatus(r?.status)).filter(Boolean);
@@ -76,7 +87,12 @@ export function parseTestAgentEvidence({
     tests_skipped: null,
     pass_rate: null,
     test_files_created: [],
+    test_files_created_count: 0,
+    test_files_created_truncated: false,
     command_exit_codes: [],
+    command_exit_codes_count: 0,
+    command_exit_codes_nonzero_count: 0,
+    command_exit_codes_truncated: false,
     bugs_found_count: null,
     invalid_reason: parsed.reason || null,
   };
@@ -90,6 +106,9 @@ export function parseTestAgentEvidence({
   const bugs = Array.isArray(body.bugs_found) ? body.bugs_found : [];
   const aStatuses = coverageStatuses(body.a_item_coverage);
   const sStatuses = coverageStatuses(body.s_item_coverage);
+  const testFilePreview = boundedPreview(testFiles);
+  const commandExitPreview = boundedPreview(commands);
+  const commandNonzeroCount = commands.filter((code) => code !== 0).length;
 
   const evidence = {
     ...base,
@@ -99,8 +118,13 @@ export function parseTestAgentEvidence({
     tests_failed: numeric(results.failed, 0),
     tests_skipped: numeric(results.skipped, 0),
     pass_rate: numeric(results.pass_rate, null),
-    test_files_created: testFiles,
-    command_exit_codes: commands,
+    test_files_created: testFilePreview.preview,
+    test_files_created_count: testFilePreview.count,
+    test_files_created_truncated: testFilePreview.truncated,
+    command_exit_codes: commandExitPreview.preview,
+    command_exit_codes_count: commandExitPreview.count,
+    command_exit_codes_nonzero_count: commandNonzeroCount,
+    command_exit_codes_truncated: commandExitPreview.truncated,
     bugs_found_count: bugs.length,
     invalid_reason: null,
   };
@@ -133,6 +157,23 @@ export function parseTestAgentEvidence({
   return evidence;
 }
 
+function evidenceCount(evidence, countKey, arrayKey) {
+  const counted = numeric(evidence?.[countKey], null);
+  if (counted !== null) return counted;
+  return Array.isArray(evidence?.[arrayKey]) ? evidence[arrayKey].length : 0;
+}
+
+function commandExitCodesPass(evidence) {
+  const counted = numeric(evidence?.command_exit_codes_count, null);
+  const nonzeroCount = numeric(evidence?.command_exit_codes_nonzero_count, null);
+  if (counted !== null || nonzeroCount !== null) {
+    return counted > 0 && nonzeroCount === 0;
+  }
+  return Array.isArray(evidence?.command_exit_codes) &&
+    evidence.command_exit_codes.length > 0 &&
+    evidence.command_exit_codes.every((code) => code === 0);
+}
+
 export function isPassingTestAgentEvidence(evidence) {
   return Boolean(
     evidence &&
@@ -145,11 +186,8 @@ export function isPassingTestAgentEvidence(evidence) {
     evidence.tests_failed === 0 &&
     typeof evidence.tests_skipped === 'number' &&
     evidence.tests_skipped === 0 &&
-    Array.isArray(evidence.test_files_created) &&
-    evidence.test_files_created.length > 0 &&
-    Array.isArray(evidence.command_exit_codes) &&
-    evidence.command_exit_codes.length > 0 &&
-    evidence.command_exit_codes.every((code) => code === 0) &&
+    evidenceCount(evidence, 'test_files_created_count', 'test_files_created') > 0 &&
+    commandExitCodesPass(evidence) &&
     evidence.bugs_found_count === 0
   );
 }
