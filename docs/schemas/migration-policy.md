@@ -33,6 +33,7 @@ of change to the state shape:
 | Rename an existing field | **Breaking** | Bump + migration must read the old name and write the new one. Drop the old name only after one stable release. | `current_phase` rename across exp16. |
 | Change the meaning of an existing field (units, enum) | **Breaking** | Bump + migration translates each prior value to the new domain. Hand-write the mapping — no implicit identity. | `session_status` enum widening (#109 G4 added `verification_hang`). |
 | Remove a field | **Breaking** | Bump + migration drops the key cleanly. Document the removal in this file. | (none yet). |
+| Retire a compatibility reader path without changing stored fields | **Consumer breaking** | Document the removal version and recovery path. Do not backfill if the old representation cannot prove the new lossless semantics. | v0.18.7 (#157): `test_agent_dispatched.*.test_files_created[]` and `command_exit_codes[]` no longer satisfy PASS without scalar counts. |
 
 ### What this means in practice
 
@@ -45,6 +46,19 @@ of change to the state shape:
   removal without a translation. Without a registered migration, a writer
   bumping `CURRENT_SCHEMA_VERSION` will trip its own G3 I8 on the next
   read.
+
+### Consumer-only compatibility retirements
+
+Some changes leave stored fields in place but change which fields a hook trusts.
+These are consumer-breaking, even when `CURRENT_SCHEMA_VERSION` does not change.
+Document the removal version and recovery path in the schema doc that owns the
+field.
+
+For v0.18.7 (#157), array-only `test_agent_dispatched[phase_id]` records are not
+migrated into scalar counts. Pre-count records must be refreshed by re-running
+`mpl-test-agent` for the phase. The arrays are retained only as bounded previews,
+and there is no durable marker that proves an array is a complete historical
+record rather than a truncated preview.
 
 ## Migration registry
 
