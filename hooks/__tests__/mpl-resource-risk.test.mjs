@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 
 import {
+  DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS,
   detectTauriRustResourceRisk,
   formatBytes,
   parseByteSize,
@@ -32,6 +33,13 @@ describe('resource risk byte parsing', () => {
     assert.equal(formatBytes(16 * 1024 ** 3), '16.0 GiB');
     assert.equal(formatBytes(705 * 1024 ** 2), '705.0 MiB');
     assert.equal(formatBytes(512), '512 B');
+  });
+
+  it('exposes size thresholds and dominance heuristic in one default surface', () => {
+    assert.equal(DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.targetWarnBytes, 8 * 1024 ** 3);
+    assert.equal(DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.depsWarnBytes, 8 * 1024 ** 3);
+    assert.equal(DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.staticLibWarnBytes, 512 * 1024 ** 2);
+    assert.equal(DEFAULT_TAURI_RUST_RESOURCE_THRESHOLDS.depsDominanceRatio, 0.9);
   });
 });
 
