@@ -12,6 +12,11 @@ description: Framework/tool profile registry for boundary scans, platform constr
 
 Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
+### `prompt_guard_literals`
+
+- Framework/tool-specific literal names that must stay in this registry rather than runtime prompts.
+- Use `none` only for generic language/tool families whose names remain acceptable in runtime prompts.
+
 ### `boundary_profiles`
 
 - `id`: stable profile id
@@ -72,6 +77,11 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### Tauri / Rust Desktop
 
+`prompt_guard_literals`
+- `Tauri`
+- `src-tauri`
+- `tauri-driver`
+
 `boundary_profiles`
 - `id`: `tauri-rust-invoke`
 - `applies_when`: `src-tauri/`, `tauri.conf.json`, `src-tauri/Cargo.toml`, or tech stack contains Tauri.
@@ -115,6 +125,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### Electron Desktop
 
+`prompt_guard_literals`
+- `Electron`
+
 `platform_constraint_profiles`
 - `id`: `electron-renderer-native-api`
 - `applies_when`: Electron config, dependency, directory, or tech-stack marker.
@@ -132,6 +145,10 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### Next.js / SSR Web Framework
 
+`prompt_guard_literals`
+- `Next.js`
+- `next.config`
+
 `platform_constraint_profiles`
 - `id`: `nextjs-ssr-browser-global`
 - `applies_when`: `next.config.*`, Next.js dependency, or equivalent SSR framework config/dependency marker.
@@ -144,6 +161,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### React Native / Native Mobile Web Runtime
 
+`prompt_guard_literals`
+- `React Native`
+
 `platform_constraint_profiles`
 - `id`: `react-native-browser-api`
 - `applies_when`: React Native dependency, native mobile config, or equivalent native mobile runtime marker.
@@ -151,6 +171,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `hint`: verify native runtime APIs instead of browser DOM assumptions.
 
 ### FastAPI / Python API With Schema Models
+
+`prompt_guard_literals`
+- `FastAPI`
 
 `framework_convention_profiles`
 - `id`: `fastapi-pydantic-schema-models`
@@ -160,6 +183,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### JavaScript/TypeScript Package Scripts
 
+`prompt_guard_literals`
+- `none`
+
 `build_tool_profiles`
 - `id`: `js-package-scripts`
 - `applies_when`: package manifest with build/typecheck/lint/test scripts.
@@ -167,6 +193,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `cwd_rule`: package manifest directory.
 
 ### Rust Cargo
+
+`prompt_guard_literals`
+- `none`
 
 `build_tool_profiles`
 - `id`: `rust-cargo`
@@ -176,6 +205,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### Python Project
 
+`prompt_guard_literals`
+- `none`
+
 `build_tool_profiles`
 - `id`: `python-project`
 - `applies_when`: Python project metadata or setup file.
@@ -183,6 +215,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `cwd_rule`: project root unless a package subroot is detected.
 
 ### Go Module
+
+`prompt_guard_literals`
+- `none`
 
 `build_tool_profiles`
 - `id`: `go-module`
@@ -192,6 +227,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### JVM Build Tools
 
+`prompt_guard_literals`
+- `none`
+
 `build_tool_profiles`
 - `id`: `jvm-gradle-maven`
 - `applies_when`: Gradle or Maven build files.
@@ -199,6 +237,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `cwd_rule`: build file directory.
 
 ### Playwright Browser E2E Runner
+
+`prompt_guard_literals`
+- `Playwright`
 
 `e2e_runner_profiles`
 - `id`: `playwright-browser-e2e`
@@ -210,6 +251,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### Cypress Browser E2E Runner
 
+`prompt_guard_literals`
+- `Cypress`
+
 `e2e_runner_profiles`
 - `id`: `cypress-browser-e2e`
 - `applies_when`: `cypress.config.*`, `cypress/`, or Cypress dependency.
@@ -220,6 +264,10 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 
 ### Puppeteer / Selenium Browser E2E Runner
 
+`prompt_guard_literals`
+- `Puppeteer`
+- `Selenium`
+
 `e2e_runner_profiles`
 - `id`: `browser-driver-e2e`
 - `applies_when`: Puppeteer or Selenium dependency/config.
@@ -228,6 +276,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `launcher_evidence`: browser driver launcher evidence.
 
 ### Pytest E2E Runner
+
+`prompt_guard_literals`
+- `none`
 
 `e2e_runner_profiles`
 - `id`: `pytest-e2e`
@@ -238,6 +289,9 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `launcher_evidence`: real API/runtime evidence when the scenario is not unit/mock.
 
 ### Custom E2E Runner
+
+`prompt_guard_literals`
+- `none`
 
 `e2e_runner_profiles`
 - `id`: `custom-e2e-runner`
