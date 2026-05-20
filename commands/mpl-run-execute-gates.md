@@ -230,10 +230,11 @@ A 100% pass rate on author-generated tests is a tautology, not evidence.
 Before marking Hard 2 PASS: for every phase whose `test_agent_required` is
 not explicitly `false`, `state.test_agent_dispatched[phase_id]` must contain
 structured PASS evidence (`valid_json:true`, `verdict:"PASS"`, executable tests,
-and `command_exit_codes[]` all zero). Missing, FAIL, INVALID, or timestamp-only
-dispatch records trigger the F-40 Required-Phase Block below; do not interpret
-pre-existing tests as a reason to skip — their authorship is what AP-TEST-01 is
-about, not their existence.
+`command_exit_codes[]` all zero, and no reported bugs). Missing verdict, FAIL,
+INVALID, partial PASS-shaped state, or timestamp-only dispatch records trigger
+the F-40 Required-Phase Block below; do not interpret pre-existing tests as a
+reason to skip — their authorship is what AP-TEST-01 is about, not their
+existence.
 
 **F-40 Required-Phase Block (AD-0007, v0.15.1):**
 

@@ -243,7 +243,7 @@ disallowedTools: Write, Edit, Task
 
     - **[g] test_agent dispatch coverage (AD-0007, v0.15.1)** — enforce the enforcement:
       - Count `required = decomposition.phases[].filter(p => p.test_agent_required != false)`
-      - Count `passed = required ids whose state.test_agent_dispatched[id] has valid_json=true, verdict="PASS", tests_total>0, tests_failed=0, tests_skipped=0, command_exit_codes all 0`
+      - Count `passed = required ids whose state.test_agent_dispatched[id] has valid_json=true, verdict="PASS", tests_total>0, tests_failed=0, tests_skipped=0, test_files_created length>0, command_exit_codes all 0, bugs_found_count=0`
       - Count `overridden = Object.keys(.mpl/config/test-agent-override.json or {})`
       - FAIL if `required - passed - overridden > 0` (AD-0007 block should have caught these)
       - WARN if `"*"` blanket override is active (anti-pattern)

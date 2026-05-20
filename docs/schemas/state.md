@@ -63,9 +63,11 @@ a dispatch timestamp. PASS evidence requires:
 - `tests_skipped == 0`
 - at least one `test_files_created[]`
 - at least one `command_exit_codes[]`, all `0`
+- `bugs_found_count == 0`
 
 Legacy timestamp-only records are treated as non-PASS and cannot satisfy Hard 2
-or a phase `evidence_required: [test_agent]` latch.
+or a phase `evidence_required: [test_agent]` latch. Records missing an explicit
+`verdict` are `INVALID`; a PASS-shaped partial state object is not enough.
 
 ## Trigger registration
 

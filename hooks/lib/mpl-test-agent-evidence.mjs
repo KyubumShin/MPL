@@ -28,7 +28,7 @@ function parseResponseJson(responseText) {
     }
     const nested = responseText.content ?? responseText.output ?? responseText.response ?? responseText.text;
     if (typeof nested === 'string') return parseResponseJson(nested);
-    return { valid: true, value: responseText };
+    return { valid: false, value: null, reason: 'missing_test_agent_fields' };
   }
   const candidate = firstJsonCandidate(String(responseText || ''));
   if (!candidate) return { valid: false, value: null, reason: 'missing_json_block' };
@@ -116,10 +116,13 @@ export function parseTestAgentEvidence({
   if (bugs.length > 0) issues.push('bugs_found');
   if (aStatuses.some((s) => s !== 'PASS')) issues.push('a_item_not_pass');
   if (sStatuses.some((s) => s !== 'PASS')) issues.push('s_item_not_pass');
+  if (!body.verdict) issues.push('missing_verdict');
   if (body.verdict && normalizeStatus(body.verdict) !== 'PASS') issues.push('reported_non_pass_verdict');
 
   if (issues.length > 0) {
-    evidence.verdict = issues.includes('phase_id_mismatch') || issues.includes('missing_command_exit_codes')
+    evidence.verdict = issues.includes('phase_id_mismatch') ||
+      issues.includes('missing_command_exit_codes') ||
+      issues.includes('missing_verdict')
       ? 'INVALID'
       : 'FAIL';
     evidence.invalid_reason = issues.join(',');
@@ -135,8 +138,18 @@ export function isPassingTestAgentEvidence(evidence) {
     evidence &&
     evidence.valid_json === true &&
     evidence.verdict === 'PASS' &&
+    (evidence.invalid_reason === null || evidence.invalid_reason === undefined) &&
+    typeof evidence.tests_total === 'number' &&
+    evidence.tests_total > 0 &&
+    typeof evidence.tests_failed === 'number' &&
+    evidence.tests_failed === 0 &&
+    typeof evidence.tests_skipped === 'number' &&
+    evidence.tests_skipped === 0 &&
+    Array.isArray(evidence.test_files_created) &&
+    evidence.test_files_created.length > 0 &&
     Array.isArray(evidence.command_exit_codes) &&
     evidence.command_exit_codes.length > 0 &&
-    evidence.command_exit_codes.every((code) => code === 0)
+    evidence.command_exit_codes.every((code) => code === 0) &&
+    evidence.bugs_found_count === 0
   );
 }

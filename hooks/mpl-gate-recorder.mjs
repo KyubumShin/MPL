@@ -323,28 +323,29 @@ try {
 
     // Branch 2: test-agent dispatch record (AD-0004 empirical gap)
     if (/mpl-test-agent$/.test(agentType)) {
-      const phaseId =
-        extractPhaseId(toolInput.prompt || toolInput.description || '') || 'unknown';
-      const dispatched = state.test_agent_dispatched || {};
-      const evidence = parseTestAgentEvidence({
-        phaseId,
-        prompt: toolInput.prompt || toolInput.description || '',
-        response: toolResponse,
-      });
-      dispatched[phaseId] = evidence;
-      patch.test_agent_dispatched = dispatched;
-      if (
-        state.session_status === 'blocked_hook' &&
-        state.blocked_by_hook === 'mpl-require-test-agent' &&
-        state.blocked_phase === phaseId &&
-        isPassingTestAgentEvidence(evidence)
-      ) {
-        patch.session_status = null;
-        patch.blocked_by_hook = null;
-        patch.blocked_phase = null;
-        patch.block_reason = null;
-        patch.resume_instruction = null;
-        patch.blocked_at = null;
+      const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
+      if (phaseId) {
+        const dispatched = state.test_agent_dispatched || {};
+        const evidence = parseTestAgentEvidence({
+          phaseId,
+          prompt: toolInput.prompt || toolInput.description || '',
+          response: toolResponse,
+        });
+        dispatched[phaseId] = evidence;
+        patch.test_agent_dispatched = dispatched;
+        if (
+          state.session_status === 'blocked_hook' &&
+          state.blocked_by_hook === 'mpl-require-test-agent' &&
+          state.blocked_phase === phaseId &&
+          isPassingTestAgentEvidence(evidence)
+        ) {
+          patch.session_status = null;
+          patch.blocked_by_hook = null;
+          patch.blocked_phase = null;
+          patch.block_reason = null;
+          patch.resume_instruction = null;
+          patch.blocked_at = null;
+        }
       }
     }
 

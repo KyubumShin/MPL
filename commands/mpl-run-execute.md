@@ -610,7 +610,7 @@ Skip/conditional rules prevent unnecessary invocations, keeping actual additions
    token in this phase's `evidence_required`, include a PASS row backed by the
    machine source used by that token:
    - `command`: command string + `exit_code=0`
-   - `test_agent`: `state.test_agent_dispatched.{phase_id}.verdict == "PASS"` with valid JSON and zero command exit codes
+   - `test_agent`: structured `state.test_agent_dispatched.{phase_id}` PASS evidence with valid JSON, explicit `verdict:"PASS"`, executable tests, zero failed/skipped tests, at least one test file, zero command exit codes, and zero reported bugs
    - `goal_trace`: covered AC/AX ids from `goal_trace`
    - any other token: token-specific PASS evidence, command, file, or result
 3. Save verification to .mpl/mpl/phases/phase-N/verification.md

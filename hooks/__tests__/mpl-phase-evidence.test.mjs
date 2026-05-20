@@ -51,6 +51,7 @@ function passingEvidence() {
     tests_failed: 0,
     tests_skipped: 0,
     test_files_created: ['tests/phase-1.test.ts'],
+    bugs_found_count: 0,
   };
 }
 
@@ -185,6 +186,41 @@ describe('mpl-require-phase-evidence hook integration', () => {
 
   it('blocks test_agent evidence when dispatch record is timestamp-only', () => {
     writeState(baseState({ test_agent_dispatched: { 'phase-1': { timestamp: '2026-05-17T00:00:00Z' } } }));
+    const r = runHook({
+      file_path: '.mpl/mpl/phases/phase-1/verification.md',
+      content: validVerification(),
+    });
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /phase-1:test_agent:missing_pass_evidence/);
+  });
+
+  it('blocks test_agent evidence when dispatch record is only verdict-shaped', () => {
+    writeState(baseState({
+      test_agent_dispatched: {
+        'phase-1': {
+          valid_json: true,
+          verdict: 'PASS',
+          command_exit_codes: [0],
+        },
+      },
+    }));
+    const r = runHook({
+      file_path: '.mpl/mpl/phases/phase-1/verification.md',
+      content: validVerification(),
+    });
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /phase-1:test_agent:missing_pass_evidence/);
+  });
+
+  it('blocks test_agent evidence when tests were skipped', () => {
+    writeState(baseState({
+      test_agent_dispatched: {
+        'phase-1': {
+          ...passingEvidence(),
+          tests_skipped: 1,
+        },
+      },
+    }));
     const r = runHook({
       file_path: '.mpl/mpl/phases/phase-1/verification.md',
       content: validVerification(),
