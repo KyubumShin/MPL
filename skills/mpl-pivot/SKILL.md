@@ -55,7 +55,6 @@ Task(subagent_type="mpl-interviewer", model="opus", prompt=`
   user_request: ${user_request}
   provided_specs: ${provided_specs}
   existing_pivot_points: ${existing_pivot_points_or_empty}
-  mode: "full"
   invocation: "/mpl:mpl-pivot"
 `)
 ```
