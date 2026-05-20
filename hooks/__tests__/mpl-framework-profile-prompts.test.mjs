@@ -57,15 +57,40 @@ function literalPattern(literal) {
   return new RegExp(`${startBoundary}${escaped}${endBoundary}`, 'i');
 }
 
+function parseBacktickBlocks(markdown) {
+  const blocks = [];
+  let current = null;
+
+  for (const line of markdown.split('\n')) {
+    const header = line.match(/^`([^`]+)`$/);
+    if (header) {
+      current = { name: header[1], lines: [] };
+      blocks.push(current);
+      continue;
+    }
+    if (current) {
+      current.lines.push(line);
+    }
+  }
+
+  return blocks;
+}
+
+function parseBacktickListItems(block) {
+  return block.lines
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.match(/^- `([^`]+)`$/)?.[1]?.trim())
+    .filter(Boolean);
+}
+
 function parsePromptGuardLiterals(registry) {
   const literals = [];
-  const blockPattern = /^`prompt_guard_literals`\n((?:- `[^`]+`\n?)+)/gm;
-  let match;
 
-  while ((match = blockPattern.exec(registry)) !== null) {
-    for (const line of match[1].trim().split('\n')) {
-      const literal = line.match(/^- `([^`]+)`$/)?.[1];
-      if (literal && literal !== 'none') {
+  for (const block of parseBacktickBlocks(registry)) {
+    if (block.name !== 'prompt_guard_literals') continue;
+    for (const literal of parseBacktickListItems(block)) {
+      if (literal.toLowerCase() !== 'none') {
         literals.push(literal);
       }
     }
@@ -94,12 +119,14 @@ function parseProfileCategoryEntries(sections) {
   const entries = new Map(REQUIRED_PROFILE_CATEGORIES.map((category) => [category, []]));
 
   for (const section of sections) {
-    const blocks = [...section.body.matchAll(/^`([^`]+)`\n([\s\S]*?)(?=\n`[^`]+`\n|\n### |\s*$)/gm)];
-    for (const [, category, body] of blocks) {
-      if (!entries.has(category)) continue;
-      const id = body.match(/^- `id`: `([^`]+)`/m)?.[1];
+    for (const block of parseBacktickBlocks(section.body)) {
+      if (!entries.has(block.name)) continue;
+      const id = block.lines
+        .map((line) => line.trim())
+        .find((line) => line.startsWith('- `id`:'))
+        ?.match(/^- `id`: `([^`]+)`/)?.[1];
       if (id) {
-        entries.get(category).push({ section: section.heading, id });
+        entries.get(block.name).push({ section: section.heading, id });
       }
     }
   }
@@ -134,6 +161,19 @@ describe('framework-specific prompt literals', () => {
     assert.deepEqual(hits, [], `Move framework-specific prompt rules to ${PROFILE_REGISTRY}:\n${hits.join('\n')}`);
   });
 
+  it('parses guard literals defensively', () => {
+    const registry = [
+      '`prompt_guard_literals`',
+      '- `None`',
+      '',
+      '- `Tauri`',
+      '- ` NONE `',
+      '',
+    ].join('\n');
+
+    assert.deepEqual(parsePromptGuardLiterals(registry), ['Tauri']);
+  });
+
   it('keeps the framework profile registry structurally complete', () => {
     const registry = readRepoFile(PROFILE_REGISTRY);
     const contractCategories = parseContractCategories(registry);
@@ -148,7 +188,10 @@ describe('framework-specific prompt literals', () => {
     assert.ok(profileSections.length > 0, 'Profile registry must contain at least one profile section');
 
     const missingGuards = profileSections
-      .filter(({ body }) => !/^`prompt_guard_literals`\n(?:- `[^`]+`\n)+/m.test(body))
+      .filter(({ body }) => {
+        const block = parseBacktickBlocks(body).find(({ name }) => name === 'prompt_guard_literals');
+        return !block || parseBacktickListItems(block).length === 0;
+      })
       .map(({ heading }) => heading);
     assert.deepEqual(missingGuards, [], `Every profile section needs prompt_guard_literals:\n${missingGuards.join('\n')}`);
 
@@ -159,5 +202,23 @@ describe('framework-specific prompt literals', () => {
       }
     }
     assert.deepEqual(emptyCategories, [], `Every supported profile category needs at least one registry entry:\n${emptyCategories.join('\n')}`);
+  });
+
+  it('parses profile ids without relying on id-first ordering', () => {
+    const entries = parseProfileCategoryEntries([
+      {
+        heading: 'Synthetic Build Tool',
+        body: [
+          '`build_tool_profiles`',
+          '- `applies_when`: synthetic manifest',
+          '- `id`: `synthetic-build-tool`',
+          '',
+        ].join('\n'),
+      },
+    ]);
+
+    assert.deepEqual(entries.get('build_tool_profiles'), [
+      { section: 'Synthetic Build Tool', id: 'synthetic-build-tool' },
+    ]);
   });
 });
