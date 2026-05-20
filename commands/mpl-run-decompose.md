@@ -127,7 +127,7 @@ Task(subagent_type="mpl-decomposer", model="opus",
      ```
      This ensures Step 5.0 E2E Test has a concrete S-item to execute.
 
-     **AD-0006 (v0.15.0) — Launch smoke deterministic detection**: if any phase touches a runtime entry point detected mechanically from the project manifest, include a `launch_smoke` S-item on that phase. Detection triggers (pure file existence, no model judgment): `package.json` has `scripts.start`, `scripts.dev`, or `scripts.serve` · `Cargo.toml` has `[[bin]]` OR `[package].default-run` · `pyproject.toml` has `[project.scripts]` · project root has a `Dockerfile` ENTRYPOINT. Emit the matching smoke: `tauri dev --no-open` + liveness for Tauri, `<bin> --help` exit 0 for CLI, startup + `curl /health` for servers, `docker run --rm <image> --help` for containers. This closes the exp9 `cargo test` pass → `cargo run` abort class of failures (MPL#38).
+     **AD-0006 (v0.15.0) — Launch smoke deterministic detection**: if any phase touches a runtime entry point detected mechanically from the project manifest or a matching `launch_smoke_profile` in `commands/references/framework-profiles.md`, include a `launch_smoke` S-item on that phase. Detection uses file existence/config evidence only, with no model judgment. Emit the matching profile smoke shape and liveness evidence. This closes the exp9 "tests pass but runtime launch aborts" class of failures (MPL#38) without hardcoding framework launch commands in the core prompt.
 
      ## PP-Proximity Classification Rules
      Assign `pp_proximity` to each phase:
@@ -428,23 +428,21 @@ Report: "[MPL] Step 3-F: Applied {feedback_conditions.length} feedback condition
 
 ## Step 3-B: Verification Planning
 
-### GUI App Mandatory Check (F-E2E-1c, v0.8.3)
+### Runtime App Mandatory Check (F-E2E-1c, v0.8.3)
 
-Before deciding whether to run Step 3-B, check for GUI app indicators:
+Before deciding whether to run Step 3-B, check for runtime app indicators from `launch_smoke_profiles` and `e2e_runner_profiles`:
 
 ```
 decomposition = Read(".mpl/mpl/decomposition.yaml")
 tech_stack = decomposition.architecture_anchor.tech_stack
 dir_pattern = decomposition.architecture_anchor.directory_pattern
+profiles = load("commands/references/framework-profiles.md")
 
-gui_app_detected = any of:
-  - "src-tauri/" in dir_pattern or directory exists
-  - "electron/" or "src-electron/" in dir_pattern or directory exists
-  - "Tauri" in tech_stack
-  - "Electron" in tech_stack
+runtime_app_detected = any profile in profiles.launch_smoke_profiles or profiles.e2e_runner_profiles
+  whose applies_when matches dir_pattern, project files, dependencies, or tech_stack
 
-if gui_app_detected:
-  announce: "[MPL] GUI app detected. Step 3-B (Verification Planning) is mandatory."
+if runtime_app_detected:
+  announce: "[MPL] Runtime app profile detected. Step 3-B (Verification Planning) is mandatory."
   → MUST execute Step 3-B. Do NOT skip.
 ```
 

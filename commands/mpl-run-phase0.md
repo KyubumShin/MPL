@@ -428,13 +428,13 @@ else:
 **Scope (reduced per #56)**: Pure mechanical extraction only. Synthesis (complexity grade, type policy, error spec) moved to decomposer (#57).
 
 Produces raw scan artifacts:
-- Boundary pair scan (CB-01 — tauri-invoke / REST / JSON-RPC)
+- Boundary pair scan (CB-01 — profile-backed boundary protocols + generic API/RPC)
 - API signatures (ast_grep + LSP fallback)
 - Test pattern scan
 - Type hints (Path A brownfield grep only)
 - Error pattern locations
 
-On greenfield (Step 2 skipped), still produces boundary pair **projections** from PP tech stack.
+On greenfield (Step 2 skipped), still produces boundary pair **projections** from PP tech stack using `commands/references/framework-profiles.md`.
 
 ---
 

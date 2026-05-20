@@ -70,18 +70,21 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     Step 5.5: Per-phase Type Policy Synthesis (v0.17, #57)
       Read raw-scan.md sections: `Type Hints (Path A brownfield)` and `Boundary Pairs`.
       Read PP `tech_stack` and architectural_layers info.
+      Read `commands/references/framework-profiles.md` and apply matching
+      `framework_convention_profiles`/`boundary_profiles`; do not inline new
+      framework-specific convention tables in this prompt.
 
       For each phase, synthesize `type_policy`:
         - Phase layer (backend/frontend/sidecar/shared) from `phase_domain`
-        - Naming convention: snake_case (Rust/Python) / camelCase (TS) / per framework rules at boundaries
-        - Null handling: Option<T> (Rust), T | null (TS), None (Python) — per layer
+        - Naming convention: language defaults plus profile rules at boundaries
+        - Null handling: language defaults plus profile rules per layer
         - Enum constraints: from raw-scan type hints OR PP schema (greenfield)
-        - Prohibited patterns per layer (e.g., no `any` in TS, no `unwrap()` beyond N count in Rust)
+        - Prohibited patterns per layer from raw audit counts and matching profiles
         - Conversion points: at contract_files boundaries where types transform
 
       **Greenfield fallback** (no raw-scan type hints): derive from PP tech stack
-      using well-known framework conventions (Tauri v2 → serde + camelCase auto-convert,
-      Next.js → camelCase, FastAPI → snake_case + pydantic, etc.).
+      using matching `framework_convention_profiles` rather than hardcoded
+      framework knowledge.
 
       **Empty case**: pure doc/infra phases with no type surface emit
       `type_policy: { applies: false }`. Do NOT omit the field — explicit false
@@ -172,8 +175,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           touches ≥2 phase impact files (complex-enough single-feature
           integration test)
         - required: true when composed_from contains any core with must_work=true
-        - test_command MUST be executable (e.g., "pnpm playwright test e2e/
-          scenario-1.spec.ts"), NEVER a placeholder like "TODO(integration-ci)"
+        - test_command MUST be executable using the matched `e2e_runner_profile`,
+          NEVER a placeholder like "TODO(integration-ci)"
           or "manual verification"
         - If goal_contract.e2e_policy.real_runtime_required is true, emit:
           runtime_class: one of real_desktop|real_web|real_browser|real_mobile|real_api
@@ -185,8 +188,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           style tests are not admissible.
 
       Infrastructure detection:
-        - Scan provided-specs + decomposition for existing E2E stack:
-          playwright in package.json, cypress, wdio, existing e2e/ directory
+        - Scan provided-specs + decomposition for an existing `e2e_runner_profile`
+          match from `commands/references/framework-profiles.md`.
         - If NONE found, insert a new phase at tier-1:
           id: "phase-e2e-infra"
           name: "E2E Infrastructure Setup"
@@ -195,9 +198,9 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           test_agent_required: false
           test_agent_rationale: "Tooling setup — no code path to verify"
           success_criteria:
-            - "playwright config 존재, smoke run 성공"
-            - "e2e/ 디렉토리 구조 준비"
-          impact: ["playwright.config.ts", "e2e/smoke.spec.ts", "package.json"]
+            - "configured e2e runner profile present"
+            - "e2e scenario directory or equivalent project convention prepared"
+          impact: ["profile-specific config file", "profile-specific smoke spec", "project manifest"]
         - This guarantees scenario test_command fields are executable at finalize.
 
       After composition, emit `e2e_scenarios[]` in the top-level output; the
@@ -231,13 +234,13 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           | infra       | "리소스 해제 누락(고아 연산) 테스트" |
           | general     | At least one relevant probing hint based on phase scope |
 
-      (2) Platform constraint hints (from Phase 0 `target_platform` detection):
+      (2) Platform constraint hints (from Phase 0 `Platform API Hits` and
+      `platform_constraint_profiles`):
 
-          | Platform Config | Auto-Generated Hint |
-          |----------------|---------------------|
-          | `tauri.conf.json` exists | "Tauri WebView에서 window.prompt/confirm/alert 차단 — 커스텀 다이얼로그 확인" |
-          | `electron-builder.json` exists | "Renderer 프로세스에서 Node.js native API 직접 호출 여부" |
-          | `next.config.js` exists | "SSR 컴포넌트에서 window/document 직접 접근 여부" |
+          Load `commands/references/framework-profiles.md`, select matching
+          `platform_constraint_profiles`, and copy their `hint` values into
+          phase `probing_hints` when the phase touches the relevant runtime
+          files or boundary.
 
       Fallback rule: if no relevant hints can be determined, omit the field (not an error).
 
@@ -445,9 +448,9 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           strict_mode_advisories: [string]  # advisories emitted when raw audit thresholds exceeded
           # Raw audit counts that triggered advisories (from raw-scan) — for traceability
           raw_audit_counts:
-            unwrap_count: number       # Rust .unwrap() count in src/
-            strict_null_enabled: boolean  # TS tsconfig flag
-            ignored_error_count: number   # Go _ = patterns
+            unwrap_count: number       # language panic/unwrap-style count when measured
+            strict_null_enabled: boolean  # strict-null equivalent flag when measured
+            ignored_error_count: number   # ignored-error count when measured
 
         estimated_complexity: "S" | "M" | "L"
         estimated_todos: number
@@ -518,7 +521,7 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         acceptance_criteria: string     # observable exit-0 criterion
         runtime_class: string           # real_desktop|real_web|real_browser|real_mobile|real_api|mock|unit
         mock_allowed: boolean           # must match goal_contract.e2e_policy
-        launcher_evidence: string       # e.g., "electron.launch", "tauri-driver", "playwright chromium"
+        launcher_evidence: string       # real launcher evidence from matching e2e_runner_profile
         assertion_evidence: string      # real assertion being made, not "expect(true)"
         test_files: [string]            # optional file paths scanned by authenticity hook
         required: boolean               # default true when composed_from includes must_work core
@@ -527,8 +530,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     #   - Each e2e_scenario must compose ≥2 core scenarios spanning ≥2 phases
     #   - Exception: a single core may become a 1:1 E2E when flow has ≥3 steps
     #     AND touches ≥2 phase impact files (complex-enough integration)
-    #   - Infrastructure detection: if project lacks e2e runner (no playwright/
-    #     cypress in package.json, no e2e/ directory), INSERT a
+    #   - Infrastructure detection: if project lacks an e2e runner profile match,
+    #     INSERT a
     #     "phase-e2e-infra" phase at tier-1 BEFORE first scenario-exercising phase
 
     risk_assessment:

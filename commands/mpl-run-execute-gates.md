@@ -113,32 +113,16 @@ if diagnostics.errors > 0:
 Report: "[MPL] Hard 1: Type check clean."
 ```
 
-**Step 3: Multi-Stack Build Verification**
+**Step 3: Profile-Backed Build Verification**
 
 ```
 build_commands = []
+profiles = load("commands/references/framework-profiles.md").build_tool_profiles
 
-// Auto-detect build tools
-if exists("package.json"):
-  scripts = parse("package.json").scripts
-  if scripts.build:     build_commands.push({ cmd: "npm run build", name: "Frontend build" })
-  if scripts.typecheck:  build_commands.push({ cmd: "npm run typecheck", name: "TypeScript check" })
-
-if exists("Cargo.toml") or exists("src-tauri/Cargo.toml"):
-  cargo_dir = exists("src-tauri") ? "src-tauri" : "."
-  build_commands.push({ cmd: "cd {cargo_dir} && cargo check", name: "Rust check" })
-
-if exists("pyproject.toml") or exists("setup.py"):
-  build_commands.push({ cmd: "python -m py_compile $(find . -name '*.py' -not -path './node_modules/*')", name: "Python check" })
-
-if exists("go.mod"):
-  build_commands.push({ cmd: "go build ./...", name: "Go build" })
-
-if exists("build.gradle") or exists("build.gradle.kts"):
-  build_commands.push({ cmd: "./gradlew compileJava", name: "Gradle compile" })
-
-if exists("pom.xml"):
-  build_commands.push({ cmd: "mvn compile -q", name: "Maven compile" })
+// Auto-detect build tools from matching build_tool_profiles
+for each profile in profiles:
+  if profile.applies_when matches project files/dependencies:
+    build_commands.push(...materialize(profile.commands, profile.cwd_rule))
 
 // Run all detected build commands
 for each { cmd, name } in build_commands:
@@ -155,7 +139,7 @@ for each { cmd, name } in build_commands:
 // Same principle as AD-02 for Hard 3 — missing precondition ≠ free pass.
 total_checks = lint_commands.length + build_commands.length + (diagnostics ? 1 : 0)
 if total_checks == 0:
-  announce: "[MPL] Hard 1 FAIL: No lint, type check, or build tool detected. At minimum, the project must have one of: package.json with build script, tsconfig.json, Cargo.toml, pyproject.toml, go.mod. Cannot verify code quality with zero tools."
+  announce: "[MPL] Hard 1 FAIL: No lint, type check, or build tool profile detected. Cannot verify code quality with zero tools."
   → enter fix loop (target: add build/lint configuration)
 
 Hard 1 passes when: all lint tools + type check + all build tools succeed AND at least one check ran.

@@ -20,10 +20,10 @@ disallowedTools: []
     - **PD Override**: never silently change a prior phase's decision. Create an explicit override request.
     - Edit/Write are allowed: Phase Runner uses them for working.md, state updates, and direct code implementation.
     - **Bash timeout (G1, #107)** — verification commands MUST set `tool_input.timeout` (ms) within the category bounds enforced by `mpl-bash-timeout.mjs`:
-      - vitest / jest / npm test: 60_000–300_000 ms (recommend 300_000)
-      - playwright / npx playwright test: 60_000–600_000 ms (recommend 600_000)
-      - tsc / vite build / cargo build / gradle / mvn: 30_000–180_000 ms
-      - tsc --noEmit / eslint / biome / ruff / flake8 / pyright / mypy / py_compile / cargo check / npm run typecheck|lint: 10_000–120_000 ms
+      - unit/integration test profile: 60_000–300_000 ms (recommend 300_000)
+      - E2E runner profile: 60_000–600_000 ms (recommend 600_000)
+      - build profile: 30_000–180_000 ms
+      - typecheck/lint profile: 10_000–120_000 ms
       Strict mode (`state.enforcement.strict === true`) hard-blocks under-spec'd or over-spec'd timeouts; non-strict warns. Untimed verification accumulates 5h fix-loop walls (exp15 phase-10).
   </Constraints>
 
@@ -84,7 +84,7 @@ disallowedTools: []
     1. **Build verification**: e.g., `npm run build` exits 0
     2. **Phase success_criteria**: execute each criterion by type (command, test, file_exists, grep, description)
     3. **Cumulative regression**: run full test suite across all completed phases
-       - Auto-detect framework (vitest, jest, pytest, cargo test, go test) and use parallel flags
+       - Auto-detect the existing test framework/tool profile and use supported parallel flags
        - Record `pass_rate = passed_tests / total_tests`
     4. **PP violation check**: confirm no CONFIRMED PP is violated
     5. **A/S/H-items**: A-items execute directly; S-items verify BDD scenarios; H-items flag for human verification
@@ -121,7 +121,7 @@ disallowedTools: []
     - **## Notes for Next Phase**: env vars, import paths, deferred discoveries (L2)
     - **## Warnings** (v0.12.0 HA-04): unexpected findings during implementation that may affect subsequent phases. Examples:
       - Dependency substitutions (e.g., "bcrypt unavailable, used argon2 — verify compatibility in next phase")
-      - Platform constraint discoveries (e.g., "Tauri WebView blocks window.prompt — custom dialog needed")
+      - Platform constraint discoveries from `commands/references/framework-profiles.md`
       - Performance concerns (e.g., "FTS5 index on 500K rows may need optimization")
       - Missing infrastructure (e.g., "Redis connection may be required for rate-limiter in Phase 5")
       This section is OPTIONAL — only include if unexpected findings occurred. Orchestrator uses these warnings when generating the next Phase Seed.

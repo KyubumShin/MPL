@@ -189,7 +189,7 @@ disallowedTools: Write, Edit, Task
     - WARN if missing (functional but undocumented)
 
     ### Category 12: Measurement Integrity Audit (AD-0006, v0.15.0)
-    - **Scope**: `.mpl/state.json`, `.mpl/goal-contract.yaml`, `.mpl/mpl/baseline.yaml`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`, `src-tauri/target/**`
+    - **Scope**: `.mpl/state.json`, `.mpl/goal-contract.yaml`, `.mpl/mpl/baseline.yaml`, `.mpl/mpl/phases/**`, `.mpl/config/test-agent-override.json`, `.mpl/config/e2e-scenario-override.json`, plus paths declared by matching `resource_risk_profiles`
     This category runs only when invoked as `mpl-doctor audit` (not default). Validates that a **completed** pipeline produced machine-evidence gate records and that Anti-rationalization guardrails held. Run against `.mpl/state.json` and `.mpl/mpl/` of a finalized run.
 
     **Preconditions**: `.mpl/state.json.current_phase == "completed"` AND `.mpl/state.json.finalize_done == true`. Otherwise report "NOT APPLICABLE (pipeline not finalized)" and skip.
@@ -225,7 +225,7 @@ disallowedTools: Write, Edit, Task
       - `override = Read(".mpl/config/e2e-scenario-override.json") or {}`
       - WARN if core_scenarios is empty but PPs have CONFIRMED entries with non-invariant flows (orphaned PP coverage)
       - FAIL if any e2e_scenario.test_command matches `/TODO|FIXME|manual verification/i` (Decomposer emitted placeholder — Step 3-H validation missed it)
-      - FAIL if any required e2e_scenario.test_command references a file path that doesn't exist on disk (for playwright/cypress specs: `e2e/*.spec.ts` etc.)
+      - FAIL if any required e2e_scenario.test_command references a file path that doesn't exist on disk (use matched `e2e_runner_profiles` for runner-specific spec globs)
       - FAIL if `required - (passed via results.exit_code==0) - overridden > 0` (AD-0008 enforcement gap)
       - WARN if `"*"` blanket override present (anti-pattern)
       - WARN if any override `recorded_at` is >30 days old (stale environment assumption per AD-0008 R-2)
@@ -251,16 +251,17 @@ disallowedTools: Write, Edit, Task
       - WARN if any phase has `test_agent_required: false` without a `test_agent_rationale` (schema violation; gate-recorder allowed it through but doctor flags it)
       - FAIL if `required > 0 AND dispatched == 0` (AD-0004 empirical gap — the original exp11 pattern)
 
-    - **[j] Tauri/Rust resource risk (exp21)** — surface build artifact growth before long verification loops:
+    - **[j] Build artifact resource risk (exp21)** — surface generated/build artifact growth before long verification loops:
+      - Load matching `resource_risk_profiles` from `commands/references/framework-profiles.md`.
       - Invoke the resource-risk CLI:
         `node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-resource-risk.mjs ${CWD}`
       - This CLI is manually invoked by doctor and is not a registered Claude hook event.
       - Parse JSON fields: `status`, `measurements[]`, `warnings[]`, `scan_errors[]`, `scan_error_count`.
-      - NOT APPLICABLE if the workspace has no `src-tauri/Cargo.toml` and no `src-tauri/target`.
-      - PASS when Tauri/Rust is present but no warning thresholds are exceeded.
+      - NOT APPLICABLE if no resource-risk profile matches the workspace.
+      - PASS when a resource-risk profile is present but no warning thresholds are exceeded.
       - WARN when `warnings[]` is non-empty. Include measured size, threshold, and recommendation for size warnings.
       - If `scan_error_count > 0`, report partial scan as WARN with representative `scan_errors[]` paths before treating the resource measurement as clean.
-      - When deps dominate the target tree, prefer the deps warning over a redundant whole-target warning so the output points at the likely root cause.
+      - When a profile emits overlapping measurements, prefer the profile's root-cause warning over redundant aggregate warnings.
       - This is advisory in v0.18.x; do not fail a pipeline solely on resource size until thresholds are calibrated.
 
     **Output format for Category 13**:
@@ -275,7 +276,7 @@ disallowedTools: Write, Edit, Task
     [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} mandatory-domain phases
     [h] E2E scenario coverage:      ✓ N건     or ✗ missing/failing E2E-N
     [i] goal_contract integrity:    ✓ hash ok or ✗ missing fields: mission.goal
-    [j] Tauri/Rust resource risk:   ✓ clean   or ⚠️ src-tauri/target=16.0 GiB over 8.0 GiB
+    [j] Build artifact resource risk: ✓ clean or ⚠️ profile path over threshold
     Result: PASS (10/10) / FAIL (X/10) / WARN (Y/10)
     ```
 

@@ -78,29 +78,30 @@ remain failing without override will be blocked.
 
 - MED/LOW H-items are NOT re-asked here — they are aggregated in Step 5.1.8 (T-10, v3.9)
 
-### 5.0.3: Playwright Trace Collection (0.16 S3-6)
+### 5.0.3: E2E Trace Collection (0.16 S3-6)
 
 When an E2E scenario fails, the diagnostician (Step 5.0.4) needs a trace
-excerpt to classify accurately. This step wires up Playwright trace output
-so the orchestrator can pass meaningful context to `mpl_diagnose_e2e_failure`.
+excerpt to classify accurately. This step wires up runner-specific trace output
+from `e2e_runner_profiles` in `commands/references/framework-profiles.md` so
+the orchestrator can pass meaningful context to `mpl_diagnose_e2e_failure`.
 
 **Auto-wrap policy** (applied inside Step 5.0 loop before `Bash(test_command)`):
 
 ```
-if test_command matches /playwright/ AND test_command does not contain "--trace":
-  # Inject trace flags — non-intrusive; Playwright writes zip files
+profiles = load("commands/references/framework-profiles.md").e2e_runner_profiles
+profile = find_matching_e2e_runner_profile(test_command, project_files, profiles)
+
+if profile.trace_policy supports automatic trace AND test_command lacks profile trace flags:
+  # Inject profile trace flags — non-intrusive; runner writes trace artifacts
   traceDir = ".mpl/e2e-traces"
   Bash("mkdir -p " + traceDir)
-  wrapped = test_command + " --trace on --trace-dir " + traceDir + "/" + s.id
+  wrapped = apply_trace_policy(test_command, profile.trace_policy, traceDir + "/" + s.id)
   Bash(wrapped, timeout=config.e2e_timeout or 60000)
 
-elif test_command matches /pytest/ OR /jest/:
-  # Other frameworks: no automatic trace injection. Diagnostician will
-  # fall back to stderr_tail. Projects can configure project-level
-  # trace via .mpl/config.json { "e2e_trace_cmd_prefix": "..." }.
-  Bash(test_command)
-
 else:
+  # No automatic trace profile. Diagnostician falls back to stderr_tail.
+  # Projects can configure project-level trace via
+  # .mpl/config.json { "e2e_trace_cmd_prefix": "..." }.
   Bash(test_command)
 ```
 
