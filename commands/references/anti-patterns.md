@@ -85,8 +85,9 @@ codex auditor agent (#117).
 
 ## Ground-truth → registry mapping
 
-exp15 §11 reported 8 distinct anti-patterns. Some are split into multiple regex IDs in this registry for tighter
-metric attribution and divergent permitted-when semantics:
+exp15 §11 reported 8 distinct anti-patterns; exp21 later added one regression-specific fallback rule. Some exp15
+findings are split into multiple regex IDs in this registry for tighter metric attribution and divergent
+permitted-when semantics:
 
 | GT # | finding | Registry IDs | Reason for split |
 |------|-------------------|--------------|------------------|
@@ -360,8 +361,8 @@ sets CSP.
 - **category**: `fallback-poison`
 - **severity**: `block`
 - **escalation**: `strict_block`
-- **rationale**: A hardcoded runtime/domain fallback like `web_novel` can mask absent request or project classification
-  evidence. exp21 showed this can survive while gate self-report still claims Hard 1/2/3 PASS.
+- **rationale**: The exp21 `web_novel` hardcoded runtime/domain fallback can mask absent request or project
+  classification evidence while gate self-report still claims Hard 1/2/3 PASS.
 - **ground-truth source**: `exp21 dispatch.ts web_novel fallback`
 
 ```regex
