@@ -52,9 +52,28 @@ function escapeRegExp(literal) {
 
 function literalPattern(literal) {
   const escaped = escapeRegExp(literal).replace(/\\ /g, '\\s+');
-  const startBoundary = /^[A-Za-z0-9_]/.test(literal) ? '\\b' : '';
-  const endBoundary = /[A-Za-z0-9_]$/.test(literal) ? '\\b' : '';
-  return new RegExp(`${startBoundary}${escaped}${endBoundary}`, 'i');
+  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}(?=$|[^A-Za-z0-9_])`, 'i');
+}
+
+function topLevelSectionLines(markdown, heading) {
+  const lines = markdown.split('\n');
+  const out = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    if (line === heading) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && /^## /.test(line)) {
+      break;
+    }
+    if (inSection) {
+      out.push(line);
+    }
+  }
+
+  return out;
 }
 
 function parseBacktickBlocks(markdown) {
@@ -100,19 +119,28 @@ function parsePromptGuardLiterals(registry) {
 }
 
 function parseContractCategories(registry) {
-  const contract = registry.match(/## Profile Contract\n([\s\S]+?)\n## Profiles/)?.[1] ?? '';
-  return [...contract.matchAll(/^### `([^`]+)`/gm)].map((match) => match[1]);
+  return topLevelSectionLines(registry, '## Profile Contract')
+    .map((line) => line.match(/^### `([^`]+)`/)?.[1])
+    .filter(Boolean);
 }
 
 function parseProfileSections(registry) {
-  const profiles = registry.match(/## Profiles\n([\s\S]+)$/)?.[1] ?? '';
-  return profiles
-    .split(/^### /m)
-    .slice(1)
-    .map((section) => {
-      const [heading, ...body] = section.split('\n');
-      return { heading: heading.trim(), body: body.join('\n') };
-    });
+  const sections = [];
+  let current = null;
+
+  for (const line of topLevelSectionLines(registry, '## Profiles')) {
+    const heading = line.match(/^### (.+)$/)?.[1];
+    if (heading) {
+      current = { heading: heading.trim(), bodyLines: [] };
+      sections.push(current);
+      continue;
+    }
+    if (current) {
+      current.bodyLines.push(line);
+    }
+  }
+
+  return sections.map(({ heading, bodyLines }) => ({ heading, body: bodyLines.join('\n') }));
 }
 
 function parseProfileCategoryEntries(sections) {
@@ -174,6 +202,13 @@ describe('framework-specific prompt literals', () => {
     assert.deepEqual(parsePromptGuardLiterals(registry), ['Tauri']);
   });
 
+  it('matches non-word-prefix guard literals with explicit token boundaries', () => {
+    const scopedPackage = literalPattern('@scope/pkg');
+
+    assert.equal(scopedPackage.test('load @scope/pkg profile'), true);
+    assert.equal(scopedPackage.test('email@scope/pkg.com'), false);
+  });
+
   it('keeps the framework profile registry structurally complete', () => {
     const registry = readRepoFile(PROFILE_REGISTRY);
     const contractCategories = parseContractCategories(registry);
@@ -219,6 +254,33 @@ describe('framework-specific prompt literals', () => {
 
     assert.deepEqual(entries.get('build_tool_profiles'), [
       { section: 'Synthetic Build Tool', id: 'synthetic-build-tool' },
+    ]);
+  });
+
+  it('parses profile sections without crossing adjacent top-level headings', () => {
+    const registry = [
+      '## Profile Contract',
+      '### `prompt_guard_literals`',
+      '### `boundary_profiles`',
+      '## Notes',
+      '### `ignored_contract_category`',
+      '## Profiles',
+      '### Synthetic Framework',
+      '`prompt_guard_literals`',
+      '- `Synthetic`',
+      '## Appendix',
+      '### Ignored Appendix Profile',
+      '`prompt_guard_literals`',
+      '- `Appendix`',
+      '',
+    ].join('\n');
+
+    assert.deepEqual(parseContractCategories(registry), ['prompt_guard_literals', 'boundary_profiles']);
+    assert.deepEqual(parseProfileSections(registry), [
+      {
+        heading: 'Synthetic Framework',
+        body: ['`prompt_guard_literals`', '- `Synthetic`'].join('\n'),
+      },
     ]);
   });
 });
