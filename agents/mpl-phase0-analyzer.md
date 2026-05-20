@@ -16,6 +16,7 @@ disallowedTools: Edit, Task
     - You CAN use Write to save a single `raw-scan.md` artifact to `{output_dir}`. No other file modifications.
     - You CANNOT spawn other agents.
     - Respect `tool_mode`: if LSP/ast_grep unavailable, fall back to Grep/Glob per `docs/standalone.md`.
+    - Load framework/tool details from `commands/references/framework-profiles.md`. Do not duplicate framework-specific policy tables in this prompt.
     - **Do not synthesize**: no complexity grading, no type policy rules, no error handling decisions. Your output is raw findings; the decomposer interprets them.
     - **No Step gating**: run all scan passes (boundary / API / tests / types / errors / platform / e2e) unconditionally — mechanical extraction is cheap.
   </Constraints>
@@ -54,21 +55,24 @@ disallowedTools: Edit, Task
 
     #### 2.1 — Boundary Pair Scan (CB-01)
 
-    Detect cross-language boundary pairs. Brownfield: grep actual code. Greenfield: infer from PP tech stack.
+    Detect cross-language boundary pairs. Brownfield: grep actual code using `boundary_profiles` from `commands/references/framework-profiles.md`. Greenfield: project boundary pairs from PP tech stack using the same profiles.
 
     ```
     boundary_pairs = []
 
-    // Brownfield: Tauri invoke pairs
-    callers = Grep("invoke[(<].*['\"]([a-z_]+)['\"]", "src/", glob="*.{ts,tsx}")
-    callees = Grep("#\\[tauri::command\\]", "src-tauri/", glob="*.rs")
-    for each caller:
-      match = callees.find(c => c.name == caller.name)
-      if match: boundary_pairs.push({
-        id: "BP-{n}", status: "confirmed",
-        caller, callee: match, protocol: "tauri-invoke",
-        framework_rules: ["camelCase params (Tauri v2 auto-convert)", "snake_case struct fields (serde default)"]
-      })
+    profiles = load("commands/references/framework-profiles.md").boundary_profiles
+
+    // Brownfield: apply each matching boundary profile mechanically
+    for each profile in profiles where profile.applies_when matches project:
+      callers = Grep(profile.caller_patterns, profile.caller_paths)
+      callees = Grep(profile.callee_patterns, profile.callee_paths)
+      for each caller:
+        match = match_boundary_pair(caller, callees, profile)
+        if match: boundary_pairs.push({
+          id: "BP-{n}", status: "confirmed",
+          caller, callee: match, protocol: profile.protocol,
+          framework_rules: profile.framework_rules
+        })
 
     // Brownfield: REST API pairs
     callers = Grep("(fetch|axios)\\.(get|post|put|delete)\\(['\"]([^'\"]+)", "src/")
@@ -81,9 +85,10 @@ disallowedTools: Edit, Task
 
     // Greenfield: infer from PP tech stack keywords
     if no boundary_pairs AND field == "greenfield":
-      if tech_stack contains "tauri":     add projected tauri-invoke pairs
-      if tech_stack contains "next|express": add projected rest-api pairs
-      if tech_stack contains "sidecar|json-rpc": add projected json-rpc pairs
+      for each matching profile in profiles:
+        add projected boundary pairs using profile.protocol and profile.framework_rules
+      add projected generic REST/API pairs when PP declares an HTTP/API layer
+      add projected JSON-RPC pairs when PP declares sidecar/RPC layers
     ```
 
     Emit as a YAML block inside `raw-scan.md`:
@@ -94,11 +99,10 @@ disallowedTools: Edit, Task
       - id: "BP-1"
         status: "confirmed"    # confirmed (brownfield) | projected (greenfield)
         caller: { lang: "ts", file: "src/stores/characterStore.ts", symbol: "invoke('save_character')" }
-        callee: { lang: "rust", file: "src-tauri/src/commands/character.rs", symbol: "fn save_character()" }
-        protocol: "tauri-invoke"
+        callee: { lang: "backend", file: "path/from/profile", symbol: "handler symbol" }
+        protocol: "profile protocol"
         framework_rules:
-          - "top-level params: camelCase (Tauri v2 default)"
-          - "struct fields: snake_case (serde default)"
+          - "rules loaded from commands/references/framework-profiles.md"
     ```
 
     #### 2.2 — API Signature Extraction
@@ -187,15 +191,13 @@ disallowedTools: Edit, Task
     #### 2.6 — Platform API Detection
 
     ```
-    1. Identify target platform from codebase_analysis.tech_stack (Tauri/Electron/RN/Node/etc.)
-    2. Grep for platform-blocked APIs present in source:
-       - Tauri v2 WebView:    window.prompt|window.confirm|window.alert|navigator.clipboard|File\.path
-       - Electron renderer:   require\(['"]fs['"]\)
-       - React Native:        document\.|window\.(?!navigator)
-    3. Record hits with file:line:pattern.
+    1. Load `platform_constraint_profiles` from `commands/references/framework-profiles.md`.
+    2. Identify matching profiles from codebase_analysis.tech_stack, config files, dependencies, and directories.
+    3. Grep each profile's `blocked_or_risky_patterns` in source.
+    4. Record hits with file:line:pattern.
     ```
 
-    Emit `## Platform API Hits` in `raw-scan.md` — raw grep hits per platform. Decomposer decides which are violations given the project's actual runtime.
+    Emit `## Platform API Hits` in `raw-scan.md` — raw grep hits per matched profile. Decomposer decides which are violations given the project's actual runtime.
 
     **Note**: F-48 Frontend Build Constraints synthesis (CSS strategy / bundle budget / code splitting) removed — decomposer derives these from PP directly.
 
@@ -206,28 +208,14 @@ disallowedTools: Edit, Task
     ```
     e2e_infra = { detected: false, tool: null, config_file: null, run_command: null }
 
-    // First match wins
-    if exists("playwright.config.ts") or exists("playwright.config.js"):
-      e2e_infra = { detected: true, tool: "playwright",
-                    config_file: "playwright.config.*",
-                    run_command: "npx playwright test" }
-    elif exists("cypress.config.ts") or exists("cypress.config.js") or exists("cypress/"):
-      e2e_infra = { detected: true, tool: "cypress",
-                    config_file: "cypress.config.*",
-                    run_command: "npx cypress run" }
-    elif exists("e2e/") or exists("tests/e2e/") or exists("test/e2e/"):
-      e2e_infra = { detected: true, tool: "custom",
-                    config_file: "e2e/", run_command: null }
-    elif Grep("puppeteer", "package.json"):
-      e2e_infra = { detected: true, tool: "puppeteer",
-                    config_file: "package.json", run_command: null }
-    elif Grep("selenium", "package.json") or Grep("selenium", "requirements.txt"):
-      e2e_infra = { detected: true, tool: "selenium",
-                    config_file: null, run_command: null }
-    elif Grep("pytest.*e2e|e2e.*pytest", "pyproject.toml"):
-      e2e_infra = { detected: true, tool: "pytest-e2e",
-                    config_file: "pyproject.toml",
-                    run_command: "pytest tests/e2e/" }
+    // First matching e2e_runner_profile wins unless project config declares priority.
+    profiles = load("commands/references/framework-profiles.md").e2e_runner_profiles
+    for each profile in profiles:
+      if profile.applies_when matches project:
+        e2e_infra = { detected: true, tool: profile.id,
+                      config_file: matched_profile_file_or_dir,
+                      run_command: profile.run_command }
+        break
     ```
 
     Emit `## E2E Infrastructure` YAML block in `raw-scan.md`.

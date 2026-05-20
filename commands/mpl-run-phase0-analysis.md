@@ -93,7 +93,7 @@ if codebase_analysis.has_database:
 if codebase_analysis.layers.length >= 2:
   decisions_needed.push({
     pattern: "multi-layer IPC",
-    question: "What IPC protocol between {layer_A} and {layer_B}? (Tauri invoke / REST / gRPC / WebSocket)",
+    question: "What boundary protocol connects {layer_A} and {layer_B}? (choose from project/framework profiles or describe the custom protocol)",
     default: "Detect from project config"
   })
 
@@ -114,7 +114,7 @@ if codebase_analysis.has_file_io:
 if codebase_analysis.layers.length >= 2:
   decisions_needed.push({
     pattern: "cross-layer contracts (B-03)",
-    question: "How are types shared between layers?\n  A) Contract-First: one layer generates types for the other (e.g., specta/ts-rs for Tauri, OpenAPI for REST)\n  B) Shared schema: single schema generates both sides (protobuf, JSON Schema)\n  C) Manual sync: both sides define types independently (NOT recommended — drift risk)",
+    question: "How are types shared between layers?\n  A) Contract-First: one layer generates types for the other using the stack's profile-supported tooling\n  B) Shared schema: single schema generates both sides\n  C) Manual sync: both sides define types independently (NOT recommended — drift risk)",
     recommendation: "A or B — auto-generation eliminates structural mismatch",
     default: "A (Contract-First) if tooling exists for the stack"
   })
@@ -162,7 +162,7 @@ Decomposer is your own guess.
 > Output: single `raw-scan.md` artifact. No more `complexity-report.json`,
 > `type-policy.md`, or `error-spec.md` (decomposer generates these inline per-phase).
 
-The raw scan collects boundary pairs, API signatures, test patterns, type hints (brownfield only), error locations, platform API hits, and E2E infra — all via grep/ast_grep with no inference. Decomposer interprets the raw facts during phase decomposition.
+The raw scan collects boundary pairs, API signatures, test patterns, type hints (brownfield only), error locations, platform API hits, and E2E infra — all via grep/ast_grep with no inference. Framework/tool details come from `commands/references/framework-profiles.md`; Decomposer interprets the raw facts during phase decomposition.
 
 ### Subagent Delegation
 
@@ -189,11 +189,12 @@ Task(subagent_type="mpl-phase0-analyzer", model="haiku",
      {loaded_memory}
 
      ## Task
-     1. Check cache (full hit → skip, partial → rerun affected passes only)
-     2. Run all scan passes unconditionally: boundary, API, tests, types (Path A only), errors, platform, e2e
-     3. Assemble single raw-scan.md artifact
-     4. Save cache with per-pass hashes for future partial invalidation
-     5. Return ~200-token summary
+     1. Read `commands/references/framework-profiles.md`
+     2. Check cache (full hit → skip, partial → rerun affected passes only)
+     3. Run all scan passes unconditionally: boundary, API, tests, types (Path A only), errors, platform, e2e
+     4. Assemble single raw-scan.md artifact
+     5. Save cache with per-pass hashes for future partial invalidation
+     6. Return ~200-token summary
 
      Save only raw-scan.md + manifest.json. Do NOT synthesize type policy or error spec.
      Return only the summary. Do NOT return full artifact content.
@@ -265,8 +266,8 @@ Task(subagent_type="mpl-phase0-analyzer", model="haiku",
      })
 
    # Path B (Fallback): heuristic matching by gate-recorder
-   # gate-recorder classifies common tool commands (pnpm lint/test/build,
-   # cargo test/clippy, playwright, etc.) automatically. No orchestrator action
+   # gate-recorder classifies common tool commands from the tool profiles
+   # automatically. No orchestrator action
    # needed for stacks covered by the heuristic.
 
    # Path C (Best-effort): Phase 0 interview for explicit commands
@@ -277,7 +278,7 @@ Task(subagent_type="mpl-phase0-analyzer", model="haiku",
        header: "검증 명령어 수집",
        options: [
          { label: "기본 heuristic 사용",
-           description: "pnpm lint/test/build, cargo test/clippy 등 자동 매칭 — 대부분 프로젝트에 충분" },
+           description: "프로젝트 tool profile 기반 자동 매칭 — 대부분 프로젝트에 충분" },
          { label: "명령어 직접 지정",
            description: "lint/test/build/e2e 명령을 각각 입력" },
          { label: ".mpl/verify.sh 작성 예정",
@@ -308,5 +309,4 @@ Task(subagent_type="mpl-phase0-analyzer", model="haiku",
 > **Fallback**: If `mpl-phase0-analyzer` agent fails, the orchestrator may perform the scan directly using the protocol embedded in `agents/mpl-phase0-analyzer.md`. That doubles orchestrator context load and increases compaction risk; prefer retrying the agent.
 
 > **v0.17 change (#56)**: Prior sections 2.5.0-2.5.9 (complexity detection, API contracts, examples, type policy, error spec, validation per artifact, token profiling per step) are removed. That protocol was duplicated between the orchestrator doc and the agent prompt; the agent is now the single source of truth. Synthesis (complexity grade, type policy, error spec) moved to decomposer (#57).
-
 
