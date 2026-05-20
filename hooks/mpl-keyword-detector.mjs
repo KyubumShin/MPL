@@ -77,6 +77,15 @@ function extractPrompt(input) {
 }
 
 /**
+ * Claude Code delivers background Task/Agent completions as user-role
+ * `<task-notification>` XML. They can contain "mpl" in agent names/results,
+ * but they are not human prompts and must never initialize/reset MPL state.
+ */
+function isTaskNotificationPrompt(prompt) {
+  return /^<task-notification(?:\s|>)/i.test(String(prompt || '').trimStart());
+}
+
+/**
  * Sanitize text for keyword detection (strip code blocks, URLs, paths)
  */
 function sanitize(text) {
@@ -120,6 +129,14 @@ async function main() {
 
     const prompt = extractPrompt(input);
     if (!prompt) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // #43: Background Task/Agent completion notifications are routed through
+    // UserPromptSubmit as user-role XML. Skip before telemetry and keyword
+    // activation so harness/coordinator notifications cannot reset state.
+    if (isTaskNotificationPrompt(prompt)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -272,4 +289,4 @@ IMPORTANT: Load the MPL orchestration protocol via /mpl:mpl-run command, then be
 
 main();
 
-export { extractPrompt, sanitize, extractFeatureName };
+export { extractPrompt, isTaskNotificationPrompt, sanitize, extractFeatureName };

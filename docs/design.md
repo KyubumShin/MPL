@@ -463,7 +463,7 @@ MPL maintains pipeline integrity with 8 hooks:
 | `mpl-permit-learner` | PostToolUse | Learn permission allow patterns (F-34) |
 | `mpl-phase-controller` | Stop | Manages phase transitions based on state |
 | `mpl-session-init` | SessionStart | Initialize Context Rotation at session start (F-38) |
-| `mpl-keyword-detector` | UserPromptSubmit | Detects "mpl" keyword in user input and initializes pipeline state |
+| `mpl-keyword-detector` | UserPromptSubmit | Detects "mpl" keyword in user input and initializes pipeline state; ignores `<task-notification>` completion XML |
 
 ---
 
