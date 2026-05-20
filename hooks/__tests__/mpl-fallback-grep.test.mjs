@@ -76,12 +76,12 @@ assert\\s*\\(\\s*true\\s*\\)
     assert.match(p.permittedWhen, /environment precondition/);
   });
 
-  it('parses real registry into 10 patterns', () => {
+  it('parses real registry into 11 patterns', () => {
     const md = readFileSync(REGISTRY_PATH, 'utf-8');
     const { patterns, scope } = parseRegistry(md);
-    assert.strictEqual(patterns.length, 10);
+    assert.strictEqual(patterns.length, 11);
     const ids = patterns.map(p => p.id).sort();
-    assert.deepStrictEqual(ids, ['C2', 'C3', 'CSP', 'D1.a', 'D1.b', 'D2', 'M1', 'TC1', 'TC2', 'TC3']);
+    assert.deepStrictEqual(ids, ['C2', 'C3', 'CSP', 'D1.a', 'D1.b', 'D1.c', 'D2', 'M1', 'TC1', 'TC2', 'TC3']);
     assert.ok(scope.allowed.has('.mjs'));
     assert.ok(scope.allowed.has('.ts'));
     assert.ok(scope.excluded.has('.md'));
@@ -129,6 +129,7 @@ foo
       'M1':  ['tier_3_block_in:production'],
       'CSP': ['tier_3_only'],
       'D1.a': ['tier_3_block_in:verification-result-LHS'],
+      'D1.c': ['strict_block'],
     };
     for (const [id, exp] of Object.entries(expected)) {
       const p = reg.patterns.find(x => x.id === id);
@@ -240,13 +241,19 @@ test('foo', () => {
     assert.ok(hits.filter(h => h.id === 'D1.b').length >= 1);
   });
 
+  it('D1.c exp21 domain fallback literal → match', () => {
+    const src = `const domain = request.domain ?? 'web_novel';`;
+    const hits = scanContent(src, registry.patterns);
+    assert.ok(hits.filter(h => h.id === 'D1.c').length >= 1);
+  });
+
   it('clean source → no hits in block-severity patterns', () => {
     const src = `
 function add(a, b) { return a + b; }
 export { add };
 `;
     const hits = scanContent(src, registry.patterns);
-    const blockIds = ['TC1', 'TC2', 'TC3', 'C3', 'D1.b', 'D2'];
+    const blockIds = ['TC1', 'TC2', 'TC3', 'C3', 'D1.b', 'D1.c', 'D2'];
     const blockHits = hits.filter(h => blockIds.includes(h.id));
     assert.strictEqual(blockHits.length, 0);
   });
