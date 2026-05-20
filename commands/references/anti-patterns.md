@@ -6,8 +6,9 @@ description: Anti-pattern enumeration consumed by phase-runner self-check + mpl-
 
 **Loaded by**: `agents/mpl-phase-runner.md` `<Anti_Patterns_Prohibited>` (human-readable summary) and
 `hooks/mpl-fallback-grep.mjs` (#105 F3, machine consumer).
-**Source of truth**: yggdrasil-exp15 §11 retrofit audit (8 distinct ground-truth anti-patterns; expanded into 10 regex
-IDs here for finer addressability). See §"Ground-truth → registry mapping" for the explicit 8 → 10 expansion.
+**Source of truth**: yggdrasil-exp15 §11 retrofit audit (8 distinct ground-truth anti-patterns) plus exp21
+regression findings; expanded into 11 regex IDs here for finer addressability. See §"Ground-truth → registry
+mapping" for the explicit expansion.
 **Issue**: #104 (F2). Companion: #105 (F3 grep hook), #106 (F4 doctor meta-self), #112 (F5 property check),
 #117 (F6 codex auditor).
 
@@ -87,7 +88,7 @@ codex auditor agent (#117).
 exp15 §11 reported 8 distinct anti-patterns. Some are split into multiple regex IDs in this registry for tighter
 metric attribution and divergent permitted-when semantics:
 
-| GT # | exp15 §11 finding | Registry IDs | Reason for split |
+| GT # | finding | Registry IDs | Reason for split |
 |------|-------------------|--------------|------------------|
 | 1 | Tautological test assertion | `TC1` | 1:1 |
 | 2 | Conditional assertion | `TC2` | 1:1 |
@@ -98,10 +99,11 @@ metric attribution and divergent permitted-when semantics:
 | 7 | Unconditional default-coalesce + synthetic-ID literal | `D1.a`, `D1.b` | exp15 conflated; this registry splits coalesce poisoning vs synthetic-id masking — different `permitted-when` semantics, different metric |
 | 8 | Swallowed promise rejection | `D2` | 1:1 |
 | add | Missing CSP meta tag (renderer hardening) | `CSP` | added beyond exp15 §11; not part of 8 GT — explicitly labeled `(unmeasured)` |
+| exp21 | Hardcoded domain/runtime fallback literal | `D1.c` | exp21 `dispatch.ts`-style `web_novel` fallback masked missing runtime/domain evidence while gate self-report still claimed PASS |
 
-**Catch rate accounting**: "Tier 4 catch 8/8" refers to the **8 ground truths**, not the 10 registry IDs. CSP is
+**Catch rate accounting**: "Tier 4 catch 8/8" refers to the **8 ground truths**, not the 11 registry IDs. CSP is
 added as a defensive item (no exp15 measurement); D1.a + D1.b together count as catching GT #7. Future expansions
-must update this table to keep the 8/8 vs 10-ID accounting transparent.
+must update this table to keep the 8/8 vs 11-ID accounting transparent.
 
 ## F3 / F4 parsing contract
 
@@ -350,6 +352,27 @@ sets CSP.
 ```permitted-when
 - the synthesized literal is explicitly tagged with a `synthetic_origin` field on the same object literal AND
   downstream consumers branch on that field (e.g. `if (id.startsWith('no-git-')) ...`)
+```
+
+### D1.c · Exp21 domain fallback literal
+
+- **id**: `D1.c`
+- **category**: `fallback-poison`
+- **severity**: `block`
+- **escalation**: `strict_block`
+- **rationale**: A hardcoded runtime/domain fallback like `web_novel` can mask absent request or project classification
+  evidence. exp21 showed this can survive while gate self-report still claims Hard 1/2/3 PASS.
+- **ground-truth source**: `exp21 dispatch.ts web_novel fallback`
+
+```regex
+\b(?:domain|project(?:Type|_type)?|content(?:Type|_type)?|genre|kind|type)\b[\s\S]{0,120}(?:\?\?|\|\|)\s*['"]web[-_]novel['"]
+```
+
+```permitted-when
+- the literal is an explicit user-configured default declared in a schema/config file and the code validates that
+  source before applying it
+- tests and fixtures are already excluded from Tier 1 source scanning; if a source file intentionally embeds a demo
+  fallback, document the product default next to the fallback and keep it out of verification-result paths
 ```
 
 ### D2 · Swallowed promise rejection
