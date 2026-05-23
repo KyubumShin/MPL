@@ -397,12 +397,16 @@ if opt_in == "No":
   mvp_scope = null
 else:
   # Guided checklist for AC ids. When total count exceeds 10, group display
-  # by the user-contract core_scenarios so the list stays navigable. The
-  # selection unit remains the individual AC id regardless of grouping.
+  # by Stage 1.1 `core_scenarios` (the PP-derived scenarios written to
+  # `.mpl/mpl/core-scenarios.yaml`; carried in-memory as the `core_scenarios`
+  # variable produced earlier in this phase, e.g. line 131+ and snapshot
+  # consumer at line 578). NOT `user_contract.scenarios`, which is the E2E
+  # scenario list with a different schema. The selection unit remains the
+  # individual AC id regardless of grouping.
   selected_ac = AskUserQuestion({
     question: "Which acceptance_criteria are in MVP scope? (multi-select)",
     # Option shape: { label: ac.id, description: ac.statement, group: scenario_id_or_null }
-    options: build_ac_options(ac_ids, threshold=10, scenarios=user_contract.core_scenarios),
+    options: build_ac_options(ac_ids, threshold=10, scenarios=core_scenarios),
     multiSelect: true,
   })
   selected_ax = AskUserQuestion({
