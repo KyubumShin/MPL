@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
 import {
+  ALLOWED_RELEASE_ARTIFACTS,
   parsePhaseContractGraphText,
   validatePhaseContractGraph,
 } from '../lib/mpl-phase-contract-graph.mjs';
@@ -136,6 +137,215 @@ phases:
     assert.ok(verdict.issues.includes('execution_tiers:duplicate:phase-1'));
     assert.ok(verdict.issues.includes('execution_tiers:unknown:phase-404'));
     assert.ok(verdict.issues.includes('phase-2:execution_tiers:missing'));
+  });
+});
+
+describe('Stage A mvp + release_cuts schema', () => {
+  function graphWithMvp(mvpYaml = '', cutsYaml = '') {
+    let base = validGraph();
+    // Inject mvp and release_cuts at the top level, before execution_tiers.
+    const insertion = (mvpYaml ? `\n${mvpYaml}` : '') + (cutsYaml ? `\n${cutsYaml}` : '');
+    return base.replace('execution_tiers:', `${insertion}\nexecution_tiers:`);
+  }
+
+  it('exposes the allowed artifact set', () => {
+    assert.deepEqual([...ALLOWED_RELEASE_ARTIFACTS].sort(), ['branch', 'draft_pr', 'release_manifest', 'tag']);
+  });
+
+  it('parses mvp object with phases, execution_mode, and artifact', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const graph = parsePhaseContractGraphText(text);
+    assert.notEqual(graph.mvp, null);
+    assert.deepEqual(graph.mvp.phases, ['phase-1']);
+    assert.equal(graph.mvp.execution_mode, 'sequential');
+    assert.equal(graph.mvp.artifact, 'draft_pr');
+  });
+
+  it('parses release_cuts list with id, phases, user_approved, artifact', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-ext-a
+    phases: [phase-2]
+    user_approved: true
+    artifact: release_manifest`);
+    const graph = parsePhaseContractGraphText(text);
+    assert.equal(graph.release_cuts.length, 1);
+    assert.equal(graph.release_cuts[0].id, 'cut-ext-a');
+    assert.deepEqual(graph.release_cuts[0].phases, ['phase-2']);
+    assert.equal(graph.release_cuts[0].user_approved, true);
+    assert.equal(graph.release_cuts[0].artifact, 'release_manifest');
+  });
+
+  it('keeps a graph without mvp valid (backward compatibility)', () => {
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(validGraph()));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+    const g = parsePhaseContractGraphText(validGraph());
+    assert.equal(g.mvp, null);
+    assert.equal(g.release_cuts, null);
+  });
+
+  it('accepts a fully valid mvp + release_cuts graph', () => {
+    const text = graphWithMvp(
+      `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`,
+      `release_cuts:
+  - id: cut-ext-a
+    phases: [phase-2]
+    user_approved: true
+    artifact: release_manifest`,
+    );
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('rejects mvp.phases pointing at unknown phase ids', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-999]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:phases:unknown:phase-999'));
+  });
+
+  it('rejects mvp.phases with duplicate ids', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:phases:duplicate:phase-1'));
+  });
+
+  it('rejects mvp without execution_mode', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:execution_mode:missing'));
+  });
+
+  it('rejects Stage B contract_skeleton execution_mode in Stage A', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: contract_skeleton
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:execution_mode:unsupported:contract_skeleton'));
+  });
+
+  it('rejects mvp.artifact with unsupported value', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: gist`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:artifact:unsupported:gist'));
+  });
+
+  it('rejects release_cuts with the reserved "mvp" id', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: mvp
+    phases: [phase-2]
+    user_approved: true
+    artifact: release_manifest`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('release_cuts:id:reserved:mvp'));
+  });
+
+  it('rejects release_cuts with duplicate ids', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-a
+    phases: [phase-1]
+    user_approved: true
+    artifact: release_manifest
+  - id: cut-a
+    phases: [phase-2]
+    user_approved: true
+    artifact: release_manifest`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('release_cuts:id:duplicate:cut-a'));
+  });
+
+  it('rejects release_cuts.phases pointing at unknown phase ids', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-a
+    phases: [phase-2, phase-999]
+    user_approved: true
+    artifact: release_manifest`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('release_cuts:cut-a:phases:unknown:phase-999'));
+  });
+
+  it('rejects phase overlap between mvp and a release_cut', () => {
+    const text = graphWithMvp(
+      `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`,
+      `release_cuts:
+  - id: cut-a
+    phases: [phase-1]
+    user_approved: true
+    artifact: release_manifest`,
+    );
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.some((i) => i.startsWith('release_cuts:cut-a:phases:overlap:phase-1:already_in:mvp')));
+  });
+
+  it('rejects phase overlap between two release_cuts', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-a
+    phases: [phase-1]
+    user_approved: true
+    artifact: release_manifest
+  - id: cut-b
+    phases: [phase-1]
+    user_approved: true
+    artifact: release_manifest`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.some((i) => i.startsWith('release_cuts:cut-b:phases:overlap:phase-1:already_in:cut-a')));
+  });
+
+  it('rejects release_cuts missing user_approved', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-a
+    phases: [phase-1]
+    artifact: release_manifest`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('release_cuts:cut-a:user_approved:missing'));
+  });
+
+  it('rejects release_cuts missing artifact', () => {
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-a
+    phases: [phase-1]
+    user_approved: false`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('release_cuts:cut-a:artifact:missing'));
   });
 });
 

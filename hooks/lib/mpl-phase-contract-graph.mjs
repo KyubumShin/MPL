@@ -3,8 +3,16 @@
  *
  * This validates the contract graph surface that is cheap to prove from the
  * prompt-controlled YAML subset: graph metadata, per-phase evidence/change
- * policy, and dangling `requires.from_phase` references.
+ * policy, dangling `requires.from_phase` references, and Stage A
+ * `mvp` / `release_cuts[]` schema integrity.
  */
+
+export const ALLOWED_RELEASE_ARTIFACTS = Object.freeze([
+  'draft_pr',
+  'branch',
+  'tag',
+  'release_manifest',
+]);
 
 function normalizeScalar(value) {
   if (typeof value !== 'string') return null;
@@ -98,6 +106,84 @@ function extractPhaseRefs(text) {
   return out;
 }
 
+function inlineListItems(block, key) {
+  if (!block) return null;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const inline = block.match(new RegExp(`^\\s*${escaped}\\s*:\\s*\\[(.*)\\]\\s*$`, 'm'));
+  if (inline) {
+    return inline[1]
+      .split(',')
+      .map((s) => normalizeScalar(s))
+      .filter(Boolean);
+  }
+  // block-list form
+  const nestedMatch = block.match(new RegExp(`^(\\s*)${escaped}\\s*:\\s*\\n((?:\\1\\s+-\\s+.+\\n?)+)`, 'm'));
+  if (!nestedMatch) return null;
+  const items = [];
+  for (const line of nestedMatch[2].split('\n')) {
+    const m = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (m) items.push(normalizeScalar(m[1]));
+  }
+  return items.filter(Boolean);
+}
+
+function nestedScalar(block, key) {
+  if (!block) return null;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = block.match(new RegExp(`^\\s+${escaped}\\s*:\\s*(.+?)\\s*$`, 'm'));
+  return m ? normalizeScalar(m[1]) : null;
+}
+
+function parseMvpObject(text) {
+  if (!/^mvp\s*:/m.test(text)) return null;
+  const block = topLevelBlock(text, 'mvp');
+  if (block === null) return null;
+  return {
+    phases: inlineListItems(block, 'phases') || [],
+    execution_mode: nestedScalar(block, 'execution_mode'),
+    artifact: nestedScalar(block, 'artifact'),
+    derived_from: nestedScalar(block, 'derived_from'),
+  };
+}
+
+function parseReleaseCuts(text) {
+  if (!/^release_cuts\s*:/m.test(text)) return null;
+  const block = topLevelBlock(text, 'release_cuts');
+  if (block === null) return null;
+
+  const lines = block.split('\n');
+  const cuts = [];
+  let cur = null;
+
+  const flush = () => {
+    if (!cur) return;
+    cuts.push({
+      id: cur.id,
+      phases: inlineListItems(cur.text, 'phases') || [],
+      user_approved: (() => {
+        const raw = nestedScalar(cur.text, 'user_approved');
+        if (raw === 'true') return true;
+        if (raw === 'false') return false;
+        return null;
+      })(),
+      artifact: nestedScalar(cur.text, 'artifact'),
+    });
+    cur = null;
+  };
+
+  for (const line of lines) {
+    const idMatch = line.match(/^\s*-\s+id\s*:\s*["']?([^"'\s#]+)["']?/);
+    if (idMatch) {
+      flush();
+      cur = { id: idMatch[1], text: `${line}\n` };
+      continue;
+    }
+    if (cur) cur.text += `${line}\n`;
+  }
+  flush();
+  return cuts;
+}
+
 export function parsePhaseContractGraphText(text) {
   const executionTiersBlock = topLevelBlock(text, 'execution_tiers');
   const phases = phaseBlocks(text).map((block) => ({
@@ -116,6 +202,8 @@ export function parsePhaseContractGraphText(text) {
     has_execution_tiers: hasTopLevelNonEmptyField(text, 'execution_tiers'),
     execution_tier_phase_refs: extractPhaseRefs(executionTiersBlock),
     phases,
+    mvp: parseMvpObject(text),
+    release_cuts: parseReleaseCuts(text),
   };
 }
 
@@ -156,8 +244,94 @@ export function validatePhaseContractGraph(graph) {
     }
   }
 
+  validateMvpAndReleaseCuts(graph, knownPhases, issues);
+
   return {
     valid: issues.length === 0,
     issues,
   };
+}
+
+function validateMvpAndReleaseCuts(graph, knownPhases, issues) {
+  const mvp = graph?.mvp;
+  const cuts = graph?.release_cuts;
+
+  // Both fields are optional at this layer: a project without Stage A `mvp_scope`
+  // emits no `mvp`/`release_cuts`, and the existing pipeline continues unchanged.
+  // The "iff goal_contract.mvp_scope present → mvp required" check lives at the
+  // goal-contract / hook integration layer, not here.
+
+  if (mvp) {
+    if (!Array.isArray(mvp.phases) || mvp.phases.length === 0) {
+      issues.push('mvp:phases:missing');
+    } else {
+      for (const phaseId of mvp.phases) {
+        if (!knownPhases.has(phaseId)) issues.push(`mvp:phases:unknown:${phaseId}`);
+      }
+      const seen = new Set();
+      for (const phaseId of mvp.phases) {
+        if (seen.has(phaseId)) issues.push(`mvp:phases:duplicate:${phaseId}`);
+        seen.add(phaseId);
+      }
+    }
+    if (mvp.execution_mode === null) {
+      issues.push('mvp:execution_mode:missing');
+    } else if (mvp.execution_mode !== 'sequential') {
+      // Stage A: contract_skeleton is reserved for Stage B and rejected here.
+      issues.push(`mvp:execution_mode:unsupported:${mvp.execution_mode}`);
+    }
+    if (mvp.artifact === null) {
+      issues.push('mvp:artifact:missing');
+    } else if (!ALLOWED_RELEASE_ARTIFACTS.includes(mvp.artifact)) {
+      issues.push(`mvp:artifact:unsupported:${mvp.artifact}`);
+    }
+  }
+
+  if (Array.isArray(cuts)) {
+    const cutIds = new Set();
+    const phaseToCut = new Map();
+    if (mvp?.phases) {
+      for (const p of mvp.phases) phaseToCut.set(p, 'mvp');
+    }
+    for (const cut of cuts) {
+      if (!cut.id) {
+        issues.push('release_cuts:id:missing');
+        continue;
+      }
+      if (cutIds.has(cut.id)) {
+        issues.push(`release_cuts:id:duplicate:${cut.id}`);
+        continue;
+      }
+      cutIds.add(cut.id);
+
+      if (cut.id === 'mvp') {
+        issues.push('release_cuts:id:reserved:mvp');
+      }
+      if (!Array.isArray(cut.phases) || cut.phases.length === 0) {
+        issues.push(`release_cuts:${cut.id}:phases:missing`);
+      } else {
+        for (const phaseId of cut.phases) {
+          if (!knownPhases.has(phaseId)) {
+            issues.push(`release_cuts:${cut.id}:phases:unknown:${phaseId}`);
+          }
+          const existingOwner = phaseToCut.get(phaseId);
+          if (existingOwner) {
+            issues.push(`release_cuts:${cut.id}:phases:overlap:${phaseId}:already_in:${existingOwner}`);
+          } else {
+            phaseToCut.set(phaseId, cut.id);
+          }
+        }
+      }
+      if (cut.user_approved === null) {
+        issues.push(`release_cuts:${cut.id}:user_approved:missing`);
+      }
+      if (cut.artifact === null) {
+        // Default applied at decomposer layer; allow absent here but flag explicitly
+        // to keep the schema honest — decomposer should emit it.
+        issues.push(`release_cuts:${cut.id}:artifact:missing`);
+      } else if (!ALLOWED_RELEASE_ARTIFACTS.includes(cut.artifact)) {
+        issues.push(`release_cuts:${cut.id}:artifact:unsupported:${cut.artifact}`);
+      }
+    }
+  }
 }
