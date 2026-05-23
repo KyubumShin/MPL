@@ -74,6 +74,39 @@ deferred_uncertainties: []
 overrides: []
 ```
 
+## Optional: `mvp_scope` (Stage A)
+
+When the user declares an MVP subset during Phase 0, the contract gains an
+optional top-level `mvp_scope` field. Absent = pre-Stage-A behavior (no MVP
+cut; the current sequential pipeline runs unchanged).
+
+```yaml
+mvp_scope:                            # OPTIONAL — omit for current behavior
+  acceptance_criteria: [AC-1, AC-2]   # subset of acceptance_criteria[].id
+  variation_axes: [AX-1]              # subset of variation_axes[].id
+  artifact: draft_pr                  # draft_pr | branch | tag | release_manifest
+```
+
+Validation rules (enforced by `hooks/lib/mpl-goal-contract.mjs`):
+
+- `mvp_scope` itself is optional. Contracts without it remain valid.
+- Every `mvp_scope.acceptance_criteria[]` id MUST exist in the contract's
+  `acceptance_criteria[].id` set.
+- Every `mvp_scope.variation_axes[]` id MUST exist in the contract's
+  `variation_axes[].id` set.
+- `mvp_scope.acceptance_criteria` and `mvp_scope.variation_axes` may not
+  both be empty when `mvp_scope` is present.
+- `mvp_scope.artifact` MUST be one of the values in `MVP_SCOPE_ARTIFACTS`
+  (`draft_pr | branch | tag | release_manifest`).
+
+**Current Stage A status: schema only.** Parsing and validation are wired
+through `hooks/lib/mpl-goal-contract.mjs`; declaring `mvp_scope` today has no
+runtime effect beyond schema validation. When the Stage A release-path
+states (`release-gate` and `release-finalize`) and decomposer `mvp`
+derivation land in subsequent commits, MVP completion will route through
+the release path. See `docs/roadmap/stage-a-mvp-cuts-rfc.md` for the full
+target state machine.
+
 ## Runtime Enforcement
 
 - `hooks/mpl-ambiguity-gate.mjs` blocks `mpl-decomposer` dispatch when the
