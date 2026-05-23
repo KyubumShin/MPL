@@ -133,9 +133,12 @@ function sha256(text) {
 }
 
 function parseMvpScope(text) {
+  // `null` reserved for "key absent" — i.e., the contract opted out of MVP entirely.
+  // A present-but-empty `mvp_scope:` block is a *malformed declaration*: the user
+  // committed to MVP but didn't fill it in. Return an empty-shape object so the
+  // validator surfaces it as missing AC/AX/artifact rather than silently dropping.
   if (!/^mvp_scope\s*:/m.test(text)) return null;
   const block = extractTopBlock(text, 'mvp_scope');
-  if (!block.trim()) return null;
   return {
     acceptance_criteria: listAfterKey(block, 'acceptance_criteria'),
     variation_axes: listAfterKey(block, 'variation_axes'),

@@ -170,7 +170,33 @@ describe('goal contract mvp_scope (Stage A)', () => {
     const text = mvpScopeBlock('  acceptance_criteria:\n    - AC-1\n  artifact: release_manifest');
     const c = parseGoalContractText(text);
     assert.deepEqual(c.mvp_scope.acceptance_criteria, ['AC-1']);
+    assert.deepEqual(c.mvp_scope.variation_axes, []);
     assert.equal(c.mvp_scope.artifact, 'release_manifest');
+  });
+
+  it('rejects mvp_scope when the block is declared but completely empty', () => {
+    const text = validGoalContract() + 'mvp_scope:\n';
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(
+      verdict.missing.includes('mvp_scope.acceptance_criteria_or_variation_axes'),
+      `expected empty-block to surface AC/AX-or check; got: ${verdict.missing.join(',')}`,
+    );
+    assert.ok(
+      verdict.missing.includes('mvp_scope.artifact'),
+      `expected empty-block to surface missing artifact; got: ${verdict.missing.join(',')}`,
+    );
+    // The contract.mvp_scope object MUST be non-null so downstream consumers
+    // can distinguish "declared-but-malformed" from "absent".
+    assert.notEqual(verdict.contract.mvp_scope, null);
+  });
+
+  it('rejects mvp_scope when only artifact is declared (no AC/AX keys)', () => {
+    const text = mvpScopeBlock('  artifact: branch');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.missing.includes('mvp_scope.acceptance_criteria_or_variation_axes'));
+    assert.equal(verdict.contract.mvp_scope.artifact, 'branch');
   });
 
   it('rejects mvp_scope acceptance_criteria ids that do not exist in the contract', () => {

@@ -99,9 +99,13 @@ Validation rules (enforced by `hooks/lib/mpl-goal-contract.mjs`):
 - `mvp_scope.artifact` MUST be one of the values in `MVP_SCOPE_ARTIFACTS`
   (`draft_pr | branch | tag | release_manifest`).
 
-When `mvp_scope` is declared, the orchestrator routes MVP completion through
-the Stage A release path (`release-gate` → `release-finalize`); see
-`docs/roadmap/stage-a-mvp-cuts-rfc.md` for the full state machine.
+**Current Stage A status: schema only.** Parsing and validation are wired
+through `hooks/lib/mpl-goal-contract.mjs`; declaring `mvp_scope` today has no
+runtime effect beyond schema validation. When the Stage A release-path
+states (`release-gate` and `release-finalize`) and decomposer `mvp`
+derivation land in subsequent commits, MVP completion will route through
+the release path. See `docs/roadmap/stage-a-mvp-cuts-rfc.md` for the full
+target state machine.
 
 ## Runtime Enforcement
 
