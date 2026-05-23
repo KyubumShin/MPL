@@ -374,6 +374,69 @@ describe('Stage A mvp + release_cuts schema', () => {
     assert.ok(verdict.issues.includes('release_cuts:cut-a:user_approved:missing'));
   });
 
+  it('rejects mvp with no phases field at all', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:phases:missing'));
+  });
+
+  it('rejects mvp.phases as an explicit empty inline list', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: []
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:phases:missing'));
+  });
+
+  it('accepts release_cuts as an explicit empty inline list (backward-compat)', () => {
+    const text = graphWithMvp('', 'release_cuts: []');
+    const graph = parsePhaseContractGraphText(text);
+    // Empty array parses to `[]` and validator runs zero cut-level checks.
+    assert.deepEqual(graph.release_cuts, []);
+    const verdict = validatePhaseContractGraph(graph);
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('parses mvp.phases in block-list form', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases:
+    - phase-1
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const graph = parsePhaseContractGraphText(text);
+    assert.deepEqual(graph.mvp.phases, ['phase-1']);
+    const verdict = validatePhaseContractGraph(graph);
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('rejects mvp.derived_from with an unsupported value', () => {
+    const text = graphWithMvp(`mvp:
+  derived_from: some_other_source
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:derived_from:unsupported:some_other_source'));
+  });
+
+  it('accepts mvp without derived_from (treated as informational omission)', () => {
+    const text = graphWithMvp(`mvp:
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
   it('rejects release_cuts missing artifact', () => {
     const text = graphWithMvp('', `release_cuts:
   - id: cut-a

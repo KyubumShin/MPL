@@ -7,12 +7,15 @@
  * `mvp` / `release_cuts[]` schema integrity.
  */
 
-export const ALLOWED_RELEASE_ARTIFACTS = Object.freeze([
-  'draft_pr',
-  'branch',
-  'tag',
-  'release_manifest',
-]);
+import { MVP_SCOPE_ARTIFACTS } from './mpl-goal-contract.mjs';
+
+// Re-export under a graph-layer name so callers depending on this validator can
+// import the allowed-artifact set without reaching across modules; the set
+// itself is single-sourced from mpl-goal-contract.mjs to prevent drift between
+// the goal-contract layer (PR #178) and the graph layer (this PR).
+export const ALLOWED_RELEASE_ARTIFACTS = MVP_SCOPE_ARTIFACTS;
+
+const ALLOWED_MVP_DERIVED_FROM = Object.freeze(['goal_contract.mvp_scope']);
 
 function normalizeScalar(value) {
   if (typeof value !== 'string') return null;
@@ -130,7 +133,10 @@ function inlineListItems(block, key) {
 function nestedScalar(block, key) {
   if (!block) return null;
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const m = block.match(new RegExp(`^\\s+${escaped}\\s*:\\s*(.+?)\\s*$`, 'm'));
+  // `^\s*` (not `^\s+`) because topLevelBlock(text, ...) trims leading
+  // whitespace from its output, so the first nested field of a block ends up
+  // with no indent — we must still match it the same as the indented siblings.
+  const m = block.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, 'm'));
   return m ? normalizeScalar(m[1]) : null;
 }
 
@@ -295,6 +301,11 @@ function validateMvpAndReleaseCuts(graph, knownPhases, issues) {
     } else if (!ALLOWED_RELEASE_ARTIFACTS.includes(mvp.artifact)) {
       issues.push(`mvp:artifact:unsupported:${mvp.artifact}`);
     }
+    // `derived_from` is the provenance marker (RFC §4.2). Treat as load-bearing
+    // so any drift away from the documented source is caught here.
+    if (mvp.derived_from !== null && !ALLOWED_MVP_DERIVED_FROM.includes(mvp.derived_from)) {
+      issues.push(`mvp:derived_from:unsupported:${mvp.derived_from}`);
+    }
   }
 
   if (Array.isArray(cuts)) {
@@ -336,8 +347,10 @@ function validateMvpAndReleaseCuts(graph, knownPhases, issues) {
         issues.push(`release_cuts:${cut.id}:user_approved:missing`);
       }
       if (cut.artifact === null) {
-        // Default applied at decomposer layer; allow absent here but flag explicitly
-        // to keep the schema honest — decomposer should emit it.
+        // Decomposer MUST emit artifact for every cut (default `release_manifest`
+        // applied at decomposer layer per RFC §4.2). Absence at hook layer means
+        // the decomposer skipped the field — that is a contract violation, not
+        // a missing default. Reject in parity with mvp.artifact:missing above.
         issues.push(`release_cuts:${cut.id}:artifact:missing`);
       } else if (!ALLOWED_RELEASE_ARTIFACTS.includes(cut.artifact)) {
         issues.push(`release_cuts:${cut.id}:artifact:unsupported:${cut.artifact}`);
