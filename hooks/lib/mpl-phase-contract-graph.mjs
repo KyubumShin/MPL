@@ -154,12 +154,29 @@ function parseMvpObject(text) {
 
 function parseReleaseCuts(text) {
   if (!/^release_cuts\s*:/m.test(text)) return null;
-  const block = topLevelBlock(text, 'release_cuts');
-  if (block === null) return null;
 
-  // Split into `-` item blocks first, then extract `id` from anywhere inside
-  // the block — YAML mapping field order is not significant, so `id` may
-  // legitimately appear after `phases:`, `artifact:`, etc.
+  // Walk the raw text instead of going through `topLevelBlock` because that
+  // helper trims leading whitespace, which would erase the indent of the very
+  // first `-` cut item and break the indent-anchored item-boundary detection
+  // below.
+  const lines = String(text || '').split('\n').map((l) => l.replace(/\r$/, ''));
+  const startIdx = lines.findIndex((line) => /^release_cuts\s*:\s*(?:\[\s*\])?\s*$/.test(line));
+  if (startIdx === -1) return null;
+
+  // Inline empty list (`release_cuts: []`) parses to an empty array.
+  if (/^release_cuts\s*:\s*\[\s*\]\s*$/.test(lines[startIdx])) return [];
+
+  // Collect lines until the next top-level key (any non-indented line).
+  const bodyLines = [];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) break;
+    bodyLines.push(lines[i]);
+  }
+  if (bodyLines.length === 0) return [];
+
+  // Split into `-` item blocks; only `-` lines at the *same* indent count as
+  // new cut boundaries. A deeper `-` (for example a block-list `phases:` field
+  // whose entries are `- phase-2`) is part of the current item, not a new cut.
   const itemBlocks = [];
   let cur = null;
 
@@ -168,13 +185,15 @@ function parseReleaseCuts(text) {
     cur = null;
   };
 
-  for (const line of block.split('\n')) {
+  let baseIndent = null;
+  for (const line of bodyLines) {
     const itemStart = line.match(/^(\s*)-\s+(.+?)\s*$/);
-    if (itemStart) {
+    if (itemStart && (baseIndent === null || itemStart[1].length === baseIndent)) {
+      if (baseIndent === null) baseIndent = itemStart[1].length;
       flush();
       // Replace `- ` with equivalent whitespace so the first line of each item
       // is a normal indented `key: value` line that nestedScalar/inlineListItems
-      // (both anchored on `\s+`) can match.
+      // can match against an indent-anchored regex.
       cur = [`${itemStart[1]}  ${itemStart[2]}`];
       continue;
     }

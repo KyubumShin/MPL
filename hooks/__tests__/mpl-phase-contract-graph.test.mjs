@@ -165,6 +165,26 @@ describe('Stage A mvp + release_cuts schema', () => {
     assert.equal(graph.mvp.artifact, 'draft_pr');
   });
 
+  it('parses release_cuts items with block-list phases without splitting at nested dashes', () => {
+    // Regression for codex review on 02beb4d: indent-blind `-` detection
+    // misread inner `- phase-2` as a new cut boundary, splitting one valid
+    // cut into two malformed items. Cut item boundaries must respect indent.
+    const text = graphWithMvp('', `release_cuts:
+  - id: cut-a
+    phases:
+      - phase-2
+    user_approved: true
+    artifact: release_manifest`);
+    const graph = parsePhaseContractGraphText(text);
+    assert.equal(graph.release_cuts.length, 1, `cut count: expected 1, got ${graph.release_cuts.length}`);
+    assert.equal(graph.release_cuts[0].id, 'cut-a');
+    assert.deepEqual(graph.release_cuts[0].phases, ['phase-2']);
+    assert.equal(graph.release_cuts[0].user_approved, true);
+    assert.equal(graph.release_cuts[0].artifact, 'release_manifest');
+    const verdict = validatePhaseContractGraph(graph);
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
   it('parses release_cuts items even when id is not the first key (YAML mapping order is insignificant)', () => {
     // Regression for codex review: previously, parseReleaseCuts only recognized
     // items whose first line was `- id:`, which silently dropped items with
