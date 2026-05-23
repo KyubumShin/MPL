@@ -300,6 +300,62 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     Step 11: Execution tiers
       - Group phases by dependency level (topological tiers).
       - pp_core phases: parallel = false (sequential). Others: parallel = true if no file overlap.
+
+    Step 12: MVP cut derivation (Stage A, only when goal_contract.mvp_scope is present)
+      When `goal_contract.mvp_scope` is ABSENT, **skip this step entirely**:
+      omit both `mvp` and `release_cuts` from the output. The pipeline runs
+      as today with no Stage A release path.
+
+      When `goal_contract.mvp_scope` IS present, derive `mvp.phases` as the
+      set of phase ids whose `goal_trace` intersects the user-declared
+      MVP id set. This is **mechanical id-set mapping** (NOT semantic
+      inference). Per RFC §3.4 / §10 D-Q4, the decomposer MUST NOT infer
+      MVP scope from anything other than `goal_contract.mvp_scope`.
+
+      ```
+      mvp_ac_ids = goal_contract.mvp_scope.acceptance_criteria  # set of AC ids
+      mvp_ax_ids = goal_contract.mvp_scope.variation_axes        # set of AX ids
+      mvp_target_ids = mvp_ac_ids ∪ mvp_ax_ids
+
+      mvp_phases = []
+      for phase in phases (in execution_tiers order):
+        phase_ids = phase.goal_trace.acceptance_criteria ∪ phase.goal_trace.variation_axes
+        if phase_ids ∩ mvp_target_ids != ∅:
+          mvp_phases.append(phase.id)
+
+      # Coverage check: every mvp_scope id must be covered by at least one phase
+      # in mvp_phases. If not, the user's MVP cannot be realized as decomposed.
+      covered_ac = ⋃ phase.goal_trace.acceptance_criteria for phase in mvp_phases
+      covered_ax = ⋃ phase.goal_trace.variation_axes        for phase in mvp_phases
+      missing_ac = mvp_ac_ids - covered_ac
+      missing_ax = mvp_ax_ids - covered_ax
+      if missing_ac or missing_ax:
+        risk_assessment.risks.append({
+          id: "STAGE_A_MVP_COVERAGE_GAP",
+          severity: "HIGH",
+          title: "MVP scope ids not covered by any phase's goal_trace",
+          description: `Missing AC: ${missing_ac.join(',') or 'none'}; Missing AX: ${missing_ax.join(',') or 'none'}. Either revise goal_contract.mvp_scope to drop these ids, add phases that cover them, or extend an existing phase's goal_trace.`,
+          mitigation: "Re-interview to revise mvp_scope, or recompose with additional phases.",
+        })
+        risk_assessment.go_no_go = "NOT_READY"  # block until coverage resolves
+
+      # Cross-cut overlap check (Stage A: decomposer emits ZERO release_cuts,
+      # so no overlap possible from this step. Stage B may auto-propose cuts;
+      # at that point the contract-graph validator (PR #180) catches overlap.)
+
+      Emit on output:
+        mvp = {
+          derived_from: "goal_contract.mvp_scope",
+          phases: mvp_phases,
+          execution_mode: "sequential",      # Stage A only allows sequential
+          artifact: goal_contract.mvp_scope.artifact,
+        }
+        release_cuts = []
+        # Stage A: decomposer does NOT auto-propose extension cuts.
+        # The orchestrator runs MVP cohort first via release-gate/release-finalize
+        # (Phase 1.6, separate landing), then extension phases via existing
+        # execution_tiers. Auto-proposal of cuts is RFC §10 D-Q2 Stage B work.
+      ```
   </Reasoning_Steps>
 
   <Output_Schema>
@@ -501,6 +557,34 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       - tier: number
         phases: [string]
         parallel: boolean
+
+    # Stage A: MVP cohort + release cuts. OPTIONAL — emit only when
+    # `goal_contract.mvp_scope` is present (see Step 12 derivation rules).
+    # When absent, omit both `mvp` and `release_cuts` entirely; the pipeline
+    # runs as today with no Stage A release path.
+    #
+    # The Stage A validators (hooks/lib/mpl-phase-contract-graph.mjs,
+    # landed in PR #180) check:
+    #   - mvp.phases ⊆ phases[], no duplicates
+    #   - mvp.execution_mode == "sequential" (Stage A only)
+    #   - mvp.artifact ∈ {draft_pr, branch, tag, release_manifest}
+    #   - release_cuts[].id unique, not "mvp"; phases ⊆ phases[]
+    #   - no cross-cut phase overlap (mvp ∩ cut, cut[i] ∩ cut[j])
+    mvp:
+      derived_from: "goal_contract.mvp_scope"
+      phases: [string]               # ids whose goal_trace covers mvp_scope AC/AX
+      execution_mode: "sequential"    # Stage A: always sequential
+      artifact: "draft_pr | branch | tag | release_manifest"  # from mvp_scope.artifact
+
+    release_cuts: []
+      # Stage A: decomposer emits EMPTY release_cuts[] when mvp is present.
+      # Auto-proposal of extension cuts is RFC §10 D-Q2 Stage B work.
+      # When present, each entry has shape:
+      #   - id: string                  # unique within release_cuts; never "mvp"
+      #     phases: [string]            # disjoint from mvp.phases and other cuts
+      #     proposed_by: "mpl-decomposer"
+      #     user_approved: boolean      # planning-stage HITL writes; runtime never mutates
+      #     artifact: "draft_pr | branch | tag | release_manifest"
 
     decomposition_rationale: string
 
