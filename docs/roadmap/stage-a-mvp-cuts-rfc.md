@@ -221,14 +221,17 @@ Do not call `release-finalize(cut_id)` from `phase5-finalize`. Whole-goal closur
 
 | Area | Change |
 |---|---|
-| `hooks/lib/mpl-state.mjs` | Add `release-gate` and `release-finalize` to `VALID_PHASES`; optionally add a `release` subtree default for active cut metadata. |
-| `docs/schemas/state.md` | Document new lifecycle markers and release-scoped metadata. No migration version bump required if fields are additive, but enum/docs/tests must update. |
-| `mpl-phase-controller.mjs` | Add `release-gate` and `release-finalize` branches; make `phase2-sprint` cohort-aware. Do not route MVP completion through `phase3-gate`. |
-| `mpl-require-phase-contract-graph.mjs` or new validator | Validate `mvp`, `release_cuts[]`, phase membership, execution tier membership, and MVP goal_trace coverage. |
-| `hooks/lib/mpl-goal-contract.mjs` | Parse and validate optional `mvp_scope`. |
-| `mpl-sentinel-s1.mjs` | Keep content validation; missing-manifest blocking belongs in evidence latch or a dedicated require hook. |
-| New/extended manifest enforcement | Block code-bearing phase completion when `export-manifest.json` is missing. |
-| `mpl-require-whole-goal-closure.mjs` | No semantic change. It remains tied to `finalize_done=true` only. |
+| `hooks/lib/mpl-state.mjs` | Add `release-gate` and `release-finalize` to `VALID_PHASES` (currently lines 66-72, 13-entry set). Add `release` subtree default to state init (`current_cut_id: null`, `completed_cut_ids: []`, `pending_artifact: null`). |
+| `docs/schemas/state.md` | Document new lifecycle markers and `state.release` subtree. No migration version bump required because fields are additive. Update VALID_PHASES enum doc, lifecycle diagram, HUD/status labels, and phase-controller tests. |
+| `mpl-phase-controller.mjs` | Add `case 'release-gate'` and `case 'release-finalize'` handlers (pattern after `small-sprint` / `small-verify` at lines 565-632). Modify `phase2-sprint` completion check at line 415: read `state.release.current_cut_id`; if non-null, filter PLAN.md TODOs to active cohort's phases (`mvp.phases` or `release_cuts[X].phases`); on cohort complete, route to `release-gate(cut_id)`, not `phase3-gate`. Whole-pipeline `phase3-gate` only entered when all cohorts complete and `state.release.current_cut_id` is null. |
+| **NEW: small-pipeline guard** | At the small-pipeline entry (before `case 'small-plan'` around `mpl-phase-controller.mjs:556`), block entry when `goal_contract.mvp_scope` is present (D-Q7). Surface a hard block message; do not silently downgrade. |
+| `mpl-phase-contract-graph.mjs` | Extend (lib at `hooks/lib/mpl-phase-contract-graph.mjs:122-150` checks phase ids / execution_tiers / dangling refs). Add: validate `mvp.phases[]` and `release_cuts[].phases[]` are subsets of `phases[]`, each phase appears exactly once across all cuts (no cross-cut overlap), MVP `goal_trace` union covers every `mvp_scope` AC/AX id, and release-immutability (D-Q6) — blocks any decomposition write that mutates a released cut's phase set when `state.release.completed_cut_ids` contains the cut id. |
+| `hooks/lib/mpl-goal-contract.mjs` | Parse and validate optional `mvp_scope`. Reject unknown AC/AX ids, unsupported `artifact` values, and `acceptance_criteria`/`variation_axes` not appearing in the contract. |
+| **NEW: `hooks/mpl-require-export-manifest.mjs`** (D-Q5) | New hook. Blocks phase-completion state writes (`state-summary.md`, `current_phase` transition) when a code-bearing phase lacks `.mpl/mpl/phases/{phase_id}/export-manifest.json`. Code-bearing detection: any phase with non-empty `impact.create ∪ impact.modify`. |
+| `mpl-sentinel-s1.mjs` | **No behavior change.** Continues content-only validation (declared symbols exist in actual files). Presence enforcement moved to `mpl-require-export-manifest.mjs`. |
+| `agents/mpl-phase-runner.md` | Output schema: add `export_manifest` evidence token to `evidence_latch[]` for code-bearing phases. Update the schema sample around lines 157-165. |
+| `agents/mpl-decomposer.md` | Rule 9 extension (around line 39): in addition to keeping completed phase blocks intact, recompose MUST treat `mvp.phases` and `release_cuts[id].phases` as immutable when the cut id is in `state.release.completed_cut_ids`. New phases go to a new cut or to non-cut tail. |
+| `mpl-require-whole-goal-closure.mjs` | **No semantic change.** Verified to inspect only `finalize_done=true` writes plus goal_trace coverage. Release path never triggers it (release-finalize never sets `finalize_done`). |
 
 ---
 
@@ -307,6 +310,45 @@ Form:
 - If `mvp.artifact` is `draft_pr`, `branch`, or `tag`, attempt the corresponding git/GitHub operation.
 - On failure, write `artifact_creation_failed` with reason, surface it to the user, and continue to the extension cohort.
 
+### D-Q5 - `export-manifest.json` enforcement location
+
+**Decision:** new dedicated hook `hooks/mpl-require-export-manifest.mjs`. Do not extend SNT-S1.
+
+- New hook performs **presence + minimal structural validity** check at phase exit. Blocks `state-summary.md` write / completed phase state transition when a code-bearing phase lacks the manifest.
+- `mpl-sentinel-s1.mjs` stays focused on **content validity** (declared symbols exist in actual files); its scope and behavior are unchanged.
+- Phase Runner output schema lists `export_manifest` as a required evidence token for code-bearing phases (added to evidence_latch alongside `command`, `test_agent`, `goal_trace`).
+
+**Rejected alternative:** extend SNT-S1 to block on missing manifest. Mixes two concerns (presence vs content) in one hook; harder to reason about and to deactivate selectively.
+
+**Rationale:** single-responsibility hooks compose better. New file cost is one ~80-line .mjs; benefit is clean separation of "manifest exists" from "manifest is correct."
+
+### D-Q6 - RECOMPOSE-MODE / APPEND-MODE vs released cut immutability
+
+**Decision:** **released cut phase membership is immutable.** Once `release-finalize(cut_id)` has shipped a release artifact, the corresponding `mvp.phases` or `release_cuts[id].phases` MUST NOT be modified by any subsequent RECOMPOSE-MODE or APPEND-MODE invocation.
+
+- New phases introduced by recompose go to a **new** release cut, or to non-cut tail phases (extension work outside any cut).
+- Decomposer rule 9 (`agents/mpl-decomposer.md:39`) is extended: in addition to keeping completed phase blocks byte-for-byte intact, recompose MUST treat `mvp.phases` and `release_cuts[id].phases` as immutable when `state.release.completed_cut_ids` contains the cut id.
+- A new validation hook (or extension of `mpl-phase-contract-graph.mjs`) blocks any decomposition write that mutates a released cut's phase membership.
+
+**Rejected alternatives:**
+- *Append-only* — released `release-manifest.json` already lists the phase set; appending makes the shipped artifact a moving target.
+- *User override via HITL* — opens a foot-gun that could only ever be a mistake post-release.
+
+**Rationale:** the release artifact is an externalized claim. Modifying its underlying phase set after delivery breaks the artifact's truthfulness. Append work belongs in a new cut.
+
+### D-Q7 - small-pipeline mode ↔ `mvp_scope` coexistence
+
+**Decision:** **mutually exclusive.** When `goal_contract.mvp_scope` is present, the orchestrator MUST NOT enter `small-plan` / `small-sprint` / `small-verify`. Conversely, when small-pipeline is active, `mvp_scope` is treated as if absent.
+
+- Router guard at the small-pipeline entry point (`hooks/mpl-phase-controller.mjs` around line 556, before `case 'small-plan'`): if `mvp_scope` is declared, refuse small-pipeline entry and surface "MVP cut path must be used; small-pipeline not available with mvp_scope."
+- Pipeline selection precedence: explicit `mvp_scope` declaration → full MPL pipeline with release path. No declaration → existing behavior (small or full chosen by current heuristics).
+
+**Rejected alternatives:**
+- *small-pipeline as degenerate single-cut MVP* — conceptually conflates two different operating modes (whole-task-is-small vs subset-of-large-task-shippable-first); doubles state machine complexity for marginal gain.
+- *User interview choice at runtime* — adds a new HITL decision surface; conflicts with the principle that planning-stage HITL is already where mode is determined.
+
+**Rationale:** the two modes answer different questions. Small-pipeline = "the whole task is small, run a lightweight pipeline." MVP cut = "the task is large, ship a subset first." Conflating them would force every downstream hook to handle both shapes. Mutual exclusion at the router is the cheapest correct policy.
+
 ---
 
 ## 11. Out-of-Scope Follow-ups
@@ -331,3 +373,7 @@ These belong to Stage B or later:
 | Users skip declaring `mvp_scope`, defeating the feature | Interview prompts explicitly. If user says everything is MVP, store all AC/AX ids. If user declines, omit `mvp_scope` and keep current behavior. |
 | Hook drift between release and pipeline finalization | Keep semantic flows separate. Share only lower-level helpers such as `run_gate_commands(scope)` and `write_evidence_summary(scope)`. |
 | Release gate evidence pollutes final gate evidence | Store release gate results under `.mpl/mpl/releases/{cut_id}/`; do not write to `state.gate_results`. |
+| RECOMPOSE-MODE mutates a released cut's phase membership, invalidating shipped release manifest (D-Q6) | Extend `mpl-phase-contract-graph.mjs` to block decomposition writes that mutate `mvp.phases` / `release_cuts[id].phases` when `state.release.completed_cut_ids` contains the cut id. Update `agents/mpl-decomposer.md` rule 9 to forbid the operation. |
+| Small-pipeline mode silently bypasses MVP cut when `mvp_scope` is declared (D-Q7) | Router guard in `mpl-phase-controller.mjs` at small-pipeline entry rejects entry when `mvp_scope` is present; surfaces explicit "use MVP cut path" message rather than silent fall-through. |
+| Missing `export-manifest.json` slips through SNT-S1 (warn-only today) and lands at final `phase3-gate`, far from root cause (D-Q5) | New `mpl-require-export-manifest.mjs` blocks phase completion at the source. SNT-S1 retains content validation separately for clean diagnostics. |
+| `state.release.current_cut_id` becomes stale (set, but never cleared after a fault path) | Defined lifecycle (§4.5): cleared at every `release-finalize` exit; never re-entered for the same cut id. Add lifecycle assertion to `release-finalize` handler so a stale cut id is detected on entry. |
