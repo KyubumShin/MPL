@@ -279,6 +279,84 @@ Announce: `[MPL] Stage 1.3 complete. user_cases=${result.user_cases.length} defe
 | `scenarios[*]` | Decomposer Step 3-H, Test Agent | E2E scenario seeds |
 | `ambiguity_hints[]` | Stage 2 Ambiguity Resolution | Targeted questions |
 
+### Stage 1.3.5: MVP Scope Selection (Stage A, optional)
+
+Before serializing the Goal Contract, offer the user a guided checklist to
+declare which `acceptance_criteria` / `variation_axes` form the MVP cohort —
+the user-shippable subset that the Stage A release path delivers first via
+`release-gate` → `release-finalize`. When the user declines, omit
+`mvp_scope` entirely and the pipeline runs as today (no Stage A release
+path).
+
+See `docs/roadmap/stage-a-mvp-cuts-rfc.md` §10 D-Q1: guided checklist is the
+chosen wording (rejected: id-only — cognitively hostile; rejected:
+prose-mapped — reintroduces inference). MVP scope is **user-declared**, not
+decomposer-inferred (RFC §3.4 / §10 D-Q4 lineage).
+
+Protocol:
+
+```
+ac_ids = [ac.id for ac in resolved_spec.acceptance_criteria]
+ax_ids = [ax.id for ax in resolved_spec.variation_axes]
+
+opt_in = AskUserQuestion({
+  question: "Declare an MVP subset for Stage A release path?",
+  options: [
+    { label: "Yes — select MVP subset",
+      description: "Pick which AC/AX ids form the MVP cohort. The pipeline ships the MVP via release-gate → release-finalize before extension work." },
+    { label: "No — full pipeline only",
+      description: "Skip Stage A release path. Pipeline runs as today; no mid-pipeline release artifact." },
+  ],
+})
+
+if opt_in == "No":
+  mvp_scope = null
+else:
+  # Guided checklist for AC ids. When total count exceeds 10, group display
+  # by core_scenarios (from user-contract.md) so the list stays navigable.
+  # The selection unit remains the individual AC id regardless of grouping.
+  selected_ac = AskUserQuestion({
+    question: "Which acceptance_criteria are in MVP scope? (multi-select)",
+    options: build_ac_options(ac_ids, threshold=10, scenarios=resolved_spec.core_scenarios),
+    multiSelect: true,
+  })
+  selected_ax = AskUserQuestion({
+    question: "Which variation_axes are in MVP scope? (multi-select; may be empty)",
+    options: build_ax_options(ax_ids),
+    multiSelect: true,
+  })
+
+  # MVP must declare at least one AC or AX (validator rejects both-empty;
+  # see hooks/lib/mpl-goal-contract.mjs MVP_SCOPE_ARTIFACTS check).
+  if len(selected_ac) == 0 and len(selected_ax) == 0:
+    Announce: "[MPL] MVP scope cannot be fully empty — at least one AC or AX required. Retrying."
+    GOTO selected_ac question.
+
+  artifact = AskUserQuestion({
+    question: "What user-visible artifact should the MVP cut produce?",
+    options: [
+      { label: "draft_pr",         description: "Open a draft GitHub PR at the MVP snapshot ref." },
+      { label: "branch",           description: "Push a snapshot branch (mpl/release/mvp) frozen at the MVP commit." },
+      { label: "tag",              description: "Push an immutable tag (mpl-release-mvp) at the MVP commit." },
+      { label: "release_manifest", description: "Manifest only — no git/GitHub artifact. Cheapest, fully offline." },
+    ],
+  })
+
+  mvp_scope = {
+    acceptance_criteria: selected_ac,
+    variation_axes: selected_ax,
+    artifact: artifact,  # one of MVP_SCOPE_ARTIFACTS (validated by mpl-goal-contract.mjs)
+  }
+
+Announce: `[MPL] MVP scope set: AC={len(selected_ac)} AX={len(selected_ax)} artifact={artifact}.` (or "MVP scope: opted out.")
+```
+
+The collected `mvp_scope` is written into the Goal Contract in the next
+stage. The hook `hooks/lib/mpl-goal-contract.mjs` validates id existence
+and artifact enum at write time; the decomposer's `mvp.phases` derivation
+(separate downstream phase) consumes this declaration without ever
+inferring it.
+
 ### Stage 1.4: Goal Contract Freeze
 
 Create `.mpl/goal-contract.yaml` as the pipeline constitution. This is the
@@ -348,6 +426,7 @@ goal_contract = {
   },
   deferred_uncertainties: unresolved-but-accepted ambiguity,
   overrides: [],
+  mvp_scope: mvp_scope,  // OPTIONAL — Stage A; null when user opted out in 1.3.5
 }
 
 Write(".mpl/goal-contract.yaml", serialize(goal_contract))
