@@ -417,13 +417,27 @@ function validateDependencyClosure(graph, mvp, cuts, issues) {
   }
 
   // Extension cuts: walk in declared order; each cut can reach into its own
-  // phases plus everything from earlier cohorts (mvp + earlier cuts). Stage A
-  // executes cuts sequentially per RFC §5.4.2, so prior-cohort phases are
-  // guaranteed to be available by the time a later cut's release-gate runs.
+  // phases plus everything from earlier *approved* cohorts (mvp + earlier
+  // approved cuts). Stage A executes approved cuts sequentially per RFC
+  // §5.4.2, so prior-approved-cohort phases are guaranteed to be available
+  // by the time a later cut's release-gate runs.
+  //
+  // `user_approved !== true` cuts are NOT release-path cohorts (RFC §10 D-Q2
+  // / B8): their phases run as non-cut tail under normal execution_tiers
+  // scheduling, AFTER all release-path cuts have completed. So:
+  //   - A declined cut's phases MUST NOT count as earlier cohort for later
+  //     approved cuts (would falsely satisfy a release-path dependency).
+  //   - A declined cut's own phase requires are NOT release-path concerns
+  //     and the dep-closure check skips them (final phase3-gate covers tail).
   if (Array.isArray(cuts)) {
     const earlierPhases = new Set(mvp?.phases || []);
     for (const cut of cuts) {
       if (!cut.id || !Array.isArray(cut.phases)) continue;
+      // Skip declined cuts entirely: not subject to release-path closure
+      // and must not be added to earlierPhases (would let a later approved
+      // cut falsely satisfy its requires through a tail phase).
+      if (cut.user_approved !== true) continue;
+
       const cutSet = new Set(cut.phases);
       for (const cutPhaseId of cut.phases) {
         const reqs = phaseRequires.get(cutPhaseId) || [];

@@ -52,10 +52,21 @@ function collectDecompositionTexts(toolInput) {
 
 function readCompletedCutIds(cwd) {
   // Returns the set of cut ids whose `release-finalize` has shipped.
-  // Source of truth is `state.release.completed_cut_ids` in `.mpl/state.json`,
-  // which Phase 1.6 will write. Until Phase 1.6 lands, the field is absent
-  // and we return an empty set — the immutability check below becomes a no-op
-  // for graphs whose state doesn't yet carry release lifecycle data.
+  //
+  // SHAPE COMMITMENT — Phase 1.6 must align with this consumer:
+  //   state.release.completed_cut_ids: string[]
+  //
+  // The path/shape is defined by RFC §4.5 (state.release subtree) and by
+  // PR #179's Rule 9 extension that references the same set. When Phase 1.6
+  // lands the writer, the schema MUST emit a flat `string[]` so the diff
+  // below remains a single hash-set lookup. Any richer audit trail (e.g.,
+  // per-cut finalized_at timestamps) must live in a sibling field so this
+  // consumer keeps working unchanged. If Phase 1.6 needs to evolve the
+  // shape, update this consumer first or both atomically.
+  //
+  // Until Phase 1.6 lands, the field is absent and we return an empty set
+  // — the immutability check below becomes a no-op for graphs whose state
+  // doesn't yet carry release lifecycle data.
   const path = join(cwd, '.mpl', 'state.json');
   if (!existsSync(path)) return new Set();
   try {
@@ -117,7 +128,14 @@ function validateReleasedCutImmutability(cwd, newGraph) {
   for (const cutId of completed) {
     const oldPhases = oldCutPhases.get(cutId);
     const newPhases = newCutPhases.get(cutId);
-    if (oldPhases === undefined) continue; // released cut absent from old graph (degenerate); cannot diff
+    // Intentionally silent on `oldPhases === undefined`: a released cut id
+    // listed in state but missing from the prior decomposition is a
+    // state↔graph drift signal that should be diagnosed by a separate
+    // consistency check, not this immutability hook. This hook's job is
+    // mutation-detection on a present-on-both-sides cut — it cannot diff
+    // what it cannot see. Surfacing it here would block legitimate graph
+    // repairs after a recompose where the cut entry was already lost.
+    if (oldPhases === undefined) continue;
     if (newPhases === undefined) {
       issues.push(`released_cut:${cutId}:removed_from_graph`);
       continue;

@@ -588,6 +588,100 @@ execution_tiers:`);
     const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(validGraph()));
     assert.equal(verdict.valid, true, verdict.issues.join(', '));
   });
+
+  it('rejects approved cut whose require resolves only into a DECLINED earlier cut (RFC B8)', () => {
+    // Codex high-severity: a declined cut (user_approved: false) is NOT a
+    // release-path cohort — its phases run as non-cut tail, AFTER all
+    // release-path cuts. So a later approved cut MUST NOT count a declined
+    // cut's phases as "already materialized."
+    //
+    // Fixture: cut-a declined with [phase-1]; cut-b approved with [phase-2].
+    // phase-2 requires phase-1. At cut-b's release-gate, phase-1 doesn't
+    // exist yet (cut-a is tail, runs later). Must be flagged.
+    const text = dcGraph('', `release_cuts:
+  - id: cut-a
+    phases: [phase-1]
+    user_approved: false
+    artifact: release_manifest
+  - id: cut-b
+    phases: [phase-2]
+    user_approved: true
+    artifact: release_manifest`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(
+      verdict.issues.includes('release_cuts:cut-b:phases:phase-2:requires:outside_cohort:phase-1'),
+      `expected declined-cut-as-tail to surface dep-closure issue; got: ${verdict.issues.join(', ')}`,
+    );
+  });
+
+  it('skips dep-closure for declined cuts themselves (tail semantics, final phase3-gate covers)', () => {
+    // A declined cut's OWN phase requires are not release-path concerns —
+    // they run as tail and are verified at final phase3-gate. The dep-
+    // closure check must not produce issues for declined cuts themselves.
+    //
+    // Fixture: mvp = [phase-1]; cut-a declined with [phase-2]. phase-2
+    // requires phase-1 — which is in mvp. But even if cut-a's phase-2 had
+    // required some non-cohort phase, dep-closure would skip the check
+    // because cut-a is declined.
+    const text = dcGraph(
+      `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`,
+      `release_cuts:
+  - id: cut-a
+    phases: [phase-2]
+    user_approved: false
+    artifact: release_manifest`,
+    );
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('parser: requires_from_phases extracts only entries with from_phase, ignoring baseline-only requires', () => {
+    // Pin the parser contract that validateDependencyClosure depends on:
+    // a `requires:` list mixing a from_phase entry and a baseline-only entry
+    // (no from_phase key) must yield ONLY the from_phase id.
+    //
+    // Fixture: phase-2 requires both phase-1 (from_phase) AND a baseline
+    // artifact (no from_phase). Only phase-1 is subject to closure check.
+    // Therefore mvp = [phase-2] alone still flags phase-1 as out-of-cohort
+    // (the from_phase entry), but does NOT flag the baseline entry.
+    const text = validGraph()
+      .replace(
+        `interface_contract:
+      requires:
+        - type: artifact
+          name: bootstrap
+          from_phase: phase-1
+      produces: []`,
+        `interface_contract:
+      requires:
+        - type: artifact
+          name: bootstrap
+          from_phase: phase-1
+        - type: artifact
+          name: baseline_only_dep
+      produces: []`,
+      )
+      .replace('execution_tiers:', `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-2]
+  execution_mode: sequential
+  artifact: draft_pr
+execution_tiers:`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    // Should fail ONLY because of phase-1 (the from_phase entry) being
+    // out of cohort. The baseline_only_dep entry must NOT appear.
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:phases:phase-2:requires:outside_cohort:phase-1'));
+    assert.ok(
+      !verdict.issues.some((i) => i.includes('baseline_only_dep')),
+      `baseline-only require must not be subject to closure; got: ${verdict.issues.join(', ')}`,
+    );
+  });
 });
 
 describe('mpl-require-phase-contract-graph hook integration', () => {
@@ -707,6 +801,27 @@ describe('mpl-require-phase-contract-graph hook integration', () => {
   artifact: draft_pr`);
     const r = runHook(mutated);
     assert.equal(r.continue, true);
+  });
+
+  it('D-Q6: blocks reorder-only mutations of a released cut (Rule 9 alignment)', () => {
+    // PR #179's Rule 9 forbids "add a phase id to, remove one from, OR
+    // reorder phases within a released cut's .phases list." `phasesEqual`
+    // is order-sensitive by design — pin that contract.
+    const priorMvp = `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-2]
+  execution_mode: sequential
+  artifact: draft_pr`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), graphWithMvp(priorMvp));
+    seedStateWithReleased(['mvp']);
+    const reordered = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-2, phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const r = runHook(reordered);
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /released_cut:mvp:phases:mutated/);
   });
 
   it('D-Q6: no-op for projects whose state.json lacks state.release (pre-Phase-1.6)', () => {
