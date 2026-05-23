@@ -3,8 +3,19 @@
  *
  * This validates the contract graph surface that is cheap to prove from the
  * prompt-controlled YAML subset: graph metadata, per-phase evidence/change
- * policy, and dangling `requires.from_phase` references.
+ * policy, dangling `requires.from_phase` references, and Stage A
+ * `mvp` / `release_cuts[]` schema integrity.
  */
+
+import { MVP_SCOPE_ARTIFACTS } from './mpl-goal-contract.mjs';
+
+// Re-export under a graph-layer name so callers depending on this validator can
+// import the allowed-artifact set without reaching across modules; the set
+// itself is single-sourced from mpl-goal-contract.mjs to prevent drift between
+// the goal-contract layer (PR #178) and the graph layer (this PR).
+export const ALLOWED_RELEASE_ARTIFACTS = MVP_SCOPE_ARTIFACTS;
+
+const ALLOWED_MVP_DERIVED_FROM = Object.freeze(['goal_contract.mvp_scope']);
 
 function normalizeScalar(value) {
   if (typeof value !== 'string') return null;
@@ -98,6 +109,116 @@ function extractPhaseRefs(text) {
   return out;
 }
 
+function inlineListItems(block, key) {
+  if (!block) return null;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const inline = block.match(new RegExp(`^\\s*${escaped}\\s*:\\s*\\[(.*)\\]\\s*$`, 'm'));
+  if (inline) {
+    return inline[1]
+      .split(',')
+      .map((s) => normalizeScalar(s))
+      .filter(Boolean);
+  }
+  // block-list form
+  const nestedMatch = block.match(new RegExp(`^(\\s*)${escaped}\\s*:\\s*\\n((?:\\1\\s+-\\s+.+\\n?)+)`, 'm'));
+  if (!nestedMatch) return null;
+  const items = [];
+  for (const line of nestedMatch[2].split('\n')) {
+    const m = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (m) items.push(normalizeScalar(m[1]));
+  }
+  return items.filter(Boolean);
+}
+
+function nestedScalar(block, key) {
+  if (!block) return null;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // `^\s*` (not `^\s+`) because topLevelBlock(text, ...) trims leading
+  // whitespace from its output, so the first nested field of a block ends up
+  // with no indent — we must still match it the same as the indented siblings.
+  const m = block.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, 'm'));
+  return m ? normalizeScalar(m[1]) : null;
+}
+
+function parseMvpObject(text) {
+  if (!/^mvp\s*:/m.test(text)) return null;
+  const block = topLevelBlock(text, 'mvp');
+  if (block === null) return null;
+  return {
+    phases: inlineListItems(block, 'phases') || [],
+    execution_mode: nestedScalar(block, 'execution_mode'),
+    artifact: nestedScalar(block, 'artifact'),
+    derived_from: nestedScalar(block, 'derived_from'),
+  };
+}
+
+function parseReleaseCuts(text) {
+  if (!/^release_cuts\s*:/m.test(text)) return null;
+
+  // Walk the raw text instead of going through `topLevelBlock` because that
+  // helper trims leading whitespace, which would erase the indent of the very
+  // first `-` cut item and break the indent-anchored item-boundary detection
+  // below.
+  const lines = String(text || '').split('\n').map((l) => l.replace(/\r$/, ''));
+  const startIdx = lines.findIndex((line) => /^release_cuts\s*:\s*(?:\[\s*\])?\s*$/.test(line));
+  if (startIdx === -1) return null;
+
+  // Inline empty list (`release_cuts: []`) parses to an empty array.
+  if (/^release_cuts\s*:\s*\[\s*\]\s*$/.test(lines[startIdx])) return [];
+
+  // Collect lines until the next top-level key (any non-indented line).
+  const bodyLines = [];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) break;
+    bodyLines.push(lines[i]);
+  }
+  if (bodyLines.length === 0) return [];
+
+  // Split into `-` item blocks; only `-` lines at the *same* indent count as
+  // new cut boundaries. A deeper `-` (for example a block-list `phases:` field
+  // whose entries are `- phase-2`) is part of the current item, not a new cut.
+  const itemBlocks = [];
+  let cur = null;
+
+  const flush = () => {
+    if (cur) itemBlocks.push(cur.join('\n'));
+    cur = null;
+  };
+
+  let baseIndent = null;
+  for (const line of bodyLines) {
+    const itemStart = line.match(/^(\s*)-\s+(.+?)\s*$/);
+    if (itemStart && (baseIndent === null || itemStart[1].length === baseIndent)) {
+      if (baseIndent === null) baseIndent = itemStart[1].length;
+      flush();
+      // Replace `- ` with equivalent whitespace so the first line of each item
+      // is a normal indented `key: value` line that nestedScalar/inlineListItems
+      // can match against an indent-anchored regex.
+      cur = [`${itemStart[1]}  ${itemStart[2]}`];
+      continue;
+    }
+    if (cur) cur.push(line);
+  }
+  flush();
+
+  const cuts = [];
+  for (const itemText of itemBlocks) {
+    const idMatch = itemText.match(/(?:^|\n)\s*id\s*:\s*["']?([^"'\s#]+)["']?/);
+    cuts.push({
+      id: idMatch ? idMatch[1] : null,
+      phases: inlineListItems(itemText, 'phases') || [],
+      user_approved: (() => {
+        const raw = nestedScalar(itemText, 'user_approved');
+        if (raw === 'true') return true;
+        if (raw === 'false') return false;
+        return null;
+      })(),
+      artifact: nestedScalar(itemText, 'artifact'),
+    });
+  }
+  return cuts;
+}
+
 export function parsePhaseContractGraphText(text) {
   const executionTiersBlock = topLevelBlock(text, 'execution_tiers');
   const phases = phaseBlocks(text).map((block) => ({
@@ -116,6 +237,8 @@ export function parsePhaseContractGraphText(text) {
     has_execution_tiers: hasTopLevelNonEmptyField(text, 'execution_tiers'),
     execution_tier_phase_refs: extractPhaseRefs(executionTiersBlock),
     phases,
+    mvp: parseMvpObject(text),
+    release_cuts: parseReleaseCuts(text),
   };
 }
 
@@ -156,8 +279,101 @@ export function validatePhaseContractGraph(graph) {
     }
   }
 
+  validateMvpAndReleaseCuts(graph, knownPhases, issues);
+
   return {
     valid: issues.length === 0,
     issues,
   };
+}
+
+function validateMvpAndReleaseCuts(graph, knownPhases, issues) {
+  const mvp = graph?.mvp;
+  const cuts = graph?.release_cuts;
+
+  // Both fields are optional at this layer: a project without Stage A `mvp_scope`
+  // emits no `mvp`/`release_cuts`, and the existing pipeline continues unchanged.
+  // The "iff goal_contract.mvp_scope present → mvp required" check lives at the
+  // goal-contract / hook integration layer, not here.
+
+  if (mvp) {
+    if (!Array.isArray(mvp.phases) || mvp.phases.length === 0) {
+      issues.push('mvp:phases:missing');
+    } else {
+      for (const phaseId of mvp.phases) {
+        if (!knownPhases.has(phaseId)) issues.push(`mvp:phases:unknown:${phaseId}`);
+      }
+      const seen = new Set();
+      for (const phaseId of mvp.phases) {
+        if (seen.has(phaseId)) issues.push(`mvp:phases:duplicate:${phaseId}`);
+        seen.add(phaseId);
+      }
+    }
+    if (mvp.execution_mode === null) {
+      issues.push('mvp:execution_mode:missing');
+    } else if (mvp.execution_mode !== 'sequential') {
+      // Stage A: contract_skeleton is reserved for Stage B and rejected here.
+      issues.push(`mvp:execution_mode:unsupported:${mvp.execution_mode}`);
+    }
+    if (mvp.artifact === null) {
+      issues.push('mvp:artifact:missing');
+    } else if (!ALLOWED_RELEASE_ARTIFACTS.includes(mvp.artifact)) {
+      issues.push(`mvp:artifact:unsupported:${mvp.artifact}`);
+    }
+    // `derived_from` is the provenance marker (RFC §4.2). Treat as load-bearing
+    // so any drift away from the documented source is caught here.
+    if (mvp.derived_from !== null && !ALLOWED_MVP_DERIVED_FROM.includes(mvp.derived_from)) {
+      issues.push(`mvp:derived_from:unsupported:${mvp.derived_from}`);
+    }
+  }
+
+  if (Array.isArray(cuts)) {
+    const cutIds = new Set();
+    const phaseToCut = new Map();
+    if (mvp?.phases) {
+      for (const p of mvp.phases) phaseToCut.set(p, 'mvp');
+    }
+    for (const cut of cuts) {
+      if (!cut.id) {
+        issues.push('release_cuts:id:missing');
+        continue;
+      }
+      if (cutIds.has(cut.id)) {
+        issues.push(`release_cuts:id:duplicate:${cut.id}`);
+        continue;
+      }
+      cutIds.add(cut.id);
+
+      if (cut.id === 'mvp') {
+        issues.push('release_cuts:id:reserved:mvp');
+      }
+      if (!Array.isArray(cut.phases) || cut.phases.length === 0) {
+        issues.push(`release_cuts:${cut.id}:phases:missing`);
+      } else {
+        for (const phaseId of cut.phases) {
+          if (!knownPhases.has(phaseId)) {
+            issues.push(`release_cuts:${cut.id}:phases:unknown:${phaseId}`);
+          }
+          const existingOwner = phaseToCut.get(phaseId);
+          if (existingOwner) {
+            issues.push(`release_cuts:${cut.id}:phases:overlap:${phaseId}:already_in:${existingOwner}`);
+          } else {
+            phaseToCut.set(phaseId, cut.id);
+          }
+        }
+      }
+      if (cut.user_approved === null) {
+        issues.push(`release_cuts:${cut.id}:user_approved:missing`);
+      }
+      if (cut.artifact === null) {
+        // Decomposer MUST emit artifact for every cut (default `release_manifest`
+        // applied at decomposer layer per RFC §4.2). Absence at hook layer means
+        // the decomposer skipped the field — that is a contract violation, not
+        // a missing default. Reject in parity with mvp.artifact:missing above.
+        issues.push(`release_cuts:${cut.id}:artifact:missing`);
+      } else if (!ALLOWED_RELEASE_ARTIFACTS.includes(cut.artifact)) {
+        issues.push(`release_cuts:${cut.id}:artifact:unsupported:${cut.artifact}`);
+      }
+    }
+  }
 }
