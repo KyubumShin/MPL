@@ -76,7 +76,8 @@ release_cuts:                         # OPTIONAL, 0..N
   - id: cut-ext-a
     phases: [phase-5, phase-6]
     proposed_by: mpl-decomposer
-    user_approved: false
+    user_approved: false              # planning-stage HITL flips to true; runtime never mutates
+    artifact: release_manifest        # draft_pr | branch | tag | release_manifest (default)
 ```
 
 Validation requirements:
@@ -85,14 +86,33 @@ Validation requirements:
 - `mvp.execution_mode` must be `sequential` in Stage A.
 - Every `mvp.phases[]` and `release_cuts[].phases[]` id exists in `phases[]`.
 - Every listed phase appears exactly once in `execution_tiers[]`.
+- No phase appears in both `mvp.phases[]` and any `release_cuts[].phases[]`, and no phase appears in multiple `release_cuts[]` entries.
 - The union of `goal_trace` over `mvp.phases[]` covers every AC/AX id in `goal_contract.mvp_scope`.
+- **Dependency-closure rule (B5).** For every phase in `mvp.phases[]`, every entry in `interface_contract.requires[]` MUST resolve to either (a) another phase in `mvp.phases[]`, or (b) baseline pre-existing code (no `from_phase`). For every phase in `release_cuts[N].phases[]`, every `requires[]` MUST resolve to (a) a phase in the same cut, (b) a phase in any **earlier** `release_cuts[]` entry, (c) `mvp.phases[]`, or (d) baseline. **A `requires` pointing forward (to a later cut) or upward (from MVP to extension) is invalid** — the validator rejects the decomposition and the user must either expand `mvp_scope` to cover the prerequisite, or shrink it so the dependency falls outside MVP.
 - `release_cuts[]` may be empty or absent. Decomposer-proposed cuts require planning-stage HITL confirmation before execution.
+
+`release_cuts[].artifact` semantics (B7):
+
+- Per-cut artifact selection, same value set as `mvp.artifact`. Default `release_manifest` for extension cuts (most extension cohorts only need a manifest, not a PR/branch/tag).
+- All artifact creation uses the snapshot-ref mechanism (§5.4.1) regardless of cut.
+
+`release_cuts[].user_approved` semantics (B8):
+
+- **Planning-stage HITL is the only writer.** During decompose, the HITL prompt flips `user_approved` to `true` for cuts the user accepts; declined cuts stay `false`.
+- **Runtime never mutates `user_approved`.** Re-running, recompose, or reviewer feedback do not change this field at runtime. To approve a previously declined cut, the user must trigger RECOMPOSE-MODE and re-confirm at planning.
+- **Runtime behavior of `user_approved: false`:** the cut's phases are not run through the release path. Instead, they are treated as **non-cut tail phases** (subject to normal `execution_tiers[]` scheduling, no `release-gate`/`release-finalize` invocation). They still execute, they just don't ship as a release.
 
 ### 4.3 `agents/mpl-phase-runner.md` - mandatory manifest output
 
 Add mandatory `export_manifest` for code-bearing phases.
 
 Stage A policy: **block missing manifests for code-bearing phases**. Do not ship Stage A as warn-only if the RFC calls the manifest mandatory.
+
+**Migration scope (B4):** the new `mpl-require-export-manifest.mjs` hook is **gated on `goal_contract.mvp_scope` presence**. Projects without `mvp_scope` (mid-pipeline at Stage A landing, or any project that does not opt in to the MVP cut path) retain the current warn-only SNT-S1 behavior. Rationale:
+
+- A project without `mvp_scope` never enters the release path; making manifest enforcement unconditional would block in-flight code-bearing phases that did not emit a manifest under the old protocol.
+- Tying the enforcement scope to opt-in is consistent with the rest of Stage A (release path, cohort-aware sprint completion, all gated on `mvp_scope`).
+- Once a project declares `mvp_scope`, all subsequent code-bearing phases (MVP cohort, extension cuts, non-cut tail) require the manifest — the gate is project-wide, not cohort-wide, to avoid two different completion contracts inside one pipeline.
 
 Implementation split:
 
@@ -184,8 +204,21 @@ Do not write scoped release gate results into `state.gate_results.hard{1,2,3}_*`
 Gate scope for Stage A:
 
 - **Hard 1 (build/lint/type): full project scope.** A single broken file breaks the whole build, so partial Hard 1 is meaningless.
-- **Hard 2 (tests): affected scope.** Use `impact.affected_tests[]` from cut phases, then augment with import-graph detection from files in `impact.create` and `impact.modify`. If source changes exist but no affected tests can be resolved, fall back to the project's normal test command for safety. **Fallback must surface to the user**: write `hard2_fallback: full_project` with the reason (e.g., `unresolved_affected_tests`, `import_graph_empty`) into `.mpl/mpl/releases/{cut_id}/gate-results.json`, and include the fallback reason in the user-visible release manifest. Silent fallback is forbidden — it would mask coverage regressions and pollute timing metrics.
+- **Hard 2 (tests): affected scope.** Stage A uses `impact.affected_tests[]` declared by cut phases as the primary source. Import-graph derivation is deferred to Stage B (mechanical recipe is language-dependent and out of scope here). If `impact.affected_tests[]` is empty for a code-bearing cut, fall back to the project's normal test command read from `.mpl/config.json` (key `test_command`). If both `impact.affected_tests[]` and `test_command` are absent, **release-gate fails fast** rather than silently passing. **Fallback must surface to the user**: write `hard2_fallback: full_project` with the reason (e.g., `empty_affected_tests`, `no_test_command`) into `.mpl/mpl/releases/{cut_id}/gate-results.json`, and include the fallback reason in the user-visible release manifest. **A failed full-project fallback blocks release identically to a scoped Hard 2 failure**; the wider scope does not soften the verdict.
 - **Hard 3 (contracts): cut scope.** Verify contract files and produced symbols declared by phases in the active cut.
+
+### 5.3.1 `release-gate` failure path
+
+When any of Hard 1/2/3 fails inside `release-gate`, the orchestrator does NOT transition to `release-finalize`. Failure routing mirrors the existing `phase3-gate → phase4-fix` pattern, scoped to the active cohort:
+
+1. **Record failure** under `.mpl/mpl/releases/{cut_id}/gate-results.json` with `status: fail`, the failing gate(s), and evidence excerpts.
+2. **Increment** `state.release.fix_loop_count` (a new field, parallel to the existing top-level `fix_loop_count` which remains reserved for `phase3-gate`). Do NOT touch the top-level `fix_loop_count`.
+3. **Route back to `phase2-sprint` for the same cohort** — `state.release.current_cut_id` is **not** cleared. Sprint re-enters the cohort's phases for fixups, then returns to `release-gate(cut_id)` on completion.
+4. **Circuit break** when `state.release.fix_loop_count` reaches `max_fix_loops` (config-driven, default 3). On circuit break:
+   - `state.release.current_cut_id` stays pinned (so the user can see which cohort blocked).
+   - Pipeline halts with a user-surfaced error: which cut, which gate, why.
+   - User intervention required: fix manually + reset `state.release.fix_loop_count`, OR abort the cut (clears `current_cut_id` and routes the cohort's phases to non-cut tail status — they still run but without the release path).
+5. **Never route a failed `release-gate` to `phase3-gate`.** The whole-pipeline gate is a final-only checkpoint; using it as a recovery sink would re-pollute `state.gate_results`.
 
 ### 5.4 `release-finalize(cut_id)`
 
@@ -193,12 +226,46 @@ Responsibilities:
 
 - Read `.mpl/mpl/releases/{cut_id}/gate-results.json`.
 - Verify phase evidence, manifest evidence, Test Agent evidence where required, and cut-scoped gate results.
-- Write `.mpl/mpl/releases/{cut_id}/release-manifest.json` and `evidence-summary.md`.
-- Attempt optional user-visible artifact creation (`draft_pr`, `branch`, `tag`) only when requested by `artifact`.
+- Write `.mpl/mpl/releases/{cut_id}/release-manifest.json` and `evidence-summary.md`. Release manifest **MUST include the immutable snapshot identifiers** (see §5.4.1 below): `commit_sha`, `tree_sha`, and `snapshot_ref` (the git ref pinning this cut's state).
+- Attempt optional user-visible artifact creation (`draft_pr`, `branch`, `tag`) only when requested by `artifact`. Artifact creation always operates against the **snapshot ref**, not the current working branch (§5.4.1).
 - On artifact creation failure, write `artifact_creation_failed` with reason into the release manifest, surface it to the user, and continue to the next cohort.
+- **Append `cut_id` to `state.release.completed_cut_ids`** when gate PASS + release-manifest write + snapshot ref creation all succeed. Artifact creation is a best-effort post-step and does NOT block append — a cut with `artifact_creation_failed` is still `completed` for the purpose of D-Q6 immutability, because the snapshot ref already pins the cut's state and the manifest is shipped. (Rationale: artifact creation depends on external tools — gh CLI, remote permissions — that are out of MPL's control. Tying immutability to artifact delivery would create stuck states where the user cannot recover.)
+- Reset `state.release.fix_loop_count` to 0.
+- Advance `state.release.current_cut_id` to the next eligible cut per §5.4.2, or to `null` if no further cuts remain.
 - Never set `state.finalize_done=true`.
 - Never transition `current_phase` to `completed`.
 - Never run whole-goal closure.
+
+### 5.4.1 Snapshot ref and artifact immutability
+
+A delivered release artifact (PR / branch / tag) is an external claim. Once shipped, its commit/tree contents must not silently change when subsequent cohorts make new commits.
+
+**Snapshot ref creation:** at the start of `release-finalize(cut_id)`, before any artifact-creation attempt:
+
+1. Read `HEAD` of the working branch — this is the cut's terminal commit.
+2. Create a **snapshot ref**: `refs/mpl/releases/{cut_id}` (a non-branch ref under `refs/mpl/`, invisible to normal branch listings but persistent and pushable).
+3. Capture `commit_sha = rev-parse HEAD` and `tree_sha = rev-parse HEAD^{tree}`.
+4. Record `snapshot_ref`, `commit_sha`, `tree_sha` in `release-manifest.json`.
+
+**Artifact behavior:**
+
+- `release_manifest` artifact: snapshot ref + manifest only, no external push/PR. Always succeeds.
+- `tag`: push `refs/tags/mpl-release-{cut_id}` pointing at `snapshot_ref`. Immutable by git semantics.
+- `branch`: push `mpl/release/{cut_id}` (a normal branch ref) pointing at `snapshot_ref`. Subsequent cohort commits go to the working branch, not this one — the release branch stays frozen at the snapshot.
+- `draft_pr`: open a draft PR with **head = the release branch** (the frozen one), **base = `main`** (or repo default). The PR body links the snapshot ref and warns "do not push to this branch; further work happens on the working branch." Subsequent cohort commits do NOT update this PR.
+
+**Working branch behavior:** the user's working branch (e.g., `docs/stage-a-mvp-rfc`) continues accumulating cohort commits as before. Release artifacts diverge from the working branch at the snapshot point and are never updated.
+
+### 5.4.2 Extension cut activation and ordering
+
+After `release-finalize(cut_id)` exits, the orchestrator selects the next `current_cut_id`:
+
+1. **Source of truth: `release_cuts[]` array order.** The decomposer-emitted order, confirmed by planning-stage HITL (D-Q2), is the SSOT for cut sequencing.
+2. **Filter: `user_approved == true`** AND **`id ∉ state.release.completed_cut_ids`**. Cuts with `user_approved: false` are skipped — their phases run as non-cut tail phases under normal `execution_tiers[]` scheduling, with no `release-gate`/`release-finalize` invocation.
+3. **Pick the first eligible cut**, set `current_cut_id = cut.id`, route to `phase2-sprint`.
+4. **No eligible cut remains** → `current_cut_id = null`. The next `phase2-sprint` entry runs non-cut tail phases (any phase not in any cut). On their completion, sprint transitions to whole-pipeline `phase3-gate`.
+
+**Interleaving is disallowed in Stage A.** Even when two extension cuts have disjoint phase sets, they execute sequentially through the release path. Parallel cuts are Stage B (frontier scheduling) territory.
 
 ### 5.5 `phase3-gate` and `phase5-finalize` remain final-only
 
@@ -219,19 +286,22 @@ Do not call `release-finalize(cut_id)` from `phase5-finalize`. Whole-goal closur
 
 ## 6. Hook / State Impact
 
+Line numbers below are accurate as of HEAD at the time of writing but may drift before Stage A lands; prefer the symbol references when navigating.
+
 | Area | Change |
 |---|---|
-| `hooks/lib/mpl-state.mjs` | Add `release-gate` and `release-finalize` to `VALID_PHASES` (currently lines 66-72, 13-entry set). Add `release` subtree default to state init (`current_cut_id: null`, `completed_cut_ids: []`, `pending_artifact: null`). |
-| `docs/schemas/state.md` | Document new lifecycle markers and `state.release` subtree. No migration version bump required because fields are additive. Update VALID_PHASES enum doc, lifecycle diagram, HUD/status labels, and phase-controller tests. |
-| `mpl-phase-controller.mjs` | Add `case 'release-gate'` and `case 'release-finalize'` handlers (pattern after `small-sprint` / `small-verify` at lines 565-632). Modify `phase2-sprint` completion check at line 415: read `state.release.current_cut_id`; if non-null, filter PLAN.md TODOs to active cohort's phases (`mvp.phases` or `release_cuts[X].phases`); on cohort complete, route to `release-gate(cut_id)`, not `phase3-gate`. Whole-pipeline `phase3-gate` only entered when all cohorts complete and `state.release.current_cut_id` is null. |
-| **NEW: small-pipeline guard** | At the small-pipeline entry (before `case 'small-plan'` around `mpl-phase-controller.mjs:556`), block entry when `goal_contract.mvp_scope` is present (D-Q7). Surface a hard block message; do not silently downgrade. |
-| `mpl-phase-contract-graph.mjs` | Extend (lib at `hooks/lib/mpl-phase-contract-graph.mjs:122-150` checks phase ids / execution_tiers / dangling refs). Add: validate `mvp.phases[]` and `release_cuts[].phases[]` are subsets of `phases[]`, each phase appears exactly once across all cuts (no cross-cut overlap), MVP `goal_trace` union covers every `mvp_scope` AC/AX id, and release-immutability (D-Q6) — blocks any decomposition write that mutates a released cut's phase set when `state.release.completed_cut_ids` contains the cut id. |
+| `hooks/lib/mpl-state.mjs` | Add `release-gate` and `release-finalize` to the `VALID_PHASES` Set. Add `release` subtree default to state init (`current_cut_id: null`, `completed_cut_ids: []`, `pending_artifact: null`, `fix_loop_count: 0`). |
+| `docs/schemas/state.md` | Document new lifecycle markers and `state.release` subtree. No migration version bump required because fields are additive. Update the VALID_PHASES enum doc, lifecycle diagram, and phase-controller tests. (HUD/status renderer updates are tracked in §11 Out-of-Scope.) |
+| `hooks/mpl-phase-controller.mjs` | (1) Add `case 'release-gate'` and `case 'release-finalize'` switch branches in the same style as the existing `small-sprint` / `small-verify` cases. (2) Modify the `phase2-sprint` completion check (the branch that today transitions to `phase3-gate` when remaining-TODO count drops to 0): read `state.release.current_cut_id`; if non-null, filter PLAN.md TODOs to the active cohort's phase set (`mvp.phases` or the matching `release_cuts[].phases`); on cohort complete, route to `release-gate`, not `phase3-gate`. Whole-pipeline `phase3-gate` is entered only when all cohorts are complete and `state.release.current_cut_id` is `null`. (3) **Owns `state.release.current_cut_id` lifecycle:** sets it to `"mvp"` on the `mpl-decompose → phase2-sprint` transition when `mvp_scope` is declared; advances or clears it on `release-finalize` exit per §5.4.2. |
+| **NEW: small-pipeline guard** in `mpl-phase-controller.mjs` (D-Q7) | At the small-pipeline entry (before the `case 'small-plan'` branch), block entry when `goal_contract.mvp_scope` is present. Surface a hard block message — "MVP cut path must be used; small-pipeline not available with `mvp_scope`." Do not silently downgrade. |
+| `hooks/lib/mpl-phase-contract-graph.mjs` | Extend the existing decomposition validator (currently covers phase ids, execution_tiers membership, dangling refs). Add validators for: (a) `mvp.phases[]` and `release_cuts[].phases[]` are subsets of `phases[]`, (b) no cross-cut phase overlap, (c) MVP `goal_trace` union covers every `mvp_scope` AC/AX id, (d) the **dependency-closure rule** in §4.2 (no forward or upward `requires`), (e) the **release-immutability rule** (D-Q6) — blocks any decomposition write that mutates `mvp.phases` or `release_cuts[id].phases` when the cut id is in `state.release.completed_cut_ids`, and rejects duplicate appends to `completed_cut_ids`. |
+| `hooks/mpl-require-phase-contract-graph.mjs` | Update the require-hook wrapper to invoke the new lib validators added above. Validators live in `hooks/lib/mpl-phase-contract-graph.mjs`; the require hook is the entry point that calls them from the PostToolUse event. |
 | `hooks/lib/mpl-goal-contract.mjs` | Parse and validate optional `mvp_scope`. Reject unknown AC/AX ids, unsupported `artifact` values, and `acceptance_criteria`/`variation_axes` not appearing in the contract. |
-| **NEW: `hooks/mpl-require-export-manifest.mjs`** (D-Q5) | New hook. Blocks phase-completion state writes (`state-summary.md`, `current_phase` transition) when a code-bearing phase lacks `.mpl/mpl/phases/{phase_id}/export-manifest.json`. Code-bearing detection: any phase with non-empty `impact.create ∪ impact.modify`. |
-| `mpl-sentinel-s1.mjs` | **No behavior change.** Continues content-only validation (declared symbols exist in actual files). Presence enforcement moved to `mpl-require-export-manifest.mjs`. |
-| `agents/mpl-phase-runner.md` | Output schema: add `export_manifest` evidence token to `evidence_latch[]` for code-bearing phases. Update the schema sample around lines 157-165. |
-| `agents/mpl-decomposer.md` | Rule 9 extension (around line 39): in addition to keeping completed phase blocks intact, recompose MUST treat `mvp.phases` and `release_cuts[id].phases` as immutable when the cut id is in `state.release.completed_cut_ids`. New phases go to a new cut or to non-cut tail. |
-| `mpl-require-whole-goal-closure.mjs` | **No semantic change.** Verified to inspect only `finalize_done=true` writes plus goal_trace coverage. Release path never triggers it (release-finalize never sets `finalize_done`). |
+| **NEW: `hooks/mpl-require-export-manifest.mjs`** (D-Q5) | New hook. Blocks phase-completion state writes (`state-summary.md`, `current_phase` transition) when a code-bearing phase lacks `.mpl/mpl/phases/{phase_id}/export-manifest.json`. Code-bearing detection: any phase with non-empty `impact.create ∪ impact.modify`. **Activation is gated on `goal_contract.mvp_scope` presence (B4)** — projects without `mvp_scope` continue under SNT-S1 warn-only. |
+| `hooks/mpl-sentinel-s1.mjs` | **No behavior change.** Continues content-only validation (declared symbols exist in actual files). Presence enforcement moved to `mpl-require-export-manifest.mjs`. |
+| `agents/mpl-phase-runner.md` | Output schema: add `export_manifest` evidence token to `evidence_latch[]` for code-bearing phases. Update the `Output_Schema` example accordingly. |
+| `agents/mpl-decomposer.md` | Extend Rule 9 ("completed phase block immutability"): in addition to keeping completed phase blocks intact, recompose MUST treat `mvp.phases` and `release_cuts[id].phases` as immutable when the cut id is in `state.release.completed_cut_ids`. New phases go to a new cut or to non-cut tail. |
+| `hooks/mpl-require-whole-goal-closure.mjs` | **No semantic change.** Verified to inspect only `finalize_done=true` writes plus goal_trace coverage. Release path never triggers it (release-finalize never sets `finalize_done`). |
 
 ---
 
@@ -361,6 +431,10 @@ These belong to Stage B or later:
 - Dependent-subtree blocking for extension waves.
 - Frontier-aware worker pool sizing.
 - `module_groups[]`.
+- **Hard 1 caching/incrementalization across release-gates.** With many extension cuts, Stage A repeats the full-project Hard 1 build per `release-gate(cut_id)`. Acknowledged cost; deferred to Stage B if release-path telemetry shows Hard 1 dominates wall time.
+- **Import-graph derivation for Hard 2 affected scope.** Stage A only consumes the decomposer-declared `impact.affected_tests[]` (with fallback to `.mpl/config.json` `test_command`). Mechanical import-graph derivation is language-dependent (JS/TS, Python, Rust each have different toolchains) and is deferred until the simpler scoping proves insufficient.
+- **`/mpl:mpl-status` rendering for new release states.** `skills/mpl-status/SKILL.md` has phase-specific rendering branches; adding `release-gate` / `release-finalize` renderers (active cut id, scoped gate progress) is a follow-up after Stage A core lands.
+- **Parallel extension cut interleaving.** Even when two cuts have disjoint phase sets, Stage A serializes them through the release path. Parallel cuts join the Stage B frontier scheduling agenda.
 
 ---
 

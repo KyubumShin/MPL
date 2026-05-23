@@ -287,13 +287,13 @@ Resulting flow:
 Phase 0
 -> Decompose
 -> phase2-sprint              # cohort = mvp (cohort-aware completion)
--> release-gate(mvp)          # scoped Hard 1/2/3
--> release-finalize(mvp)      # MVP cut artifact handed off
+-> release-gate               # scope = mvp; scoped Hard 1/2/3
+-> release-finalize           # scope = mvp; MVP cut artifact handed off
 -> phase2-sprint              # cohort = extension cut A
--> release-gate(cut-a)
--> release-finalize(cut-a)
--> ... (further approved cuts)
--> phase2-sprint              # cohort = remaining phases (if any)
+-> release-gate               # scope = cut-a
+-> release-finalize           # scope = cut-a
+-> ... (further approved cuts in order, gated by release_cuts[].user_approved)
+-> phase2-sprint              # cohort = remaining non-cut tail phases (if any)
 -> phase3-gate                # whole-pipeline gate, regression safety net
 -> phase5-finalize            # whole-goal closure, sets finalize_done=true
 -> completed
@@ -354,11 +354,13 @@ Sequenced to avoid touching too many subsystems at once.
 
 ## 7. Open Questions
 
-- What is the minimum acceptable MVP artifact: draft PR, branch/tag, release manifest, or all of them?
-- Exact interview question wording for `mvp_scope`. Does the user respond in AC/AX ids, in prose later mapped to ids, or in a guided checklist?
-- Should `release_cuts[]` be auto-emitted by decomposer or only on user request? If auto, how much HITL approval is required?
+This section is a historical record of design uncertainties surfaced during analysis. **Stage A decisions live in the RFC (`stage-a-mvp-cuts-rfc.md` §10 and inline §4–§6); when these diverge from the bullets below, the RFC is the SSOT.**
+
+- ~~What is the minimum acceptable MVP artifact: draft PR, branch/tag, release manifest, or all of them?~~ → **Decided (RFC §10 D-Q4):** release-manifest always; PR/branch/tag only when `mvp.artifact` (or `release_cuts[].artifact`) explicitly requests it.
+- ~~Exact interview question wording for `mvp_scope`. Does the user respond in AC/AX ids, in prose later mapped to ids, or in a guided checklist?~~ → **Decided (RFC §10 D-Q1):** guided checklist of all AC/AX ids; grouped by `core_scenarios` when count exceeds 10.
+- ~~Should `release_cuts[]` be auto-emitted by decomposer or only on user request? If auto, how much HITL approval is required?~~ → **Decided (RFC §10 D-Q2):** auto-emit by decomposer; planning-stage HITL flips `user_approved` per cut. No runtime HITL.
 - ~~Which gates are valid for `release-finalize(cut_id)` when extension phases are still pending, and which checks must remain global sanity checks?~~ → **Decided (RFC §5.3 / D-Q3):** Hard 1 full project, Hard 2 affected scope with documented fallback, Hard 3 active cut's interface_contract. Whole-pipeline `phase3-gate` remains as the final regression net.
-- What manifest schema is required for Phase Runner output without making small phases too heavy?
+- ~~What manifest schema is required for Phase Runner output without making small phases too heavy?~~ → **Decided (RFC §4.3 + §10 D-Q5):** `export_manifest` token in `evidence_latch[]`, enforced by new dedicated hook `mpl-require-export-manifest.mjs` (gated on `mvp_scope` presence, B4). SNT-S1 stays content-only.
 - ~~For `contract_skeleton` mode: what mechanical check verifies the skeleton phase actually froze the surface?~~ → **Decided (§5):** `export-manifest.json` with `frozen: true` baseline, SNT-S1 subset-check on subsequent MVP phases.
 - ~~For 1-pass reconcile failure: does MVP cut wait for queued fixup phases or fail-and-surface?~~ → **Decided (§5):** fail-and-surface; user gets a one-shot approve/abort decision, fixups run sequentially off the skeleton path.
 - ~~How does `mvp.execution_mode: contract_skeleton` interact with the existing small-pipeline mode in `hooks/mpl-phase-controller.mjs`?~~ → **Decided (RFC §10 D-Q7):** mutually exclusive. When `mvp_scope` is present, small-pipeline entry is blocked at the router. Small-pipeline remains only for projects without `mvp_scope`.
