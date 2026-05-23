@@ -312,6 +312,14 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       inference). Per RFC §3.4 / §10 D-Q4, the decomposer MUST NOT infer
       MVP scope from anything other than `goal_contract.mvp_scope`.
 
+      Schema reference: each phase already carries
+      `goal_trace.acceptance_criteria[]` and `goal_trace.variation_axes[]`
+      under the per-phase Output_Schema (this file, the `goal_trace:` block
+      with `acceptance_criteria: [string]` and `variation_axes: [string]`).
+      Both fields are REQUIRED to be set by every phase (per the existing
+      goal_trace contract, enforced by `mpl-require-goal-trace.mjs`), so
+      both sides of the intersection below are well-defined.
+
       ```
       mvp_ac_ids = goal_contract.mvp_scope.acceptance_criteria  # set of AC ids
       mvp_ax_ids = goal_contract.mvp_scope.variation_axes        # set of AX ids
@@ -323,8 +331,12 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         if phase_ids ∩ mvp_target_ids != ∅:
           mvp_phases.append(phase.id)
 
-      # Coverage check: every mvp_scope id must be covered by at least one phase
-      # in mvp_phases. If not, the user's MVP cannot be realized as decomposed.
+      # ─── Guard 1: COVERAGE ─────────────────────────────────────────────
+      # Every mvp_scope id must be covered by at least one phase in
+      # mvp_phases. If not, the user's MVP cannot be realized as decomposed.
+      # (When mvp_phases ends up empty, the validator's `mvp:phases:missing`
+      # in PR #180 will ALSO reject; that is the safety net. This Step 12
+      # NOT_READY is the user-facing diagnostic with the missing-id list.)
       covered_ac = ⋃ phase.goal_trace.acceptance_criteria for phase in mvp_phases
       covered_ax = ⋃ phase.goal_trace.variation_axes        for phase in mvp_phases
       missing_ac = mvp_ac_ids - covered_ac
@@ -339,9 +351,31 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         })
         risk_assessment.go_no_go = "NOT_READY"  # block until coverage resolves
 
-      # Cross-cut overlap check (Stage A: decomposer emits ZERO release_cuts,
-      # so no overlap possible from this step. Stage B may auto-propose cuts;
-      # at that point the contract-graph validator (PR #180) catches overlap.)
+      # ─── Guard 2: DEPENDENCY CLOSURE (transient, until Phase 1.4b) ─────
+      # Phase 1.6's orchestrator will route the MVP cohort BEFORE extension
+      # phases via release-gate(mvp) → release-finalize(mvp). If any MVP
+      # phase requires a non-MVP phase, that requirement is unsatisfied at
+      # MVP gate time and Hard 1/3 will fail. The durable hook-level check
+      # lives in Phase 1.4b (B5 dependency-closure rule). Until 1.4b lands,
+      # surface the gap here so MVP cannot ship with unsatisfied requires.
+      mvp_id_set = {phase.id for phase in mvp_phases}
+      mvp_requires = ⋃ phase.interface_contract.requires.from_phase
+                       for phase in mvp_phases
+                       (skip entries without from_phase — they are baseline refs)
+      missing_deps = mvp_requires - mvp_id_set
+      if missing_deps:
+        risk_assessment.risks.append({
+          id: "STAGE_A_MVP_DEPENDENCY_GAP",
+          severity: "HIGH",
+          title: "MVP cohort requires phases outside MVP",
+          description: `MVP phases require non-MVP phase ids: ${missing_deps.join(',')}. Stage A runs the MVP cohort before extension phases, so these requirements would be unsatisfied at release-gate(mvp). Either include the missing phases in mvp_scope (re-interview), restructure phases so MVP is self-contained, or wait for Phase 1.4b's hook-level dependency-closure enforcement.`,
+          mitigation: "Re-interview to expand mvp_scope; or restructure phase boundaries.",
+        })
+        risk_assessment.go_no_go = "NOT_READY"
+
+      # Cross-cut overlap check is unnecessary here: decomposer emits ZERO
+      # release_cuts in Stage A, so no overlap is possible. PR #180's
+      # contract-graph validator catches overlap in Stage B when cuts exist.
 
       Emit on output:
         mvp = {
@@ -576,15 +610,15 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       execution_mode: "sequential"    # Stage A: always sequential
       artifact: "draft_pr | branch | tag | release_manifest"  # from mvp_scope.artifact
 
+    # Stage A: decomposer emits release_cuts as an explicit empty list when
+    # mvp is present. Auto-proposal of extension cuts is RFC §10 D-Q2 Stage
+    # B work. When Stage B lands, each entry's shape will be:
+    #   - id: string                  # unique within release_cuts; never "mvp"
+    #     phases: [string]            # disjoint from mvp.phases and other cuts
+    #     proposed_by: "mpl-decomposer"
+    #     user_approved: boolean      # planning-stage HITL writes; runtime never mutates
+    #     artifact: "draft_pr | branch | tag | release_manifest"
     release_cuts: []
-      # Stage A: decomposer emits EMPTY release_cuts[] when mvp is present.
-      # Auto-proposal of extension cuts is RFC §10 D-Q2 Stage B work.
-      # When present, each entry has shape:
-      #   - id: string                  # unique within release_cuts; never "mvp"
-      #     phases: [string]            # disjoint from mvp.phases and other cuts
-      #     proposed_by: "mpl-decomposer"
-      #     user_approved: boolean      # planning-stage HITL writes; runtime never mutates
-      #     artifact: "draft_pr | branch | tag | release_manifest"
 
     decomposition_rationale: string
 
