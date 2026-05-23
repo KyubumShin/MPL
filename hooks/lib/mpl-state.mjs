@@ -68,6 +68,12 @@ const VALID_PHASES = new Set([
   'phase1a-research', 'phase1b-plan',
   'phase2-sprint', 'phase3-gate', 'phase4-fix', 'phase5-finalize',
   'small-plan', 'small-sprint', 'small-verify',
+  // Stage A release path (RFC §5.1): scoped Hard 1/2/3 + release-manifest
+  // delivery for a single cohort (mvp or an approved release_cut). Routed
+  // into from phase2-sprint per cohort-aware completion (Phase 1.6b).
+  // Neither state sets `finalize_done=true`; that remains exclusive to
+  // phase5-finalize (RFC §5.5).
+  'release-gate', 'release-finalize',
   'completed'
 ]);
 
@@ -169,6 +175,26 @@ const DEFAULT_STATE = {
     mode: 'full',           // 'full' (3-stage) | 'light' (stage 1 only) | 'standalone'
     error: null,            // failure error message
     degraded_stages: []     // stages with partial failures, e.g. ['stage2']
+  },
+  // Stage A release-path lifecycle (RFC §4.5).
+  // `current_cut_id` carries the active cohort while phase2-sprint /
+  // release-gate / release-finalize execute that cohort's phases. Cleared
+  // (advanced to next eligible cut, or null) at release-finalize exit per
+  // RFC §5.4.2 cut activation rules.
+  // `completed_cut_ids` is the SSOT consumed by D-Q6 immutability hook
+  // (mpl-require-phase-contract-graph.mjs SHAPE COMMITMENT block).
+  // `fix_loop_count` is release-path scoped — does NOT touch the top-level
+  // `fix_loop_count` reserved for whole-pipeline phase3-gate.
+  // `pending_artifact` carries the user-visible artifact descriptor (draft_pr
+  // | branch | tag) requested by mvp.artifact / release_cuts[].artifact
+  // between release-gate PASS and release-finalize artifact attempt.
+  // For projects without `goal_contract.mvp_scope`, this subtree stays at
+  // defaults and the release path is never entered (RFC §4.5 lifecycle).
+  release: {
+    current_cut_id: null,        // null | "mvp" | "<release_cut.id>"
+    completed_cut_ids: [],       // appended on successful release-finalize
+    fix_loop_count: 0,           // scoped retries inside release-gate, not phase3-gate
+    pending_artifact: null,      // null | { type: "draft_pr"|"branch"|"tag", target: string }
   },
   memory: {                  // F-25: 4-Tier Adaptive Memory statistics
     episodic_entries: 0,

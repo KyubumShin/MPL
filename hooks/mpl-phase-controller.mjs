@@ -36,6 +36,11 @@ const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
 
+// Stage A: goal-contract reader for the D-Q7 small-pipeline guard.
+const { readGoalContract } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
+);
+
 // G4 hang detection (#109)
 const { detectHang } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-hang-detector.mjs')).href
@@ -554,6 +559,26 @@ async function main() {
     // === Small Pipeline Phases (3-Phase Lightweight) ===
 
     case 'small-plan': {
+      // RFC §10 D-Q7: small-pipeline and `mvp_scope` are mutually exclusive.
+      // Small-pipeline answers "the whole task is small, run a lightweight
+      // pipeline." MVP cut answers "the task is large, ship a subset first."
+      // Conflating the two doubles the state-machine complexity for marginal
+      // gain. When mvp_scope is declared, the project MUST take the full MPL
+      // pipeline with the release path; small-pipeline entry is rejected
+      // here rather than silently downgrading the contract.
+      const gc = readGoalContract(cwd);
+      if (gc.exists && gc.contract?.mvp_scope) {
+        console.log(JSON.stringify({
+          continue: false,
+          decision: 'block',
+          reason: '[MPL] small-pipeline is not available when goal_contract.mvp_scope is declared. ' +
+            'Use the full MPL pipeline so the Stage A release path (release-gate → release-finalize) ' +
+            'can deliver the user-declared MVP cohort. ' +
+            'Either run the full pipeline (recommended) or remove mvp_scope from .mpl/goal-contract.yaml and re-enter small-plan.'
+        }));
+        break;
+      }
+
       // Small Plan: orchestrator handles, no auto-transition
       console.log(JSON.stringify({
         continue: true,
