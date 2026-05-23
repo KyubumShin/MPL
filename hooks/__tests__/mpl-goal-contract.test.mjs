@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 
 import {
   GOAL_CONTRACT_REL_PATH,
+  MVP_SCOPE_ARTIFACTS,
   parseGoalContractText,
   readGoalContract,
   validateGoalContractText,
@@ -137,5 +138,86 @@ describe('goal contract parsing', () => {
     assert.equal(verdict.exists, true);
     assert.equal(verdict.valid, true);
     assert.equal(verdict.contract.mission.project_pivot, 'Avoid false completion');
+  });
+});
+
+describe('goal contract mvp_scope (Stage A)', () => {
+  function mvpScopeBlock(body) {
+    return validGoalContract() + `mvp_scope:\n${body}\n`;
+  }
+
+  it('parses mvp_scope as null when the top-level key is absent', () => {
+    const c = parseGoalContractText(validGoalContract());
+    assert.equal(c.mvp_scope, null);
+  });
+
+  it('keeps the contract valid when mvp_scope is absent (backward compatibility)', () => {
+    const verdict = validateGoalContractText(validGoalContract());
+    assert.equal(verdict.valid, true);
+    assert.equal(verdict.contract.mvp_scope, null);
+  });
+
+  it('parses mvp_scope with inline-list acceptance_criteria, variation_axes, and a supported artifact', () => {
+    const text = mvpScopeBlock('  acceptance_criteria: [AC-1]\n  variation_axes: [AX-1]\n  artifact: draft_pr');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, true, `missing: ${verdict.missing.join(',')}`);
+    assert.deepEqual(verdict.contract.mvp_scope.acceptance_criteria, ['AC-1']);
+    assert.deepEqual(verdict.contract.mvp_scope.variation_axes, ['AX-1']);
+    assert.equal(verdict.contract.mvp_scope.artifact, 'draft_pr');
+  });
+
+  it('parses mvp_scope with block-list acceptance_criteria', () => {
+    const text = mvpScopeBlock('  acceptance_criteria:\n    - AC-1\n  artifact: release_manifest');
+    const c = parseGoalContractText(text);
+    assert.deepEqual(c.mvp_scope.acceptance_criteria, ['AC-1']);
+    assert.equal(c.mvp_scope.artifact, 'release_manifest');
+  });
+
+  it('rejects mvp_scope acceptance_criteria ids that do not exist in the contract', () => {
+    const text = mvpScopeBlock('  acceptance_criteria: [AC-1, AC-999]\n  artifact: draft_pr');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(
+      verdict.missing.some((m) => m === 'mvp_scope.acceptance_criteria.unknown_id:AC-999'),
+      `expected unknown AC id in missing; got: ${verdict.missing.join(',')}`,
+    );
+  });
+
+  it('rejects mvp_scope variation_axes ids that do not exist in the contract', () => {
+    const text = mvpScopeBlock('  acceptance_criteria: [AC-1]\n  variation_axes: [AX-99]\n  artifact: tag');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(
+      verdict.missing.some((m) => m === 'mvp_scope.variation_axes.unknown_id:AX-99'),
+      `expected unknown AX id in missing; got: ${verdict.missing.join(',')}`,
+    );
+  });
+
+  it('rejects mvp_scope with an unsupported artifact value', () => {
+    const text = mvpScopeBlock('  acceptance_criteria: [AC-1]\n  artifact: gist');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(
+      verdict.missing.some((m) => m === 'mvp_scope.artifact.unsupported:gist'),
+      `expected unsupported artifact in missing; got: ${verdict.missing.join(',')}`,
+    );
+  });
+
+  it('rejects mvp_scope when artifact is missing entirely', () => {
+    const text = mvpScopeBlock('  acceptance_criteria: [AC-1]');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.missing.includes('mvp_scope.artifact'));
+  });
+
+  it('rejects mvp_scope when both acceptance_criteria and variation_axes are empty', () => {
+    const text = mvpScopeBlock('  acceptance_criteria: []\n  variation_axes: []\n  artifact: branch');
+    const verdict = validateGoalContractText(text);
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.missing.includes('mvp_scope.acceptance_criteria_or_variation_axes'));
+  });
+
+  it('exposes the allowed artifact set as MVP_SCOPE_ARTIFACTS', () => {
+    assert.deepEqual([...MVP_SCOPE_ARTIFACTS].sort(), ['branch', 'draft_pr', 'release_manifest', 'tag']);
   });
 });

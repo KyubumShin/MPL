@@ -27,6 +27,13 @@ const DEFAULT_REQUIRED_ARTIFACTS = [
   '.mpl/mpl/RUNBOOK.md',
 ];
 
+export const MVP_SCOPE_ARTIFACTS = Object.freeze([
+  'draft_pr',
+  'branch',
+  'tag',
+  'release_manifest',
+]);
+
 function normalizeScalar(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -125,6 +132,17 @@ function sha256(text) {
   return createHash('sha256').update(String(text || '').replace(/\r\n/g, '\n').trim()).digest('hex');
 }
 
+function parseMvpScope(text) {
+  if (!/^mvp_scope\s*:/m.test(text)) return null;
+  const block = extractTopBlock(text, 'mvp_scope');
+  if (!block.trim()) return null;
+  return {
+    acceptance_criteria: listAfterKey(block, 'acceptance_criteria'),
+    variation_axes: listAfterKey(block, 'variation_axes'),
+    artifact: scalarInBlock(block, 'artifact'),
+  };
+}
+
 export function parseGoalContractText(text) {
   const source = extractTopBlock(text, 'source');
   const mission = extractTopBlock(text, 'mission');
@@ -169,6 +187,7 @@ export function parseGoalContractText(text) {
       require_commit: booleanInBlock(completionEvidence, 'require_commit'),
       require_finalize_timestamps: booleanInBlock(completionEvidence, 'require_finalize_timestamps'),
     },
+    mvp_scope: parseMvpScope(text),
     content_sha256: sha256(text),
   };
 }
@@ -214,6 +233,26 @@ export function validateGoalContractText(text) {
   for (const artifact of DEFAULT_REQUIRED_ARTIFACTS) {
     if (!contract.completion_evidence.required_artifacts.includes(artifact)) {
       warnings.push(`completion_evidence.required_artifacts missing recommended ${artifact}`);
+    }
+  }
+
+  if (contract.mvp_scope) {
+    const acIds = new Set(contract.acceptance_criteria);
+    const axIds = new Set(contract.variation_axes);
+    for (const id of contract.mvp_scope.acceptance_criteria) {
+      if (!acIds.has(id)) missing.push(`mvp_scope.acceptance_criteria.unknown_id:${id}`);
+    }
+    for (const id of contract.mvp_scope.variation_axes) {
+      if (!axIds.has(id)) missing.push(`mvp_scope.variation_axes.unknown_id:${id}`);
+    }
+    if (contract.mvp_scope.acceptance_criteria.length === 0
+      && contract.mvp_scope.variation_axes.length === 0) {
+      missing.push('mvp_scope.acceptance_criteria_or_variation_axes');
+    }
+    if (contract.mvp_scope.artifact === null) {
+      missing.push('mvp_scope.artifact');
+    } else if (!MVP_SCOPE_ARTIFACTS.includes(contract.mvp_scope.artifact)) {
+      missing.push(`mvp_scope.artifact.unsupported:${contract.mvp_scope.artifact}`);
     }
   }
 
