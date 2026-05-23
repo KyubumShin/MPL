@@ -151,36 +151,46 @@ function parseReleaseCuts(text) {
   const block = topLevelBlock(text, 'release_cuts');
   if (block === null) return null;
 
-  const lines = block.split('\n');
-  const cuts = [];
+  // Split into `-` item blocks first, then extract `id` from anywhere inside
+  // the block — YAML mapping field order is not significant, so `id` may
+  // legitimately appear after `phases:`, `artifact:`, etc.
+  const itemBlocks = [];
   let cur = null;
 
   const flush = () => {
-    if (!cur) return;
+    if (cur) itemBlocks.push(cur.join('\n'));
+    cur = null;
+  };
+
+  for (const line of block.split('\n')) {
+    const itemStart = line.match(/^(\s*)-\s+(.+?)\s*$/);
+    if (itemStart) {
+      flush();
+      // Replace `- ` with equivalent whitespace so the first line of each item
+      // is a normal indented `key: value` line that nestedScalar/inlineListItems
+      // (both anchored on `\s+`) can match.
+      cur = [`${itemStart[1]}  ${itemStart[2]}`];
+      continue;
+    }
+    if (cur) cur.push(line);
+  }
+  flush();
+
+  const cuts = [];
+  for (const itemText of itemBlocks) {
+    const idMatch = itemText.match(/(?:^|\n)\s*id\s*:\s*["']?([^"'\s#]+)["']?/);
     cuts.push({
-      id: cur.id,
-      phases: inlineListItems(cur.text, 'phases') || [],
+      id: idMatch ? idMatch[1] : null,
+      phases: inlineListItems(itemText, 'phases') || [],
       user_approved: (() => {
-        const raw = nestedScalar(cur.text, 'user_approved');
+        const raw = nestedScalar(itemText, 'user_approved');
         if (raw === 'true') return true;
         if (raw === 'false') return false;
         return null;
       })(),
-      artifact: nestedScalar(cur.text, 'artifact'),
+      artifact: nestedScalar(itemText, 'artifact'),
     });
-    cur = null;
-  };
-
-  for (const line of lines) {
-    const idMatch = line.match(/^\s*-\s+id\s*:\s*["']?([^"'\s#]+)["']?/);
-    if (idMatch) {
-      flush();
-      cur = { id: idMatch[1], text: `${line}\n` };
-      continue;
-    }
-    if (cur) cur.text += `${line}\n`;
   }
-  flush();
   return cuts;
 }
 

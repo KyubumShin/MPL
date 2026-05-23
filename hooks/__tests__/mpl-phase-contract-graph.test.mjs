@@ -165,6 +165,42 @@ describe('Stage A mvp + release_cuts schema', () => {
     assert.equal(graph.mvp.artifact, 'draft_pr');
   });
 
+  it('parses release_cuts items even when id is not the first key (YAML mapping order is insignificant)', () => {
+    // Regression for codex review: previously, parseReleaseCuts only recognized
+    // items whose first line was `- id:`, which silently dropped items with
+    // any other field order. Validator would then report `valid: true` because
+    // there were no items to check.
+    const text = graphWithMvp('', `release_cuts:
+  - phases: [phase-2]
+    id: cut-a
+    user_approved: true
+    artifact: release_manifest`);
+    const graph = parsePhaseContractGraphText(text);
+    assert.equal(graph.release_cuts.length, 1);
+    assert.equal(graph.release_cuts[0].id, 'cut-a');
+    assert.deepEqual(graph.release_cuts[0].phases, ['phase-2']);
+    assert.equal(graph.release_cuts[0].user_approved, true);
+    assert.equal(graph.release_cuts[0].artifact, 'release_manifest');
+
+    // And the validator MUST still see the same constraints — e.g., overlap
+    // detection must trigger even when ids are not first.
+    const overlapText = graphWithMvp(
+      `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`,
+      `release_cuts:
+  - phases: [phase-1]
+    id: cut-a
+    user_approved: true
+    artifact: release_manifest`,
+    );
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(overlapText));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.some((i) => i.startsWith('release_cuts:cut-a:phases:overlap:phase-1:already_in:mvp')));
+  });
+
   it('parses release_cuts list with id, phases, user_approved, artifact', () => {
     const text = graphWithMvp('', `release_cuts:
   - id: cut-ext-a
