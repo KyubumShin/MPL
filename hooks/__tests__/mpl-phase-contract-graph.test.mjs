@@ -169,12 +169,23 @@ describe('Stage A mvp + release_cuts schema', () => {
     // Regression for codex review on 02beb4d: indent-blind `-` detection
     // misread inner `- phase-2` as a new cut boundary, splitting one valid
     // cut into two malformed items. Cut item boundaries must respect indent.
-    const text = graphWithMvp('', `release_cuts:
+    //
+    // The fixture also includes mvp=[phase-1] so cut-a's phase-2 dependency
+    // on phase-1 resolves through the earlier cohort (mvp) for the new
+    // dependency-closure validator (Phase 1.4b).
+    const text = graphWithMvp(
+      `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`,
+      `release_cuts:
   - id: cut-a
     phases:
       - phase-2
     user_approved: true
-    artifact: release_manifest`);
+    artifact: release_manifest`,
+    );
     const graph = parsePhaseContractGraphText(text);
     assert.equal(graph.release_cuts.length, 1, `cut count: expected 1, got ${graph.release_cuts.length}`);
     assert.equal(graph.release_cuts[0].id, 'cut-a');
@@ -468,6 +479,117 @@ describe('Stage A mvp + release_cuts schema', () => {
   });
 });
 
+describe('Stage A dependency-closure rule (Phase 1.4b)', () => {
+  // Helper: build a graph with two phases where phase-2 requires phase-1.
+  // mvp/cut yaml inserted before `execution_tiers:`.
+  function dcGraph(mvpYaml, cutsYaml = '') {
+    const insertion = (mvpYaml ? `\n${mvpYaml}` : '') + (cutsYaml ? `\n${cutsYaml}` : '');
+    return validGraph().replace('execution_tiers:', `${insertion}\nexecution_tiers:`);
+  }
+
+  it('rejects mvp.phases that requires a non-mvp phase (out of cohort)', () => {
+    // mvp = [phase-2] only. phase-2 requires phase-1, but phase-1 not in mvp.
+    // MVP cohort runs in isolation at release-gate(mvp); its requires must
+    // resolve inside the cohort or baseline. phase-1 here is neither.
+    const text = dcGraph(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-2]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.includes('mvp:phases:phase-2:requires:outside_cohort:phase-1'));
+  });
+
+  it('accepts mvp that fully encloses its dependency chain', () => {
+    const text = dcGraph(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-2]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('accepts release_cuts whose require resolves into mvp (earlier cohort)', () => {
+    // mvp = [phase-1]; cut-a = [phase-2]; phase-2.requires.from_phase = phase-1.
+    // mvp executes first per RFC §5.4.2 array order; phase-1 is materialized
+    // by the time cut-a's release-gate runs.
+    const text = dcGraph(
+      `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`,
+      `release_cuts:
+  - id: cut-a
+    phases: [phase-2]
+    user_approved: true
+    artifact: release_manifest`,
+    );
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('rejects release_cuts whose require resolves to a LATER cut (forward reference)', () => {
+    // Three-phase graph: phase-3 requires phase-1.
+    // mvp empty; cut-a = [phase-3]; cut-b = [phase-1].
+    // cut-a runs before cut-b per array order, so phase-3's require on
+    // phase-1 is unsatisfied at cut-a's release-gate. Forward reference.
+    const text = validGraph()
+      .replace('  - id: phase-2', `  - id: phase-3
+    evidence_required: [command]
+    change_policy: append_delta_only
+    resource_locks: []
+    interface_contract:
+      requires:
+        - type: artifact
+          name: bootstrap
+          from_phase: phase-1
+      produces: []
+  - id: phase-2`)
+      .replace('phases: [phase-2]\n    parallel: false', 'phases: [phase-2, phase-3]\n    parallel: false')
+      .replace('execution_tiers:', `release_cuts:
+  - id: cut-a
+    phases: [phase-3]
+    user_approved: true
+    artifact: release_manifest
+  - id: cut-b
+    phases: [phase-1]
+    user_approved: true
+    artifact: release_manifest
+execution_tiers:`);
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, false);
+    assert.ok(
+      verdict.issues.includes('release_cuts:cut-a:phases:phase-3:requires:outside_cohort:phase-1'),
+      `expected forward-ref issue; got: ${verdict.issues.join(', ')}`,
+    );
+  });
+
+  it('treats requires entries without from_phase as baseline (no validation error)', () => {
+    // The validator's `requires_from_phases` extractor only records entries
+    // with an explicit `from_phase`. requires that omit `from_phase` are
+    // baseline references and must NOT produce dependency-closure errors.
+    const text = dcGraph(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    // phase-1 has `requires: []`, which is the canonical baseline-only case.
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(text));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('does not run dependency-closure on graphs without mvp or release_cuts', () => {
+    // Pre-Stage-A graphs (no mvp_scope) must remain valid even when phases
+    // have cross-phase requires. The dependency-closure rule only applies
+    // when Stage A cohort structure is declared.
+    const verdict = validatePhaseContractGraph(parsePhaseContractGraphText(validGraph()));
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+});
+
 describe('mpl-require-phase-contract-graph hook integration', () => {
   it('allows a valid graph', () => {
     const r = runHook(validGraph());
@@ -500,6 +622,110 @@ describe('mpl-require-phase-contract-graph hook integration', () => {
     const r = runHook('phases:\n  - id: phase-1\n', {
       config: { phase_contract_graph_required: false },
     });
+    assert.equal(r.continue, true);
+  });
+
+  // ── D-Q6 released-cut immutability (Phase 1.4b) ─────────────────────────
+  // Hook only enforces when `state.release.completed_cut_ids` is non-empty
+  // (Phase 1.6 territory). Until then, the check is a no-op — these tests
+  // simulate the Phase 1.6+ state shape by seeding it directly.
+
+  function graphWithMvp(mvpYaml) {
+    return validGraph().replace('execution_tiers:', `${mvpYaml}\nexecution_tiers:`);
+  }
+
+  function seedStateWithReleased(cutIds) {
+    writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'mpl-decompose',
+      release: { completed_cut_ids: cutIds },
+    }));
+  }
+
+  it('D-Q6: blocks decomposition writes that mutate a released mvp.phases list', () => {
+    // Seed prior decomposition.yaml with mvp=[phase-1] and mark "mvp" as released.
+    const priorMvp = `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), graphWithMvp(priorMvp));
+    seedStateWithReleased(['mvp']);
+
+    // New write tries to change mvp.phases to [phase-1, phase-2] — must block.
+    const mutated = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-2]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const r = runHook(mutated);
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /released_cut:mvp:phases:mutated/);
+  });
+
+  it('D-Q6: allows non-mutating re-writes of a released cut', () => {
+    const mvpYaml = `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), graphWithMvp(mvpYaml));
+    seedStateWithReleased(['mvp']);
+    // Identical write — should pass.
+    const r = runHook(graphWithMvp(mvpYaml));
+    assert.equal(r.continue, true);
+  });
+
+  it('D-Q6: blocks removal of a released cut from the graph', () => {
+    const priorMvp = `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), graphWithMvp(priorMvp));
+    seedStateWithReleased(['mvp']);
+    // New write drops mvp entirely — released cut cannot be removed.
+    const r = runHook(validGraph());
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /released_cut:mvp:removed_from_graph/);
+  });
+
+  it('D-Q6: pre-release iteration is unconstrained (cut not yet in completed_cut_ids)', () => {
+    // Same prior graph but state.release.completed_cut_ids is empty — mvp is
+    // not yet released, so the user is free to edit mvp.phases.
+    const priorMvp = `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), graphWithMvp(priorMvp));
+    seedStateWithReleased([]); // explicit empty
+    const mutated = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-2]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const r = runHook(mutated);
+    assert.equal(r.continue, true);
+  });
+
+  it('D-Q6: no-op for projects whose state.json lacks state.release (pre-Phase-1.6)', () => {
+    // Default state seeded in beforeEach has no `release` subtree. The
+    // immutability check returns [] and the hook does not block on the
+    // mvp.phases diff.
+    const priorMvp = `mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1]
+  execution_mode: sequential
+  artifact: draft_pr`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), graphWithMvp(priorMvp));
+    // state.json from beforeEach has no `release` field.
+    const mutated = graphWithMvp(`mvp:
+  derived_from: goal_contract.mvp_scope
+  phases: [phase-1, phase-2]
+  execution_mode: sequential
+  artifact: draft_pr`);
+    const r = runHook(mutated);
     assert.equal(r.continue, true);
   });
 });

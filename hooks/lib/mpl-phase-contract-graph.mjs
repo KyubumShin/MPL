@@ -376,4 +376,64 @@ function validateMvpAndReleaseCuts(graph, knownPhases, issues) {
       }
     }
   }
+
+  // Dependency-closure rule (RFC §4.2 / B5, hook layer for Phase 1.4b).
+  // The decomposer carries a transient check in its prompt (Phase 1.2 Step 12
+  // Guard 2). This is the durable enforcement at write time.
+  //
+  // Rule: a phase's `requires.from_phase` must resolve to:
+  //   - another phase in the SAME cohort, OR
+  //   - a phase in an EARLIER cohort (mvp, or release_cuts before this one in
+  //     the array order — Stage A serializes cuts per RFC §5.4.2 "array order"),
+  //   - OR baseline pre-existing code (no from_phase entry).
+  //
+  // The Stage B `contract_skeleton` mode would allow parallel cuts and need a
+  // dependency-graph DAG check; Stage A serializes cuts so a simple "earlier
+  // cohort" set check is sufficient.
+  validateDependencyClosure(graph, mvp, cuts, issues);
+}
+
+function validateDependencyClosure(graph, mvp, cuts, issues) {
+  if (!Array.isArray(graph?.phases)) return;
+  // Only run when Stage A release fields are present.
+  if (!mvp && !Array.isArray(cuts)) return;
+
+  const phaseRequires = new Map();
+  for (const p of graph.phases) {
+    phaseRequires.set(p.id, Array.isArray(p.requires_from_phases) ? p.requires_from_phases : []);
+  }
+
+  // MVP cohort: every requires.from_phase must be inside mvp.phases or baseline (absent).
+  if (mvp?.phases?.length) {
+    const mvpSet = new Set(mvp.phases);
+    for (const mvpPhaseId of mvp.phases) {
+      const reqs = phaseRequires.get(mvpPhaseId) || [];
+      for (const req of reqs) {
+        if (!mvpSet.has(req)) {
+          issues.push(`mvp:phases:${mvpPhaseId}:requires:outside_cohort:${req}`);
+        }
+      }
+    }
+  }
+
+  // Extension cuts: walk in declared order; each cut can reach into its own
+  // phases plus everything from earlier cohorts (mvp + earlier cuts). Stage A
+  // executes cuts sequentially per RFC §5.4.2, so prior-cohort phases are
+  // guaranteed to be available by the time a later cut's release-gate runs.
+  if (Array.isArray(cuts)) {
+    const earlierPhases = new Set(mvp?.phases || []);
+    for (const cut of cuts) {
+      if (!cut.id || !Array.isArray(cut.phases)) continue;
+      const cutSet = new Set(cut.phases);
+      for (const cutPhaseId of cut.phases) {
+        const reqs = phaseRequires.get(cutPhaseId) || [];
+        for (const req of reqs) {
+          if (!cutSet.has(req) && !earlierPhases.has(req)) {
+            issues.push(`release_cuts:${cut.id}:phases:${cutPhaseId}:requires:outside_cohort:${req}`);
+          }
+        }
+      }
+      for (const p of cut.phases) earlierPhases.add(p);
+    }
+  }
 }
