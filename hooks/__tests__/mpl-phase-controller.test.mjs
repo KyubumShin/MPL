@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -1464,5 +1464,233 @@ mvp_scope:
     const manifest = JSON.parse(readFileSync(join(releaseDir, 'release-manifest.json'), 'utf-8'));
     assert.equal(manifest.cut_id, 'mvp', 'stale manifest overwritten');
     assert.equal(manifest.stale, undefined, 'stale field gone');
+  });
+
+  // ── Stage A Phase 1.6c-iii: snapshot ref + artifact creation ──
+
+  function initGitFixture(dir) {
+    execFileSync('git', ['init', '--initial-branch=main'], { cwd: dir, encoding: 'utf-8' });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+    execFileSync('git', ['config', 'tag.gpgSign', 'false'], { cwd: dir });
+    writeFileSync(join(dir, 'README.md'), '# fixture\n');
+    execFileSync('git', ['add', 'README.md'], { cwd: dir });
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: dir });
+  }
+
+  function readManifest(dir) {
+    return JSON.parse(readFileSync(
+      join(dir, '.mpl', 'mpl', 'releases', 'mvp', 'release-manifest.json'),
+      'utf-8'
+    ));
+  }
+
+  it('1.6c-iii: release-finalize populates manifest.commit_sha / tree_sha / snapshot_ref from git rev-parse', () => {
+    initGitFixture(tmpDir);
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const manifest = readManifest(tmpDir);
+    assert.match(manifest.commit_sha, /^[0-9a-f]{40}$/, 'commit_sha populated');
+    assert.match(manifest.tree_sha, /^[0-9a-f]{40}$/, 'tree_sha populated');
+    assert.equal(manifest.snapshot_ref, 'refs/mpl/releases/mvp');
+    // refs/mpl/releases/mvp actually points at HEAD.
+    const refTarget = execFileSync('git', ['rev-parse', 'refs/mpl/releases/mvp'],
+      { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    assert.equal(refTarget, manifest.commit_sha);
+  });
+
+  it('1.6c-iii: release-finalize records artifact_creation_failed when not in a git repo (snapshot ref fails)', () => {
+    // No `git init` — every git call fails. Manifest still written (with
+    // null snapshot fields + artifact_creation_failed.type='snapshot_ref')
+    // and lifecycle still advances per RFC §5.4 best-effort post-step.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const manifest = readManifest(tmpDir);
+    assert.equal(manifest.commit_sha, null);
+    assert.equal(manifest.tree_sha, null);
+    assert.equal(manifest.snapshot_ref, null);
+    assert.equal(manifest.artifact_creation_failed.type, 'snapshot_ref');
+    assert.ok(manifest.artifact_creation_failed.reason);
+    // Lifecycle still advances.
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
+    assert.match(out.stopReason, /snapshot ref FAILED/);
+  });
+
+  it('1.6c-iii: release-finalize records artifact_creation_failed.tag when no remote (artifact best-effort)', () => {
+    // Git repo set up, snapshot ref succeeds, but no remote so tag push
+    // fails. Per RFC §5.4 ("artifact creation depends on external tools
+    // out of MPL's control"), lifecycle still advances and the failure
+    // is recorded in the manifest.
+    initGitFixture(tmpDir);
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    // Goal-contract artifact = tag (override the default draft_pr).
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [AC-1]
+  variation_axes: [AX-1]
+  artifact: tag
+`);
+    writeDecompositionWithMvp(tmpDir, { artifact: 'tag' });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const manifest = readManifest(tmpDir);
+    // Snapshot succeeded.
+    assert.match(manifest.commit_sha, /^[0-9a-f]{40}$/);
+    // Tag failure recorded.
+    assert.equal(manifest.artifact_creation_failed.type, 'tag');
+    assert.match(manifest.artifact_creation_failed.reason, /push failed/);
+    // Lifecycle advances regardless (RFC §5.4 best-effort).
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
+    assert.match(out.stopReason, /artifact=tag FAILED/);
+    // Local tag exists (push failed but local creation succeeded).
+    const localTag = execFileSync('git', ['rev-parse', 'refs/tags/mpl-release-mvp'],
+      { cwd: tmpDir, encoding: 'utf-8' }).trim();
+    assert.equal(localTag, manifest.commit_sha);
+  });
+
+  it('1.6c-iii: release-finalize with artifact=release_manifest emits snapshot + manifest only, artifact_creation_failed=null', () => {
+    initGitFixture(tmpDir);
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [AC-1]
+  variation_axes: [AX-1]
+  artifact: release_manifest
+`);
+    writeDecompositionWithMvp(tmpDir, { artifact: 'release_manifest' });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const manifest = readManifest(tmpDir);
+    assert.match(manifest.commit_sha, /^[0-9a-f]{40}$/);
+    assert.equal(manifest.artifact, 'release_manifest');
+    assert.equal(manifest.artifact_creation_failed, null);
+    // No tag / branch should have been created.
+    assert.throws(() => execFileSync('git', ['rev-parse', 'refs/tags/mpl-release-mvp'],
+      { cwd: tmpDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }));
+    assert.match(out.stopReason, /artifact=release_manifest \(no external push\)/);
+  });
+
+  it('1.6c-iii: atomic write leaves no .tmp residue on success', () => {
+    initGitFixture(tmpDir);
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const releaseDir = join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp');
+    const entries = readdirSync(releaseDir);
+    assert.ok(!entries.some((f) => f.endsWith('.tmp')),
+      `no .tmp residue expected, got: ${entries.join(', ')}`);
+    // Three release artifacts are present at the final paths.
+    assert.ok(entries.includes('release-manifest.json'));
+    assert.ok(entries.includes('evidence-summary.md'));
+    assert.ok(entries.includes('gate-results.json'));
   });
 });

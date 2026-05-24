@@ -16,7 +16,8 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { randomBytes } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,6 +56,27 @@ const {
 const { parsePhaseContractGraphText } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-phase-contract-graph.mjs')).href
 );
+
+// Stage A Phase 1.6c-iii: snapshot ref + user-visible artifact creation.
+const { createSnapshotRef, attemptArtifactCreation } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-release-artifact.mjs')).href
+);
+
+/**
+ * Atomic file write — write to a sibling tmp file then rename onto the
+ * final path. Removes the partial-file failure window claude #2 on PR
+ * #187 flagged: if a write is interrupted mid-stream, the final path is
+ * untouched (the tmp is orphaned, which a future release-finalize
+ * re-run reclaims by writing a fresh tmp). All three release artifacts
+ * use this so the on-disk state is always "all three present at the
+ * same generation" or "the prior generation intact" — never a
+ * partial-mix that a consumer could read between writes.
+ */
+function atomicWriteFile(filePath, contents, mode) {
+  const tmp = `${filePath}.${randomBytes(4).toString('hex')}.tmp`;
+  writeFileSync(tmp, contents, { mode });
+  renameSync(tmp, filePath);
+}
 
 // G4 hang detection (#109)
 const { detectHang } = await import(
@@ -737,10 +759,30 @@ async function main() {
         }));
         break;
       }
+
+      // Phase 1.6c-iii: create snapshot ref BEFORE writing the manifest so
+      // commit_sha / tree_sha / snapshot_ref can be recorded. RFC §5.4.1:
+      // "at the start of release-finalize(cut_id), before any artifact-
+      // creation attempt". A snapshot-ref failure is a soft failure — the
+      // manifest is still written (with placeholders) and the failure is
+      // recorded in `artifact_creation_failed.snapshot` so the user has
+      // an actionable record. The lifecycle still advances because RFC
+      // §5.4 explicitly tolerates artifact creation depending on tools
+      // out of MPL's control.
+      const snapshot = createSnapshotRef(cwd, cur);
+      if (snapshot.ok) {
+        manifest.commit_sha = snapshot.commit_sha;
+        manifest.tree_sha = snapshot.tree_sha;
+        manifest.snapshot_ref = snapshot.snapshot_ref;
+      } else {
+        manifest.artifact_creation_failed = { type: 'snapshot_ref', reason: snapshot.reason };
+      }
+
       const evidence = buildEvidenceSummary({ cutId: cur, state, contract, graph, now: writtenAt });
       const gateSnapshot = buildGateResultsSnapshot(state, writtenAt);
 
       const releaseDir = join(cwd, RELEASE_DIR_REL_PATH, cur);
+      const manifestPath = join(releaseDir, 'release-manifest.json');
       try {
         mkdirSync(releaseDir, { recursive: true });
         // 0o644 (not the 0o600 used for state.json): release artifacts
@@ -749,20 +791,25 @@ async function main() {
         // dev box / CI agent (claude review #1 on PR #187). state.json
         // stays 0o600 because it carries session-internal evidence;
         // these files are the shippable record of the release.
-        writeFileSync(
-          join(releaseDir, 'release-manifest.json'),
+        //
+        // Atomic temp+rename (claude review #2 on PR #187) so a mid-write
+        // failure leaves the on-disk state at the prior generation
+        // instead of an asymmetric "manifest written but summary
+        // missing" state.
+        atomicWriteFile(
+          manifestPath,
           JSON.stringify(manifest, null, 2) + '\n',
-          { mode: 0o644 }
+          0o644
         );
-        writeFileSync(
+        atomicWriteFile(
           join(releaseDir, 'evidence-summary.md'),
           evidence.endsWith('\n') ? evidence : evidence + '\n',
-          { mode: 0o644 }
+          0o644
         );
-        writeFileSync(
+        atomicWriteFile(
           join(releaseDir, 'gate-results.json'),
           JSON.stringify(gateSnapshot, null, 2) + '\n',
-          { mode: 0o644 }
+          0o644
         );
       } catch (err) {
         // Manifest write failure must NOT advance the lifecycle (RFC §5.4:
@@ -774,6 +821,43 @@ async function main() {
             `${RELEASE_DIR_REL_PATH}/${cur}/ and let the loop retry.`
         }));
         break;
+      }
+
+      // Phase 1.6c-iii: attempt user-visible artifact (tag / branch /
+      // draft_pr) after manifest write succeeded. Only run when snapshot
+      // ref creation succeeded — without commit_sha we cannot point an
+      // artifact at the cut's terminal commit. The attempt is best-
+      // effort per RFC §5.4: failures are recorded in the manifest
+      // (artifact_creation_failed) and surfaced to the user, but they do
+      // NOT block `completed_cut_ids` append because artifact creation
+      // depends on external tools (gh CLI, remote permissions) that are
+      // out of MPL's control.
+      let artifactAttempt = null;
+      if (snapshot.ok && manifest.artifact && manifest.artifact !== 'release_manifest') {
+        artifactAttempt = attemptArtifactCreation({
+          cwd,
+          cutId: cur,
+          artifact: manifest.artifact,
+          commitSha: snapshot.commit_sha,
+          snapshotRef: snapshot.snapshot_ref,
+        });
+        if (artifactAttempt.artifact_creation_failed) {
+          // Re-write the manifest with the failure recorded so the
+          // shipped record matches the actual outcome.
+          manifest.artifact_creation_failed = artifactAttempt.artifact_creation_failed;
+          try {
+            atomicWriteFile(
+              manifestPath,
+              JSON.stringify(manifest, null, 2) + '\n',
+              0o644
+            );
+          } catch {
+            // Manifest re-write failure is itself non-fatal — the
+            // original manifest (with artifact_creation_failed=null) is
+            // already on disk; the lifecycle should still advance to
+            // honor the "best-effort post-step" contract.
+          }
+        }
       }
 
       const existing = state.release || {};
@@ -797,9 +881,23 @@ async function main() {
         },
         current_phase: nextPhase,
       });
+      // Build a status-aware tail so users immediately see whether the
+      // snapshot/artifact step succeeded or fell back.
+      const snapshotTail = snapshot.ok
+        ? `snapshot ${snapshot.snapshot_ref} @ ${snapshot.commit_sha.slice(0, 12)}`
+        : `⚠ snapshot ref FAILED (${snapshot.reason}) — artifact_creation_failed recorded`;
+      const artifactTail = (() => {
+        if (!manifest.artifact || manifest.artifact === 'release_manifest') return 'artifact=release_manifest (no external push)';
+        if (!artifactAttempt) return `artifact=${manifest.artifact} skipped (snapshot ref failed)`;
+        if (artifactAttempt.artifact_creation_failed) {
+          return `⚠ artifact=${manifest.artifact} FAILED (${artifactAttempt.artifact_creation_failed.reason})`;
+        }
+        return `artifact=${manifest.artifact} created`;
+      })();
       console.log(JSON.stringify({
         continue: true,
         stopReason: `[MPL] release-finalize(${cur}): cohort completed. Manifest written to ${RELEASE_DIR_REL_PATH}/${cur}/. ` +
+          `${snapshotTail}. ${artifactTail}. ` +
           `Stage A single-cohort path: transitioning to whole-pipeline phase3-gate.`
       }));
       break;
