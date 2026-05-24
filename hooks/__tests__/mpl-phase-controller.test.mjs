@@ -702,15 +702,20 @@ mvp_scope:
     assert.match(out.stopReason, /Phase 3: Quality Gate/);
   });
 
-  it('1.6b: release-gate stub passes through to release-finalize', () => {
+  it('1.6c-i: release-gate with no scoped evidence stays at release-gate (no pass-through)', () => {
+    // Pre-1.6c-i, the release-gate handler was a stub that passed through
+    // unconditionally to release-finalize. After 1.6c-i, the handler reads
+    // state.release.gate_results and routes on PASS/FAIL/MISSING. Without
+    // any scoped evidence (the migration backfills the defaults to null),
+    // the path is MISSING — stay at release-gate and surface guidance.
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
     const out = runStopHook(tmpDir, {
       current_phase: 'release-gate',
       release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
     });
     const state = readState();
-    assert.strictEqual(state.current_phase, 'release-finalize');
-    assert.match(out.stopReason, /release-gate\(mvp\).*Phase 1\.6c/);
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(out.stopReason, /release-gate\(mvp\).*missing scoped Hard 1\/2\/3 evidence/);
   });
 
   it('1.6b: release-gate with no active cohort routes defensively to phase3-gate', () => {
@@ -844,5 +849,173 @@ mvp_scope:
     const state = readState();
     assert.strictEqual(state.current_phase, 'phase2-sprint');
     assert.strictEqual(state.session_status, 'blocked_hook');
+  });
+
+  // ── Stage A Phase 1.6c-i: release-gate scoped Hard 1/2/3 evidence routing ──
+
+  function releaseStateWith(gateResults, opts = {}) {
+    return {
+      current_phase: 'release-gate',
+      release: {
+        current_cut_id: opts.cohort ?? 'mvp',
+        completed_cut_ids: opts.completed ?? [],
+        fix_loop_count: opts.fixCount ?? 0,
+        pending_artifact: null,
+        gate_results: gateResults,
+        max_fix_loops: opts.maxFix ?? 3,
+      },
+    };
+  }
+
+  it('1.6c-i: release-gate PASS (all 3 structured exit_code=0) → transitions to release-finalize', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: { exit_code: 0, command: 'build' },
+      hard2_coverage: { exit_code: 0, command: 'test' },
+      hard3_resilience: { exit_code: 0, command: 'contract' },
+    }));
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.match(out.stopReason, /release-gate\(mvp\).*passed.*source=structured/);
+    // Cohort preserved across transition.
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+  });
+
+  it('1.6c-i: release-gate FAIL within budget → routes back to phase2-sprint, increments fix_loop_count, preserves cohort', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: { exit_code: 0, command: 'build' },
+      hard2_coverage: { exit_code: 1, command: 'test', stdout_tail: 'failure detected' },
+      hard3_resilience: { exit_code: 0, command: 'contract' },
+    }, { fixCount: 0, maxFix: 3 }));
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase2-sprint');
+    assert.strictEqual(state.release.current_cut_id, 'mvp', 'cohort must be preserved across FAIL→sprint');
+    assert.strictEqual(state.release.fix_loop_count, 1);
+    // Scoped evidence reset so next attempt starts clean.
+    assert.strictEqual(state.release.gate_results.hard1_baseline, null);
+    assert.strictEqual(state.release.gate_results.hard2_coverage, null);
+    assert.strictEqual(state.release.gate_results.hard3_resilience, null);
+    // Top-level state.gate_results isolation is covered by the dedicated
+    // "RFC §5.5 isolation" test below, which seeds the top-level subtree
+    // explicitly so the assertion has a real before/after to compare.
+    assert.match(out.stopReason, /release-gate\(mvp\) FAILED/);
+    assert.match(out.stopReason, /Scoped fix loop 1\/3/);
+    assert.match(out.stopReason, /Returning to phase2-sprint/);
+  });
+
+  it('1.6c-i: release-gate FAIL at threshold → circuit-break: stay at release-gate, pin cohort, surface ⛔', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: { exit_code: 0 },
+      hard2_coverage: { exit_code: 2 },
+      hard3_resilience: { exit_code: 0 },
+    }, { fixCount: 2, maxFix: 3 }));
+    const state = readState();
+    // Pin: stay at release-gate, no phase transition.
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.strictEqual(state.release.current_cut_id, 'mvp', 'cohort must remain pinned');
+    assert.strictEqual(state.release.fix_loop_count, 3, 'count reaches threshold');
+    // Evidence NOT reset at circuit-break — user needs the failure record.
+    assert.deepStrictEqual(state.release.gate_results.hard2_coverage, { exit_code: 2 });
+    assert.match(out.stopReason, /⛔/);
+    assert.match(out.stopReason, /circuit-break/);
+    assert.match(out.stopReason, /3\/3/);
+    assert.match(out.stopReason, /User intervention required/);
+  });
+
+  it('1.6c-i: release-gate pinned re-entry does NOT double-increment fix_loop_count past max', () => {
+    // Already at threshold (count=3, max=3). Re-entering release-gate (e.g.
+    // user re-triggered the loop without mutating state) must not grow the
+    // counter past the cap.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: { exit_code: 0 },
+      hard2_coverage: { exit_code: 2 },
+      hard3_resilience: { exit_code: 0 },
+    }, { fixCount: 3, maxFix: 3 }));
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.strictEqual(state.release.fix_loop_count, 3, 'pinned counter must not grow');
+    assert.match(out.stopReason, /⛔/);
+    assert.match(out.stopReason, /3\/3/);
+  });
+
+  it('1.6c-i: release-gate MISSING (zero structured evidence) → continue with stopReason guiding production', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: null,
+      hard2_coverage: null,
+      hard3_resilience: null,
+    }));
+    const state = readState();
+    // No transition.
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.strictEqual(state.release.fix_loop_count, 0, 'MISSING must not consume fix budget');
+    assert.match(out.stopReason, /release-gate\(mvp\)/);
+    assert.match(out.stopReason, /missing scoped Hard 1\/2\/3 evidence/);
+    assert.match(out.stopReason, /state\.release\.gate_results/);
+  });
+
+  it('1.6c-i: release-gate MISSING (partial — 1 of 3 structured) → continue, lists missing keys', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: { exit_code: 0 },
+      hard2_coverage: null,
+      hard3_resilience: null,
+    }));
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(out.stopReason, /missing scoped Hard 1\/2\/3 evidence/);
+    assert.match(out.stopReason, /hard2_coverage/);
+    assert.match(out.stopReason, /hard3_resilience/);
+    assert.doesNotMatch(out.stopReason, /hard1_baseline/);
+  });
+
+  it('1.6c-i: release-gate FAIL does NOT touch top-level state.gate_results (RFC §5.5 isolation)', () => {
+    // Defense for the RFC §5.5 invariant: scoped release evidence must
+    // never pollute the whole-pipeline gate subtree reserved for the final
+    // phase3-gate. Pre-seed top-level gate_results with PASS values and
+    // verify they survive a release-gate FAIL untouched.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    runStopHook(tmpDir, {
+      ...releaseStateWith({
+        hard1_baseline: { exit_code: 0 },
+        hard2_coverage: { exit_code: 1 },
+        hard3_resilience: { exit_code: 0 },
+      }),
+      gate_results: {
+        hard1_baseline: { exit_code: 0, command: 'prior whole-pipeline' },
+        hard2_coverage: { exit_code: 0, command: 'prior whole-pipeline' },
+        hard3_resilience: { exit_code: 0, command: 'prior whole-pipeline' },
+      },
+    });
+    const state = readState();
+    // Top-level evidence preserved verbatim.
+    assert.deepStrictEqual(state.gate_results.hard1_baseline, {
+      exit_code: 0, command: 'prior whole-pipeline',
+    });
+    assert.deepStrictEqual(state.gate_results.hard2_coverage, {
+      exit_code: 0, command: 'prior whole-pipeline',
+    });
+    // Release-scoped subtree was reset on FAIL→sprint.
+    assert.strictEqual(state.release.gate_results.hard2_coverage, null);
+  });
+
+  it('1.6c-i: release-gate honors workspace strict mode for missing_gate_evidence', () => {
+    // Strict mode (.mpl/config.json enforcement.missing_gate_evidence:
+    // "block") changes the MISSING surface wording to ⛔ BLOCKED, matching
+    // phase3-gate's behavior so the two gate paths feel consistent.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'config.json'), JSON.stringify({
+      enforcement: { missing_gate_evidence: 'block' },
+    }));
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_baseline: null,
+      hard2_coverage: null,
+      hard3_resilience: null,
+    }));
+    assert.match(out.stopReason, /⛔ BLOCKED/);
+    assert.match(out.stopReason, /Strict enforcement/);
   });
 });

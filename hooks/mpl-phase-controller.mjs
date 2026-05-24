@@ -502,20 +502,27 @@ async function main() {
     // 1/2/3 and release-manifest / artifact creation) ===
 
     case 'release-gate': {
-      // Phase 1.6b: stub handler. Scoped Hard 1/2/3 + release-scoped
-      // gate-results.json land in Phase 1.6c. For now, immediately advance
-      // to release-finalize so the lifecycle exit logic can run.
+      // Phase 1.6c-i: scoped Hard 1/2/3 evidence routing.
       //
-      // Phase 1.6c will:
-      //   - Run scoped Hard 1/2/3 against `state.release.current_cut_id`
-      //     (full Hard 1 project-wide; Hard 2 affected scope; Hard 3 active
-      //      cut's interface_contract — per RFC §5.3 D-Q3)
-      //   - Write `.mpl/mpl/releases/{cut_id}/gate-results.json` (NEVER
-      //     touch `state.gate_results.hard{1,2,3}_*` per RFC §5.5)
-      //   - On failure: increment `state.release.fix_loop_count`, route
-      //     back to `phase2-sprint` for the same cohort (mirror of
-      //     phase3-gate→phase4-fix loop, RFC §5.3.1)
-      //   - On success: transition to release-finalize as today's stub does
+      // Reads `state.release.gate_results` (parallel subtree to top-level
+      // `state.gate_results`, per RFC §5.5 — scoped release evidence MUST
+      // NOT mix into whole-pipeline gates reserved for the final
+      // phase3-gate). mpl-gate-recorder populates this subtree only when
+      // `current_phase == 'release-gate'`; this handler consumes and
+      // routes. Evidence *production* (running scoped commands, deciding
+      // affected-tests scope for Hard 2, etc.) is gate-recorder's
+      // responsibility and lands separately.
+      //
+      // Routing per RFC §5.3.1:
+      //   - PASS → release-finalize
+      //   - FAIL → increment state.release.fix_loop_count, route back to
+      //     phase2-sprint, PRESERVE current_cut_id. Reset scoped
+      //     evidence so the next attempt starts clean.
+      //   - FAIL at threshold (count reaches state.release.max_fix_loops,
+      //     default 3) → circuit-break: pin cohort, stay at release-gate,
+      //     surface user-actionable message. User intervention required.
+      //   - MISSING → continue with stopReason guiding orchestrator to
+      //     produce evidence; same UX as phase3-gate partial/empty paths.
       const cohort = state.release?.current_cut_id;
       if (!cohort) {
         // Defensive: release-gate without an active cohort is a state
@@ -527,11 +534,99 @@ async function main() {
         }));
         break;
       }
-      writeState(cwd, { current_phase: 'release-finalize' });
+
+      // Reuse the top-level missing_gate_evidence rule so workspace policy
+      // drives both phase3-gate and release-gate consistently. The
+      // cohort-scoped fix budget still uses state.release.max_fix_loops
+      // (default 3), separate from top-level state.max_fix_loops (default
+      // 10) per RFC §5.3.1.
+      const releaseGateRuleAction = resolveRuleAction(cwd, state, 'missing_gate_evidence');
+      const releaseEnforcementStrict = releaseGateRuleAction === 'block';
+      // Adapter: checkGateResults reads `state.gate_results`. Wrap the
+      // release subtree to reuse the structured-vs-legacy decision tree
+      // without duplicating logic across two gate paths.
+      const releaseGates = state.release?.gate_results || {};
+      const releaseResults = checkGateResults({ gate_results: releaseGates }, { strict: releaseEnforcementStrict });
+
+      if (releaseResults.allPassed) {
+        writeState(cwd, { current_phase: 'release-finalize' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] release-gate(${cohort}): scoped Hard 1/2/3 passed (source=${releaseResults.source}). Transitioning to release-finalize.`
+        }));
+        break;
+      }
+
+      if (releaseResults.anyFailed) {
+        const existingRelease = state.release || {};
+        const currentReleaseFix = typeof existingRelease.fix_loop_count === 'number'
+          ? existingRelease.fix_loop_count
+          : 0;
+        const releaseMax = typeof existingRelease.max_fix_loops === 'number'
+          ? existingRelease.max_fix_loops
+          : 3;
+        // Avoid runaway increment when already pinned at threshold —
+        // repeated Stop ticks would otherwise grow the counter past the
+        // cap (cosmetic but noisy in /mpl-status).
+        const nextReleaseFix = currentReleaseFix >= releaseMax
+          ? currentReleaseFix
+          : currentReleaseFix + 1;
+        const willCircuitBreak = nextReleaseFix >= releaseMax;
+
+        if (willCircuitBreak) {
+          // Pin cohort, stay at release-gate. Only write when the count
+          // actually changed (skip writeState noise on repeat pinned ticks).
+          if (nextReleaseFix !== currentReleaseFix) {
+            writeState(cwd, {
+              release: { ...existingRelease, fix_loop_count: nextReleaseFix },
+            });
+          }
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `[MPL] ⛔ release-gate(${cohort}) circuit-break: release-scoped fix loop ${nextReleaseFix}/${releaseMax} (RFC §5.3.1). ` +
+              `Gate results: H1=${releaseResults.details.hard1}, H2=${releaseResults.details.hard2}, H3=${releaseResults.details.hard3}. ` +
+              `Cohort pinned. User intervention required: fix the failing tasks and reset state.release.fix_loop_count via mpl_state_write, ` +
+              `OR remove the cohort from goal-contract.yaml mvp_scope to abort the release path.`
+          }));
+          break;
+        }
+
+        // Budget remaining → route back to phase2-sprint. Reset scoped
+        // evidence on retry so mpl-gate-recorder writes fresh exits on
+        // the next attempt (same pattern as phase3-gate FAIL path).
+        writeState(cwd, {
+          current_phase: 'phase2-sprint',
+          release: {
+            ...existingRelease,
+            fix_loop_count: nextReleaseFix,
+            gate_results: {
+              hard1_passed: null, hard2_passed: null, hard3_passed: null,
+              hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+            },
+          },
+        });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] release-gate(${cohort}) FAILED (source=${releaseResults.source}). ` +
+            `H1=${releaseResults.details.hard1}, H2=${releaseResults.details.hard2}, H3=${releaseResults.details.hard3}. ` +
+            `Scoped fix loop ${nextReleaseFix}/${releaseMax}. Returning to phase2-sprint; cohort "${cohort}" preserved. ` +
+            `Fix the failing tasks, then re-run scoped Hard 1/2/3 — mpl-gate-recorder will repopulate state.release.gate_results.`
+        }));
+        break;
+      }
+
+      // MISSING (zero or partial structured evidence). No transition;
+      // surface guidance and let the orchestrator produce evidence. Strict
+      // mode hard-blocks the wording; non-strict frames as "in progress".
+      const missing = releaseResults.missingEvidence;
+      const missingLabel = missing.length ? missing.join(', ') : 'all three (none recorded yet)';
+      const verb = releaseEnforcementStrict ? '⛔ BLOCKED' : 'in progress';
+      const tail = releaseEnforcementStrict
+        ? 'Strict enforcement requires all 3 scoped gates to be recorded by mpl-gate-recorder via real Bash exit codes. Self-reported booleans are not accepted.'
+        : `Run the missing scoped gates so mpl-gate-recorder writes structured evidence into state.release.gate_results; the loop will continue once all 3 are recorded.`;
       console.log(JSON.stringify({
         continue: true,
-        stopReason: `[MPL] release-gate(${cohort}): scoped Hard 1/2/3 execution lands in Phase 1.6c. ` +
-          `Stub passes through to release-finalize.`
+        stopReason: `[MPL] release-gate(${cohort}) ${verb}: missing scoped Hard 1/2/3 evidence (${missingLabel}). ${tail}`
       }));
       break;
     }
