@@ -760,22 +760,52 @@ async function main() {
         break;
       }
 
-      // Phase 1.6c-iii: create snapshot ref BEFORE writing the manifest so
-      // commit_sha / tree_sha / snapshot_ref can be recorded. RFC §5.4.1:
-      // "at the start of release-finalize(cut_id), before any artifact-
-      // creation attempt". A snapshot-ref failure is a soft failure — the
-      // manifest is still written (with placeholders) and the failure is
-      // recorded in `artifact_creation_failed.snapshot` so the user has
-      // an actionable record. The lifecycle still advances because RFC
-      // §5.4 explicitly tolerates artifact creation depending on tools
-      // out of MPL's control.
+      // Phase 1.6c-iii: snapshot ref creation MUST succeed before any
+      // file is written or the cohort is marked released. RFC §5.4 §232
+      // explicitly requires "gate PASS + release-manifest write + snapshot
+      // ref creation all succeed" before appending completed_cut_ids;
+      // the snapshot ref is the immutability anchor (the commit that the
+      // shipped manifest claims to pin). PR #188 codex review: prior
+      // implementation flipped through to release on snapshot failure
+      // with null commit_sha/tree_sha/snapshot_ref, which would let
+      // D-Q6 immutability turn on for a manifest that pins nothing.
       const snapshot = createSnapshotRef(cwd, cur);
-      if (snapshot.ok) {
-        manifest.commit_sha = snapshot.commit_sha;
-        manifest.tree_sha = snapshot.tree_sha;
-        manifest.snapshot_ref = snapshot.snapshot_ref;
-      } else {
-        manifest.artifact_creation_failed = { type: 'snapshot_ref', reason: snapshot.reason };
+      if (!snapshot.ok) {
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ release-finalize(${cur}): snapshot ref creation failed (${snapshot.reason}). ` +
+            `Cohort NOT appended to completed_cut_ids per RFC §5.4 (snapshot ref is the immutability anchor). ` +
+            `Resolve the underlying git issue (e.g., not a git repo, detached HEAD) and let the loop retry.`
+        }));
+        break;
+      }
+      manifest.commit_sha = snapshot.commit_sha;
+      manifest.tree_sha = snapshot.tree_sha;
+      manifest.snapshot_ref = snapshot.snapshot_ref;
+
+      // Phase 1.6c-iii: attempt user-visible artifact (tag / branch /
+      // draft_pr) BEFORE writing the manifest so the failure result is
+      // captured in the single canonical manifest write — no re-write,
+      // no disk ↔ stopReason divergence (PR #188 claude review #2).
+      // The attempt is best-effort per RFC §5.4: failures are recorded
+      // in the manifest (artifact_creation_failed) and surfaced to the
+      // user, but they do NOT block `completed_cut_ids` append because
+      // artifact creation depends on external tools (gh CLI, remote
+      // permissions) that are out of MPL's control. Snapshot ref is
+      // distinct from this — it's the immutability anchor and was
+      // already enforced above.
+      let artifactAttempt = null;
+      if (manifest.artifact && manifest.artifact !== 'release_manifest') {
+        artifactAttempt = attemptArtifactCreation({
+          cwd,
+          cutId: cur,
+          artifact: manifest.artifact,
+          commitSha: snapshot.commit_sha,
+          snapshotRef: snapshot.snapshot_ref,
+        });
+        if (artifactAttempt.artifact_creation_failed) {
+          manifest.artifact_creation_failed = artifactAttempt.artifact_creation_failed;
+        }
       }
 
       const evidence = buildEvidenceSummary({ cutId: cur, state, contract, graph, now: writtenAt });
@@ -823,43 +853,6 @@ async function main() {
         break;
       }
 
-      // Phase 1.6c-iii: attempt user-visible artifact (tag / branch /
-      // draft_pr) after manifest write succeeded. Only run when snapshot
-      // ref creation succeeded — without commit_sha we cannot point an
-      // artifact at the cut's terminal commit. The attempt is best-
-      // effort per RFC §5.4: failures are recorded in the manifest
-      // (artifact_creation_failed) and surfaced to the user, but they do
-      // NOT block `completed_cut_ids` append because artifact creation
-      // depends on external tools (gh CLI, remote permissions) that are
-      // out of MPL's control.
-      let artifactAttempt = null;
-      if (snapshot.ok && manifest.artifact && manifest.artifact !== 'release_manifest') {
-        artifactAttempt = attemptArtifactCreation({
-          cwd,
-          cutId: cur,
-          artifact: manifest.artifact,
-          commitSha: snapshot.commit_sha,
-          snapshotRef: snapshot.snapshot_ref,
-        });
-        if (artifactAttempt.artifact_creation_failed) {
-          // Re-write the manifest with the failure recorded so the
-          // shipped record matches the actual outcome.
-          manifest.artifact_creation_failed = artifactAttempt.artifact_creation_failed;
-          try {
-            atomicWriteFile(
-              manifestPath,
-              JSON.stringify(manifest, null, 2) + '\n',
-              0o644
-            );
-          } catch {
-            // Manifest re-write failure is itself non-fatal — the
-            // original manifest (with artifact_creation_failed=null) is
-            // already on disk; the lifecycle should still advance to
-            // honor the "best-effort post-step" contract.
-          }
-        }
-      }
-
       const existing = state.release || {};
       const already = Array.isArray(existing.completed_cut_ids) ? existing.completed_cut_ids : [];
       const completed = already.includes(cur) ? already : [...already, cur];
@@ -881,18 +874,21 @@ async function main() {
         },
         current_phase: nextPhase,
       });
-      // Build a status-aware tail so users immediately see whether the
-      // snapshot/artifact step succeeded or fell back.
-      const snapshotTail = snapshot.ok
-        ? `snapshot ${snapshot.snapshot_ref} @ ${snapshot.commit_sha.slice(0, 12)}`
-        : `⚠ snapshot ref FAILED (${snapshot.reason}) — artifact_creation_failed recorded`;
+      // Build a status-aware tail so users immediately see snapshot +
+      // artifact outcome at the single Stop hook surface. Snapshot is
+      // always ok here (failure path bails earlier); push may be soft-
+      // failed so surface that explicitly.
+      const snapshotTail = snapshot.pushed
+        ? `snapshot ${snapshot.snapshot_ref} @ ${snapshot.commit_sha.slice(0, 12)} (pushed)`
+        : `snapshot ${snapshot.snapshot_ref} @ ${snapshot.commit_sha.slice(0, 12)} (local only, push: ${snapshot.push_reason})`;
       const artifactTail = (() => {
         if (!manifest.artifact || manifest.artifact === 'release_manifest') return 'artifact=release_manifest (no external push)';
-        if (!artifactAttempt) return `artifact=${manifest.artifact} skipped (snapshot ref failed)`;
+        if (!artifactAttempt) return `artifact=${manifest.artifact} skipped`;
         if (artifactAttempt.artifact_creation_failed) {
           return `⚠ artifact=${manifest.artifact} FAILED (${artifactAttempt.artifact_creation_failed.reason})`;
         }
-        return `artifact=${manifest.artifact} created`;
+        const noopSuffix = artifactAttempt.result?.noop ? ' (noop — already at this commit)' : '';
+        return `artifact=${manifest.artifact} created${noopSuffix}`;
       })();
       console.log(JSON.stringify({
         continue: true,

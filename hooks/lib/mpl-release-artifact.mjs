@@ -42,9 +42,27 @@ import { execFileSync } from 'child_process';
  * fine because release-finalize re-entry should re-pin the snapshot to
  * the latest cohort tip.
  *
+ * **HEAD-drift caveat (PR #188 claude review #4)**: the caller is
+ * responsible for ensuring HEAD is at the cohort's terminal commit when
+ * this helper is invoked. Stage A's release-gate → release-finalize is
+ * a tight loop in the normal flow, but if the user makes unrelated
+ * commits between release-gate PASS and release-finalize firing the
+ * snapshot pins those instead of the cohort tip. Stage B will likely
+ * need an explicit "release-finalize must run on the cohort tip"
+ * invariant; until then this is a contract on the caller.
+ *
+ * **Push (PR #188 claude review #3)**: after local ref creation succeeds,
+ * the helper best-effort pushes `snapshot_ref` to `origin` so downstream
+ * consumers (CI, mpl-status, fresh clones) can verify the manifest's
+ * `commit_sha` against the canonical remote pin. Push failure is
+ * non-fatal — the local ref remains the canonical record. The result
+ * object's `pushed` boolean + `push_reason` (set when push fails)
+ * surface this to the caller; lifecycle decisions do NOT depend on
+ * push success.
+ *
  * @param {string} cwd
  * @param {string} cutId
- * @returns {{ok: true, commit_sha: string, tree_sha: string, snapshot_ref: string} | {ok: false, reason: string}}
+ * @returns {{ok: true, commit_sha: string, tree_sha: string, snapshot_ref: string, pushed: boolean, push_reason: string|null} | {ok: false, reason: string}}
  */
 export function createSnapshotRef(cwd, cutId) {
   if (typeof cutId !== 'string' || !cutId) {
@@ -61,9 +79,33 @@ export function createSnapshotRef(cwd, cutId) {
       return { ok: false, reason: `git rev-parse HEAD^{tree} returned unexpected output: ${tree_sha.slice(0, 80)}` };
     }
     git(cwd, ['update-ref', snapshot_ref, commit_sha]);
-    return { ok: true, commit_sha, tree_sha, snapshot_ref };
+    const pushResult = tryPushRef(cwd, snapshot_ref);
+    return {
+      ok: true,
+      commit_sha,
+      tree_sha,
+      snapshot_ref,
+      pushed: pushResult.pushed,
+      push_reason: pushResult.ok ? null : pushResult.reason,
+    };
   } catch (err) {
     return { ok: false, reason: stringifyError(err) };
+  }
+}
+
+/**
+ * Look up the commit a ref currently points at, or `null` if absent /
+ * unreadable. Used by tag/branch creators to make the operation
+ * idempotent (PR #188 claude review #1): if the ref already exists at
+ * the requested commit, treat as no-op rather than failing with "tag
+ * already exists".
+ */
+function refExists(cwd, ref) {
+  try {
+    const sha = git(cwd, ['rev-parse', '--verify', ref]).trim();
+    return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    return null;
   }
 }
 
@@ -84,12 +126,34 @@ export function createArtifactTag(cwd, cutId, commitSha) {
     return { ok: false, reason: 'commitSha must be a 40-char hex string' };
   }
   const tag = `mpl-release-${cutId}`;
+  const tagRef = `refs/tags/${tag}`;
+  // Idempotent re-creation (PR #188 claude review #1): if the tag already
+  // exists at the same commit, treat the local step as a no-op and still
+  // attempt push (a push of an already-pushed ref is also a no-op). If it
+  // exists at a DIFFERENT commit, refuse — overwriting a shipped tag
+  // would silently change an external claim (the whole point of §5.4.1
+  // immutability).
+  const existing = refExists(cwd, tagRef);
+  if (existing === commitSha) {
+    const pushResult = tryPushRef(cwd, tagRef);
+    if (!pushResult.ok) {
+      return { ok: false, reason: `tag exists locally at same commit but push failed: ${pushResult.reason}`, tag, noop: true };
+    }
+    return { ok: true, tag, pushed: pushResult.pushed, noop: true };
+  }
+  if (existing && existing !== commitSha) {
+    return {
+      ok: false,
+      reason: `tag ${tag} already exists at different commit ${existing.slice(0, 12)} — refusing to overwrite a shipped release tag. Delete the stale tag (git tag -d ${tag}) and retry if intentional.`,
+      tag,
+    };
+  }
   try {
     git(cwd, ['tag', tag, commitSha]);
   } catch (err) {
     return { ok: false, reason: `git tag failed: ${stringifyError(err)}`, tag };
   }
-  const pushResult = tryPushRef(cwd, `refs/tags/${tag}`);
+  const pushResult = tryPushRef(cwd, tagRef);
   if (!pushResult.ok) {
     return { ok: false, reason: `tag created locally but push failed: ${pushResult.reason}`, tag };
   }
@@ -110,12 +174,30 @@ export function createArtifactBranch(cwd, cutId, commitSha) {
     return { ok: false, reason: 'commitSha must be a 40-char hex string' };
   }
   const branch = `mpl/release/${cutId}`;
+  const branchRef = `refs/heads/${branch}`;
+  // Same idempotency semantics as createArtifactTag (PR #188 claude #1):
+  // existing-at-same-sha = noop, existing-at-different-sha = refuse.
+  const existing = refExists(cwd, branchRef);
+  if (existing === commitSha) {
+    const pushResult = tryPushRef(cwd, branchRef);
+    if (!pushResult.ok) {
+      return { ok: false, reason: `branch exists locally at same commit but push failed: ${pushResult.reason}`, branch, noop: true };
+    }
+    return { ok: true, branch, pushed: pushResult.pushed, noop: true };
+  }
+  if (existing && existing !== commitSha) {
+    return {
+      ok: false,
+      reason: `branch ${branch} already exists at different commit ${existing.slice(0, 12)} — refusing to overwrite. Delete the stale branch (git branch -D ${branch}) and retry if intentional.`,
+      branch,
+    };
+  }
   try {
     git(cwd, ['branch', branch, commitSha]);
   } catch (err) {
     return { ok: false, reason: `git branch failed: ${stringifyError(err)}`, branch };
   }
-  const pushResult = tryPushRef(cwd, `refs/heads/${branch}`);
+  const pushResult = tryPushRef(cwd, branchRef);
   if (!pushResult.ok) {
     return { ok: false, reason: `branch created locally but push failed: ${pushResult.reason}`, branch };
   }
@@ -200,6 +282,18 @@ export function attemptArtifactCreation(opts) {
       return {
         result: branchResult,
         artifact_creation_failed: { type: 'draft_pr', reason: `branch prerequisite failed: ${branchResult.reason}` },
+      };
+    }
+    // Idempotency (PR #188 claude #1): when the branch step is a noop
+    // (release-finalize re-entry on the same commit), assume the PR
+    // from the prior run is still open and skip `gh pr create`. Re-
+    // running `gh pr create` against an existing PR would fail with
+    // "a pull request already exists" — that's a spurious surface, not
+    // a real artifact failure.
+    if (branchResult.noop) {
+      return {
+        result: { ok: true, branch: branchResult.branch, noop: true, pr_skipped: 'branch noop — assumed PR from prior run still open' },
+        artifact_creation_failed: null,
       };
     }
     const prResult = createArtifactDraftPr(cwd, cutId, branchResult.branch, snapshotRef);

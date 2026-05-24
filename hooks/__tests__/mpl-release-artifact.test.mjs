@@ -81,6 +81,34 @@ describe('createSnapshotRef', () => {
     assert.equal(createSnapshotRef(tmpDir, null).ok, false);
     assert.equal(createSnapshotRef(tmpDir, undefined).ok, false);
   });
+
+  // PR #188 claude review #3: snapshot ref push surface.
+  it('surfaces pushed:false + push_reason when no `origin` remote is configured', () => {
+    initGitRepo(tmpDir);
+    const r = createSnapshotRef(tmpDir, 'mvp');
+    assert.equal(r.ok, true);
+    assert.equal(r.pushed, false);
+    assert.match(r.push_reason, /no .?origin.? remote configured/);
+  });
+
+  it('surfaces pushed:true when origin (bare remote) is configured', () => {
+    initGitRepo(tmpDir);
+    // Wire a bare remote so the push succeeds.
+    const remoteDir = mkdtempSync(join(tmpdir(), 'mpl-art-bare-'));
+    try {
+      git(remoteDir, ['init', '--bare']);
+      git(tmpDir, ['remote', 'add', 'origin', remoteDir]);
+      const r = createSnapshotRef(tmpDir, 'mvp');
+      assert.equal(r.ok, true);
+      assert.equal(r.pushed, true);
+      assert.equal(r.push_reason, null);
+      // Remote actually carries the ref.
+      const remoteSha = git(remoteDir, ['rev-parse', 'refs/mpl/releases/mvp']).trim();
+      assert.equal(remoteSha, r.commit_sha);
+    } finally {
+      rmSync(remoteDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createArtifactTag', () => {
@@ -107,6 +135,57 @@ describe('createArtifactTag', () => {
     assert.equal(createArtifactTag(tmpDir, 'mvp', 'not-a-sha').ok, false);
     assert.equal(createArtifactTag(tmpDir, 'mvp', '').ok, false);
   });
+
+  // PR #188 claude review #1: idempotent re-creation.
+  it('idempotent re-run with same commit reports noop:true (no spurious "tag already exists")', () => {
+    initGitRepo(tmpDir);
+    const sha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+    const first = createArtifactTag(tmpDir, 'mvp', sha);
+    // First run still soft-fails on push (no remote) — that's expected.
+    assert.equal(first.ok, false);
+    assert.equal(first.tag, 'mpl-release-mvp');
+    // Second run: existing-at-same-sha → noop:true (no git tag invocation).
+    const second = createArtifactTag(tmpDir, 'mvp', sha);
+    assert.equal(second.noop, true);
+    assert.equal(second.tag, 'mpl-release-mvp');
+    assert.doesNotMatch(second.reason || '', /already exists/i,
+      'must NOT surface "tag already exists" — that was the pre-fix spurious failure');
+  });
+
+  it('refuses to overwrite an existing tag pointing at a different commit (release immutability)', () => {
+    initGitRepo(tmpDir);
+    const originalSha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+    createArtifactTag(tmpDir, 'mvp', originalSha);  // creates local tag
+    // Make a new commit so the next snapshot would point at a different SHA.
+    writeFileSync(join(tmpDir, 'second.md'), '# second\n');
+    git(tmpDir, ['add', 'second.md']);
+    git(tmpDir, ['commit', '-m', 'second']);
+    const newSha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+    assert.notEqual(newSha, originalSha);
+    const r = createArtifactTag(tmpDir, 'mvp', newSha);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /already exists at different commit/);
+    assert.match(r.reason, /refusing to overwrite/);
+  });
+
+  it('idempotent re-run succeeds (ok:true, noop:true) when origin remote is set up', () => {
+    initGitRepo(tmpDir);
+    const remoteDir = mkdtempSync(join(tmpdir(), 'mpl-art-bare-tag-'));
+    try {
+      git(remoteDir, ['init', '--bare']);
+      git(tmpDir, ['remote', 'add', 'origin', remoteDir]);
+      const sha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+      const first = createArtifactTag(tmpDir, 'mvp', sha);
+      assert.equal(first.ok, true);
+      assert.equal(first.pushed, true);
+      const second = createArtifactTag(tmpDir, 'mvp', sha);
+      assert.equal(second.ok, true);
+      assert.equal(second.noop, true);
+      assert.equal(second.pushed, true);
+    } finally {
+      rmSync(remoteDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createArtifactBranch', () => {
@@ -124,6 +203,30 @@ describe('createArtifactBranch', () => {
     // Local branch exists at the snapshot commit.
     const localRef = git(tmpDir, ['rev-parse', 'refs/heads/mpl/release/mvp']).trim();
     assert.equal(localRef, sha);
+  });
+
+  // PR #188 claude review #1: idempotent re-creation, symmetric with tag.
+  it('idempotent re-run with same commit reports noop:true', () => {
+    initGitRepo(tmpDir);
+    const sha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+    createArtifactBranch(tmpDir, 'mvp', sha);
+    const second = createArtifactBranch(tmpDir, 'mvp', sha);
+    assert.equal(second.noop, true);
+    assert.equal(second.branch, 'mpl/release/mvp');
+    assert.doesNotMatch(second.reason || '', /already exists/i);
+  });
+
+  it('refuses to overwrite an existing branch pointing at a different commit', () => {
+    initGitRepo(tmpDir);
+    const originalSha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+    createArtifactBranch(tmpDir, 'mvp', originalSha);
+    writeFileSync(join(tmpDir, 'second.md'), '# second\n');
+    git(tmpDir, ['add', 'second.md']);
+    git(tmpDir, ['commit', '-m', 'second']);
+    const newSha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+    const r = createArtifactBranch(tmpDir, 'mvp', newSha);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /already exists at different commit/);
   });
 });
 
@@ -197,6 +300,34 @@ describe('attemptArtifactCreation dispatch', () => {
     });
     assert.equal(r.artifact_creation_failed.type, 'rocket');
     assert.match(r.artifact_creation_failed.reason, /unsupported artifact type/);
+  });
+
+  // PR #188 claude review #1: draft_pr idempotency on re-run skips `gh pr create`
+  // so it cannot fail with "a pull request already exists".
+  it('draft_pr re-run with branch noop skips gh pr create (no spurious "already exists")', () => {
+    initGitRepo(tmpDir);
+    const remoteDir = mkdtempSync(join(tmpdir(), 'mpl-art-bare-pr-'));
+    try {
+      git(remoteDir, ['init', '--bare']);
+      git(tmpDir, ['remote', 'add', 'origin', remoteDir]);
+      const sha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+      // First attempt: create the branch via the helper. (Skip the actual
+      // PR creation by short-circuiting — we just need the local branch
+      // present so the second run's branch step is a noop.)
+      createArtifactBranch(tmpDir, 'mvp', sha);
+      // Second attempt via attemptArtifactCreation. Branch step is noop;
+      // attemptArtifactCreation should skip the gh pr create call.
+      const second = attemptArtifactCreation({
+        cwd: tmpDir, cutId: 'mvp', artifact: 'draft_pr',
+        commitSha: sha, snapshotRef: 'refs/mpl/releases/mvp',
+      });
+      assert.equal(second.artifact_creation_failed, null,
+        're-run with noop branch must not surface a draft_pr failure');
+      assert.equal(second.result.noop, true);
+      assert.match(second.result.pr_skipped, /branch noop/);
+    } finally {
+      rmSync(remoteDir, { recursive: true, force: true });
+    }
   });
 });
 
