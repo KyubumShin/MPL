@@ -23,8 +23,11 @@ const { loadConfig } = await import(
 const { readGoalContract, readBaselineGoalContractHash } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
 );
-const { parseDecompositionGoalTraceText, validateGoalTraceCoverage } = await import(
+const { parseDecompositionGoalTraceText, validateGoalTraceCoverage, validateMvpGoalTraceCoverage } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-trace.mjs')).href
+);
+const { parsePhaseContractGraphText } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-phase-contract-graph.mjs')).href
 );
 const { collectFileWrites, isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
@@ -93,6 +96,20 @@ async function main() {
     const decomposition = parseDecompositionGoalTraceText(text);
     const verdict = validateGoalTraceCoverage(decomposition, goal.contract);
     issues.push(...verdict.issues);
+
+    // Stage A RFC §4.2 (post-Stage-A audit fix #2): when goal_contract
+    // declares an MVP cohort, also enforce that the union of goal_trace
+    // over `graph.mvp.phases[]` covers every AC/AX in
+    // `goal_contract.mvp_scope`. The whole-pipeline validator above
+    // catches "no phase covers AC-N anywhere"; this catches "AC-N is
+    // covered by some non-MVP phase but no MVP phase, so the MVP cohort
+    // manifest would assert coverage it does not actually deliver".
+    // Skips silently when no mvp_scope is declared.
+    if (goal.contract?.mvp_scope) {
+      const graph = parsePhaseContractGraphText(text);
+      const mvpVerdict = validateMvpGoalTraceCoverage(decomposition, goal.contract, graph);
+      issues.push(...mvpVerdict.issues);
+    }
   }
 
   if (issues.length > 0) {
@@ -100,7 +117,8 @@ async function main() {
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
     block(
       `[MPL Goal Trace] decomposition.yaml does not cover the frozen Goal Contract: ${shown}${more}. ` +
-        `Each phase needs goal_trace and the graph must cover every AC/AX from .mpl/goal-contract.yaml.`
+        `Each phase needs goal_trace and the graph must cover every AC/AX from .mpl/goal-contract.yaml ` +
+        `(including the MVP subset when mvp_scope is declared).`
     );
     return;
   }
