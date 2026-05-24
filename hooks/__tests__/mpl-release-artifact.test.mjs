@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -302,30 +302,108 @@ describe('attemptArtifactCreation dispatch', () => {
     assert.match(r.artifact_creation_failed.reason, /unsupported artifact type/);
   });
 
-  // PR #188 claude review #1: draft_pr idempotency on re-run skips `gh pr create`
-  // so it cannot fail with "a pull request already exists".
-  it('draft_pr re-run with branch noop skips gh pr create (no spurious "already exists")', () => {
+  // PR #188 claude review #1 + codex round-2: draft_pr idempotency must
+  // VERIFY the PR exists (via gh pr list) before skipping creation. A
+  // branch noop alone is not evidence the PR was actually created.
+  it('draft_pr re-run with existing open PR (verified via gh pr list) reports noop', () => {
     initGitRepo(tmpDir);
     const remoteDir = mkdtempSync(join(tmpdir(), 'mpl-art-bare-pr-'));
+    const stubDir = mkdtempSync(join(tmpdir(), 'mpl-art-pr-stub-noop-'));
+    const pathBackup = process.env.PATH;
     try {
       git(remoteDir, ['init', '--bare']);
       git(tmpDir, ['remote', 'add', 'origin', remoteDir]);
       const sha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
-      // First attempt: create the branch via the helper. (Skip the actual
-      // PR creation by short-circuiting — we just need the local branch
-      // present so the second run's branch step is a noop.)
+      // Fake gh: `gh pr list` returns a canned PR URL; `gh pr create`
+      // would fail if invoked (which it shouldn't be on this path).
+      const ghPath = join(stubDir, 'gh');
+      writeFileSync(ghPath,
+        '#!/bin/sh\n' +
+        'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then\n' +
+        '  echo "https://github.com/example/repo/pull/99"\n' +
+        '  exit 0\n' +
+        'fi\n' +
+        'echo "stub should not run gh pr create on noop path" >&2\n' +
+        'exit 99\n'
+      );
+      chmodSync(ghPath, 0o755);
+      process.env.PATH = `${stubDir}:${pathBackup}`;
+
+      // Seed the local branch so the branch step is a noop.
       createArtifactBranch(tmpDir, 'mvp', sha);
-      // Second attempt via attemptArtifactCreation. Branch step is noop;
-      // attemptArtifactCreation should skip the gh pr create call.
-      const second = attemptArtifactCreation({
+
+      const r = attemptArtifactCreation({
         cwd: tmpDir, cutId: 'mvp', artifact: 'draft_pr',
         commitSha: sha, snapshotRef: 'refs/mpl/releases/mvp',
       });
-      assert.equal(second.artifact_creation_failed, null,
-        're-run with noop branch must not surface a draft_pr failure');
-      assert.equal(second.result.noop, true);
-      assert.match(second.result.pr_skipped, /branch noop/);
+      assert.equal(r.artifact_creation_failed, null,
+        'gh pr list confirmed existing PR; no failure should surface');
+      assert.equal(r.result.noop, true);
+      assert.equal(r.result.pr_url, 'https://github.com/example/repo/pull/99');
+      assert.match(r.result.pr_skipped, /existing open PR found via gh pr list/);
     } finally {
+      process.env.PATH = pathBackup;
+      rmSync(stubDir, { recursive: true, force: true });
+      rmSync(remoteDir, { recursive: true, force: true });
+    }
+  });
+
+  it('draft_pr re-run after prior gh-create failure actually re-invokes gh pr create (codex round-2 regression)', () => {
+    // Codex round-2 reproducer: first run pushed branch but failed at
+    // `gh pr create` (gh missing / auth / API). Second run must NOT
+    // assume the PR exists from the branch noop — it must verify via
+    // gh pr list (returns empty) and then actually call gh pr create.
+    // This test simulates the SECOND run only — we just need to prove
+    // that on a branch-noop + gh-pr-list-returns-empty path, gh pr
+    // create IS invoked.
+    initGitRepo(tmpDir);
+    const remoteDir = mkdtempSync(join(tmpdir(), 'mpl-art-bare-pr-codex-'));
+    const stubDir = mkdtempSync(join(tmpdir(), 'mpl-art-pr-stub-codex-'));
+    const callLog = join(stubDir, 'call.log');
+    const pathBackup = process.env.PATH;
+    try {
+      git(remoteDir, ['init', '--bare']);
+      git(tmpDir, ['remote', 'add', 'origin', remoteDir]);
+      const sha = git(tmpDir, ['rev-parse', 'HEAD']).trim();
+
+      // Fake gh: `gh pr list` returns empty (no existing PR), `gh pr
+      // create` returns a fresh URL + logs the call so we can prove it
+      // actually ran.
+      const ghPath = join(stubDir, 'gh');
+      writeFileSync(ghPath,
+        '#!/bin/sh\n' +
+        `echo "$@" >> ${callLog}\n` +
+        'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then\n' +
+        '  exit 0\n' +
+        'fi\n' +
+        'if [ "$1" = "pr" ] && [ "$2" = "create" ]; then\n' +
+        '  echo "https://github.com/example/repo/pull/200"\n' +
+        '  exit 0\n' +
+        'fi\n' +
+        'exit 1\n'
+      );
+      chmodSync(ghPath, 0o755);
+      process.env.PATH = `${stubDir}:${pathBackup}`;
+
+      // Seed the local branch (representing the prior run's successful
+      // branch push); PR was never created in that prior run.
+      createArtifactBranch(tmpDir, 'mvp', sha);
+
+      const r = attemptArtifactCreation({
+        cwd: tmpDir, cutId: 'mvp', artifact: 'draft_pr',
+        commitSha: sha, snapshotRef: 'refs/mpl/releases/mvp',
+      });
+      // PR creation should succeed on this re-run.
+      assert.equal(r.artifact_creation_failed, null);
+      assert.equal(r.result.pr_url, 'https://github.com/example/repo/pull/200');
+      // Critical check: gh pr create WAS actually invoked. The pre-fix
+      // would have short-circuited on branch noop and never called gh,
+      // leaving the false-positive idempotent success.
+      const log = readFileSync(callLog, 'utf-8');
+      assert.match(log, /pr create/, 'gh pr create must have actually run');
+    } finally {
+      process.env.PATH = pathBackup;
+      rmSync(stubDir, { recursive: true, force: true });
       rmSync(remoteDir, { recursive: true, force: true });
     }
   });

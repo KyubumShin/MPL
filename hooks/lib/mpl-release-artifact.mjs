@@ -205,6 +205,37 @@ export function createArtifactBranch(cwd, cutId, commitSha) {
 }
 
 /**
+ * Look up an existing open PR for the given branch via
+ * `gh pr list --head <branch> --state open`. Returns the PR url if
+ * found, `null` if none, or `null` on any gh failure (caller can then
+ * decide whether to attempt creation). Pure observation — never throws,
+ * never mutates remote state.
+ *
+ * PR #188 round-2 codex review: a `branch` step being a noop ("the
+ * release branch already exists at the same commit") is NOT evidence
+ * that the draft PR was actually created in a prior run — branch push
+ * could have succeeded while `gh pr create` failed (missing gh, auth
+ * failure, API rate limit). Re-running release-finalize must verify
+ * the PR's actual existence before claiming idempotent success.
+ */
+export function findExistingDraftPr(cwd, branchName) {
+  if (typeof branchName !== 'string' || !branchName) return null;
+  try {
+    const out = execFileSync('gh', [
+      'pr', 'list',
+      '--head', branchName,
+      '--state', 'open',
+      '--json', 'url',
+      '--jq', '.[0].url // empty',
+    ], { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const url = out.trim();
+    return url && /^https?:\/\//.test(url) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a draft PR via `gh pr create --draft`. Requires the release
  * branch to already exist on the remote. The PR body links the snapshot
  * ref and includes the canonical "do not push to this branch" warning
@@ -284,15 +315,24 @@ export function attemptArtifactCreation(opts) {
         artifact_creation_failed: { type: 'draft_pr', reason: `branch prerequisite failed: ${branchResult.reason}` },
       };
     }
-    // Idempotency (PR #188 claude #1): when the branch step is a noop
-    // (release-finalize re-entry on the same commit), assume the PR
-    // from the prior run is still open and skip `gh pr create`. Re-
-    // running `gh pr create` against an existing PR would fail with
-    // "a pull request already exists" — that's a spurious surface, not
-    // a real artifact failure.
-    if (branchResult.noop) {
+    // Idempotency with verification (PR #188 claude #1 + codex round-2):
+    // a branch noop is NOT evidence that the PR exists. Verify via
+    // `gh pr list --head <branch>` first. If a PR is found → idempotent
+    // success (noop). If none found → retry `gh pr create` regardless
+    // of whether the branch step was a noop. This catches the case
+    // where the first run pushed the branch but failed at `gh pr create`
+    // (missing gh, auth failure, API rate limit) — the second run
+    // actually creates the PR instead of falsely reporting success.
+    const existingUrl = findExistingDraftPr(cwd, branchResult.branch);
+    if (existingUrl) {
       return {
-        result: { ok: true, branch: branchResult.branch, noop: true, pr_skipped: 'branch noop — assumed PR from prior run still open' },
+        result: {
+          ok: true,
+          branch: branchResult.branch,
+          pr_url: existingUrl,
+          noop: true,
+          pr_skipped: 'existing open PR found via gh pr list',
+        },
         artifact_creation_failed: null,
       };
     }
