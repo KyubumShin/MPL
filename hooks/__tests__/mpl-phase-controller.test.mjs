@@ -519,6 +519,100 @@ describe('G4 hang detection (#109) Stop hook integration', () => {
     assert.strictEqual(state.session_status, 'verification_hang');
   });
 
+  it('D-Q7: blocks small-plan entry when goal_contract.mvp_scope is declared', () => {
+    // RFC §10 D-Q7: small-pipeline and mvp_scope are mutually exclusive.
+    // When the contract declares an MVP, small-plan must refuse to enter
+    // rather than silently downgrading away from the Stage A release path.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    // Minimal valid contract with mvp_scope.
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [AC-1]
+  variation_axes: [AX-1]
+  artifact: draft_pr
+`);
+    const out = runStopHook(tmpDir, { current_phase: 'small-plan' });
+    assert.strictEqual(out.continue, false);
+    assert.strictEqual(out.decision, 'block');
+    assert.match(out.reason, /small-pipeline is not available when goal_contract\.mvp_scope is declared/);
+  });
+
+  it('D-Q7: allows small-plan entry when goal_contract.mvp_scope is absent', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    // No goal-contract file → mvp_scope is absent → small-plan must proceed.
+    const out = runStopHook(tmpDir, { current_phase: 'small-plan' });
+    assert.strictEqual(out.continue, true);
+    assert.match(out.stopReason, /Small Plan in progress/);
+  });
+
+  it('D-Q7: allows small-plan when goal_contract exists but mvp_scope is absent (transitional case)', () => {
+    // Most projects during Stage A rollout have a goal-contract.yaml from
+    // prior runs but never declared mvp_scope. The guard's optional-chain
+    // (`gc.contract?.mvp_scope`) must yield undefined → falsy → no block.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+`);
+    const out = runStopHook(tmpDir, { current_phase: 'small-plan' });
+    assert.strictEqual(out.continue, true);
+    assert.match(out.stopReason, /Small Plan in progress/);
+  });
+
   it('blocked_hook pre-mark on phase2 complete → blocks Phase 3 transition', () => {
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
     writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `

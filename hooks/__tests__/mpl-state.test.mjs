@@ -622,3 +622,93 @@ describe('P2-6 drift detection', () => {
     assert.deepStrictEqual(r.details, []);
   });
 });
+
+describe('Stage A release-path state (Phase 1.6a)', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-state-release-')); });
+  afterEach(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  it('initState seeds the release subtree with defaults', () => {
+    initState(tmpDir, 'release-test-feature');
+    const state = readState(tmpDir);
+    assert.ok(state.release, 'release subtree must exist on init');
+    assert.strictEqual(state.release.current_cut_id, null);
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.strictEqual(state.release.fix_loop_count, 0);
+    assert.strictEqual(state.release.pending_artifact, null);
+  });
+
+  it('writeState accepts release-gate and release-finalize as valid phases (no warning)', () => {
+    initState(tmpDir, 'release-test-feature');
+    // Capture console.error to ensure no VALID_PHASES warning is emitted.
+    const captured = [];
+    const originalError = console.error;
+    console.error = (...args) => { captured.push(args.join(' ')); };
+    try {
+      writeState(tmpDir, { current_phase: 'release-gate' });
+      writeState(tmpDir, { current_phase: 'release-finalize' });
+    } finally {
+      console.error = originalError;
+    }
+    const warnings = captured.filter((m) => m.includes('Unrecognized current_phase'));
+    assert.deepStrictEqual(
+      warnings,
+      [],
+      `release-gate / release-finalize must be in VALID_PHASES; got warnings: ${warnings.join(' || ')}`,
+    );
+  });
+
+  it('v4 → v5 migration: legacy state.json without release subtree is backfilled on read', () => {
+    // Codex high-severity catch on PR #184: adding state.release to
+    // DEFAULT_STATE alone doesn't backfill existing v4 state.json. The v4→v5
+    // migration must fill release defaults when the field is absent.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: 4,
+      current_phase: 'phase2-sprint',
+      pipeline_id: 'legacy-pipeline-v4',
+    }));
+    const state = readState(tmpDir);
+    assert.strictEqual(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.ok(state.release, 'release subtree must be backfilled on legacy state read');
+    assert.strictEqual(state.release.current_cut_id, null);
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.strictEqual(state.release.fix_loop_count, 0);
+    assert.strictEqual(state.release.pending_artifact, null);
+    // Existing fields preserved verbatim.
+    assert.strictEqual(state.current_phase, 'phase2-sprint');
+    assert.strictEqual(state.pipeline_id, 'legacy-pipeline-v4');
+  });
+
+  it('v4 → v5 migration: partial release subtree gets defaults filled, existing values preserved', () => {
+    // If a forward-port left a partial release object (e.g. only
+    // completed_cut_ids set), the migration must preserve that and fill
+    // the missing fields.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: 4,
+      current_phase: 'release-gate',
+      release: { completed_cut_ids: ['mvp'] },
+    }));
+    const state = readState(tmpDir);
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']); // preserved
+    assert.strictEqual(state.release.current_cut_id, null);            // backfilled
+    assert.strictEqual(state.release.fix_loop_count, 0);               // backfilled
+    assert.strictEqual(state.release.pending_artifact, null);          // backfilled
+  });
+
+  it('writeState preserves release subtree updates (deep merge)', () => {
+    initState(tmpDir, 'release-test-feature');
+    writeState(tmpDir, {
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: { type: 'draft_pr', target: 'pr-123' },
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.pending_artifact, { type: 'draft_pr', target: 'pr-123' });
+  });
+});
