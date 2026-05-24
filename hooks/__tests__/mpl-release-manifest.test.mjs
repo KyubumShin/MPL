@@ -81,6 +81,32 @@ describe('resolveCutDescriptor', () => {
     assert.equal(d, null);
   });
 
+  // PR #187 round-2 codex+claude High: empty-AC+AX guard symmetric with empty-phases.
+  it('returns null when BOTH mvp_scope.acceptance_criteria and variation_axes are empty arrays', () => {
+    // codex reproducer: `mvp_scope: { artifact: 'draft_pr' }` only — AC/AX
+    // never declared. Library-layer defense against callers bypassing
+    // readGoalContract's validator.
+    const contract = mvpContract({ ac: [], ax: [], artifact: 'draft_pr' });
+    const graph = mvpGraph({ phases: ['phase-1'], artifact: 'draft_pr' });
+    assert.equal(resolveCutDescriptor('mvp', contract, graph), null);
+  });
+
+  it('accepts mvp when ONLY acceptance_criteria is populated (variation_axes empty is fine)', () => {
+    // The validator's `acceptance_criteria_or_variation_axes` flag fires
+    // only when BOTH are empty. A contract with AC but no AX is valid.
+    const contract = mvpContract({ ac: ['AC-1'], ax: [], artifact: 'draft_pr' });
+    const d = resolveCutDescriptor('mvp', contract, mvpGraph());
+    assert.deepEqual(d.acceptance_criteria, ['AC-1']);
+    assert.deepEqual(d.variation_axes, []);
+  });
+
+  it('accepts mvp when ONLY variation_axes is populated (acceptance_criteria empty is fine)', () => {
+    const contract = mvpContract({ ac: [], ax: ['AX-1'], artifact: 'draft_pr' });
+    const d = resolveCutDescriptor('mvp', contract, mvpGraph());
+    assert.deepEqual(d.acceptance_criteria, []);
+    assert.deepEqual(d.variation_axes, ['AX-1']);
+  });
+
   it('returns null when extension cut phases array is empty (same empty-membership guard)', () => {
     const graph = {
       mvp: null,

@@ -1271,6 +1271,124 @@ release_cuts: []
     assert.match(out.stopReason, /cohort descriptor missing/);
   });
 
+  // PR #187 round-2 (codex + claude): bail on invalid goal-contract.
+  it('1.6c-ii (PR #187 round-2 codex+claude): release-finalize bails when contract.mvp_scope has neither AC nor AX (codex reproducer)', () => {
+    // Codex reproducer: `mvp_scope: { artifact: draft_pr }` only — the
+    // validator flags `mvp_scope.acceptance_criteria_or_variation_axes`
+    // so gcRead.valid=false. Pre-fix the handler ignored gcRead.valid
+    // and shipped a manifest with empty goal_trace, flipping D-Q6
+    // immutability for a cohort with no acceptance criteria.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  artifact: draft_pr
+`);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    // No advancement.
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /goal-contract is invalid/);
+    assert.match(out.stopReason, /mvp_scope\.acceptance_criteria_or_variation_axes/);
+    // No file written.
+    assert.equal(existsSync(join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp', 'release-manifest.json')), false);
+  });
+
+  it('1.6c-ii (PR #187 round-2 codex+claude): release-finalize bails when contract validator flags any structural failure (defense-in-depth)', () => {
+    // Any contract validity failure must block release-finalize — even
+    // unrelated-looking ones (e.g., unknown AC id) — because a broken
+    // contract at release-time means goal_trace cannot be trusted.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [AC-DOES-NOT-EXIST]
+  variation_axes: [AX-1]
+  artifact: draft_pr
+`);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /goal-contract is invalid/);
+  });
+
   it('1.6c-ii (PR #187 codex review): release-finalize refuses to advance when graph.mvp.phases is empty', () => {
     // Decomposer wrote `mvp:` block but `phases: []` (mechanical mapping
     // yielded no membership). Manifest would assert "released" with no

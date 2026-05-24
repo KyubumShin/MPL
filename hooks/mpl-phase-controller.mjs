@@ -690,7 +690,30 @@ async function main() {
       // required: contract supplies goal_trace (AC/AX), decomposition
       // supplies phases per cut. Missing either is an actionable error —
       // refuse to write a degraded manifest and stay at release-finalize.
+      //
+      // PR #187 round-2 codex+claude High: an INVALID contract (e.g.,
+      // `mvp_scope: { artifact: draft_pr }` with no AC/AX) was previously
+      // passed through because the handler only checked `gcRead.exists`.
+      // The validator already flags `mvp_scope.acceptance_criteria_or_variation_axes`
+      // and other structural failures; route any `!gcRead.valid` through
+      // the same bail mechanism so a degraded "released" manifest with
+      // empty goal_trace cannot flip D-Q6 immutability. Library-layer
+      // defense (resolveCutDescriptor rejecting empty AC+AX) is the
+      // backstop for callers that bypass `readGoalContract`.
       const gcRead = readGoalContract(cwd);
+      if (gcRead.exists && !gcRead.valid) {
+        const reasonList = Array.isArray(gcRead.missing) && gcRead.missing.length > 0
+          ? gcRead.missing.join(', ')
+          : '(no detail)';
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ release-finalize(${cur}): goal-contract is invalid (${reasonList}). ` +
+            `Cohort NOT appended to completed_cut_ids. Fix .mpl/goal-contract.yaml — the validator at ` +
+            `mpl-goal-contract.validateGoalContractText lists what is required. ` +
+            `Staying at release-finalize until resolved.`
+        }));
+        break;
+      }
       const contract = gcRead.exists ? gcRead.contract : null;
       let graph = null;
       try {

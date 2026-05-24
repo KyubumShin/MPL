@@ -59,6 +59,22 @@ export function resolveCutDescriptor(cutId, contract, graph) {
     // manifest would assert "this cut is released" while listing no
     // work — refuse.
     if (phases.length === 0) return null;
+    const acceptance = Array.isArray(mvpScope.acceptance_criteria)
+      ? [...mvpScope.acceptance_criteria]
+      : [];
+    const axes = Array.isArray(mvpScope.variation_axes)
+      ? [...mvpScope.variation_axes]
+      : [];
+    // Defense-in-depth (PR #187 round-2 codex + claude review): symmetric
+    // empty-membership guard for the goal_trace axis. The goal-contract
+    // validator already flags `mvp_scope.acceptance_criteria_or_variation_axes`
+    // when BOTH AC and AX are empty, but a caller that bypasses
+    // `readGoalContract` (hand-built contract object, contract drift mid-
+    // pipeline) would otherwise ship a manifest with empty `goal_trace` and
+    // flip D-Q6 immutability for a cohort with no acceptance criteria. The
+    // handler also gates on `gcRead.valid` upstream; this is the library-
+    // layer defense for callers that skip that gate.
+    if (acceptance.length === 0 && axes.length === 0) return null;
     return {
       phases,
       artifact:
@@ -68,12 +84,8 @@ export function resolveCutDescriptor(cutId, contract, graph) {
         // contract scope when the graph entry is missing (e.g., legacy
         // decomposition predates 1.2).
         mvpGraph.artifact ?? mvpScope.artifact ?? null,
-      acceptance_criteria: Array.isArray(mvpScope.acceptance_criteria)
-        ? [...mvpScope.acceptance_criteria]
-        : [],
-      variation_axes: Array.isArray(mvpScope.variation_axes)
-        ? [...mvpScope.variation_axes]
-        : [],
+      acceptance_criteria: acceptance,
+      variation_axes: axes,
     };
   }
 
