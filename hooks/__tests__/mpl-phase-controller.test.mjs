@@ -613,6 +613,152 @@ completion_evidence:
     assert.match(out.stopReason, /Small Plan in progress/);
   });
 
+  // ── Stage A Phase 1.6b: release-path state handlers + lifecycle writer ──
+
+  function writeGoalContractWithMvp(dir) {
+    writeFileSync(join(dir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [AC-1]
+  variation_axes: [AX-1]
+  artifact: draft_pr
+`);
+  }
+
+  it('1.6b: phase2-sprint lazy-initializes current_cut_id="mvp" when mvp_scope declared', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    // Sprint with no PLAN.md → just touches the lifecycle init, then exits
+    // with "no TODOs defined" message. We verify the init wrote current_cut_id.
+    runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      release: { current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+  });
+
+  it('1.6b: phase2-sprint without mvp_scope leaves current_cut_id null (backward compat)', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    // No goal-contract file → mvp_scope absent → no cohort init
+    runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      release: { current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.release.current_cut_id, null);
+  });
+
+  it('1.6b: phase2-sprint completion with current_cut_id=mvp routes to release-gate', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `### [x] Task 1\n### [x] Task 2\n`);
+    writeGoalContractWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(out.stopReason, /Transitioning to release-gate\(mvp\)/);
+  });
+
+  it('1.6b: phase2-sprint completion with current_cut_id=null routes to phase3-gate (existing behavior)', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `### [x] Task 1\n### [x] Task 2\n`);
+    // No goal-contract → init does not set cohort → current_cut_id stays null
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      release: { current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.match(out.stopReason, /Phase 3: Quality Gate/);
+  });
+
+  it('1.6b: release-gate stub passes through to release-finalize', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-gate',
+      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.match(out.stopReason, /release-gate\(mvp\).*Phase 1\.6c/);
+  });
+
+  it('1.6b: release-gate with no active cohort routes defensively to phase3-gate', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-gate',
+      release: { current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.match(out.stopReason, /no active cohort/);
+  });
+
+  it('1.6b: release-finalize appends current cohort to completed_cut_ids and clears current_cut_id', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
+    assert.strictEqual(state.release.current_cut_id, null);
+    assert.strictEqual(state.release.fix_loop_count, 0);
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.match(out.stopReason, /release-finalize\(mvp\).*whole-pipeline phase3-gate/);
+  });
+
+  it('1.6b: release-finalize is idempotent — re-entering with cohort already in completed_cut_ids does not double-append', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: { current_cut_id: 'mvp', completed_cut_ids: ['mvp'], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']); // not ['mvp', 'mvp']
+  });
+
+  it('1.6b: release-finalize with no active cohort routes defensively to phase3-gate', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: { current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.match(out.stopReason, /no active cohort/);
+  });
+
   it('blocked_hook pre-mark on phase2 complete → blocks Phase 3 transition', () => {
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
     writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `
