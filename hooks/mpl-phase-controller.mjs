@@ -221,7 +221,7 @@ async function main() {
     return;
   }
 
-  const state = readState(cwd);
+  let state = readState(cwd);
   if (!state) {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
@@ -404,6 +404,35 @@ async function main() {
       // v0.17 (#55): interview_depth guard removed. Phase 0 no longer has
       // light/full dual-track — Stage 1 always runs full depth.
 
+      // Stage A Phase 1.6b: lazy-initialize state.release.current_cut_id
+      // on first sprint entry when goal_contract.mvp_scope is declared.
+      // This is the single lifecycle write point per RFC §4.5: subsequent
+      // advancement happens at release-finalize exit. Without an mvp_scope,
+      // current_cut_id stays null and the release path is never entered
+      // (existing pipeline behavior preserved).
+      //
+      // RFC §4.5: "Never re-entered for the same cut_id within a single
+      // pipeline run." A cohort already in `completed_cut_ids` MUST NOT be
+      // re-set here, even if `current_cut_id` is null and the contract
+      // still carries `mvp_scope`. This guards the phase3-gate → phase4-fix
+      // → recompose → phase2-sprint loop from spuriously re-running the
+      // mvp release path after the artifact has shipped.
+      if (state.release?.current_cut_id == null) {
+        const already = Array.isArray(state.release?.completed_cut_ids)
+          ? state.release.completed_cut_ids
+          : [];
+        if (!already.includes('mvp')) {
+          const gc = readGoalContract(cwd);
+          if (gc.exists && gc.contract?.mvp_scope) {
+            writeState(cwd, {
+              release: { ...(state.release || {}), current_cut_id: 'mvp' },
+            });
+            // Re-read so the routing below sees the freshly-set cohort.
+            state = readState(cwd);
+          }
+        }
+      }
+
       // Check PLAN.md completion
       const planStatus = checkPlanStatus(cwd);
       if (!planStatus || planStatus.total === 0) {
@@ -418,11 +447,47 @@ async function main() {
       const remaining = total - completed - failed;
 
       if (remaining === 0) {
-        // All TODOs resolved (completed or failed) → Phase 3
-        writeState(cwd, { current_phase: 'phase3-gate' });
+        // Stage A Phase 1.6b: route based on `state.release.current_cut_id`.
+        // - non-null → cohort active, transition to release-gate (scoped Hard
+        //   1/2/3 will run there once Phase 1.6c lands; for now the stub
+        //   immediately advances to release-finalize)
+        // - null → whole-pipeline complete, transition to phase3-gate
+        //   (existing pre-Stage-A behavior, unchanged for projects without
+        //   mvp_scope)
+        const cohort = state.release?.current_cut_id;
+
+        // RFC §10 D-Q6 + Phase 1.4b: a cohort with FAILED TODOs MUST NOT be
+        // recorded as completed. release-finalize would otherwise append the
+        // cohort to `completed_cut_ids` (PR #185 codex review), flipping D-Q6
+        // immutability on for a cohort that never actually shipped its release
+        // artifact. The release path is reserved for cohorts whose sprint
+        // completed cleanly.
+        //
+        // Codex re-review caught a follow-up: routing to phase3-gate here
+        // would let an existing all-PASS state.gate_results path through to
+        // phase5-finalize while the cohort is still active — whole-pipeline
+        // finalize would start before the release path completes. Stay in
+        // phase2-sprint instead until the FAILED TODOs are cleared in PLAN.md
+        // (user/agent flips [FAILED] → [x] or removes the TODO). The release
+        // path resumes naturally when the sprint completes cleanly.
+        if (cohort && failed > 0) {
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `[MPL] Sprint resolved with FAILED TODOs (${completed} completed, ${failed} failed). ` +
+              `Active release cohort "${cohort}" cannot enter the release path while failures are present, ` +
+              `and routing to whole-pipeline phase3-gate would risk advancing past release-finalize when prior ` +
+              `gate evidence is all-PASS. Staying in phase2-sprint. ` +
+              `Clear the FAILED TODOs in PLAN.md (fix the failing tasks, then flip [FAILED] → [x]) to resume the release path.`
+          }));
+          break;
+        }
+
+        const nextPhase = cohort ? 'release-gate' : 'phase3-gate';
+        const target = cohort ? `release-gate(${cohort})` : 'Phase 3: Quality Gate';
+        writeState(cwd, { current_phase: nextPhase });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to Phase 3: Quality Gate.`
+          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to ${target}.`
         }));
       } else {
         console.log(JSON.stringify({
@@ -433,7 +498,109 @@ async function main() {
       break;
     }
 
+    // === Stage A Release Path (Phase 1.6b stubs; 1.6c will add scoped Hard
+    // 1/2/3 and release-manifest / artifact creation) ===
+
+    case 'release-gate': {
+      // Phase 1.6b: stub handler. Scoped Hard 1/2/3 + release-scoped
+      // gate-results.json land in Phase 1.6c. For now, immediately advance
+      // to release-finalize so the lifecycle exit logic can run.
+      //
+      // Phase 1.6c will:
+      //   - Run scoped Hard 1/2/3 against `state.release.current_cut_id`
+      //     (full Hard 1 project-wide; Hard 2 affected scope; Hard 3 active
+      //      cut's interface_contract — per RFC §5.3 D-Q3)
+      //   - Write `.mpl/mpl/releases/{cut_id}/gate-results.json` (NEVER
+      //     touch `state.gate_results.hard{1,2,3}_*` per RFC §5.5)
+      //   - On failure: increment `state.release.fix_loop_count`, route
+      //     back to `phase2-sprint` for the same cohort (mirror of
+      //     phase3-gate→phase4-fix loop, RFC §5.3.1)
+      //   - On success: transition to release-finalize as today's stub does
+      const cohort = state.release?.current_cut_id;
+      if (!cohort) {
+        // Defensive: release-gate without an active cohort is a state
+        // corruption. Surface and revert to phase3-gate (whole-pipeline).
+        writeState(cwd, { current_phase: 'phase3-gate' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: '[MPL] ⚠ release-gate entered with no active cohort. Reverting to phase3-gate.'
+        }));
+        break;
+      }
+      writeState(cwd, { current_phase: 'release-finalize' });
+      console.log(JSON.stringify({
+        continue: true,
+        stopReason: `[MPL] release-gate(${cohort}): scoped Hard 1/2/3 execution lands in Phase 1.6c. ` +
+          `Stub passes through to release-finalize.`
+      }));
+      break;
+    }
+
+    case 'release-finalize': {
+      // Phase 1.6b: minimal completion logic — record the cohort in
+      // completed_cut_ids, advance current_cut_id, and route.
+      // Manifest write + artifact creation (per-cut snapshot ref +
+      // optional draft_pr/branch/tag) land in Phase 1.6c.
+      const cur = state.release?.current_cut_id;
+      if (!cur) {
+        writeState(cwd, { current_phase: 'phase3-gate' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: '[MPL] ⚠ release-finalize entered with no active cohort. Routing to phase3-gate.'
+        }));
+        break;
+      }
+
+      const existing = state.release || {};
+      const already = Array.isArray(existing.completed_cut_ids) ? existing.completed_cut_ids : [];
+      const completed = already.includes(cur) ? already : [...already, cur];
+
+      // Stage A simplification: decomposer (Phase 1.2 / PR #182) emits
+      // `release_cuts: []` so there is never a "next cut" to advance to.
+      // The orchestrator routes directly to whole-pipeline phase3-gate.
+      // Multi-cohort cut chaining (auto-proposed extension cuts) is RFC
+      // §10 D-Q2 Stage B work.
+      const nextCutId = null;
+      const nextPhase = 'phase3-gate';
+
+      writeState(cwd, {
+        release: {
+          ...existing,
+          completed_cut_ids: completed,
+          current_cut_id: nextCutId,
+          fix_loop_count: 0,
+        },
+        current_phase: nextPhase,
+      });
+      console.log(JSON.stringify({
+        continue: true,
+        stopReason: `[MPL] release-finalize(${cur}): cohort completed. ` +
+          `Stage A single-cohort path: transitioning to whole-pipeline phase3-gate.`
+      }));
+      break;
+    }
+
     case 'phase3-gate': {
+      // Stage A defense-in-depth (RFC §5.5): the whole-pipeline phase3-gate
+      // must never advance to phase5-finalize while a release cohort is
+      // still active. Any prior all-PASS gate_results from a previous run
+      // would otherwise let an in-progress release path's finalize be
+      // skipped. Sprint completion routing already prevents this in normal
+      // flow (failed-cohort case stays in phase2-sprint; clean-cohort case
+      // routes to release-gate), but a hand-edited state.json or a
+      // recompose-driven re-entry could still land here with a live cohort.
+      // Surface and revert.
+      if (state.release?.current_cut_id) {
+        writeState(cwd, { current_phase: 'phase2-sprint' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⚠ phase3-gate entered while release cohort "${state.release.current_cut_id}" is still active. ` +
+            `Whole-pipeline finalize must NOT run before release-finalize completes the active cohort. ` +
+            `Reverting to phase2-sprint; complete the cohort's release path first (release-gate → release-finalize).`
+        }));
+        break;
+      }
+
       // Per-rule policy (P0-2, #110): `missing_gate_evidence` resolves the
       // strict toggle for checkGateResults. Default is 'warn' per #110 §정책
       // (transitional — surface only, no block). Workspace can opt-in to
