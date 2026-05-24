@@ -134,6 +134,62 @@ describe('readState / writeState', () => {
     assert.strictEqual(state.gate_results.hard3_passed, null);
   });
 
+  // Stage A post-merge audit fix #1: derivation must apply to BOTH gate
+  // subtrees (top-level + state.release.gate_results) so the release-
+  // finalize gate-results.json archive is not stuck at stale `null`.
+  it('derives legacy gate booleans for state.release.gate_results (Stage A scoped subtree)', () => {
+    const ent = (exit_code) => ({ command: 'npm test', exit_code, stdout_tail: '', timestamp: 'now' });
+    writeState(tmpDir, {
+      current_phase: 'release-gate',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: ent(0),
+          hard2_coverage: ent(2),
+          hard3_resilience: ent(0),
+        },
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.release.gate_results.hard1_passed, true);
+    assert.strictEqual(state.release.gate_results.hard2_passed, false);
+    assert.strictEqual(state.release.gate_results.hard3_passed, true);
+    // Top-level subtree must remain untouched (RFC §5.5 isolation):
+    // release-scoped derivation does NOT bleed into whole-pipeline gates.
+    assert.strictEqual(state.gate_results.hard1_passed, null);
+    assert.strictEqual(state.gate_results.hard2_passed, null);
+    assert.strictEqual(state.gate_results.hard3_passed, null);
+  });
+
+  it('release.gate_results derivation respects the same partial-structured semantics', () => {
+    // When only some scoped entries are present, derive only those —
+    // missing entries stay null. Mirrors the top-level partial test above.
+    const ent = (exit_code) => ({ command: 'npm test', exit_code });
+    writeState(tmpDir, {
+      current_phase: 'release-gate',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: ent(0),
+          // hard2_coverage / hard3_resilience absent
+          hard2_passed: true,  // self-reported legacy — must be cleared
+        },
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.release.gate_results.hard1_passed, true);
+    assert.strictEqual(state.release.gate_results.hard2_passed, null);
+    assert.strictEqual(state.release.gate_results.hard3_passed, null);
+  });
+
   it('clears hook-block companion fields when blocked_hook status clears', () => {
     writeState(tmpDir, {
       current_phase: 'phase2-sprint',

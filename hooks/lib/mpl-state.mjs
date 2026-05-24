@@ -637,9 +637,23 @@ function recordRunbookTransition(cwd, prev, merged) {
  * to null or contradict the machine evidence. Once any structured gate signal
  * exists, legacy values for missing/malformed structured gates are cleared
  * instead of mixing self-report with machine evidence.
+ *
+ * Applies to BOTH gate subtrees — top-level `state.gate_results` (whole-
+ * pipeline phase3-gate) and `state.release.gate_results` (Stage A scoped
+ * release-gate, RFC §5.5 isolation). The release subtree was added in
+ * schema v6 but the original derivation only touched top-level, leaving
+ * `state.release.gate_results.hard{1,2,3}_passed` stuck at `null` —
+ * cosmetic on its own (release-gate routing reads structured exit codes
+ * directly), but `buildGateResultsSnapshot` archives the booleans into
+ * `gate-results.json` shipped with each release. Driving both subtrees
+ * here keeps the archived snapshot honest.
  */
 function deriveLegacyGateBooleans(state) {
-  const gr = state?.gate_results;
+  applyLegacyGateDerivation(state?.gate_results);
+  applyLegacyGateDerivation(state?.release?.gate_results);
+}
+
+function applyLegacyGateDerivation(gr) {
   if (!gr || typeof gr !== 'object') return;
   const pairs = [
     ['hard1_baseline', 'hard1_passed'],
