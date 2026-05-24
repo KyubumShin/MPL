@@ -43,12 +43,20 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  *   `user_intervention_count` (auto-mode honesty counter).
  * - `4` = Goal Contract readiness fields and finalize/security evidence
  *   backfills.
+ * - `5` = Stage A release-path lifecycle subtree (`state.release` with
+ *   `current_cut_id`, `completed_cut_ids`, `fix_loop_count`,
+ *   `pending_artifact`); consumed by D-Q6 immutability hook + Phase 1.6b
+ *   release-gate / release-finalize handlers.
+ * - `6` = Stage A release-gate scoped evidence subtree
+ *   (`state.release.gate_results` parallel to top-level `state.gate_results`,
+ *   `state.release.max_fix_loops` default 3); consumed by Phase 1.6c-i
+ *   release-gate handler for scoped Hard 1/2/3 routing per RFC §5.5.
  *
  * H8 (#116) routes per-version logic through `hooks/lib/migrations/`. To
  * bump this constant, register a new migration entry; see
  * `docs/schemas/migration-policy.md`.
  */
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
@@ -194,11 +202,33 @@ const DEFAULT_STATE = {
   // NOT transit through `pending_artifact`; the field is opt-in transit only.
   // For projects without `goal_contract.mvp_scope`, this subtree stays at
   // defaults and the release path is never entered (RFC §4.5 lifecycle).
+  //
+  // Phase 1.6c-i additions (schema v6):
+  // `gate_results` mirrors the top-level `gate_results` shape but is
+  // populated by mpl-gate-recorder ONLY when `current_phase ==
+  // 'release-gate'` (RFC §5.5: scoped release evidence MUST NOT mix into
+  // the whole-pipeline `state.gate_results.hard{1,2,3}_*` subtree
+  // reserved for the final phase3-gate). The release-gate handler reuses
+  // `checkGateResults` against this subtree to decide PASS / FAIL /
+  // MISSING.
+  // `max_fix_loops` is the scoped retry budget for the release-gate →
+  // phase2-sprint fix loop (RFC §5.3.1). Separate from top-level
+  // `max_fix_loops` because cohort-local failures should circuit-break
+  // faster (default 3 vs the whole-pipeline default 10).
   release: {
     current_cut_id: null,        // null | "mvp" | "<release_cut.id>"
     completed_cut_ids: [],       // appended on successful release-finalize
     fix_loop_count: 0,           // scoped retries inside release-gate, not phase3-gate
     pending_artifact: null,      // null | { type: "draft_pr"|"branch"|"tag", target: string }
+    gate_results: {              // Phase 1.6c-i: parallel to top-level gate_results; release-scope only
+      hard1_passed: null,
+      hard2_passed: null,
+      hard3_passed: null,
+      hard1_baseline: null,      // { command, exit_code, stdout_tail, timestamp }
+      hard2_coverage: null,
+      hard3_resilience: null,
+    },
+    max_fix_loops: 3,            // RFC §5.3.1: scoped budget; circuit-break message at threshold
   },
   memory: {                  // F-25: 4-Tier Adaptive Memory statistics
     episodic_entries: 0,

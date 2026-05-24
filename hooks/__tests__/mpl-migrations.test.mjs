@@ -316,3 +316,131 @@ describe('v1→v2 migration archives raw bytes when legacy file is corrupt (PR #
     assert.equal(archive.legacy_content_corrupt, undefined);
   });
 });
+
+/* ─────────────── v5 → v6: Stage A release-gate scoped evidence ──────────── */
+
+describe('v5 → v6 migration backfills release.gate_results + release.max_fix_loops', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-v5v6-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeRawState(body) {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify(body));
+  }
+
+  it('backfills release.gate_results (parallel to top-level shape) and max_fix_loops default 3', () => {
+    writeRawState({
+      pipeline_id: 'mpl-v5-fixture',
+      current_phase: 'phase2-sprint',
+      schema_version: 5,
+      release: {
+        current_cut_id: null,
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+      },
+    });
+    const state = readState(tmpDir);
+    assert.equal(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.deepStrictEqual(state.release.gate_results, {
+      hard1_passed: null, hard2_passed: null, hard3_passed: null,
+      hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+    });
+    assert.strictEqual(state.release.max_fix_loops, 3);
+  });
+
+  it('preserves existing v5 release fields across the bump (current_cut_id, completed_cut_ids, fix_loop_count)', () => {
+    writeRawState({
+      pipeline_id: 'mpl-v5-mid-cohort',
+      current_phase: 'release-gate',
+      schema_version: 5,
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: ['cut-1'],
+        fix_loop_count: 2,
+        pending_artifact: { type: 'draft_pr', target: 'main' },
+      },
+    });
+    const state = readState(tmpDir);
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['cut-1']);
+    assert.strictEqual(state.release.fix_loop_count, 2);
+    assert.deepStrictEqual(state.release.pending_artifact, { type: 'draft_pr', target: 'main' });
+    // New fields filled with defaults.
+    assert.strictEqual(state.release.max_fix_loops, 3);
+    assert.strictEqual(state.release.gate_results.hard1_baseline, null);
+  });
+
+  it('preserves a partially-populated release.gate_results (hand-edit scenario), filling only missing keys', () => {
+    writeRawState({
+      pipeline_id: 'mpl-v5-partial-gate',
+      current_phase: 'release-gate',
+      schema_version: 5,
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        gate_results: {
+          hard1_baseline: { exit_code: 0, command: 'npm run build' },
+        },
+        max_fix_loops: 5,
+      },
+    });
+    const state = readState(tmpDir);
+    // Existing entry preserved verbatim.
+    assert.deepStrictEqual(state.release.gate_results.hard1_baseline, {
+      exit_code: 0,
+      command: 'npm run build',
+    });
+    // Missing keys filled with null defaults.
+    assert.strictEqual(state.release.gate_results.hard2_coverage, null);
+    assert.strictEqual(state.release.gate_results.hard3_resilience, null);
+    // Caller-supplied max_fix_loops survives.
+    assert.strictEqual(state.release.max_fix_loops, 5);
+  });
+
+  it('resets release.gate_results when on-disk value is malformed (non-object / array)', () => {
+    writeRawState({
+      pipeline_id: 'mpl-v5-bad-gate',
+      current_phase: 'phase2-sprint',
+      schema_version: 5,
+      release: {
+        current_cut_id: null,
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        gate_results: ['this', 'is', 'wrong'],
+        max_fix_loops: 'three',
+      },
+    });
+    const state = readState(tmpDir);
+    assert.deepStrictEqual(state.release.gate_results, {
+      hard1_passed: null, hard2_passed: null, hard3_passed: null,
+      hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+    });
+    assert.strictEqual(state.release.max_fix_loops, 3);
+  });
+
+  it('chains v4 → v5 → v6 when starting from a v4 state.json', () => {
+    // Legacy v4 file with no release subtree at all — exercises the full
+    // additive chain (v4→v5 creates release with defaults; v5→v6 then adds
+    // gate_results + max_fix_loops on top).
+    writeRawState({
+      pipeline_id: 'mpl-v4-legacy',
+      current_phase: 'phase2-sprint',
+      schema_version: 4,
+    });
+    const state = readState(tmpDir);
+    assert.equal(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.strictEqual(state.release.current_cut_id, null);
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.strictEqual(state.release.fix_loop_count, 0);
+    assert.strictEqual(state.release.max_fix_loops, 3);
+    assert.deepStrictEqual(state.release.gate_results, {
+      hard1_passed: null, hard2_passed: null, hard3_passed: null,
+      hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+    });
+  });
+});
