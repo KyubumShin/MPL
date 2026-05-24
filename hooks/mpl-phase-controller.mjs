@@ -460,17 +460,24 @@ async function main() {
         // recorded as completed. release-finalize would otherwise append the
         // cohort to `completed_cut_ids` (PR #185 codex review), flipping D-Q6
         // immutability on for a cohort that never actually shipped its release
-        // artifact. The whole-pipeline phase3-gate path handles failed TODOs
-        // via the existing fix loop; the release path is reserved for cohorts
-        // whose sprint completed cleanly.
+        // artifact. The release path is reserved for cohorts whose sprint
+        // completed cleanly.
+        //
+        // Codex re-review caught a follow-up: routing to phase3-gate here
+        // would let an existing all-PASS state.gate_results path through to
+        // phase5-finalize while the cohort is still active — whole-pipeline
+        // finalize would start before the release path completes. Stay in
+        // phase2-sprint instead until the FAILED TODOs are cleared in PLAN.md
+        // (user/agent flips [FAILED] → [x] or removes the TODO). The release
+        // path resumes naturally when the sprint completes cleanly.
         if (cohort && failed > 0) {
-          writeState(cwd, { current_phase: 'phase3-gate' });
           console.log(JSON.stringify({
             continue: true,
             stopReason: `[MPL] Sprint resolved with FAILED TODOs (${completed} completed, ${failed} failed). ` +
-              `Active cohort "${cohort}" cannot enter the release path while failures are present. ` +
-              `Transitioning to whole-pipeline phase3-gate; the fix loop will run there. ` +
-              `(state.release.current_cut_id preserved; the release path will resume from a clean sprint next time.)`
+              `Active release cohort "${cohort}" cannot enter the release path while failures are present, ` +
+              `and routing to whole-pipeline phase3-gate would risk advancing past release-finalize when prior ` +
+              `gate evidence is all-PASS. Staying in phase2-sprint. ` +
+              `Clear the FAILED TODOs in PLAN.md (fix the failing tasks, then flip [FAILED] → [x]) to resume the release path.`
           }));
           break;
         }
@@ -574,6 +581,26 @@ async function main() {
     }
 
     case 'phase3-gate': {
+      // Stage A defense-in-depth (RFC §5.5): the whole-pipeline phase3-gate
+      // must never advance to phase5-finalize while a release cohort is
+      // still active. Any prior all-PASS gate_results from a previous run
+      // would otherwise let an in-progress release path's finalize be
+      // skipped. Sprint completion routing already prevents this in normal
+      // flow (failed-cohort case stays in phase2-sprint; clean-cohort case
+      // routes to release-gate), but a hand-edited state.json or a
+      // recompose-driven re-entry could still land here with a live cohort.
+      // Surface and revert.
+      if (state.release?.current_cut_id) {
+        writeState(cwd, { current_phase: 'phase2-sprint' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⚠ phase3-gate entered while release cohort "${state.release.current_cut_id}" is still active. ` +
+            `Whole-pipeline finalize must NOT run before release-finalize completes the active cohort. ` +
+            `Reverting to phase2-sprint; complete the cohort's release path first (release-gate → release-finalize).`
+        }));
+        break;
+      }
+
       // Per-rule policy (P0-2, #110): `missing_gate_evidence` resolves the
       // strict toggle for checkGateResults. Default is 'warn' per #110 §정책
       // (transitional — surface only, no block). Workspace can opt-in to

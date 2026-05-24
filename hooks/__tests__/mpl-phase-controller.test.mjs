@@ -758,14 +758,12 @@ mvp_scope:
     );
   });
 
-  it('1.6b: sprint with FAILED TODOs in active cohort routes to phase3-gate, not release-gate (codex high)', () => {
-    // Codex review on PR #185: release-gate stub unconditionally passed
-    // through to release-finalize, which appended the cohort to
-    // completed_cut_ids. So a sprint with FAILED TODOs would mark the
-    // cohort as "released" — flipping D-Q6 immutability on for a cohort
-    // that never actually shipped. The sprint completion now refuses to
-    // enter the release path when failures are present, preserving
-    // current_cut_id for the fix loop to retry later.
+  it('1.6b: sprint with FAILED TODOs in active cohort stays in phase2-sprint (does not route to phase3-gate)', () => {
+    // Codex review on PR #185 (round 2): the original fix routed to
+    // phase3-gate, but with existing all-PASS gate_results that would advance
+    // to phase5-finalize and skip release-finalize entirely. The corrected
+    // fix stays in phase2-sprint so the user/agent clears FAILED TODOs and
+    // re-enters the sprint cleanly, at which point the release path resumes.
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
     writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `### [x] Task 1\n### [FAILED] Task 2\n`);
     writeGoalContractWithMvp(tmpDir);
@@ -774,15 +772,36 @@ mvp_scope:
       release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
     });
     const state = readState();
-    // Must route to phase3-gate (whole-pipeline fix loop), NOT release-gate.
-    assert.strictEqual(state.current_phase, 'phase3-gate');
-    // current_cut_id preserved — release path resumes from a clean sprint
-    // after the fix loop fixes the failure.
+    // Must STAY in phase2-sprint — neither release-gate nor phase3-gate.
+    assert.strictEqual(state.current_phase, 'phase2-sprint');
     assert.strictEqual(state.release.current_cut_id, 'mvp');
-    // completed_cut_ids MUST stay empty — the cohort never reached
-    // release-finalize so it was never released.
     assert.deepStrictEqual(state.release.completed_cut_ids, []);
-    assert.match(out.stopReason, /cannot enter the release path while failures are present/);
+    assert.match(out.stopReason, /Staying in phase2-sprint/);
+    assert.match(out.stopReason, /Clear the FAILED TODOs/);
+  });
+
+  it('1.6b: phase3-gate defensively reverts to phase2-sprint when release cohort still active (codex round-2 high)', () => {
+    // Defense-in-depth for codex round-2 catch: even if some unknown path
+    // (hand-edited state, partial replay) lands at phase3-gate with an
+    // active release cohort + all-PASS gate evidence, the guard must
+    // refuse to advance to phase5-finalize and instead revert to sprint.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase3-gate',
+      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+      gate_results: {
+        hard1_baseline: { exit_code: 0 },
+        hard2_coverage: { exit_code: 0 },
+        hard3_resilience: { exit_code: 0 },
+      },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'phase2-sprint',
+      'phase3-gate must revert to phase2-sprint when an active cohort exists');
+    assert.strictEqual(state.release.current_cut_id, 'mvp',
+      'current_cut_id must be preserved across the revert');
+    assert.match(out.stopReason, /release cohort .* is still active/);
+    assert.match(out.stopReason, /Reverting to phase2-sprint/);
   });
 
   it('1.6b: release-finalize is idempotent — re-entering with cohort already in completed_cut_ids does not double-append', () => {
