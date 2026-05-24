@@ -180,3 +180,60 @@ export function validateGoalTraceCoverage(decomposition, contract) {
     issues,
   };
 }
+
+/**
+ * Stage A RFC §4.2 — MVP cohort goal_trace subset coverage.
+ *
+ * The whole-pipeline validator above checks that the UNION of every
+ * phase's `goal_trace` covers `contract.acceptance_criteria` /
+ * `contract.variation_axes`. That guard is necessary but not sufficient
+ * when `goal_contract.mvp_scope` declares a cohort: the cohort manifest
+ * shipped at `release-finalize` carries `goal_trace.acceptance_criteria`
+ * / `variation_axes` derived solely from `mvp_scope`, and the
+ * decomposer is supposed to assign at least one MVP phase that covers
+ * each MVP AC/AX. Without this validator the whole-pipeline coverage
+ * could pass while the MVP subset (phases referenced by
+ * `graph.mvp.phases`) leaves some MVP AC/AX uncovered — a
+ * "released" cohort would then ship a manifest claiming coverage of
+ * an AC/AX that no phase actually delivered, flipping D-Q6
+ * immutability for a partial cohort. The post-Stage-A audit caught this
+ * as a spec gap.
+ *
+ * Skip when no MVP cohort is declared (contract.mvp_scope is null) —
+ * the whole-pipeline validator already handles non-cohort flows.
+ *
+ * @param {object} decomposition - parsed by parseDecompositionGoalTraceText
+ * @param {object} contract      - parsed by parseGoalContractText
+ * @param {object} graph         - parsed by parsePhaseContractGraphText (carries graph.mvp.phases)
+ */
+export function validateMvpGoalTraceCoverage(decomposition, contract, graph) {
+  const issues = [];
+  const mvpScope = contract?.mvp_scope;
+  if (!mvpScope) return { valid: true, issues };
+
+  const mvpPhaseIds = Array.isArray(graph?.mvp?.phases) ? graph.mvp.phases : [];
+  // Empty mvp.phases is caught by mpl-require-phase-contract-graph (B5
+  // dependency-closure rule + resolveCutDescriptor empty-phases guard).
+  // Don't double-report here.
+  if (mvpPhaseIds.length === 0) return { valid: true, issues };
+
+  const mvpPhaseSet = new Set(mvpPhaseIds);
+  const requiredAc = Array.isArray(mvpScope.acceptance_criteria) ? mvpScope.acceptance_criteria : [];
+  const requiredAx = Array.isArray(mvpScope.variation_axes) ? mvpScope.variation_axes : [];
+
+  const mvpAc = [];
+  const mvpAx = [];
+  for (const phase of (decomposition?.phases || [])) {
+    if (!mvpPhaseSet.has(phase.id)) continue;
+    mvpAc.push(...(phase.acceptance_criteria || []));
+    mvpAx.push(...(phase.variation_axes || []));
+  }
+
+  for (const id of difference(requiredAc, mvpAc)) issues.push(`mvp_scope.acceptance_criteria:uncovered:${id}`);
+  for (const id of difference(requiredAx, mvpAx)) issues.push(`mvp_scope.variation_axes:uncovered:${id}`);
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
