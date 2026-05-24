@@ -720,20 +720,26 @@ async function main() {
       const releaseDir = join(cwd, RELEASE_DIR_REL_PATH, cur);
       try {
         mkdirSync(releaseDir, { recursive: true });
+        // 0o644 (not the 0o600 used for state.json): release artifacts
+        // are designed for consumption by CI runners, mpl-status, and
+        // future tooling that may run as a different uid on a shared
+        // dev box / CI agent (claude review #1 on PR #187). state.json
+        // stays 0o600 because it carries session-internal evidence;
+        // these files are the shippable record of the release.
         writeFileSync(
           join(releaseDir, 'release-manifest.json'),
           JSON.stringify(manifest, null, 2) + '\n',
-          { mode: 0o600 }
+          { mode: 0o644 }
         );
         writeFileSync(
           join(releaseDir, 'evidence-summary.md'),
           evidence.endsWith('\n') ? evidence : evidence + '\n',
-          { mode: 0o600 }
+          { mode: 0o644 }
         );
         writeFileSync(
           join(releaseDir, 'gate-results.json'),
           JSON.stringify(gateSnapshot, null, 2) + '\n',
-          { mode: 0o600 }
+          { mode: 0o644 }
         );
       } catch (err) {
         // Manifest write failure must NOT advance the lifecycle (RFC §5.4:

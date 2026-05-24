@@ -58,6 +58,54 @@ describe('resolveCutDescriptor', () => {
     assert.equal(resolveCutDescriptor('mvp', {}, { release_cuts: [] }), null);
   });
 
+  // PR #187 codex review High: strict-both-required regression suite.
+  it('returns null when ONLY contract.mvp_scope is present (no graph.mvp) — strict', () => {
+    // Pre-fix: would have returned a descriptor with phases:[] and shipped
+    // a degraded manifest. Now rejects so release-finalize bails.
+    const d = resolveCutDescriptor('mvp', mvpContract(), { mvp: null, release_cuts: [] });
+    assert.equal(d, null);
+  });
+
+  it('returns null when ONLY graph.mvp is present (no contract.mvp_scope) — strict', () => {
+    // Same regression — goal_trace would have been empty without contract,
+    // so the manifest could not satisfy RFC §5.4 goal-trace requirement.
+    const d = resolveCutDescriptor('mvp', { mvp_scope: null }, mvpGraph());
+    assert.equal(d, null);
+  });
+
+  it('returns null when graph.mvp.phases is empty array — empty-membership guard', () => {
+    // Decomposer never derived an mvp membership; shipping an empty-phases
+    // manifest would assert "released" with no work — refuse.
+    const graph = { mvp: { phases: [], artifact: 'draft_pr' }, release_cuts: [] };
+    const d = resolveCutDescriptor('mvp', mvpContract(), graph);
+    assert.equal(d, null);
+  });
+
+  it('returns null when extension cut phases array is empty (same empty-membership guard)', () => {
+    const graph = {
+      mvp: null,
+      release_cuts: [{ id: 'cut-1', phases: [], artifact: 'tag' }],
+    };
+    assert.equal(resolveCutDescriptor('cut-1', {}, graph), null);
+  });
+
+  // PR #187 claude review #4: extension-cut AC/AX auto-pickup (Stage B forward-compat).
+  it('auto-picks extension cut acceptance_criteria/variation_axes when release_cuts[] entry carries them', () => {
+    const graph = {
+      mvp: null,
+      release_cuts: [{
+        id: 'cut-extended',
+        phases: ['phase-7'],
+        artifact: 'tag',
+        acceptance_criteria: ['AC-7', 'AC-8'],  // Stage B forward-compat field
+        variation_axes: ['AX-3'],
+      }],
+    };
+    const d = resolveCutDescriptor('cut-extended', {}, graph);
+    assert.deepEqual(d.acceptance_criteria, ['AC-7', 'AC-8']);
+    assert.deepEqual(d.variation_axes, ['AX-3']);
+  });
+
   it('resolves an extension cut by id from release_cuts[]', () => {
     const graph = {
       mvp: null,
@@ -199,6 +247,22 @@ describe('buildGateResultsSnapshot', () => {
     // Mutating the source should not bleed into the snapshot.
     entry.exit_code = 99;
     assert.equal(snap.gate_results.hard1_baseline.exit_code, 0);
+  });
+
+  it('isolates NESTED mutations via structuredClone (claude #3 forward-compat)', () => {
+    // If a gate entry ever grows a nested object (e.g., diagnostics block),
+    // shallow spread would leak the source mutation through the nested
+    // reference. structuredClone deep-copies so the snapshot is fully
+    // independent. This test future-proofs against shape additions.
+    const breakdown = { warnings: 1, errors: 0 };
+    const entry = { exit_code: 0, diagnostics: { breakdown } };
+    const state = { release: { gate_results: { hard2_coverage: entry } } };
+    const snap = buildGateResultsSnapshot(state);
+    // Mutate the deeply-nested source object after the snapshot is taken.
+    breakdown.warnings = 99;
+    breakdown.errors = 99;
+    assert.equal(snap.gate_results.hard2_coverage.diagnostics.breakdown.warnings, 1);
+    assert.equal(snap.gate_results.hard2_coverage.diagnostics.breakdown.errors, 0);
   });
 
   it('handles missing state.release gracefully', () => {

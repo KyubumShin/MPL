@@ -23,10 +23,19 @@ export const RELEASE_DIR_REL_PATH = '.mpl/mpl/releases';
 /**
  * Resolve which cut object describes the cohort being released.
  *
- * Stage A: when `cutId === 'mvp'`, source is `graph.mvp` (decomposer-derived,
- * see PR #182). When `cutId` matches a `release_cuts[].id`, source is that
- * entry. Returns `null` when the contract or decomposition is missing the
- * cohort — the caller should treat that as an error and refuse to write.
+ * Stage A: when `cutId === 'mvp'`, source REQUIRES both `graph.mvp`
+ * (decomposer-derived, see PR #182) AND `contract.mvp_scope`. The two
+ * artifacts describe different facets of the cohort — graph carries the
+ * mechanically-derived `phases[]` membership, contract carries the
+ * user-declared `acceptance_criteria` / `variation_axes` goal trace.
+ * Allowing one without the other lets a degraded manifest with empty
+ * phases (or missing goal_trace) ship and silently flip D-Q6 immutability
+ * for a cut that never had a real phase set. **Both must be present and
+ * `graph.mvp.phases` must be non-empty.** Returns `null` when either side
+ * is missing or phases are empty — the caller refuses to advance the
+ * lifecycle (PR #187 codex review).
+ *
+ * When `cutId` matches a `release_cuts[].id`, source is that entry.
  *
  * @param {string} cutId
  * @param {object|null} contract - parsed goal contract (parseGoalContractText)
@@ -40,20 +49,29 @@ export function resolveCutDescriptor(cutId, contract, graph) {
   if (cutId === 'mvp') {
     const mvpGraph = graph?.mvp;
     const mvpScope = contract?.mvp_scope;
-    if (!mvpGraph && !mvpScope) return null;
+    // Strict: both sides required (RFC §5.4 — manifest must carry both
+    // phase membership AND goal trace). PR #187 codex review caught the
+    // prior OR logic that silently shipped phases:[] manifests.
+    if (!mvpGraph || !mvpScope) return null;
+    const phases = Array.isArray(mvpGraph.phases) ? [...mvpGraph.phases] : [];
+    // Empty phases means the decomposer never derived an mvp membership
+    // (mechanical id-set mapping yielded nothing); shipping such a
+    // manifest would assert "this cut is released" while listing no
+    // work — refuse.
+    if (phases.length === 0) return null;
     return {
-      phases: Array.isArray(mvpGraph?.phases) ? [...mvpGraph.phases] : [],
+      phases,
       artifact:
         // Stage A: the decomposer mechanically copies mvp_scope.artifact
         // into graph.mvp.artifact (PR #182). Prefer the graph entry — it's
         // the canonical mechanically-derived value. Fall back to the
         // contract scope when the graph entry is missing (e.g., legacy
         // decomposition predates 1.2).
-        mvpGraph?.artifact ?? mvpScope?.artifact ?? null,
-      acceptance_criteria: Array.isArray(mvpScope?.acceptance_criteria)
+        mvpGraph.artifact ?? mvpScope.artifact ?? null,
+      acceptance_criteria: Array.isArray(mvpScope.acceptance_criteria)
         ? [...mvpScope.acceptance_criteria]
         : [],
-      variation_axes: Array.isArray(mvpScope?.variation_axes)
+      variation_axes: Array.isArray(mvpScope.variation_axes)
         ? [...mvpScope.variation_axes]
         : [],
     };
@@ -62,13 +80,21 @@ export function resolveCutDescriptor(cutId, contract, graph) {
   const releaseCuts = Array.isArray(graph?.release_cuts) ? graph.release_cuts : [];
   const found = releaseCuts.find((c) => c?.id === cutId);
   if (!found) return null;
+  const phases = Array.isArray(found.phases) ? [...found.phases] : [];
+  // Same empty-phases guard as the mvp branch.
+  if (phases.length === 0) return null;
   return {
-    phases: Array.isArray(found.phases) ? [...found.phases] : [],
+    phases,
     artifact: found.artifact ?? null,
-    // Extension cuts don't carry AC/AX in Stage A — the contract scope
-    // is mvp-only. Future Stage B may extend; until then leave empty.
-    acceptance_criteria: [],
-    variation_axes: [],
+    // Auto-pick-up if Stage B extends `release_cuts[]` with goal_trace
+    // fields (claude review #4 on PR #187). One-character defense lets
+    // the resolver stay correct without a future code change.
+    acceptance_criteria: Array.isArray(found.acceptance_criteria)
+      ? [...found.acceptance_criteria]
+      : [],
+    variation_axes: Array.isArray(found.variation_axes)
+      ? [...found.variation_axes]
+      : [],
   };
 }
 
@@ -148,9 +174,14 @@ function summarizeGateResults(gates) {
  */
 export function buildGateResultsSnapshot(state, now) {
   const gates = state?.release?.gate_results || {};
+  // structuredClone (not spread) so any nested object inside an entry
+  // — e.g., a future `{ exit_code: 0, details: { ... } }` shape — is
+  // isolated from the source. Today's flat shape works with shallow
+  // copy, but the future-proofing is a one-liner (claude review #3 on
+  // PR #187).
   const clone = (entry) => {
     if (!entry || typeof entry !== 'object') return null;
-    return { ...entry };
+    return structuredClone(entry);
   };
   return {
     archived_at: now || new Date().toISOString(),
