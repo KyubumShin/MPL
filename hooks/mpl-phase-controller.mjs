@@ -588,6 +588,14 @@ async function main() {
     }
 
     case 'small-sprint': {
+      // D-Q7 guard intentionally fires only at `case 'small-plan'`. If a
+      // user lands here after entering small-plan with mvp_scope absent
+      // (legitimate path), the contract may have been edited mid-flow to
+      // add mvp_scope. Re-checking here is *not* supported in Phase 1.6a
+      // — the cost is replicating the guard in three places (-sprint,
+      // -verify) for an edge case where the user is intentionally
+      // restructuring mid-pipeline. Recommended workflow for that case:
+      // cancel the small pipeline and restart with the full pipeline.
       // Check PLAN.md completion (reuse checkPlanStatus)
       const smallPlanStatus = checkPlanStatus(cwd);
       if (!smallPlanStatus || smallPlanStatus.total === 0) {

@@ -48,7 +48,7 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  * bump this constant, register a new migration entry; see
  * `docs/schemas/migration-policy.md`.
  */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
@@ -188,6 +188,10 @@ const DEFAULT_STATE = {
   // `pending_artifact` carries the user-visible artifact descriptor (draft_pr
   // | branch | tag) requested by mvp.artifact / release_cuts[].artifact
   // between release-gate PASS and release-finalize artifact attempt.
+  // `release_manifest` — the fourth allowed mvp.artifact value — is the
+  // always-emitted artifact at release-finalize (RFC §5.4 / §10 D-Q4: "release
+  // manifest always; PR/branch/tag only when explicitly requested") and does
+  // NOT transit through `pending_artifact`; the field is opt-in transit only.
   // For projects without `goal_contract.mvp_scope`, this subtree stays at
   // defaults and the release path is never entered (RFC §4.5 lifecycle).
   release: {
