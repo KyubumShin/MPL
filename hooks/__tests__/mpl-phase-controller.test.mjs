@@ -738,6 +738,53 @@ mvp_scope:
     assert.match(out.stopReason, /release-finalize\(mvp\).*whole-pipeline phase3-gate/);
   });
 
+  it('1.6b: phase2-sprint init does NOT re-enter mvp cohort after it is in completed_cut_ids (RFC §4.5)', () => {
+    // Claude review on PR #185: the init guard previously only checked
+    // `current_cut_id == null` and re-set "mvp" on every phase2-sprint entry
+    // when mvp_scope was still in the contract. This violated RFC §4.5
+    // "Never re-entered for the same cut_id within a single pipeline run"
+    // on the phase3-gate → phase4-fix → recompose → phase2-sprint loop.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      release: { current_cut_id: null, completed_cut_ids: ['mvp'], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    assert.strictEqual(
+      state.release.current_cut_id,
+      null,
+      'init must not re-enter mvp cohort once it is in completed_cut_ids',
+    );
+  });
+
+  it('1.6b: sprint with FAILED TODOs in active cohort routes to phase3-gate, not release-gate (codex high)', () => {
+    // Codex review on PR #185: release-gate stub unconditionally passed
+    // through to release-finalize, which appended the cohort to
+    // completed_cut_ids. So a sprint with FAILED TODOs would mark the
+    // cohort as "released" — flipping D-Q6 immutability on for a cohort
+    // that never actually shipped. The sprint completion now refuses to
+    // enter the release path when failures are present, preserving
+    // current_cut_id for the fix loop to retry later.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), `### [x] Task 1\n### [FAILED] Task 2\n`);
+    writeGoalContractWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase2-sprint',
+      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+    });
+    const state = readState();
+    // Must route to phase3-gate (whole-pipeline fix loop), NOT release-gate.
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    // current_cut_id preserved — release path resumes from a clean sprint
+    // after the fix loop fixes the failure.
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    // completed_cut_ids MUST stay empty — the cohort never reached
+    // release-finalize so it was never released.
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /cannot enter the release path while failures are present/);
+  });
+
   it('1.6b: release-finalize is idempotent — re-entering with cohort already in completed_cut_ids does not double-append', () => {
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
     runStopHook(tmpDir, {

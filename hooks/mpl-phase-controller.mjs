@@ -410,14 +410,26 @@ async function main() {
       // advancement happens at release-finalize exit. Without an mvp_scope,
       // current_cut_id stays null and the release path is never entered
       // (existing pipeline behavior preserved).
+      //
+      // RFC §4.5: "Never re-entered for the same cut_id within a single
+      // pipeline run." A cohort already in `completed_cut_ids` MUST NOT be
+      // re-set here, even if `current_cut_id` is null and the contract
+      // still carries `mvp_scope`. This guards the phase3-gate → phase4-fix
+      // → recompose → phase2-sprint loop from spuriously re-running the
+      // mvp release path after the artifact has shipped.
       if (state.release?.current_cut_id == null) {
-        const gc = readGoalContract(cwd);
-        if (gc.exists && gc.contract?.mvp_scope) {
-          writeState(cwd, {
-            release: { ...(state.release || {}), current_cut_id: 'mvp' },
-          });
-          // Re-read so the routing below sees the freshly-set cohort.
-          state = readState(cwd);
+        const already = Array.isArray(state.release?.completed_cut_ids)
+          ? state.release.completed_cut_ids
+          : [];
+        if (!already.includes('mvp')) {
+          const gc = readGoalContract(cwd);
+          if (gc.exists && gc.contract?.mvp_scope) {
+            writeState(cwd, {
+              release: { ...(state.release || {}), current_cut_id: 'mvp' },
+            });
+            // Re-read so the routing below sees the freshly-set cohort.
+            state = readState(cwd);
+          }
         }
       }
 
@@ -443,6 +455,26 @@ async function main() {
         //   (existing pre-Stage-A behavior, unchanged for projects without
         //   mvp_scope)
         const cohort = state.release?.current_cut_id;
+
+        // RFC §10 D-Q6 + Phase 1.4b: a cohort with FAILED TODOs MUST NOT be
+        // recorded as completed. release-finalize would otherwise append the
+        // cohort to `completed_cut_ids` (PR #185 codex review), flipping D-Q6
+        // immutability on for a cohort that never actually shipped its release
+        // artifact. The whole-pipeline phase3-gate path handles failed TODOs
+        // via the existing fix loop; the release path is reserved for cohorts
+        // whose sprint completed cleanly.
+        if (cohort && failed > 0) {
+          writeState(cwd, { current_phase: 'phase3-gate' });
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `[MPL] Sprint resolved with FAILED TODOs (${completed} completed, ${failed} failed). ` +
+              `Active cohort "${cohort}" cannot enter the release path while failures are present. ` +
+              `Transitioning to whole-pipeline phase3-gate; the fix loop will run there. ` +
+              `(state.release.current_cut_id preserved; the release path will resume from a clean sprint next time.)`
+          }));
+          break;
+        }
+
         const nextPhase = cohort ? 'release-gate' : 'phase3-gate';
         const target = cohort ? `release-gate(${cohort})` : 'Phase 3: Quality Gate';
         writeState(cwd, { current_phase: nextPhase });
@@ -466,6 +498,17 @@ async function main() {
       // Phase 1.6b: stub handler. Scoped Hard 1/2/3 + release-scoped
       // gate-results.json land in Phase 1.6c. For now, immediately advance
       // to release-finalize so the lifecycle exit logic can run.
+      //
+      // Phase 1.6c will:
+      //   - Run scoped Hard 1/2/3 against `state.release.current_cut_id`
+      //     (full Hard 1 project-wide; Hard 2 affected scope; Hard 3 active
+      //      cut's interface_contract — per RFC §5.3 D-Q3)
+      //   - Write `.mpl/mpl/releases/{cut_id}/gate-results.json` (NEVER
+      //     touch `state.gate_results.hard{1,2,3}_*` per RFC §5.5)
+      //   - On failure: increment `state.release.fix_loop_count`, route
+      //     back to `phase2-sprint` for the same cohort (mirror of
+      //     phase3-gate→phase4-fix loop, RFC §5.3.1)
+      //   - On success: transition to release-finalize as today's stub does
       const cohort = state.release?.current_cut_id;
       if (!cohort) {
         // Defensive: release-gate without an active cohort is a state
