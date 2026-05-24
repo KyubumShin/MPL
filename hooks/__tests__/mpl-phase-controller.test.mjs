@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -730,10 +730,38 @@ mvp_scope:
   });
 
   it('1.6b: release-finalize appends current cohort to completed_cut_ids and clears current_cut_id', () => {
-    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    // After 1.6c-ii, release-finalize requires goal-contract + decomposition
+    // to build the release-manifest before advancing the lifecycle. Seed
+    // both so the original 1.6b lifecycle assertion still exercises the
+    // append+clear+route path. The helpers `writeGoalContractWithMvp` and
+    // `writeDecompositionWithMvp` are defined in the 1.6c-ii block below;
+    // we inline equivalents here to avoid a forward-declaration dependency.
+    mkdirSync(join(tmpDir, '.mpl', 'mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeFileSync(join(tmpDir, '.mpl', 'mpl', 'decomposition.yaml'), `
+graph_version: "1.0"
+generated_by: mpl-decomposer
+recompose_count: 0
+completed_phase_policy: immutable
+execution_tiers:
+  - tier: 1
+    phases: [phase-1, phase-2]
+mvp:
+  phases: [phase-1, phase-2]
+  execution_mode: sequential
+  artifact: draft_pr
+  derived_from: mvp_scope
+release_cuts: []
+`);
     const out = runStopHook(tmpDir, {
       current_phase: 'release-finalize',
-      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
     });
     const state = readState();
     assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
@@ -1068,5 +1096,183 @@ mvp_scope:
     const state = readState();
     assert.strictEqual(state.current_phase, 'release-gate');
     assert.match(out.stopReason, /missing scoped Hard 1\/2\/3 evidence/);
+  });
+
+  // ── Stage A Phase 1.6c-ii: release-finalize writes manifest + evidence + gate-results ──
+
+  function writeDecompositionWithMvp(dir, { phases = ['phase-1', 'phase-2'], artifact = 'draft_pr' } = {}) {
+    mkdirSync(join(dir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+graph_version: "1.0"
+generated_by: mpl-decomposer
+recompose_count: 0
+completed_phase_policy: immutable
+execution_tiers:
+  - tier: 1
+    phases: [${phases.join(', ')}]
+mvp:
+  phases: [${phases.join(', ')}]
+  execution_mode: sequential
+  artifact: ${artifact}
+  derived_from: mvp_scope
+release_cuts: []
+`);
+  }
+
+  it('1.6c-ii: release-finalize writes release-manifest.json + evidence-summary.md + gate-results.json under .mpl/mpl/releases/{cut_id}/', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      pipeline_id: 'mpl-20260524-mvp-fixture',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0, command: 'npm run build' },
+          hard2_coverage: { exit_code: 0, command: 'npm test' },
+          hard3_resilience: { exit_code: 0, command: 'contract' },
+        },
+      },
+    });
+    const releaseDir = join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp');
+    const manifestPath = join(releaseDir, 'release-manifest.json');
+    const summaryPath = join(releaseDir, 'evidence-summary.md');
+    const gatePath = join(releaseDir, 'gate-results.json');
+
+    assert.ok(existsSync(manifestPath), 'release-manifest.json must exist');
+    assert.ok(existsSync(summaryPath), 'evidence-summary.md must exist');
+    assert.ok(existsSync(gatePath), 'gate-results.json must exist');
+
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+    assert.equal(manifest.cut_id, 'mvp');
+    assert.deepEqual(manifest.phases, ['phase-1', 'phase-2']);
+    assert.deepEqual(manifest.goal_trace.acceptance_criteria, ['AC-1']);
+    assert.deepEqual(manifest.goal_trace.variation_axes, ['AX-1']);
+    assert.equal(manifest.artifact, 'draft_pr');
+    assert.equal(manifest.pipeline_id, 'mpl-20260524-mvp-fixture');
+    // 1.6c-iii placeholders.
+    assert.equal(manifest.commit_sha, null);
+    assert.equal(manifest.tree_sha, null);
+    assert.equal(manifest.snapshot_ref, null);
+    assert.deepEqual(manifest.gate_results_summary, { hard1: true, hard2: true, hard3: true });
+
+    const summary = readFileSync(summaryPath, 'utf-8');
+    assert.match(summary, /# Release evidence — `mvp`/);
+    assert.match(summary, /Artifact:\*\* draft_pr/);
+    assert.match(summary, /`phase-1`/);
+
+    const gate = JSON.parse(readFileSync(gatePath, 'utf-8'));
+    assert.ok(gate.archived_at);
+    assert.equal(gate.gate_results.hard1_baseline.exit_code, 0);
+  });
+
+  it('1.6c-ii: release-finalize advances lifecycle (appends completed_cut_ids, clears current, routes to phase3-gate) AFTER write succeeds', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
+    assert.strictEqual(state.release.current_cut_id, null);
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.match(out.stopReason, /Manifest written to \.mpl\/mpl\/releases\/mvp\//);
+  });
+
+  it('1.6c-ii: release-finalize MUST NOT set finalize_done or transition to completed (RFC §5.5)', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.notStrictEqual(state.finalize_done, true, 'finalize_done is exclusive to phase5-finalize');
+    assert.notStrictEqual(state.current_phase, 'completed', 'release path never routes to completed');
+  });
+
+  it('1.6c-ii: release-finalize refuses to advance when contract/decomposition lack cohort descriptor', () => {
+    // No goal-contract, no decomposition → descriptor missing → manifest
+    // would be degraded. Refuse to write, stay at release-finalize,
+    // surface actionable message.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    // No lifecycle advancement.
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /cohort descriptor missing/);
+    // No file created.
+    assert.equal(existsSync(join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp', 'release-manifest.json')), false);
+  });
+
+  it('1.6c-ii: release-finalize re-entry with cohort already in completed_cut_ids overwrites the manifest (idempotent re-write)', () => {
+    // PR #185 idempotency: re-entering release-finalize with a cohort
+    // already in completed_cut_ids did not double-append. 1.6c-ii adds
+    // a file write — re-entry should overwrite the manifest cleanly
+    // (no append, no stale read).
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    const releaseDir = join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp');
+    mkdirSync(releaseDir, { recursive: true });
+    writeFileSync(join(releaseDir, 'release-manifest.json'), JSON.stringify({ stale: true }));
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: ['mvp'],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp'], 'idempotent: no double-append');
+    const manifest = JSON.parse(readFileSync(join(releaseDir, 'release-manifest.json'), 'utf-8'));
+    assert.equal(manifest.cut_id, 'mvp', 'stale manifest overwritten');
+    assert.equal(manifest.stale, undefined, 'stale field gone');
   });
 });
