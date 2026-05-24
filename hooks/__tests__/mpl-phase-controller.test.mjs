@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -730,10 +730,23 @@ mvp_scope:
   });
 
   it('1.6b: release-finalize appends current cohort to completed_cut_ids and clears current_cut_id', () => {
+    // After 1.6c-ii, release-finalize requires goal-contract + decomposition
+    // to build the release-manifest before advancing the lifecycle. Both
+    // helpers (`writeGoalContractWithMvp`, `writeDecompositionWithMvp`) are
+    // function declarations in this describe block — hoisted, so usable
+    // here even though `writeDecompositionWithMvp` is defined further down.
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
     const out = runStopHook(tmpDir, {
       current_phase: 'release-finalize',
-      release: { current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null },
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0, pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
     });
     const state = readState();
     assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
@@ -1068,5 +1081,388 @@ mvp_scope:
     const state = readState();
     assert.strictEqual(state.current_phase, 'release-gate');
     assert.match(out.stopReason, /missing scoped Hard 1\/2\/3 evidence/);
+  });
+
+  // ── Stage A Phase 1.6c-ii: release-finalize writes manifest + evidence + gate-results ──
+
+  function writeDecompositionWithMvp(dir, { phases = ['phase-1', 'phase-2'], artifact = 'draft_pr' } = {}) {
+    mkdirSync(join(dir, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+graph_version: "1.0"
+generated_by: mpl-decomposer
+recompose_count: 0
+completed_phase_policy: immutable
+execution_tiers:
+  - tier: 1
+    phases: [${phases.join(', ')}]
+mvp:
+  phases: [${phases.join(', ')}]
+  execution_mode: sequential
+  artifact: ${artifact}
+  derived_from: mvp_scope
+release_cuts: []
+`);
+  }
+
+  it('1.6c-ii: release-finalize writes release-manifest.json + evidence-summary.md + gate-results.json under .mpl/mpl/releases/{cut_id}/', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      pipeline_id: 'mpl-20260524-mvp-fixture',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0, command: 'npm run build' },
+          hard2_coverage: { exit_code: 0, command: 'npm test' },
+          hard3_resilience: { exit_code: 0, command: 'contract' },
+        },
+      },
+    });
+    const releaseDir = join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp');
+    const manifestPath = join(releaseDir, 'release-manifest.json');
+    const summaryPath = join(releaseDir, 'evidence-summary.md');
+    const gatePath = join(releaseDir, 'gate-results.json');
+
+    assert.ok(existsSync(manifestPath), 'release-manifest.json must exist');
+    assert.ok(existsSync(summaryPath), 'evidence-summary.md must exist');
+    assert.ok(existsSync(gatePath), 'gate-results.json must exist');
+
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+    assert.equal(manifest.cut_id, 'mvp');
+    assert.deepEqual(manifest.phases, ['phase-1', 'phase-2']);
+    assert.deepEqual(manifest.goal_trace.acceptance_criteria, ['AC-1']);
+    assert.deepEqual(manifest.goal_trace.variation_axes, ['AX-1']);
+    assert.equal(manifest.artifact, 'draft_pr');
+    assert.equal(manifest.pipeline_id, 'mpl-20260524-mvp-fixture');
+    // 1.6c-iii placeholders.
+    assert.equal(manifest.commit_sha, null);
+    assert.equal(manifest.tree_sha, null);
+    assert.equal(manifest.snapshot_ref, null);
+    assert.deepEqual(manifest.gate_results_summary, { hard1: true, hard2: true, hard3: true });
+
+    const summary = readFileSync(summaryPath, 'utf-8');
+    assert.match(summary, /# Release evidence — `mvp`/);
+    assert.match(summary, /Artifact:\*\* draft_pr/);
+    assert.match(summary, /`phase-1`/);
+
+    const gate = JSON.parse(readFileSync(gatePath, 'utf-8'));
+    assert.ok(gate.archived_at);
+    assert.equal(gate.gate_results.hard1_baseline.exit_code, 0);
+  });
+
+  it('1.6c-ii: release-finalize advances lifecycle (appends completed_cut_ids, clears current, routes to phase3-gate) AFTER write succeeds', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp']);
+    assert.strictEqual(state.release.current_cut_id, null);
+    assert.strictEqual(state.current_phase, 'phase3-gate');
+    assert.match(out.stopReason, /Manifest written to \.mpl\/mpl\/releases\/mvp\//);
+  });
+
+  it('1.6c-ii: release-finalize MUST NOT set finalize_done or transition to completed (RFC §5.5)', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.notStrictEqual(state.finalize_done, true, 'finalize_done is exclusive to phase5-finalize');
+    assert.notStrictEqual(state.current_phase, 'completed', 'release path never routes to completed');
+  });
+
+  it('1.6c-ii: release-finalize refuses to advance when contract/decomposition lack cohort descriptor', () => {
+    // No goal-contract, no decomposition → descriptor missing → manifest
+    // would be degraded. Refuse to write, stay at release-finalize,
+    // surface actionable message.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    // No lifecycle advancement.
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /cohort descriptor missing/);
+    // No file created.
+    assert.equal(existsSync(join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp', 'release-manifest.json')), false);
+  });
+
+  // PR #187 codex High regression: strict-both-required for resolveCutDescriptor.
+  it('1.6c-ii (PR #187 codex review): release-finalize refuses to advance when contract present but decomposition missing', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);  // contract only — no decomposition
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /cohort descriptor missing/);
+    assert.equal(existsSync(join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp', 'release-manifest.json')), false);
+  });
+
+  it('1.6c-ii (PR #187 codex review): release-finalize refuses to advance when decomposition present but contract missing', () => {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeDecompositionWithMvp(tmpDir);  // decomposition only — no contract
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /cohort descriptor missing/);
+  });
+
+  // PR #187 round-2 (codex + claude): bail on invalid goal-contract.
+  it('1.6c-ii (PR #187 round-2 codex+claude): release-finalize bails when contract.mvp_scope has neither AC nor AX (codex reproducer)', () => {
+    // Codex reproducer: `mvp_scope: { artifact: draft_pr }` only — the
+    // validator flags `mvp_scope.acceptance_criteria_or_variation_axes`
+    // so gcRead.valid=false. Pre-fix the handler ignored gcRead.valid
+    // and shipped a manifest with empty goal_trace, flipping D-Q6
+    // immutability for a cohort with no acceptance criteria.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  artifact: draft_pr
+`);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    // No advancement.
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /goal-contract is invalid/);
+    assert.match(out.stopReason, /mvp_scope\.acceptance_criteria_or_variation_axes/);
+    // No file written.
+    assert.equal(existsSync(join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp', 'release-manifest.json')), false);
+  });
+
+  it('1.6c-ii (PR #187 round-2 codex+claude): release-finalize bails when contract validator flags any structural failure (defense-in-depth)', () => {
+    // Any contract validity failure must block release-finalize — even
+    // unrelated-looking ones (e.g., unknown AC id) — because a broken
+    // contract at release-time means goal_trace cannot be trusted.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'goal-contract.yaml'), `
+source:
+  runtime_goal: "x"
+  user_request_hash: "abc"
+mission:
+  goal: "g"
+  project_pivot: "pp"
+  must_ship_outcomes:
+    - "ship"
+ontology:
+  entities:
+    - foo
+variation_axes:
+  - id: AX-1
+    name: ax
+acceptance_criteria:
+  - id: AC-1
+    statement: "ac"
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/audit-report.json
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [AC-DOES-NOT-EXIST]
+  variation_axes: [AX-1]
+  artifact: draft_pr
+`);
+    writeDecompositionWithMvp(tmpDir);
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /goal-contract is invalid/);
+  });
+
+  it('1.6c-ii (PR #187 codex review): release-finalize refuses to advance when graph.mvp.phases is empty', () => {
+    // Decomposer wrote `mvp:` block but `phases: []` (mechanical mapping
+    // yielded no membership). Manifest would assert "released" with no
+    // work — refuse.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir, { phases: [] });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-finalize');
+    assert.deepStrictEqual(state.release.completed_cut_ids, []);
+    assert.match(out.stopReason, /cohort descriptor missing/);
+  });
+
+  it('1.6c-ii (PR #187 claude review): release artifacts written with 0o644 mode (consumer-friendly)', () => {
+    // Skip on Windows where POSIX file modes do not apply.
+    if (process.platform === 'win32') return;
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp', completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null, max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const releaseDir = join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp');
+    for (const f of ['release-manifest.json', 'evidence-summary.md', 'gate-results.json']) {
+      const mode = statSync(join(releaseDir, f)).mode & 0o777;
+      assert.equal(mode, 0o644, `${f} should have mode 0o644 (got ${mode.toString(8)})`);
+    }
+  });
+
+  it('1.6c-ii: release-finalize re-entry with cohort already in completed_cut_ids overwrites the manifest (idempotent re-write)', () => {
+    // PR #185 idempotency: re-entering release-finalize with a cohort
+    // already in completed_cut_ids did not double-append. 1.6c-ii adds
+    // a file write — re-entry should overwrite the manifest cleanly
+    // (no append, no stale read).
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeGoalContractWithMvp(tmpDir);
+    writeDecompositionWithMvp(tmpDir);
+    const releaseDir = join(tmpDir, '.mpl', 'mpl', 'releases', 'mvp');
+    mkdirSync(releaseDir, { recursive: true });
+    writeFileSync(join(releaseDir, 'release-manifest.json'), JSON.stringify({ stale: true }));
+    runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: ['mvp'],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        max_fix_loops: 3,
+        gate_results: {
+          hard1_baseline: { exit_code: 0 }, hard2_coverage: { exit_code: 0 }, hard3_resilience: { exit_code: 0 },
+        },
+      },
+    });
+    const state = readState();
+    assert.deepStrictEqual(state.release.completed_cut_ids, ['mvp'], 'idempotent: no double-append');
+    const manifest = JSON.parse(readFileSync(join(releaseDir, 'release-manifest.json'), 'utf-8'));
+    assert.equal(manifest.cut_id, 'mvp', 'stale manifest overwritten');
+    assert.equal(manifest.stale, undefined, 'stale field gone');
   });
 });

@@ -16,7 +16,7 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,6 +39,21 @@ const { resolveRuleAction } = await import(
 // Stage A: goal-contract reader for the D-Q7 small-pipeline guard.
 const { readGoalContract } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
+);
+
+// Stage A Phase 1.6c-ii: release-manifest serializers for the release-finalize
+// file-write step. Pure helpers; this hook owns the filesystem side.
+const {
+  buildReleaseManifest,
+  buildEvidenceSummary,
+  buildGateResultsSnapshot,
+  RELEASE_DIR_REL_PATH,
+} = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-release-manifest.mjs')).href
+);
+
+const { parsePhaseContractGraphText } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-phase-contract-graph.mjs')).href
 );
 
 // G4 hang detection (#109)
@@ -645,16 +660,118 @@ async function main() {
     }
 
     case 'release-finalize': {
-      // Phase 1.6b: minimal completion logic — record the cohort in
-      // completed_cut_ids, advance current_cut_id, and route.
-      // Manifest write + artifact creation (per-cut snapshot ref +
-      // optional draft_pr/branch/tag) land in Phase 1.6c.
+      // Phase 1.6c-ii: write release-manifest.json + evidence-summary.md +
+      // gate-results.json under .mpl/mpl/releases/{cut_id}/ before the
+      // existing append+clear step. RFC §5.4 requires the manifest write
+      // to precede `completed_cut_ids` append — a cohort is only "released"
+      // (and D-Q6 immutable) once its manifest is shipped.
+      //
+      // Snapshot identifiers (commit_sha/tree_sha/snapshot_ref) are
+      // placeholders here; 1.6c-iii populates them via git rev-parse /
+      // update-ref. Optional user-visible artifact creation (draft_pr /
+      // branch / tag) also lands in 1.6c-iii. The manifest schema is
+      // stable across the 1.6c-ii → 1.6c-iii boundary so the upcoming
+      // diff is small.
+      //
+      // RFC §5.5 invariants preserved: this handler MUST NOT set
+      // `state.finalize_done=true` and MUST NOT transition `current_phase`
+      // to `completed`. Both remain exclusive to phase5-finalize.
       const cur = state.release?.current_cut_id;
       if (!cur) {
         writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: '[MPL] ⚠ release-finalize entered with no active cohort. Routing to phase3-gate.'
+        }));
+        break;
+      }
+
+      // Read contract + decomposition for the manifest builder. Both are
+      // required: contract supplies goal_trace (AC/AX), decomposition
+      // supplies phases per cut. Missing either is an actionable error —
+      // refuse to write a degraded manifest and stay at release-finalize.
+      //
+      // PR #187 round-2 codex+claude High: an INVALID contract (e.g.,
+      // `mvp_scope: { artifact: draft_pr }` with no AC/AX) was previously
+      // passed through because the handler only checked `gcRead.exists`.
+      // The validator already flags `mvp_scope.acceptance_criteria_or_variation_axes`
+      // and other structural failures; route any `!gcRead.valid` through
+      // the same bail mechanism so a degraded "released" manifest with
+      // empty goal_trace cannot flip D-Q6 immutability. Library-layer
+      // defense (resolveCutDescriptor rejecting empty AC+AX) is the
+      // backstop for callers that bypass `readGoalContract`.
+      const gcRead = readGoalContract(cwd);
+      if (gcRead.exists && !gcRead.valid) {
+        const reasonList = Array.isArray(gcRead.missing) && gcRead.missing.length > 0
+          ? gcRead.missing.join(', ')
+          : '(no detail)';
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ release-finalize(${cur}): goal-contract is invalid (${reasonList}). ` +
+            `Cohort NOT appended to completed_cut_ids. Fix .mpl/goal-contract.yaml — the validator at ` +
+            `mpl-goal-contract.validateGoalContractText lists what is required. ` +
+            `Staying at release-finalize until resolved.`
+        }));
+        break;
+      }
+      const contract = gcRead.exists ? gcRead.contract : null;
+      let graph = null;
+      try {
+        const decompPath = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
+        if (existsSync(decompPath)) {
+          graph = parsePhaseContractGraphText(readFileSync(decompPath, 'utf-8'));
+        }
+      } catch {
+        graph = null;
+      }
+
+      const writtenAt = new Date().toISOString();
+      const manifest = buildReleaseManifest({ cutId: cur, state, contract, graph, now: writtenAt });
+      if (!manifest) {
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ release-finalize(${cur}): cohort descriptor missing from contract/decomposition. ` +
+            `Cannot build release manifest. Verify .mpl/goal-contract.yaml mvp_scope and ` +
+            `.mpl/mpl/decomposition.yaml mvp.phases are present and match the active cut_id. ` +
+            `Staying at release-finalize until resolved.`
+        }));
+        break;
+      }
+      const evidence = buildEvidenceSummary({ cutId: cur, state, contract, graph, now: writtenAt });
+      const gateSnapshot = buildGateResultsSnapshot(state, writtenAt);
+
+      const releaseDir = join(cwd, RELEASE_DIR_REL_PATH, cur);
+      try {
+        mkdirSync(releaseDir, { recursive: true });
+        // 0o644 (not the 0o600 used for state.json): release artifacts
+        // are designed for consumption by CI runners, mpl-status, and
+        // future tooling that may run as a different uid on a shared
+        // dev box / CI agent (claude review #1 on PR #187). state.json
+        // stays 0o600 because it carries session-internal evidence;
+        // these files are the shippable record of the release.
+        writeFileSync(
+          join(releaseDir, 'release-manifest.json'),
+          JSON.stringify(manifest, null, 2) + '\n',
+          { mode: 0o644 }
+        );
+        writeFileSync(
+          join(releaseDir, 'evidence-summary.md'),
+          evidence.endsWith('\n') ? evidence : evidence + '\n',
+          { mode: 0o644 }
+        );
+        writeFileSync(
+          join(releaseDir, 'gate-results.json'),
+          JSON.stringify(gateSnapshot, null, 2) + '\n',
+          { mode: 0o644 }
+        );
+      } catch (err) {
+        // Manifest write failure must NOT advance the lifecycle (RFC §5.4:
+        // append only after manifest write succeeds). Surface and pin.
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] ⛔ release-finalize(${cur}): manifest write failed (${err?.message || 'unknown'}). ` +
+            `Cohort NOT appended to completed_cut_ids. Resolve the filesystem error under ` +
+            `${RELEASE_DIR_REL_PATH}/${cur}/ and let the loop retry.`
         }));
         break;
       }
@@ -682,7 +799,7 @@ async function main() {
       });
       console.log(JSON.stringify({
         continue: true,
-        stopReason: `[MPL] release-finalize(${cur}): cohort completed. ` +
+        stopReason: `[MPL] release-finalize(${cur}): cohort completed. Manifest written to ${RELEASE_DIR_REL_PATH}/${cur}/. ` +
           `Stage A single-cohort path: transitioning to whole-pipeline phase3-gate.`
       }));
       break;
