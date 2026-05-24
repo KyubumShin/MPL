@@ -250,3 +250,133 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }), false);
   });
 });
+
+/* ─── Stage A Phase 1.6c-i (PR #186 review fix): Bash gate routing ─── */
+
+describe('mpl-gate-recorder Bash gate routing — release-gate vs whole-pipeline', () => {
+  function runBashHook(dir, { command, exit_code, stdout = '' }) {
+    const input = {
+      cwd: dir,
+      tool_name: 'Bash',
+      tool_input: { command },
+      tool_response: { stdout, exit_code },
+    };
+    return JSON.parse(execFileSync('node', [HOOK_PATH], {
+      input: JSON.stringify(input),
+      encoding: 'utf-8',
+    }));
+  }
+
+  it('current_phase=release-gate routes hard2_coverage into state.release.gate_results (NOT top-level)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gr-release-'));
+    try {
+      // Seed both subtrees so the assertion has a real before/after for
+      // top-level isolation (RFC §5.5).
+      const topLevelBefore = {
+        hard1_passed: null, hard2_passed: null, hard3_passed: null,
+        hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+      };
+      seedState(tmp, {
+        current_phase: 'release-gate',
+        gate_results: { ...topLevelBefore },
+        release: {
+          current_cut_id: 'mvp',
+          completed_cut_ids: [],
+          fix_loop_count: 0,
+          pending_artifact: null,
+          gate_results: {
+            hard1_passed: null, hard2_passed: null, hard3_passed: null,
+            hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+          },
+          max_fix_loops: 3,
+        },
+      });
+      runBashHook(tmp, { command: 'npm test', exit_code: 0 });
+      const state = readState(tmp);
+      // Scoped subtree got the entry.
+      assert.equal(state.release.gate_results.hard2_coverage.exit_code, 0);
+      assert.equal(state.release.gate_results.hard2_coverage.command, 'npm test');
+      // Top-level untouched (RFC §5.5 isolation).
+      assert.equal(state.gate_results.hard2_coverage, null);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('current_phase=phase3-gate routes hard2_coverage into top-level state.gate_results (unchanged behavior)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gr-phase3-'));
+    try {
+      seedState(tmp, {
+        current_phase: 'phase3-gate',
+        release: {
+          current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0,
+          pending_artifact: null, max_fix_loops: 3,
+          gate_results: {
+            hard1_passed: null, hard2_passed: null, hard3_passed: null,
+            hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+          },
+        },
+      });
+      runBashHook(tmp, { command: 'npm test', exit_code: 0 });
+      const state = readState(tmp);
+      assert.equal(state.gate_results.hard2_coverage.exit_code, 0);
+      // Scoped subtree NOT polluted by whole-pipeline evidence.
+      assert.equal(state.release.gate_results.hard2_coverage, null);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('current_phase=phase2-sprint routes to top-level (pre-Stage-A default)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gr-sprint-'));
+    try {
+      seedState(tmp, {
+        current_phase: 'phase2-sprint',
+        release: {
+          current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0,
+          pending_artifact: null, max_fix_loops: 3,
+          gate_results: {
+            hard1_passed: null, hard2_passed: null, hard3_passed: null,
+            hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+          },
+        },
+      });
+      runBashHook(tmp, { command: 'npm test', exit_code: 0 });
+      const state = readState(tmp);
+      assert.equal(state.gate_results.hard2_coverage.exit_code, 0);
+      assert.equal(state.release.gate_results.hard2_coverage, null);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('release-gate FAIL exit_code is recorded into release subtree with first-failure-wins semantics', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gr-rel-fail-'));
+    try {
+      seedState(tmp, {
+        current_phase: 'release-gate',
+        release: {
+          current_cut_id: 'mvp',
+          completed_cut_ids: [],
+          fix_loop_count: 0,
+          pending_artifact: null,
+          gate_results: {
+            hard1_passed: null, hard2_passed: null, hard3_passed: null,
+            hard1_baseline: null,
+            hard2_coverage: { exit_code: 1, command: 'npm test', timestamp: '2026-05-24T00:00:00Z' },
+            hard3_resilience: null,
+          },
+          max_fix_loops: 3,
+        },
+      });
+      // Second run with PASS — first-failure-wins means the new PASS
+      // overrides the prior failure (fix-loop succeeded). Same semantics
+      // as the top-level branch (lines 303-305 in mpl-gate-recorder.mjs).
+      runBashHook(tmp, { command: 'npm test', exit_code: 0 });
+      const state = readState(tmp);
+      assert.equal(state.release.gate_results.hard2_coverage.exit_code, 0);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

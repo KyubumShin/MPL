@@ -279,7 +279,22 @@ try {
       process.exit(0);
     }
 
-    const priorResults = state.gate_results || {};
+    // Stage A Phase 1.6c-i (PR #186 review): route gate evidence based on
+    // current_phase. When the orchestrator is at `release-gate`, scoped
+    // Hard 1/2/3 evidence MUST land in `state.release.gate_results` —
+    // writing to top-level `state.gate_results` would (a) pollute the
+    // whole-pipeline subtree reserved for the final phase3-gate (RFC §5.5
+    // isolation), and (b) leave `state.release.gate_results` empty so the
+    // release-gate handler reads MISSING forever.
+    //
+    // This is the resume doc §7 Q2 option (c) — "recorder routes to
+    // release-scoped only when current_phase == 'release-gate'". The
+    // existing top-level path is preserved unchanged for every other
+    // phase (phase3-gate runs the whole-pipeline gate).
+    const isReleaseGatePhase = state.current_phase === 'release-gate';
+    const priorResults = isReleaseGatePhase
+      ? (state.release?.gate_results || {})
+      : (state.gate_results || {});
     const priorEntry = priorResults[gateName];
     // Convert legacy boolean fields (hard1_passed: true) into structured entry
     // by overwriting; no loss because legacy booleans are self-report and
@@ -297,14 +312,24 @@ try {
       timestamp: new Date().toISOString(),
     };
 
+    function buildPatch(updatedGate) {
+      if (isReleaseGatePhase) {
+        // Merge into state.release.gate_results, preserving sibling
+        // release fields (current_cut_id, completed_cut_ids,
+        // fix_loop_count, etc.) via deepMerge.
+        return { release: { gate_results: { ...priorResults, [gateName]: updatedGate } } };
+      }
+      return { gate_results: { ...priorResults, [gateName]: updatedGate } };
+    }
+
     // First failure wins within a phase (so a later success cannot mask a
     // prior failure). A later fix-loop that writes `exit_code: 0` resets the
     // record — which is intended because the fix did actually pass.
     if (priorEntry && priorEntry.exit_code !== 0 && recordedExit === 0) {
       // Keep the latest on success after prior failure (fix-loop succeeded)
-      writeState(cwd, { gate_results: { ...priorResults, [gateName]: newEntry } });
+      writeState(cwd, buildPatch(newEntry));
     } else if (!priorEntry || priorEntry.exit_code === 0 || recordedExit !== 0) {
-      writeState(cwd, { gate_results: { ...priorResults, [gateName]: newEntry } });
+      writeState(cwd, buildPatch(newEntry));
     }
     ok();
     process.exit(0);

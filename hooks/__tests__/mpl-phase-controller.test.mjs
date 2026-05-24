@@ -1018,4 +1018,55 @@ mvp_scope:
     assert.match(out.stopReason, /⛔ BLOCKED/);
     assert.match(out.stopReason, /Strict enforcement/);
   });
+
+  it('1.6c-i (PR #186 review): release-gate ALWAYS structured-only — legacy hard1_passed=true alone does NOT pass', () => {
+    // Codex/claude High #2 on PR #186: release subtree had no historical
+    // legacy evidence so the AD-0006 zero-structured legacy boolean
+    // fallback would let a single self-reported `release.gate_results.
+    // hard1_passed=true` bypass the structured-only contract and reach
+    // release-finalize. The adapter now hard-codes strict:true regardless
+    // of workspace `missing_gate_evidence` policy. Verifies the gate
+    // refuses to advance under the legacy-only shape.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    const out = runStopHook(tmpDir, releaseStateWith({
+      // Legacy booleans only — would have triggered source=legacy PASS
+      // pre-fix because checkGateResults' legacy fallback path returns
+      // allPassed when at least one boolean is true and zero are false.
+      hard1_passed: true,
+      hard2_passed: null,
+      hard3_passed: null,
+      hard1_baseline: null,
+      hard2_coverage: null,
+      hard3_resilience: null,
+    }));
+    const state = readState();
+    // Must STAY at release-gate (no PASS transition).
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(out.stopReason, /missing scoped Hard 1\/2\/3 evidence/);
+    // No bypass to release-finalize.
+    assert.doesNotMatch(out.stopReason, /Transitioning to release-finalize/);
+  });
+
+  it('1.6c-i (PR #186 review): release-gate strict overrides workspace policy=off (cannot opt-out of structured-only)', () => {
+    // Even when the workspace explicitly turns OFF the missing_gate_evidence
+    // rule, the release-gate must still reject zero-structured + legacy-
+    // boolean evidence. The workspace policy only affects MISSING message
+    // wording for parity with phase3-gate; the structured contract is
+    // non-negotiable on the release path.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'config.json'), JSON.stringify({
+      enforcement: { missing_gate_evidence: 'off' },
+    }));
+    const out = runStopHook(tmpDir, releaseStateWith({
+      hard1_passed: true,
+      hard2_passed: true,
+      hard3_passed: true,  // three legacy booleans — pre-fix would have PASSed
+      hard1_baseline: null,
+      hard2_coverage: null,
+      hard3_resilience: null,
+    }));
+    const state = readState();
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(out.stopReason, /missing scoped Hard 1\/2\/3 evidence/);
+  });
 });

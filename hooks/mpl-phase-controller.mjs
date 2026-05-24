@@ -535,18 +535,27 @@ async function main() {
         break;
       }
 
-      // Reuse the top-level missing_gate_evidence rule so workspace policy
-      // drives both phase3-gate and release-gate consistently. The
-      // cohort-scoped fix budget still uses state.release.max_fix_loops
-      // (default 3), separate from top-level state.max_fix_loops (default
-      // 10) per RFC §5.3.1.
+      // The workspace `missing_gate_evidence` rule only controls MISSING
+      // message wording (in progress vs ⛔ BLOCKED) for parity with
+      // phase3-gate UX. The strict toggle for checkGateResults is ALWAYS
+      // true on release-gate, regardless of policy.
+      //
+      // Rationale (PR #186 codex/claude High #2): `state.release.gate_results`
+      // is a v6 subtree with no historical legacy boolean evidence to
+      // honor. The transitional zero-structured legacy fallback was added
+      // for top-level state.gate_results to ease the AD-0006 migration; on
+      // a brand-new subtree it would let `release.gate_results.hard1_passed
+      // = true` alone trigger PASS → release-finalize, bypassing the
+      // structured-only contract Phase 1.6c-i is meant to enforce.
       const releaseGateRuleAction = resolveRuleAction(cwd, state, 'missing_gate_evidence');
-      const releaseEnforcementStrict = releaseGateRuleAction === 'block';
+      const releaseMissingMessagingStrict = releaseGateRuleAction === 'block';
       // Adapter: checkGateResults reads `state.gate_results`. Wrap the
       // release subtree to reuse the structured-vs-legacy decision tree
-      // without duplicating logic across two gate paths.
+      // without duplicating logic across two gate paths. `strict: true`
+      // is hard-coded (see rationale above) — release-gate ALWAYS requires
+      // structured exits.
       const releaseGates = state.release?.gate_results || {};
-      const releaseResults = checkGateResults({ gate_results: releaseGates }, { strict: releaseEnforcementStrict });
+      const releaseResults = checkGateResults({ gate_results: releaseGates }, { strict: true });
 
       if (releaseResults.allPassed) {
         writeState(cwd, { current_phase: 'release-finalize' });
@@ -616,17 +625,21 @@ async function main() {
       }
 
       // MISSING (zero or partial structured evidence). No transition;
-      // surface guidance and let the orchestrator produce evidence. Strict
-      // mode hard-blocks the wording; non-strict frames as "in progress".
+      // surface guidance and let the orchestrator produce evidence. The
+      // workspace strict policy changes the message wording only — the
+      // structured-only contract is always enforced (see above).
+      //
+      // Note: `missingEvidence` is guaranteed non-empty here because
+      // checkGateResults returns the MISSING branch only when at least
+      // one of hard{1,2,3} is absent. The full-PASS path returns earlier.
       const missing = releaseResults.missingEvidence;
-      const missingLabel = missing.length ? missing.join(', ') : 'all three (none recorded yet)';
-      const verb = releaseEnforcementStrict ? '⛔ BLOCKED' : 'in progress';
-      const tail = releaseEnforcementStrict
+      const verb = releaseMissingMessagingStrict ? '⛔ BLOCKED' : 'in progress';
+      const tail = releaseMissingMessagingStrict
         ? 'Strict enforcement requires all 3 scoped gates to be recorded by mpl-gate-recorder via real Bash exit codes. Self-reported booleans are not accepted.'
         : `Run the missing scoped gates so mpl-gate-recorder writes structured evidence into state.release.gate_results; the loop will continue once all 3 are recorded.`;
       console.log(JSON.stringify({
         continue: true,
-        stopReason: `[MPL] release-gate(${cohort}) ${verb}: missing scoped Hard 1/2/3 evidence (${missingLabel}). ${tail}`
+        stopReason: `[MPL] release-gate(${cohort}) ${verb}: missing scoped Hard 1/2/3 evidence (${missing.join(', ')}). ${tail}`
       }));
       break;
     }
