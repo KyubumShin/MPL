@@ -14,7 +14,7 @@ Interactive setup wizard for the MPL plugin. Handles first-time installation, to
 Check the current MPL installation state:
 
 1. **Plugin exists?** Check for either `MPL/.claude-plugin/plugin.json` or `MPL/.codex-plugin/plugin.json`
-2. **Runtime manifests valid?** If present, validate both Claude (`.claude-plugin/*`) and Codex (`.codex-plugin/plugin.json`, `install/codex.sh` wrapper marketplace generation)
+2. **Runtime manifests valid?** If present, validate the top-level bootstrap (`install.sh`), Claude (`.claude-plugin/*`) and Codex (`.codex-plugin/plugin.json`, `install/codex.sh` wrapper marketplace generation)
 3. **Hooks registered?** Check for `MPL/hooks/hooks.json` with all 4 events (Claude Code hook surface)
 4. **State directory?** Check for `.mpl/` directory
 5. **Config exists?** Check for `.mpl/config.json`
@@ -34,7 +34,7 @@ This prevents local-scope plugin installations from polluting global settings.
 For Codex CLI:
 - Do not write `.claude/settings*.json`.
 - Verify `.codex-plugin/plugin.json` points to `./skills/` and `./.codex-plugin/.mcp.json`.
-- Verify `install/codex.sh` is present and executable; it generates the Codex wrapper marketplace with a clean staged plugin root at `./plugins/mpl` at install time. After `git pull` or local edits, users must rerun it to refresh the staged Codex root.
+- Verify `install.sh` and `install/codex.sh` are present and executable. `install.sh` supports curl/gitless installs by downloading a source archive and writing `.mpl-install-manifest`; `install/codex.sh` generates the Codex wrapper marketplace with a clean staged plugin root at `./plugins/mpl`. After MPL updates, users must rerun `install.sh` or `install/codex.sh` from a refreshed source.
 - Set `SETTINGS_SCOPE = "codex-plugin"` and `SETTINGS_TARGET = ".codex-plugin/plugin.json"` for reporting only.
 
 ```
