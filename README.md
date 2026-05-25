@@ -64,35 +64,22 @@ The moment the orchestrator touches source files, it becomes invested in its own
 
 **Step 1 — Install for your agent runtime:**
 
-Claude Code:
+Clone MPL once, then run the installer for the runtime you use:
 
 ```bash
-# Register the MPL marketplace (one-time)
-claude plugin marketplace add https://github.com/KyubumShin/MPL.git
+git clone https://github.com/KyubumShin/MPL.git
+cd MPL
 
-# Install the plugin
-claude plugin install mpl
+# Claude Code
+./install/claude.sh
+
+# Codex CLI
+./install/codex.sh
 ```
 
-Or from inside Claude Code:
+The installers keep runtime-specific marketplace metadata separate. Claude registers this checkout directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl`.
 
-```
-/plugin marketplace add https://github.com/KyubumShin/MPL.git
-/plugin install mpl
-```
-
-Codex CLI:
-
-```bash
-# Register the MPL marketplace. The marketplace entry installs MPL by default.
-codex plugin marketplace add KyubumShin/MPL
-```
-
-For local development, point Codex at this checkout:
-
-```bash
-codex plugin marketplace add /path/to/MPL
-```
+**Codex refresh note:** after `git pull` or local edits, rerun `./install/codex.sh` to refresh the staged Codex root. The first Codex MCP call after each refresh prepares dependencies and builds the MCP server.
 
 <details>
 <summary><strong>Alternative: Manual installation</strong></summary>

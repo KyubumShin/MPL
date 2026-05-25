@@ -1,4 +1,5 @@
 ---
+name: mpl-doctor
 description: "Diagnose MPL installation — validate plugin structure, hooks, agents, skills, state, and configuration. Command-only: invoke via /mpl:mpl-doctor. Do not auto-trigger from natural language."
 ---
 

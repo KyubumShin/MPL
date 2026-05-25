@@ -1,4 +1,5 @@
 ---
+name: mpl-version-bump
 description: "MPL 플러그인 버전 업데이트 — 버전 참조 일괄 갱신, roadmap 상태 업데이트, version history 생성, commit/push. Command-only: invoke via /mpl:mpl-version-bump. Do not auto-trigger from natural language."
 ---
 
@@ -36,7 +37,7 @@ Version Reference Checklist:
   ☐ .claude-plugin/marketplace.json    → "version" field (top-level)
   ☐ .claude-plugin/marketplace.json    → plugins[0].version field
   ☐ .codex-plugin/plugin.json          → "version" field
-  ☐ .agents/plugins/marketplace.json   → mpl plugin entry present
+  ☐ install/codex.sh                   → generated marketplace entry path "./plugins/mpl"
   ☐ mcp-server/package.json            → "version" field
   ☐ docs/design.md                     → title line "# MPL (Micro-Phase Loop) vX.Y.Z"
   ☐ docs/config-schema.md              → "Version" field in header
@@ -64,7 +65,7 @@ For each mandatory target, update the version. Report each change:
 [MPL-BUMP] ✓ .claude-plugin/marketplace.json (top): 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ .claude-plugin/marketplace.json (plugin): 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ .codex-plugin/plugin.json: 0.8.2 → 0.8.3
-[MPL-BUMP] ✓ .agents/plugins/marketplace.json: mpl entry present
+[MPL-BUMP] ✓ install/codex.sh: generated marketplace entry path "./plugins/mpl"
 [MPL-BUMP] ✓ mcp-server/package.json: 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ docs/design.md title: 0.8.2 → 0.8.3
 [MPL-BUMP] ✓ README.md title: 0.8.2 → 0.8.3
