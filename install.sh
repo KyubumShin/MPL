@@ -8,6 +8,7 @@ fi
 MPL_REPO="${MPL_REPO:-KyubumShin/MPL}"
 MPL_REF="${MPL_REF:-main}"
 MPL_RUNTIME="${MPL_RUNTIME:-auto}"
+MPL_CLAUDE_SCOPE="${MPL_CLAUDE_SCOPE:-user}"
 MPL_INSTALL_ROOT="${MPL_INSTALL_ROOT:-${HOME}/.mpl/install}"
 MPL_SOURCE_DIR="${MPL_SOURCE_DIR:-${MPL_INSTALL_ROOT}/source/mpl}"
 MPL_FORCE_DOWNLOAD="${MPL_FORCE_DOWNLOAD:-0}"
@@ -17,7 +18,7 @@ MPL_TARBALL_SHA256="${MPL_TARBALL_SHA256:-}"
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--runtime auto|claude|codex|both] [--ref <git-ref>] [--source-dir <path>] [--repo <owner/repo>]
+Usage: install.sh [--runtime auto|claude|codex|both] [--scope user|project|local|ask] [--ref <git-ref>] [--source-dir <path>] [--repo <owner/repo>]
 
 Environment:
   MPL_REPO             GitHub repo to download (default: KyubumShin/MPL)
@@ -29,11 +30,12 @@ Environment:
   MPL_INSTALL_ROOT     Persistent install root (default: ~/.mpl/install)
   MPL_SOURCE_DIR       Persistent MPL source dir (default: ~/.mpl/install/source/mpl)
   MPL_RUNTIME          Runtime when --runtime is omitted
+  MPL_CLAUDE_SCOPE     Claude plugin scope: user, project, local, or ask (default: user)
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
+  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope ask
   curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
-  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
+  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope ask
 USAGE
 }
 
@@ -42,6 +44,11 @@ while [ "$#" -gt 0 ]; do
     --runtime)
       [ "$#" -ge 2 ] || { echo "error: --runtime requires a value" >&2; exit 1; }
       MPL_RUNTIME="$2"
+      shift 2
+      ;;
+    --scope)
+      [ "$#" -ge 2 ] || { echo "error: --scope requires a value" >&2; exit 1; }
+      MPL_CLAUDE_SCOPE="$2"
       shift 2
       ;;
     --ref)
@@ -81,6 +88,15 @@ case "${MPL_RUNTIME}" in
     ;;
 esac
 
+case "${MPL_CLAUDE_SCOPE}" in
+  user|project|local|ask) ;;
+  *)
+    echo "error: invalid Claude plugin scope: ${MPL_CLAUDE_SCOPE}" >&2
+    echo "Use --scope user, --scope project, --scope local, or --scope ask." >&2
+    exit 1
+    ;;
+esac
+
 case "${MPL_REPO}" in
   */*/*|""|/*|*/|*//*|*[!A-Za-z0-9_./-]*)
     echo "error: invalid GitHub repo: ${MPL_REPO}" >&2
@@ -94,6 +110,30 @@ case "${MPL_REPO}" in
     exit 1
     ;;
 esac
+
+prompt_claude_scope() {
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo "error: --scope ask requires an interactive terminal" >&2
+    echo "Use --scope user, --scope project, or --scope local for non-interactive installs." >&2
+    exit 1
+  fi
+
+  local choice=""
+  while true; do
+    printf '%s\n' "[MPL] Select Claude Code plugin scope:" > /dev/tty
+    printf '%s\n' "  1) user    Install for this OS user (default)" > /dev/tty
+    printf '%s\n' "  2) project Install for the current project" > /dev/tty
+    printf '%s\n' "  3) local   Install for the current local workspace" > /dev/tty
+    printf '%s' "Choose scope [1/user]: " > /dev/tty
+    IFS= read -r choice < /dev/tty || choice=""
+    case "${choice}" in
+      ""|1|u|U|user) MPL_CLAUDE_SCOPE="user"; break ;;
+      2|p|P|project) MPL_CLAUDE_SCOPE="project"; break ;;
+      3|l|L|local) MPL_CLAUDE_SCOPE="local"; break ;;
+      *) printf '%s\n' "[MPL] Invalid scope: ${choice}" > /dev/tty ;;
+    esac
+  done
+}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -254,8 +294,11 @@ case "${MPL_RUNTIME}" in
 esac
 
 if [ "${install_claude}" = 1 ]; then
-  echo "[MPL] Installing for Claude Code..."
-  MPL_BOOTSTRAP_SOURCE_KIND="${SOURCE_KIND}" bash "${SOURCE_ROOT}/install/claude.sh"
+  if [ "${MPL_CLAUDE_SCOPE}" = "ask" ]; then
+    prompt_claude_scope
+  fi
+  echo "[MPL] Installing for Claude Code with ${MPL_CLAUDE_SCOPE} scope..."
+  MPL_BOOTSTRAP_SOURCE_KIND="${SOURCE_KIND}" MPL_CLAUDE_SCOPE="${MPL_CLAUDE_SCOPE}" bash "${SOURCE_ROOT}/install/claude.sh"
 fi
 
 if [ "${install_codex}" = 1 ]; then

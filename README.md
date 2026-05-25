@@ -67,17 +67,17 @@ The moment the orchestrator touches source files, it becomes invested in its own
 Install with the bootstrap script for the runtime you use. Git is optional; the script downloads a clean MPL source archive with `curl` when it is not run from a checkout.
 
 ```bash
-# Claude Code
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
+# Claude Code (interactive scope prompt; Enter keeps user scope)
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope ask
 
 # Codex CLI
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
 
-# Both runtimes
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
+# Both runtimes (the scope flag applies to Claude Code)
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope ask
 ```
 
-The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. For reproducible installs, pin a release tag by passing the env var to `bash`, for example `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`. Set `MPL_INSTALL_ROOT=<path>` to choose another install root.
+The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. Claude Code installs default to `--scope user`; pass `--scope ask` to choose interactively from Bash, where Enter selects `user`, or pass `--scope project`/`--scope local` for explicit non-interactive installs. For reproducible installs, pin a release tag by passing the env var to `bash`, for example `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`. Set `MPL_INSTALL_ROOT=<path>` to choose another install root.
 
 When `install.sh` is run from a local checkout, that local source takes precedence; `--ref`/`MPL_REF` will warn unless `MPL_FORCE_DOWNLOAD=1` is set. To inspect before running, download the script first: `curl -fsSLo /tmp/mpl-install.sh https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh && less /tmp/mpl-install.sh && bash /tmp/mpl-install.sh --runtime codex`.
 
@@ -92,7 +92,9 @@ The installers keep runtime-specific marketplace metadata separate. Claude regis
 # Local checkout install
 git clone https://github.com/KyubumShin/MPL.git
 cd MPL
-./install.sh --runtime both
+./install.sh --runtime both --scope ask
+# or install Claude only into the project scope
+./install/claude.sh --scope project
 
 # As a git submodule
 cd /path/to/your-project

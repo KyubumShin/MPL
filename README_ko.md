@@ -65,17 +65,17 @@ Phase 0 없음          38% → 디버깅 지옥
 사용할 런타임에 맞춰 bootstrap 스크립트를 실행한다. Git은 선택 사항이다. checkout에서 실행하지 않으면 스크립트가 `curl`로 깨끗한 MPL source archive를 내려받는다.
 
 ```bash
-# Claude Code
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
+# Claude Code (scope를 Bash에서 선택, Enter는 user 선택)
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope ask
 
 # Codex CLI
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
 
-# 둘 다
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
+# 둘 다 (--scope는 Claude Code 설치에 적용됨)
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope ask
 ```
 
-다운로드된 MPL source는 기본적으로 `~/.mpl/install/source/mpl` 아래에 유지된다. 재현 가능한 설치가 필요하면 `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`처럼 release tag를 `bash`에 전달한다. 설치 루트를 바꾸려면 `MPL_INSTALL_ROOT=<path>`를 설정한다.
+다운로드된 MPL source는 기본적으로 `~/.mpl/install/source/mpl` 아래에 유지된다. Claude Code 설치는 기본적으로 `--scope user`이며, `--scope ask`를 넘기면 Bash 안에서 선택할 수 있고 Enter는 `user`를 선택한다. 자동화나 비대화형 설치에서는 `--scope user`, `--scope project`, `--scope local` 중 하나를 명시한다. 재현 가능한 설치가 필요하면 `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`처럼 release tag를 `bash`에 전달한다. 설치 루트를 바꾸려면 `MPL_INSTALL_ROOT=<path>`를 설정한다.
 
 로컬 checkout에서 `install.sh`를 실행하면 로컬 source가 우선한다. 이때 `--ref`/`MPL_REF`는 경고를 출력하며, 특정 ref를 다운로드하려면 `MPL_FORCE_DOWNLOAD=1`을 함께 설정한다. 실행 전 확인하려면 `curl -fsSLo /tmp/mpl-install.sh https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh && less /tmp/mpl-install.sh && bash /tmp/mpl-install.sh --runtime codex`처럼 먼저 내려받아 검토할 수 있다.
 
@@ -401,7 +401,7 @@ curl bootstrap:
 
 ```bash
 # Claude Code
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope ask
 
 # Codex CLI
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
@@ -410,7 +410,9 @@ curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | ba
 로컬 checkout에서 설치할 때는 다음을 사용할 수 있다:
 
 ```bash
-./install.sh --runtime both
+./install.sh --runtime both --scope ask
+# 또는 Claude만 project scope에 설치
+./install/claude.sh --scope project
 ```
 
 MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행해야 한다. 재현 가능한 설치가 필요하면 `MPL_REF=v0.18.6`처럼 release tag를 고정한다. 첫 MCP 사용 시 의존성 준비와 빌드가 한 번 수행될 수 있다.
