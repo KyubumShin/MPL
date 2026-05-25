@@ -1,4 +1,5 @@
 ---
+name: mpl-pivot
 description: "Thin wrapper for Pivot Point discovery. Delegates interview logic to agents/mpl-interviewer.md; use for /mpl:mpl-pivot or when the user asks to define core constraints, Pivot Points, PP, immutable boundaries, PP 정리, 피벗 포인트, or 제약조건."
 ---
 

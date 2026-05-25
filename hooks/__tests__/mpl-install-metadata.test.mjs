@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -67,9 +68,27 @@ describe('dual-runtime install metadata', () => {
     assert.equal(marketplace.interface.displayName, 'MPL');
     assert.equal(entry.name, 'mpl');
     assert.equal(entry.source.source, 'local');
-    assert.equal(entry.source.path, './');
+    assert.equal(entry.source.path, './plugins/mpl');
     assert.equal(entry.policy.installation, 'INSTALLED_BY_DEFAULT');
     assert.equal(entry.policy.authentication, 'ON_INSTALL');
     assert.equal(entry.category, 'Coding');
+  });
+
+  it("ships executable runtime-specific installers", () => {
+    for (const script of ["install/claude.sh", "install/codex.sh"]) {
+      const scriptPath = join(PLUGIN_ROOT, script);
+      assert.ok(existsSync(scriptPath));
+      assert.ok((statSync(scriptPath).mode & 0o111) !== 0, script + " must be executable");
+      execFileSync("bash", ["-n", scriptPath]);
+    }
+
+    const codexInstaller = readText("install/codex.sh");
+    assert.match(codexInstaller, /plugins\/mpl/);
+    assert.match(codexInstaller, /\$\{CODEX_BIN\}" plugin marketplace add/);
+    assert.match(codexInstaller, /\$\{CODEX_BIN\}" plugin add mpl@mpl/);
+
+    const claudeInstaller = readText("install/claude.sh");
+    assert.match(claudeInstaller, /\$\{CLAUDE_BIN\}" plugin marketplace add/);
+    assert.match(claudeInstaller, /\$\{CLAUDE_BIN\}" plugin install/);
   });
 });

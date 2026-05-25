@@ -8,7 +8,7 @@
       "name": "mpl",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "./plugins/mpl"
       },
       "policy": {
         "installation": "INSTALLED_BY_DEFAULT",

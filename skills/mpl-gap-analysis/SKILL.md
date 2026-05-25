@@ -1,4 +1,5 @@
 ---
+name: mpl-gap-analysis
 description: "Gap analysis for missing requirements — standalone pre-implementation review. Usually called internally during Phase 0. May also trigger when the user explicitly asks for requirement review: 'gap analysis', '빠진 거 없는지 검토', '요구사항 점검해줘'."
 ---
 

@@ -62,28 +62,20 @@ Phase 0 없음          38% → 디버깅 지옥
 
 **Step 1 — 사용하는 런타임에 설치:**
 
-Claude Code:
+MPL을 한 번 clone한 뒤 사용할 런타임의 설치 스크립트를 실행한다:
 
 ```bash
-# 마켓플레이스 등록
-claude plugin marketplace add https://github.com/KyubumShin/MPL.git
+git clone https://github.com/KyubumShin/MPL.git
+cd MPL
 
-# 플러그인 설치
-claude plugin install mpl
+# Claude Code
+./install/claude.sh
+
+# Codex CLI
+./install/codex.sh
 ```
 
-Codex CLI:
-
-```bash
-# 마켓플레이스 등록. MPL은 기본 설치 정책으로 제공된다.
-codex plugin marketplace add KyubumShin/MPL
-```
-
-로컬 개발 중이면 현재 체크아웃을 직접 등록할 수 있다:
-
-```bash
-codex plugin marketplace add /path/to/MPL
-```
+설치 스크립트는 런타임별 marketplace 메타데이터를 분리한다. Claude는 이 체크아웃을 직접 marketplace로 등록하고, Codex는 `$CODEX_HOME/mpl-marketplace` 또는 `~/.codex/mpl-marketplace` 아래에 작은 wrapper marketplace를 만든 뒤 `./plugins/mpl`이 현재 체크아웃을 가리키게 한다.
 
 **Step 2 — 셋업 실행:**
 
@@ -402,14 +394,13 @@ MPL은 Claude Code 플러그인과 Codex 플러그인 구조를 모두 제공한
 Claude Code:
 
 ```bash
-claude plugin marketplace add https://github.com/KyubumShin/MPL.git
-claude plugin install mpl
+./install/claude.sh
 ```
 
 Codex CLI:
 
 ```bash
-codex plugin marketplace add KyubumShin/MPL
+./install/codex.sh
 ```
 
 설치 후 셋업 위저드에 맡길 수 있다:

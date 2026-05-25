@@ -1,4 +1,5 @@
 ---
+name: mpl-version-bump
 description: "MPL 플러그인 버전 업데이트 — 버전 참조 일괄 갱신, roadmap 상태 업데이트, version history 생성, commit/push. Command-only: invoke via /mpl:mpl-version-bump. Do not auto-trigger from natural language."
 ---
 
