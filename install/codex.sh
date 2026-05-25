@@ -54,6 +54,8 @@ cat >"${MARKETPLACE_JSON}" <<'JSON'
 JSON
 
 echo "[MPL] Registering Codex marketplace wrapper at ${MARKETPLACE_ROOT}..."
+# Codex CLI accepts already-registered marketplaces and installed plugins, so
+# rerunning this installer is a no-op after the first successful install.
 "${CODEX_BIN}" plugin marketplace add "${MARKETPLACE_ROOT}"
 
 echo "[MPL] Installing Codex plugin mpl@mpl..."

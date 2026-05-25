@@ -18,6 +18,8 @@ echo "[MPL] Validating Claude plugin metadata..."
 "${CLAUDE_BIN}" plugin validate "${REPO_ROOT}/.claude-plugin/marketplace.json"
 
 echo "[MPL] Registering Claude marketplace from ${REPO_ROOT}..."
+# Claude CLI accepts already-registered marketplaces and installed plugins, so
+# rerunning this installer is a no-op after the first successful install.
 "${CLAUDE_BIN}" plugin marketplace add --scope "${CLAUDE_SCOPE}" "${REPO_ROOT}"
 
 echo "[MPL] Installing Claude plugin mpl@mpl..."

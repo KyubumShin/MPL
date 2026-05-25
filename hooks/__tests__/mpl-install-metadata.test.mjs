@@ -60,20 +60,21 @@ describe('dual-runtime install metadata', () => {
     assert.ok(existsSync(join(PLUGIN_ROOT, 'tools', 'mpl-mcp-server-launcher.mjs')));
   });
 
-  it('publishes MPL through a Codex marketplace entry', () => {
-    const marketplace = readJson('.agents/plugins/marketplace.json');
-    const [entry] = marketplace.plugins;
+  it("uses the Codex installer as the single marketplace source", () => {
+    assert.equal(existsSync(join(PLUGIN_ROOT, ".agents/plugins/marketplace.json")), false);
 
-    assert.equal(marketplace.name, 'mpl');
-    assert.equal(marketplace.interface.displayName, 'MPL');
-    assert.equal(entry.name, 'mpl');
-    assert.equal(entry.source.source, 'local');
-    assert.equal(entry.source.path, './plugins/mpl');
-    assert.equal(entry.policy.installation, 'INSTALLED_BY_DEFAULT');
-    assert.equal(entry.policy.authentication, 'ON_INSTALL');
-    assert.equal(entry.category, 'Coding');
+    const codexInstaller = readText("install/codex.sh");
+    assert.match(codexInstaller, /MARKETPLACE_JSON=.*\.agents\/plugins\/marketplace\.json/);
+    assert.match(codexInstaller, /PLUGIN_LINK=.*plugins\/mpl/);
+    assert.match(codexInstaller, /ln -s .*\$\{REPO_ROOT\}.*\$\{PLUGIN_LINK\}/);
+    assert.match(codexInstaller, /\"name\": \"mpl\"/);
+    assert.match(codexInstaller, /\"displayName\": \"MPL\"/);
+    assert.match(codexInstaller, /\"source\": \"local\"/);
+    assert.match(codexInstaller, /\"path\": \"\.\/plugins\/mpl\"/);
+    assert.match(codexInstaller, /\"installation\": \"INSTALLED_BY_DEFAULT\"/);
+    assert.match(codexInstaller, /\"authentication\": \"ON_INSTALL\"/);
+    assert.match(codexInstaller, /\"category\": \"Coding\"/);
   });
-
   it("ships executable runtime-specific installers", () => {
     for (const script of ["install/claude.sh", "install/codex.sh"]) {
       const scriptPath = join(PLUGIN_ROOT, script);
