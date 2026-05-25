@@ -77,7 +77,7 @@ cd MPL
 ./install/codex.sh
 ```
 
-The installers keep runtime-specific marketplace metadata separate. Claude registers this checkout directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) whose plugin entry points to this checkout through `./plugins/mpl`.
+The installers keep runtime-specific marketplace metadata separate. Claude registers this checkout directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl`.
 
 <details>
 <summary><strong>Alternative: Manual installation</strong></summary>

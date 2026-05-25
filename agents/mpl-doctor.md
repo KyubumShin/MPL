@@ -27,7 +27,7 @@ disallowedTools: Write, Edit, Task
     - If `.claude-plugin/plugin.json` exists, verify fields: name, version, description, commands, skills, hooks
     - If `.codex-plugin/plugin.json` exists, verify fields: name, version, description, skills, mcpServers, interface
     - If both Claude and Codex manifests exist, verify their `name` and `version` match
-    - If `.codex-plugin/plugin.json` exists, verify `install/codex.sh` exists, is executable, and generates a wrapper marketplace whose `mpl` entry uses `source.path: "./plugins/mpl"`; do not require a repo-root `.agents/plugins/marketplace.json`
+    - If `.codex-plugin/plugin.json` exists, verify `install/codex.sh` exists, is executable, and generates a wrapper marketplace whose `mpl` entry uses `source.path: "./plugins/mpl"` for a clean staged plugin root; do not require a repo-root `.agents/plugins/marketplace.json`
     - FAIL if all runtime manifests are missing or invalid JSON
     - WARN if optional fields missing
 

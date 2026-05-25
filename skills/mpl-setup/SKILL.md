@@ -34,7 +34,7 @@ This prevents local-scope plugin installations from polluting global settings.
 For Codex CLI:
 - Do not write `.claude/settings*.json`.
 - Verify `.codex-plugin/plugin.json` points to `./skills/` and `./.codex-plugin/.mcp.json`.
-- Verify `install/codex.sh` is present and executable; it generates the Codex wrapper marketplace with `./plugins/mpl` at install time.
+- Verify `install/codex.sh` is present and executable; it generates the Codex wrapper marketplace with a clean staged plugin root at `./plugins/mpl` at install time.
 - Set `SETTINGS_SCOPE = "codex-plugin"` and `SETTINGS_TARGET = ".codex-plugin/plugin.json"` for reporting only.
 
 ```

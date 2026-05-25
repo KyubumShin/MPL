@@ -65,8 +65,16 @@ describe('dual-runtime install metadata', () => {
 
     const codexInstaller = readText("install/codex.sh");
     assert.match(codexInstaller, /MARKETPLACE_JSON=.*\.agents\/plugins\/marketplace\.json/);
-    assert.match(codexInstaller, /PLUGIN_LINK=.*plugins\/mpl/);
-    assert.match(codexInstaller, /ln -s .*\$\{REPO_ROOT\}.*\$\{PLUGIN_LINK\}/);
+    assert.match(codexInstaller, /PLUGIN_ROOT=.*plugins\/mpl/);
+    assert.match(codexInstaller, /git -C .*\$\{REPO_ROOT\}.*ls-files -z/);
+    assert.match(codexInstaller, /cp -p .*\$\{REPO_ROOT\}\/\$\{REL_PATH\}/);
+    assert.match(codexInstaller, /--exclude \"\.\/\.git\"/);
+    assert.match(codexInstaller, /--exclude \"\.\/\.mpl\"/);
+    assert.match(codexInstaller, /--exclude \"\.\/\.pr-review-state\"/);
+    assert.match(codexInstaller, /--exclude \"\.\/\.claude\"/);
+    assert.match(codexInstaller, /--exclude \"\.\/mcp-server\/node_modules\"/);
+    assert.match(codexInstaller, /--exclude \"\.\/mcp-server\/dist\"/);
+    assert.doesNotMatch(codexInstaller, /ln -s/);
     assert.match(codexInstaller, /\"name\": \"mpl\"/);
     assert.match(codexInstaller, /\"displayName\": \"MPL\"/);
     assert.match(codexInstaller, /\"source\": \"local\"/);

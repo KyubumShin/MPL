@@ -75,7 +75,7 @@ cd MPL
 ./install/codex.sh
 ```
 
-설치 스크립트는 런타임별 marketplace 메타데이터를 분리한다. Claude는 이 체크아웃을 직접 marketplace로 등록하고, Codex는 `$CODEX_HOME/mpl-marketplace` 또는 `~/.codex/mpl-marketplace` 아래에 작은 wrapper marketplace를 만든 뒤 `./plugins/mpl`이 현재 체크아웃을 가리키게 한다.
+설치 스크립트는 런타임별 marketplace 메타데이터를 분리한다. Claude는 이 체크아웃을 직접 marketplace로 등록하고, Codex는 `$CODEX_HOME/mpl-marketplace` 또는 `~/.codex/mpl-marketplace` 아래에 작은 wrapper marketplace를 만든 뒤 `./plugins/mpl`에 깨끗한 MPL plugin root를 staging한다.
 
 **Step 2 — 셋업 실행:**
 
