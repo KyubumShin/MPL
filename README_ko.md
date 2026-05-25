@@ -62,22 +62,24 @@ Phase 0 없음          38% → 디버깅 지옥
 
 **Step 1 — 사용하는 런타임에 설치:**
 
-MPL을 한 번 clone한 뒤 사용할 런타임의 설치 스크립트를 실행한다:
+사용할 런타임에 맞춰 bootstrap 스크립트를 실행한다. Git은 선택 사항이다. checkout에서 실행하지 않으면 스크립트가 `curl`로 깨끗한 MPL source archive를 내려받는다.
 
 ```bash
-git clone https://github.com/KyubumShin/MPL.git
-cd MPL
-
 # Claude Code
-./install/claude.sh
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
 
 # Codex CLI
-./install/codex.sh
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
+
+# 둘 다
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
 ```
 
-설치 스크립트는 런타임별 marketplace 메타데이터를 분리한다. Claude는 이 체크아웃을 직접 marketplace로 등록하고, Codex는 `$CODEX_HOME/mpl-marketplace` 또는 `~/.codex/mpl-marketplace` 아래에 작은 wrapper marketplace를 만든 뒤 `./plugins/mpl`에 깨끗한 MPL plugin root를 staging한다.
+다운로드된 MPL source는 기본적으로 `~/.mpl/install/source/mpl` 아래에 유지된다. 특정 ref를 고정하려면 `MPL_REF=<branch-or-tag>`, 설치 루트를 바꾸려면 `MPL_INSTALL_ROOT=<path>`를 설정한다.
 
-**Codex 갱신 안내:** `git pull` 또는 로컬 편집 후에는 `./install/codex.sh`를 다시 실행해 Codex staged root를 갱신해야 한다. 각 갱신 후 첫 Codex MCP 호출에서 의존성 준비와 MCP 서버 빌드가 수행된다.
+설치 스크립트는 런타임별 marketplace 메타데이터를 분리한다. Claude는 persistent MPL source를 직접 marketplace로 등록하고, Codex는 `$CODEX_HOME/mpl-marketplace` 또는 `~/.codex/mpl-marketplace` 아래에 작은 wrapper marketplace를 만든 뒤 archive manifest 기준으로 `./plugins/mpl`에 깨끗한 MPL plugin root를 staging한다.
+
+**갱신 안내:** MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행한다. 각 갱신 후 첫 MCP 호출에서 의존성 준비와 MCP 서버 빌드가 수행된다.
 
 **Step 2 — 셋업 실행:**
 
@@ -389,23 +391,27 @@ MPL은 Claude Code 플러그인과 Codex 플러그인 구조를 모두 제공한
 | Claude Code CLI | 최신 | `claude --version` |
 | Codex CLI | 최신 | `codex --version` |
 | Node.js | 18+ | `node --version` |
-| Git | 2.x | `git --version` |
+| Git | 선택 사항 | `git --version` |
 
 ### 자동 설치
 
-Claude Code:
+curl bootstrap:
 
 ```bash
-./install/claude.sh
+# Claude Code
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
+
+# Codex CLI
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
 ```
 
-Codex CLI:
+로컬 checkout에서 설치할 때는 다음을 사용할 수 있다:
 
 ```bash
-./install/codex.sh
+./install.sh --runtime both
 ```
 
-Codex는 설치 시 깨끗한 staged plugin root를 만들기 때문에, `git pull` 또는 로컬 편집 후에는 `./install/codex.sh`를 다시 실행해야 한다. 첫 MCP 사용 시 의존성 준비와 빌드가 한 번 수행될 수 있다.
+MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행해야 한다. 첫 MCP 사용 시 의존성 준비와 빌드가 한 번 수행될 수 있다.
 
 설치 후 셋업 위저드에 맡길 수 있다:
 

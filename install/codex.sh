@@ -19,9 +19,14 @@ if ! command -v "${CODEX_BIN}" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "error: Codex install requires an MPL git checkout." >&2
-  echo "Clone MPL with git, then rerun ./install/codex.sh." >&2
+SOURCE_MODE=""
+if command -v git >/dev/null 2>&1 && git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  SOURCE_MODE="git"
+elif [ "${MPL_ALLOW_NONGIT_SOURCE:-}" = "1" ] && [ -f "${REPO_ROOT}/.mpl-install-manifest" ]; then
+  SOURCE_MODE="manifest"
+else
+  echo "error: Codex install requires an MPL git checkout or a manifest source prepared by install.sh." >&2
+  echo "For gitless installs, run the top-level install.sh via curl." >&2
   exit 1
 fi
 
@@ -41,18 +46,28 @@ stage_clean_plugin_root() {
   rm -rf "${PLUGIN_TMP}" "${PLUGIN_OLD}"
   mkdir -p "${PLUGIN_TMP}"
 
-  UNTRACKED_FILES="$(git -C "${REPO_ROOT}" ls-files --others --exclude-standard)"
-  if [ -n "${UNTRACKED_FILES}" ]; then
-    echo "[MPL] Warning: untracked files are not included in the Codex staged plugin root." >&2
-    echo "[MPL] Run git add for files you want staged, then rerun ./install/codex.sh." >&2
-  fi
+  if [ "${SOURCE_MODE}" = "git" ]; then
+    UNTRACKED_FILES="$(git -C "${REPO_ROOT}" ls-files --others --exclude-standard)"
+    if [ -n "${UNTRACKED_FILES}" ]; then
+      echo "[MPL] Warning: untracked files are not included in the Codex staged plugin root." >&2
+      echo "[MPL] Run git add for files you want staged, then rerun ./install/codex.sh." >&2
+    fi
 
-  while IFS= read -r -d "" REL_PATH; do
-    [ -e "${REPO_ROOT}/${REL_PATH}" ] || continue
-    REL_DIR="$(dirname -- "${REL_PATH}")"
-    mkdir -p "${PLUGIN_TMP}/${REL_DIR}"
-    cp -p "${REPO_ROOT}/${REL_PATH}" "${PLUGIN_TMP}/${REL_PATH}"
-  done < <(git -C "${REPO_ROOT}" ls-files -z)
+    while IFS= read -r -d "" REL_PATH; do
+      [ -e "${REPO_ROOT}/${REL_PATH}" ] || continue
+      REL_DIR="$(dirname -- "${REL_PATH}")"
+      mkdir -p "${PLUGIN_TMP}/${REL_DIR}"
+      cp -p "${REPO_ROOT}/${REL_PATH}" "${PLUGIN_TMP}/${REL_PATH}"
+    done < <(git -C "${REPO_ROOT}" ls-files -z)
+  else
+    while IFS= read -r REL_PATH; do
+      [ -n "${REL_PATH}" ] || continue
+      [ -e "${REPO_ROOT}/${REL_PATH}" ] || continue
+      REL_DIR="$(dirname -- "${REL_PATH}")"
+      mkdir -p "${PLUGIN_TMP}/${REL_DIR}"
+      cp -p "${REPO_ROOT}/${REL_PATH}" "${PLUGIN_TMP}/${REL_PATH}"
+    done <"${REPO_ROOT}/.mpl-install-manifest"
+  fi
 
   if [ ! -f "${PLUGIN_TMP}/.codex-plugin/plugin.json" ]; then
     echo "error: staged Codex plugin root is missing .codex-plugin/plugin.json" >&2
@@ -111,7 +126,7 @@ echo "[MPL] Installing Codex plugin mpl@mpl..."
 "${CODEX_BIN}" plugin add mpl@mpl
 
 echo "[MPL] Codex install complete. Start a new Codex session to load the MPL plugin."
-echo "[MPL] After git pull or local edits, rerun ./install/codex.sh to refresh the staged plugin root."
+echo "[MPL] After updating MPL, rerun install.sh or ./install/codex.sh from the refreshed source."
 echo "[MPL] The MCP server will prepare dependencies and build on first use."
 
 rm -rf "${LOCK_DIR}"
