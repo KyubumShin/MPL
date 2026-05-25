@@ -114,6 +114,18 @@ describe('dual-runtime install metadata', () => {
     assert.match(codexInstaller, /\"category\": \"Coding\"/);
   });
 
+  it("documents bootstrap installer safeguards", () => {
+    const bootstrapInstaller = readText("install.sh");
+
+    assert.match(bootstrapInstaller, /MPL_TARBALL_SHA256/);
+    assert.ok(bootstrapInstaller.includes(`! -path "./.mpl-install-manifest"`));
+    assert.match(bootstrapInstaller, /ignored while using local MPL source/);
+    assert.match(bootstrapInstaller, /Auto-detected Claude Code and Codex CLI/);
+    assert.match(bootstrapInstaller, /invalid GitHub repo/);
+    assert.match(readText("README.md"), /For reproducible installs, pin a release tag/);
+    assert.match(readText("README_ko.md"), /재현 가능한 설치가 필요하면/);
+  });
+
   it("stages a clean Codex plugin root with a stub CLI", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "mpl-codex-install-"));
     try {
@@ -201,6 +213,51 @@ describe('dual-runtime install metadata', () => {
       assert.match(cliCalls, /plugin add mpl@mpl/);
       assert.match(output, /Installed MPL source/);
       assert.match(output, /To update MPL later, rerun this install\.sh command/);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps local gitless reruns from staging the bootstrap manifest", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "mpl-local-gitless-install-"));
+    try {
+      const archivePath = makeSourceArchive(tempRoot);
+      const localSource = join(tempRoot, "local-source");
+      mkdirSync(localSource, { recursive: true });
+      execFileSync("tar", ["-xzf", archivePath, "-C", localSource]);
+
+      const codexStub = join(tempRoot, "codex-stub.sh");
+      const codexLog = join(tempRoot, "codex.log");
+      writeFileSync(codexStub, ["#!/usr/bin/env bash", "printf '%s\\n' \"$*\" >> " + JSON.stringify(codexLog), ""].join("\n"));
+      chmodSync(codexStub, 0o755);
+
+      const marketplaceRoot = join(tempRoot, "codex-marketplace");
+      const env = {
+        ...process.env,
+        CODEX_BIN: codexStub,
+        HOME: tempRoot,
+        MPL_CODEX_MARKETPLACE_ROOT: marketplaceRoot,
+      };
+
+      execFileSync("bash", [join(localSource, "install.sh"), "--runtime", "codex"], {
+        cwd: tempRoot,
+        encoding: "utf8",
+        env,
+      });
+      execFileSync("bash", [join(localSource, "install.sh"), "--runtime", "codex"], {
+        cwd: tempRoot,
+        encoding: "utf8",
+        env,
+      });
+
+      const manifest = readFileSync(join(localSource, ".mpl-install-manifest"), "utf8");
+      assert.doesNotMatch(manifest, /^\.mpl-install-manifest$/m);
+
+      const stagedRoot = join(marketplaceRoot, "plugins", "mpl");
+      assert.ok(existsSync(join(stagedRoot, ".codex-plugin", "plugin.json")));
+      assert.equal(existsSync(join(stagedRoot, ".mpl-install-manifest")), false);
+      assert.equal(existsSync(join(stagedRoot, "mcp-server", "node_modules")), false);
+      assert.equal(existsSync(join(stagedRoot, "mcp-server", "dist")), false);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }

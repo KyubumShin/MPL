@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+MPL_REF_PROVIDED=0
+if [ "${MPL_REF+x}" = "x" ] && [ -n "${MPL_REF}" ]; then
+  MPL_REF_PROVIDED=1
+fi
 MPL_REPO="${MPL_REPO:-KyubumShin/MPL}"
 MPL_REF="${MPL_REF:-main}"
 MPL_RUNTIME="${MPL_RUNTIME:-auto}"
@@ -9,16 +13,19 @@ MPL_SOURCE_DIR="${MPL_SOURCE_DIR:-${MPL_INSTALL_ROOT}/source/mpl}"
 MPL_FORCE_DOWNLOAD="${MPL_FORCE_DOWNLOAD:-0}"
 MPL_TARBALL_PATH="${MPL_TARBALL_PATH:-}"
 MPL_TARBALL_URL="${MPL_TARBALL_URL:-}"
+MPL_TARBALL_SHA256="${MPL_TARBALL_SHA256:-}"
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--runtime auto|claude|codex|both] [--ref <git-ref>] [--source-dir <path>]
+Usage: install.sh [--runtime auto|claude|codex|both] [--ref <git-ref>] [--source-dir <path>] [--repo <owner/repo>]
 
 Environment:
   MPL_REPO             GitHub repo to download (default: KyubumShin/MPL)
-  MPL_REF              Git ref to download when not run from a checkout (default: main)
+  MPL_REF              Git ref to download for archive installs (default: main)
   MPL_TARBALL_URL      Override source archive URL
   MPL_TARBALL_PATH     Use a local .tar.gz archive instead of curl (tests/offline installs)
+  MPL_TARBALL_SHA256   Optional SHA256 expected for the downloaded/copied archive
+  MPL_FORCE_DOWNLOAD   Force archive download/copy even when install.sh is run from a checkout
   MPL_INSTALL_ROOT     Persistent install root (default: ~/.mpl/install)
   MPL_SOURCE_DIR       Persistent MPL source dir (default: ~/.mpl/install/source/mpl)
   MPL_RUNTIME          Runtime when --runtime is omitted
@@ -40,6 +47,7 @@ while [ "$#" -gt 0 ]; do
     --ref)
       [ "$#" -ge 2 ] || { echo "error: --ref requires a value" >&2; exit 1; }
       MPL_REF="$2"
+      MPL_REF_PROVIDED=1
       shift 2
       ;;
     --source-dir)
@@ -69,6 +77,20 @@ case "${MPL_RUNTIME}" in
   *)
     echo "error: invalid runtime: ${MPL_RUNTIME}" >&2
     usage >&2
+    exit 1
+    ;;
+esac
+
+case "${MPL_REPO}" in
+  */*/*|""|/*|*/|*//*|*[!A-Za-z0-9_./-]*)
+    echo "error: invalid GitHub repo: ${MPL_REPO}" >&2
+    echo "Use --repo owner/repo or MPL_REPO=owner/repo." >&2
+    exit 1
+    ;;
+  */*) ;;
+  *)
+    echo "error: invalid GitHub repo: ${MPL_REPO}" >&2
+    echo "Use --repo owner/repo or MPL_REPO=owner/repo." >&2
     exit 1
     ;;
 esac
@@ -108,9 +130,32 @@ write_manifest() {
   manifest_tmp="$(mktemp "${TMPDIR:-/tmp}/mpl-manifest.XXXXXX")"
   (
     cd "${source_dir}"
-    find . -type f -print | LC_ALL=C sort | sed "s#^\./##"
+    find . -type f ! -path "./.mpl-install-manifest" -print | LC_ALL=C sort | sed "s#^\./##"
   ) >"${manifest_tmp}"
   mv "${manifest_tmp}" "${source_dir}/.mpl-install-manifest"
+}
+
+verify_archive_sha256() {
+  local archive_path="$1"
+  local expected="$2"
+  local actual=""
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "${archive_path}")"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "${archive_path}")"
+  else
+    echo "error: MPL_TARBALL_SHA256 is set but sha256sum/shasum was not found" >&2
+    exit 1
+  fi
+  actual="${actual%% *}"
+
+  if [ "${actual}" != "${expected}" ]; then
+    echo "error: archive SHA256 mismatch" >&2
+    echo "expected: ${expected}" >&2
+    echo "actual:   ${actual}" >&2
+    exit 1
+  fi
 }
 
 download_source() {
@@ -120,10 +165,10 @@ download_source() {
   local archive_path="${tmp_dir}/mpl.tar.gz"
   local extract_dir="${tmp_dir}/source"
 
-  cleanup_download() {
+  __mpl_cleanup_download() {
     rm -rf "${tmp_dir}"
   }
-  trap cleanup_download EXIT
+  trap __mpl_cleanup_download EXIT
 
   if [ -n "${MPL_TARBALL_PATH}" ]; then
     cp "${MPL_TARBALL_PATH}" "${archive_path}"
@@ -135,6 +180,10 @@ download_source() {
     fi
     echo "[MPL] Downloading ${url}..."
     curl -fsSL "${url}" -o "${archive_path}"
+  fi
+
+  if [ -n "${MPL_TARBALL_SHA256}" ]; then
+    verify_archive_sha256 "${archive_path}" "${MPL_TARBALL_SHA256}"
   fi
 
   mkdir -p "${extract_dir}"
@@ -150,8 +199,10 @@ download_source() {
   echo "[MPL] Installed MPL source at ${MPL_SOURCE_DIR}"
   SOURCE_ROOT="${MPL_SOURCE_DIR}"
   SOURCE_KIND="archive"
-  cleanup_download
+  __mpl_cleanup_download
   trap - EXIT
+  unset -f __mpl_cleanup_download
+  return 0
 }
 
 SOURCE_ROOT=""
@@ -164,6 +215,9 @@ fi
 
 if [ "${MPL_FORCE_DOWNLOAD}" != "1" ] && [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/.claude-plugin/plugin.json" ] && [ -f "${SCRIPT_DIR}/.codex-plugin/plugin.json" ]; then
   SOURCE_ROOT="${SCRIPT_DIR}"
+  if [ "${MPL_REF_PROVIDED}" = "1" ]; then
+    echo "[MPL] Warning: --ref/MPL_REF=${MPL_REF} is ignored while using local MPL source at ${SOURCE_ROOT}. Set MPL_FORCE_DOWNLOAD=1 to download that ref instead." >&2
+  fi
   if command -v git >/dev/null 2>&1 && git -C "${SOURCE_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     SOURCE_KIND="checkout"
   else
@@ -185,6 +239,13 @@ case "${MPL_RUNTIME}" in
       echo "error: neither Claude Code CLI nor Codex CLI was found" >&2
       echo "Install one runtime CLI, or set CLAUDE_BIN/CODEX_BIN." >&2
       exit 1
+    fi
+    if [ "${install_claude}" = 1 ] && [ "${install_codex}" = 1 ]; then
+      echo "[MPL] Auto-detected Claude Code and Codex CLI. Use --runtime to install only one runtime."
+    elif [ "${install_claude}" = 1 ]; then
+      echo "[MPL] Auto-detected Claude Code. Use --runtime to override."
+    else
+      echo "[MPL] Auto-detected Codex CLI. Use --runtime to override."
     fi
     ;;
   claude) install_claude=1 ;;

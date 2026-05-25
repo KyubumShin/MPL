@@ -75,11 +75,13 @@ curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | ba
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
 ```
 
-다운로드된 MPL source는 기본적으로 `~/.mpl/install/source/mpl` 아래에 유지된다. 특정 ref를 고정하려면 `MPL_REF=<branch-or-tag>`, 설치 루트를 바꾸려면 `MPL_INSTALL_ROOT=<path>`를 설정한다.
+다운로드된 MPL source는 기본적으로 `~/.mpl/install/source/mpl` 아래에 유지된다. 재현 가능한 설치가 필요하면 `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`처럼 release tag를 `bash`에 전달한다. 설치 루트를 바꾸려면 `MPL_INSTALL_ROOT=<path>`를 설정한다.
+
+로컬 checkout에서 `install.sh`를 실행하면 로컬 source가 우선한다. 이때 `--ref`/`MPL_REF`는 경고를 출력하며, 특정 ref를 다운로드하려면 `MPL_FORCE_DOWNLOAD=1`을 함께 설정한다. 실행 전 확인하려면 `curl -fsSLo /tmp/mpl-install.sh https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh && less /tmp/mpl-install.sh && bash /tmp/mpl-install.sh --runtime codex`처럼 먼저 내려받아 검토할 수 있다.
 
 설치 스크립트는 런타임별 marketplace 메타데이터를 분리한다. Claude는 persistent MPL source를 직접 marketplace로 등록하고, Codex는 `$CODEX_HOME/mpl-marketplace` 또는 `~/.codex/mpl-marketplace` 아래에 작은 wrapper marketplace를 만든 뒤 archive manifest 기준으로 `./plugins/mpl`에 깨끗한 MPL plugin root를 staging한다.
 
-**갱신 안내:** MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행한다. 각 갱신 후 첫 MCP 호출에서 의존성 준비와 MCP 서버 빌드가 수행된다.
+**갱신 안내:** MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행한다. 기존 설치도 재실행 후 shared MCP launcher를 사용하며, 각 갱신 후 첫 MCP 호출에서 의존성 준비와 MCP 서버 빌드가 수행될 수 있다.
 
 **Step 2 — 셋업 실행:**
 
@@ -411,7 +413,7 @@ curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | ba
 ./install.sh --runtime both
 ```
 
-MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행해야 한다. 첫 MCP 사용 시 의존성 준비와 빌드가 한 번 수행될 수 있다.
+MPL 업데이트 후에는 같은 `install.sh` 명령을 다시 실행해야 한다. 재현 가능한 설치가 필요하면 `MPL_REF=v0.18.6`처럼 release tag를 고정한다. 첫 MCP 사용 시 의존성 준비와 빌드가 한 번 수행될 수 있다.
 
 설치 후 셋업 위저드에 맡길 수 있다:
 

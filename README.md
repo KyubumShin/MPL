@@ -77,11 +77,13 @@ curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | ba
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
 ```
 
-The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. Set `MPL_REF=<branch-or-tag>` to pin a ref, or `MPL_INSTALL_ROOT=<path>` to choose another install root.
+The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. For reproducible installs, pin a release tag by passing the env var to `bash`, for example `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`. Set `MPL_INSTALL_ROOT=<path>` to choose another install root.
+
+When `install.sh` is run from a local checkout, that local source takes precedence; `--ref`/`MPL_REF` will warn unless `MPL_FORCE_DOWNLOAD=1` is set. To inspect before running, download the script first: `curl -fsSLo /tmp/mpl-install.sh https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh && less /tmp/mpl-install.sh && bash /tmp/mpl-install.sh --runtime codex`.
 
 The installers keep runtime-specific marketplace metadata separate. Claude registers the persistent MPL source directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl` from the archive manifest.
 
-**Refresh note:** after updating MPL, rerun the same `install.sh` command. The first MCP call after each refresh prepares dependencies and builds the MCP server.
+**Refresh note:** after updating MPL, rerun the same `install.sh` command. Existing installs pick up the shared MCP launcher after rerun; the first MCP call after each refresh may prepare dependencies and rebuild the MCP server.
 
 <details>
 <summary><strong>Alternative: Manual installation</strong></summary>
