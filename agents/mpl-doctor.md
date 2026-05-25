@@ -22,11 +22,12 @@ disallowedTools: Write, Edit, Task
     Run all 11 categories in order. For each, report PASS / WARN / FAIL with evidence.
 
     ### Category 1: Plugin Structure
-    - **Scope**: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json`, `install/codex.sh`
+    - **Scope**: `install.sh`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json`, `install/codex.sh`
     - Check at least one runtime manifest exists and is valid JSON
     - If `.claude-plugin/plugin.json` exists, verify fields: name, version, description, commands, skills, hooks
     - If `.codex-plugin/plugin.json` exists, verify fields: name, version, description, skills, mcpServers, interface
     - If both Claude and Codex manifests exist, verify their `name` and `version` match
+    - Verify `install.sh` exists and is executable; it should support curl/gitless installs by downloading a source archive into a persistent source root and writing `.mpl-install-manifest`
     - If `.codex-plugin/plugin.json` exists, verify `install/codex.sh` exists, is executable, and generates a wrapper marketplace whose `mpl` entry uses `source.path: "./plugins/mpl"` for a clean staged plugin root; do not require a repo-root `.agents/plugins/marketplace.json`
     - FAIL if all runtime manifests are missing or invalid JSON
     - WARN if optional fields missing

@@ -64,27 +64,34 @@ The moment the orchestrator touches source files, it becomes invested in its own
 
 **Step 1 — Install for your agent runtime:**
 
-Clone MPL once, then run the installer for the runtime you use:
+Install with the bootstrap script for the runtime you use. Git is optional; the script downloads a clean MPL source archive with `curl` when it is not run from a checkout.
 
 ```bash
-git clone https://github.com/KyubumShin/MPL.git
-cd MPL
-
 # Claude Code
-./install/claude.sh
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
 
 # Codex CLI
-./install/codex.sh
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
+
+# Both runtimes
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
 ```
 
-The installers keep runtime-specific marketplace metadata separate. Claude registers this checkout directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl`.
+The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. Set `MPL_REF=<branch-or-tag>` to pin a ref, or `MPL_INSTALL_ROOT=<path>` to choose another install root.
 
-**Codex refresh note:** after `git pull` or local edits, rerun `./install/codex.sh` to refresh the staged Codex root. The first Codex MCP call after each refresh prepares dependencies and builds the MCP server.
+The installers keep runtime-specific marketplace metadata separate. Claude registers the persistent MPL source directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl` from the archive manifest.
+
+**Refresh note:** after updating MPL, rerun the same `install.sh` command. The first MCP call after each refresh prepares dependencies and builds the MCP server.
 
 <details>
 <summary><strong>Alternative: Manual installation</strong></summary>
 
 ```bash
+# Local checkout install
+git clone https://github.com/KyubumShin/MPL.git
+cd MPL
+./install.sh --runtime both
+
 # As a git submodule
 cd /path/to/your-project
 git submodule add https://github.com/KyubumShin/MPL.git
