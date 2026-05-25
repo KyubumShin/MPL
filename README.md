@@ -77,7 +77,9 @@ cd MPL
 ./install/codex.sh
 ```
 
-The installers keep runtime-specific marketplace metadata separate. Claude registers this checkout directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl`. After `git pull` or local edits, rerun `./install/codex.sh` to refresh that staged Codex root. The Codex MCP server prepares dependencies and builds on first use after each refresh.
+The installers keep runtime-specific marketplace metadata separate. Claude registers this checkout directly; Codex creates a small wrapper marketplace under `$CODEX_HOME/mpl-marketplace` (or `~/.codex/mpl-marketplace`) and stages a clean MPL plugin root at `./plugins/mpl`.
+
+**Codex refresh note:** after `git pull` or local edits, rerun `./install/codex.sh` to refresh the staged Codex root. The first Codex MCP call after each refresh prepares dependencies and builds the MCP server.
 
 <details>
 <summary><strong>Alternative: Manual installation</strong></summary>
