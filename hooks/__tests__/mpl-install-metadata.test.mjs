@@ -120,9 +120,8 @@ describe('dual-runtime install metadata', () => {
     assert.ok(bootstrapInstaller.includes("[--scope user|project|local|ask]"));
     assert.match(bootstrapInstaller, /MPL_CLAUDE_SCOPE/);
     assert.match(bootstrapInstaller, /invalid Claude plugin scope/);
-    assert.match(bootstrapInstaller, /--scope ask requires an interactive terminal/);
-    assert.match(bootstrapInstaller, /Choose scope \[1\/user\]/);
-    assert.match(bootstrapInstaller, /read -r choice < \/dev\/tty/);
+    assert.doesNotMatch(bootstrapInstaller, /prompt_claude_scope/);
+    assert.match(bootstrapInstaller, /MPL_CLAUDE_SCOPE="\$\{MPL_CLAUDE_SCOPE\}" bash "\$\{SOURCE_ROOT\}\/install\/claude\.sh"/);
     assert.match(bootstrapInstaller, /MPL_TARBALL_SHA256/);
     assert.ok(bootstrapInstaller.includes(`! -path "./.mpl-install-manifest"`));
     assert.match(bootstrapInstaller, /ignored while using local MPL source/);
@@ -137,6 +136,7 @@ describe('dual-runtime install metadata', () => {
 
     assert.ok(claudeInstaller.includes("[--scope user|project|local|ask]"));
     assert.match(claudeInstaller, /MPL_CLAUDE_SCOPE/);
+    assert.match(claudeInstaller, /CLI --scope overrides this environment value/);
     assert.match(claudeInstaller, /--scope ask requires an interactive terminal/);
     assert.match(claudeInstaller, /Choose scope \[1\/user\]/);
     assert.match(claudeInstaller, /plugin marketplace add --scope "\$\{CLAUDE_SCOPE\}"/);
@@ -147,9 +147,12 @@ describe('dual-runtime install metadata', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "mpl-claude-install-"));
     try {
       const claudeStub = join(tempRoot, "claude-stub.sh");
+      const ignoredClaudeStub = join(tempRoot, "claude");
       const claudeLog = join(tempRoot, "claude.log");
       writeFileSync(claudeStub, ["#!/usr/bin/env bash", "printf '%s\\n' \"$*\" >> " + JSON.stringify(claudeLog), ""].join("\n"));
+      writeFileSync(ignoredClaudeStub, ["#!/usr/bin/env bash", "echo 'CLAUDE_BIN was ignored' >&2", "exit 73", ""].join("\n"));
       chmodSync(claudeStub, 0o755);
+      chmodSync(ignoredClaudeStub, 0o755);
 
       const output = execFileSync("bash", [join(PLUGIN_ROOT, "install/claude.sh"), "--scope", "local"], {
         cwd: PLUGIN_ROOT,
@@ -158,6 +161,7 @@ describe('dual-runtime install metadata', () => {
           ...process.env,
           CLAUDE_BIN: claudeStub,
           HOME: tempRoot,
+          PATH: `${tempRoot}:${process.env.PATH ?? ""}`,
         },
       });
 

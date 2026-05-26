@@ -13,6 +13,7 @@ Usage: install/claude.sh [--scope user|project|local|ask]
 
 Environment:
   MPL_CLAUDE_SCOPE     Claude plugin scope: user, project, local, or ask (default: user)
+                       CLI --scope overrides this environment value.
 USAGE
 }
 

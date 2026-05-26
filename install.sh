@@ -111,30 +111,6 @@ case "${MPL_REPO}" in
     ;;
 esac
 
-prompt_claude_scope() {
-  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-    echo "error: --scope ask requires an interactive terminal" >&2
-    echo "Use --scope user, --scope project, or --scope local for non-interactive installs." >&2
-    exit 1
-  fi
-
-  local choice=""
-  while true; do
-    printf '%s\n' "[MPL] Select Claude Code plugin scope:" > /dev/tty
-    printf '%s\n' "  1) user    Install for this OS user (default)" > /dev/tty
-    printf '%s\n' "  2) project Install for the current project" > /dev/tty
-    printf '%s\n' "  3) local   Install for the current local workspace" > /dev/tty
-    printf '%s' "Choose scope [1/user]: " > /dev/tty
-    IFS= read -r choice < /dev/tty || choice=""
-    case "${choice}" in
-      ""|1|u|U|user) MPL_CLAUDE_SCOPE="user"; break ;;
-      2|p|P|project) MPL_CLAUDE_SCOPE="project"; break ;;
-      3|l|L|local) MPL_CLAUDE_SCOPE="local"; break ;;
-      *) printf '%s\n' "[MPL] Invalid scope: ${choice}" > /dev/tty ;;
-    esac
-  done
-}
-
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "error: required command not found: $1" >&2
@@ -294,9 +270,6 @@ case "${MPL_RUNTIME}" in
 esac
 
 if [ "${install_claude}" = 1 ]; then
-  if [ "${MPL_CLAUDE_SCOPE}" = "ask" ]; then
-    prompt_claude_scope
-  fi
   echo "[MPL] Installing for Claude Code with ${MPL_CLAUDE_SCOPE} scope..."
   MPL_BOOTSTRAP_SOURCE_KIND="${SOURCE_KIND}" MPL_CLAUDE_SCOPE="${MPL_CLAUDE_SCOPE}" bash "${SOURCE_ROOT}/install/claude.sh"
 fi
