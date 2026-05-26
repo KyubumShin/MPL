@@ -29,7 +29,7 @@ Classify installation state:
 ### Step 1b: Settings Scope Selection
 
 Determine the active runtime. If running inside Claude Code, determine where MPL should write settings (permissions, statusLine, MCP config).
-This prevents local-scope plugin installations from polluting global settings.
+This prevents local-scope plugin installations from polluting global settings. Claude installer scope can be selected with `install.sh --scope user|project|local|ask` or `install/claude.sh --scope user|project|local|ask`; `ask` prompts on `/dev/tty` and Enter selects `user`.
 
 For Codex CLI:
 - Do not write `.claude/settings*.json`.

@@ -8,6 +8,7 @@ fi
 MPL_REPO="${MPL_REPO:-KyubumShin/MPL}"
 MPL_REF="${MPL_REF:-main}"
 MPL_RUNTIME="${MPL_RUNTIME:-auto}"
+MPL_CLAUDE_SCOPE="${MPL_CLAUDE_SCOPE:-user}"
 MPL_INSTALL_ROOT="${MPL_INSTALL_ROOT:-${HOME}/.mpl/install}"
 MPL_SOURCE_DIR="${MPL_SOURCE_DIR:-${MPL_INSTALL_ROOT}/source/mpl}"
 MPL_FORCE_DOWNLOAD="${MPL_FORCE_DOWNLOAD:-0}"
@@ -17,7 +18,7 @@ MPL_TARBALL_SHA256="${MPL_TARBALL_SHA256:-}"
 
 usage() {
   cat <<USAGE
-Usage: install.sh [--runtime auto|claude|codex|both] [--ref <git-ref>] [--source-dir <path>] [--repo <owner/repo>]
+Usage: install.sh [--runtime auto|claude|codex|both] [--scope user|project|local|ask] [--ref <git-ref>] [--source-dir <path>] [--repo <owner/repo>]
 
 Environment:
   MPL_REPO             GitHub repo to download (default: KyubumShin/MPL)
@@ -29,11 +30,12 @@ Environment:
   MPL_INSTALL_ROOT     Persistent install root (default: ~/.mpl/install)
   MPL_SOURCE_DIR       Persistent MPL source dir (default: ~/.mpl/install/source/mpl)
   MPL_RUNTIME          Runtime when --runtime is omitted
+  MPL_CLAUDE_SCOPE     Claude plugin scope: user, project, local, or ask (default: user)
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude
+  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope user
   curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
-  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both
+  curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope user
 USAGE
 }
 
@@ -42,6 +44,11 @@ while [ "$#" -gt 0 ]; do
     --runtime)
       [ "$#" -ge 2 ] || { echo "error: --runtime requires a value" >&2; exit 1; }
       MPL_RUNTIME="$2"
+      shift 2
+      ;;
+    --scope)
+      [ "$#" -ge 2 ] || { echo "error: --scope requires a value" >&2; exit 1; }
+      MPL_CLAUDE_SCOPE="$2"
       shift 2
       ;;
     --ref)
@@ -77,6 +84,15 @@ case "${MPL_RUNTIME}" in
   *)
     echo "error: invalid runtime: ${MPL_RUNTIME}" >&2
     usage >&2
+    exit 1
+    ;;
+esac
+
+case "${MPL_CLAUDE_SCOPE}" in
+  user|project|local|ask) ;;
+  *)
+    echo "error: invalid Claude plugin scope: ${MPL_CLAUDE_SCOPE}" >&2
+    echo "Use --scope user, --scope project, --scope local, or --scope ask." >&2
     exit 1
     ;;
 esac
@@ -254,8 +270,8 @@ case "${MPL_RUNTIME}" in
 esac
 
 if [ "${install_claude}" = 1 ]; then
-  echo "[MPL] Installing for Claude Code..."
-  MPL_BOOTSTRAP_SOURCE_KIND="${SOURCE_KIND}" bash "${SOURCE_ROOT}/install/claude.sh"
+  echo "[MPL] Installing for Claude Code with ${MPL_CLAUDE_SCOPE} scope..."
+  MPL_BOOTSTRAP_SOURCE_KIND="${SOURCE_KIND}" MPL_CLAUDE_SCOPE="${MPL_CLAUDE_SCOPE}" bash "${SOURCE_ROOT}/install/claude.sh"
 fi
 
 if [ "${install_codex}" = 1 ]; then
