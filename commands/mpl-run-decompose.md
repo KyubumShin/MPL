@@ -19,13 +19,13 @@ Load this when transitioning from pre-execution analysis to phase decomposition.
   (b) call `Task(subagent_type="mpl-decomposer", ...)` — the agent reasons AND writes the file,
   (c) **Read** `.mpl/mpl/decomposition.yaml` from disk (do not parse the agent's response — it returns only a confirmation line),
   (d) validate fields the agent must have produced (covers, contract_files, type_policy, error_spec, e2e_scenarios, etc.),
-  (e) post-process: extract `contract_files[]` to `.mpl/contracts/*.json`, split `e2e_scenarios[]` to `.mpl/mpl/e2e-scenarios.yaml`.
+  (e) post-process: extract `contract_files[]` to `.mpl/contracts/*.json`, split `e2e_scenarios[]` to `.mpl/mpl/e2e-scenarios.yaml`, and derive mechanical fields into `.mpl/mpl/decomposition-derived.json`.
 
 The orchestrator never holds a Write authority on `decomposition.yaml` for the **initial creation path** (3.0 → 3.1 → "After Receiving Output"). If validation fails, surface the failure and re-dispatch the agent with the diagnostics; do not patch the file by hand.
 
 **Recomposition path**: once `.mpl/mpl/decomposition.yaml` exists, every graph change is a decomposer-owned recomposition. The decomposer must first write `.mpl/mpl/decomposition-deltas/recompose-{N}.yaml`, then write the full updated `.mpl/mpl/decomposition.yaml` with `recompose_count: N`. The orchestrator must not perform Step 3-F field patches, phase splits, or APPEND-MODE recovery edits itself.
 
-**Why this rule exists**: an earlier autonomous-mode shortcut had the orchestrator write a 5-phase decomposition itself ("pragmatic decomposition"). It was caught by `mpl-require-covers.mjs` (covers missing) but only because covers happened to be missing — main-context fabrications can also pass schema-checks while silently omitting the agent's Step 5.5 / 5.6 / 6.5 / 9.7 synthesis (type_policy, error_spec, contract_files, intent invariants). Moving the Write into the agent removes the orchestrator's ability to fabricate at all.
+**Why this rule exists**: an earlier autonomous-mode shortcut had the orchestrator write a 5-phase decomposition itself ("pragmatic decomposition"). It was caught by `mpl-require-covers.mjs` (covers missing) but only because covers happened to be missing — main-context fabrications can also pass schema-checks while silently omitting the agent's Step 5.5 / 5.6 / 6.5 synthesis (type_policy, error_spec, contract_files). Moving the semantic Write into the agent removes the orchestrator's ability to fabricate phases at all. Deterministic post-processing is allowed only for fields mechanically derived from already-written artifacts.
 
 **How this rule applies under autonomous mandates**: a user instruction like "no questions, run autonomously" authorizes the agent to skip *user-facing prompts*, never to skip *agent dispatches*. Phase 0 artifacts (PP, core-scenarios, design-intent, user-contract) remain orchestrator-authored; everything from Step 3 onward is agent-authored. APPEND-MODE/RECOMPOSE-MODE is also agent-authored end-to-end — the agent writes the delta artifact and then re-Writes the full updated file per `agents/mpl-decomposer.md` Rule 9.
 
@@ -187,7 +187,7 @@ Add the following instructions to the mpl-decomposer agent:
 
 > The decomposer Task in 3.1 has already Written `.mpl/mpl/decomposition.yaml`. The orchestrator's response from Task is just a confirmation line (e.g., `Wrote .mpl/mpl/decomposition.yaml — 5 phases, 3 tiers.`). The orchestrator MUST NOT issue any Write/Edit against this path (see 3.0.0). If validation below fails, surface the failure and re-dispatch the decomposer; never patch the file by hand.
 
-1. **Read** `.mpl/mpl/decomposition.yaml` from disk; parse YAML, validate phase count and pp_proximity assignments
+1. **Read** `.mpl/mpl/decomposition.yaml` from disk; parse YAML, validate phase count and pp_proximity assignments. Mechanical fields are not required in the agent output: default AD-0005 pattern checks, intent invariant copies, and Stage A MVP phase membership are derived by `hooks/lib/mpl-decomposition-postprocess.mjs`.
 2. (Removed — agent owns the Write; see 3.0.0)
 2a. **Write contract files (CB-08 L0 / AD-01, v0.13.0)**:
     Validate that every phase has `interface_contract.contract_files` present (empty list allowed, omission is a hard error — abort with "[MPL] Decomposer output missing required interface_contract.contract_files on phase {id}").
@@ -230,8 +230,19 @@ Add the following instructions to the mpl-decomposer agent:
     ```
 
     Report: `[MPL] AD-01: {N} contract files written to .mpl/contracts/`
-2b. **Inject default risk patterns (AD-0005, v0.13.0, EXPERIMENTAL)**:
-    Apply `default_risk_patterns` to each phase's `verification_plan.a_items[]`. This step ensures security patterns are checked even if the decomposer omits them from `risk_patterns[]`.
+2b. **Derive mechanical fields (Phase 5 decomposer diet)**:
+    Run deterministic post-processing once after the decomposer write. This writes `.mpl/mpl/decomposition-derived.json` and keeps mechanical copies/lookups out of the LLM output path:
+
+    ```
+    node hooks/lib/mpl-decomposition-postprocess.mjs --write-json
+    ```
+
+    The derived file contains:
+    - `phases[phase_id].risk_pattern_checks`: default AD-0005 grep checks plus any project-specific `phase.risk_patterns[]`.
+    - `phases[phase_id].invariants`: verbatim `{id, statement, verify}` copies from `.mpl/mpl/phase0/design-intent.yaml`, filtered by `applies_to_phases`.
+    - `mvp`: deterministic Stage A MVP membership derived from `goal_contract.mvp_scope` and per-phase `goal_trace`.
+
+    Apply `risk_pattern_checks` to each phase's `verification_plan.a_items[]` at execution-context assembly time. This step ensures security patterns are checked even when the decomposer does not emit default `risk_patterns[]`.
 
     ```
     default_risk_patterns = [
@@ -255,7 +266,7 @@ Add the following instructions to the mpl-decomposer agent:
             severity: "EXPERIMENTAL"  // non-blocking, metric only
           })
 
-      // Also merge any decomposer-generated risk_patterns (project-specific)
+      // Also merge any decomposer-generated risk_patterns (project-specific only)
       for each rp in phase.risk_patterns:
         if rp not already in a_items:
           phase.verification_plan.a_items.push({
@@ -268,7 +279,7 @@ Add the following instructions to the mpl-decomposer agent:
     pattern_count = count injected a_items across all phases
     ```
 
-    Report: `[MPL] AD-0005: {pattern_count} EXPERIMENTAL pattern checks injected across {phase_count} phases`
+    Report: `[MPL] AD-0005: {pattern_count} EXPERIMENTAL pattern checks derived across {phase_count} phases`
 3. Initialize `.mpl/mpl/phase-decisions.md` with empty Active/Summary sections
 4. Create `.mpl/mpl/phases/phase-N/` directories for each phase
 5. **Initialize execution state (P2-6)** — write to the unified `.mpl/state.json.execution` subtree, NOT the legacy `.mpl/mpl/state.json` (removed in P2-6; hooks auto-migrate any leftover legacy files):

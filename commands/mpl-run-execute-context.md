@@ -26,11 +26,22 @@ context = {
   prev_verification:  Read previous phase's verification.md (if available),    // v0.7.0: failure context
   prev_changes_diff:  load_prev_phase_diff(prev_phase),                        // v0.7.0: code diff (N-1 only)
   dep_summaries:    load_dependency_summaries(current_phase),  // All phases referenced in interface_contract.requires
-  verification_plan:  load_phase_verification_plan(current_phase),  // A/S/H items for this phase
+  derived_fields:   load_decomposition_derived(current_phase), // Phase 5 deterministic risk/invariant/MVP derivations
+  verification_plan:  load_phase_verification_plan(current_phase, derived_fields),  // A/S/H items + derived risk/invariant checks
   learnings:        load_learnings(),               // F-11: Past run learnings (optional)
   error_files:      load_error_files(current_phase) // F-30: Error files from previous attempts (optional)
 }
 ```
+
+`load_decomposition_derived(phase_id)` reads `.mpl/mpl/decomposition-derived.json`
+when present and returns `derived.phases[phase_id]` plus the top-level `mvp`
+object. Missing file or phase entry returns `{}` for backward compatibility.
+
+`load_phase_verification_plan(phase_id, derived_fields)` starts from the legacy
+`decomposition.phases[phase_id].verification_plan`, then appends
+`derived_fields.risk_pattern_checks` to `a_items` and exposes
+`derived_fields.invariants` as the active invariant list. Legacy
+`verification_plan.invariants` remains a fallback for old decompositions.
 
 #### Run-to-Run Learnings Loading (F-11) — Legacy
 

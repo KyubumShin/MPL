@@ -2,7 +2,7 @@
 
 **생성 시점**: Phase 0 (opus 강화)
 **경로**: `.mpl/mpl/phase0/design-intent.yaml`
-**소비자**: Seed Generator (chain-seed 생성 시 input), Decomposer (invariants verbatim 매핑), G2 Gate (invariants verify 실행)
+**소비자**: Seed Generator (chain-seed 생성 시 input), deterministic decomposition post-processing (invariants verbatim 매핑), G2 Gate (invariants verify 실행)
 **관련**: #34 Phase 0 opus 강화, #50 Intent Invariants (2026-04-20 debate 합의), `[[specification-over-debugging]]` 원칙
 
 ## 개요
@@ -11,7 +11,7 @@ Phase 0 opus가 모든 phase의 **자연어 설계 의도**를 1회 선언. Seed
 
 파일은 두 개의 top-level 섹션을 갖는다:
 - `design_intent`: per-phase 자연어 설계 의도 (Seed Generator 소비)
-- `invariants`: 프로젝트 전역 **teleological 불변식** (Decomposer verbatim 매핑 + G2 기계 검증)
+- `invariants`: 프로젝트 전역 **teleological 불변식** (postprocess verbatim 매핑 + G2 기계 검증)
 
 ## 스키마
 

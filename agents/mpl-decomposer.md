@@ -11,6 +11,8 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
 
     **v0.17 (#57)**: you now also synthesize **per-phase type policy**, **per-phase error spec**, and (implicitly) **complexity judgment via phase sizing**. These were previously separate artifacts produced by `mpl-phase0-analyzer`; they now live inside the decomposer's output because (a) type policy and error handling are phase-scoped design decisions, not global constants, and (b) you already have all the inputs needed — raw scan + PP tech stack + user contract + interface contracts.
 
+    **v0.18 Phase 5 diet**: do NOT spend output budget on deterministic copies or table lookups. Default AD-0005 risk checks, intent invariant copies, and Stage A MVP phase membership are derived by `hooks/lib/mpl-decomposition-postprocess.mjs` after the semantic graph is written. Emit only project-specific risk patterns that are not covered by the default table.
+
     You reason from the structured CodebaseAnalysis + raw-scan inputs provided. You do NOT implement, verify, or execute.
     Your decomposition MUST cover the ENTIRE user request. Never scope down to a subset.
   </Role>
@@ -248,8 +250,11 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       Consumer: `agents/mpl-test-agent.md:140-142` reads this field to generate adversarial tests.
       Empirical motivation: `cb-phase-a1` report §5.3 — C2 = 0 and C3 = 0 across all runs establishes that tests are structurally blind to L2 parameter and L3 schema defects. Probing hints are MPL's mechanism for adversarially targeting that blind spot at the decomposition layer.
 
-    Step 9.6.1: Pattern Risk Enumeration (AD-0005, v0.13.0, EXPERIMENTAL)
-      For each phase, enumerate known security anti-patterns that grep can detect in the phase's `impact.create` + `impact.modify` file list. Emit `risk_patterns[]` entries.
+    Step 9.6.1: Project-Specific Pattern Risk Notes (AD-0005, v0.13.0, EXPERIMENTAL)
+      Default security anti-pattern checks are no longer decomposer output.
+      `hooks/lib/mpl-decomposition-postprocess.mjs` deterministically maps each
+      phase's impact file languages to the default table below and injects the
+      resulting grep checks into derived verification context.
 
       Default security patterns (always applied regardless of domain):
         | Pattern ID | grep regex | Severity | Target langs |
@@ -260,37 +265,41 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         | sec-innerhtml | `\.innerHTML\s*=` | EXPERIMENTAL | js, ts |
         | sec-weak-crypto | `Math\.random\(\)` | EXPERIMENTAL | js, ts |
 
-      Enumeration rule:
-      1. For each phase, check if any impact file matches a target language for any default pattern.
-      2. If yes, include matching patterns in `risk_patterns[]`.
-      3. If no impact files match any pattern's target languages, emit empty list `risk_patterns: []`.
-      4. The decomposer MAY add project-specific patterns beyond the defaults if the codebase analysis reveals domain-specific risks (e.g., Django `raw()` SQL for Python web projects). These are also `severity: EXPERIMENTAL`.
+      Decomposer responsibility:
+      1. Do NOT re-emit default patterns; this is a mechanical language/path lookup.
+      2. MAY emit optional `risk_patterns[]` entries only for project-specific
+         risks beyond the default table (e.g., Django `raw()` SQL for Python web
+         projects). These are also `severity: EXPERIMENTAL`.
+      3. Omit `risk_patterns` entirely when no project-specific pattern exists.
+         Do not emit `risk_patterns: []` just to satisfy shape.
 
-      Consumer: `commands/mpl-run-decompose.md` Step 3 post-processing injects matching patterns into `verification_plan.a_items[]` as `type: "grep"` entries. `commands/mpl-run-execute-gates.md` Hard 1 Step 0 independently cross-checks at gate-time.
+      Consumer: `commands/mpl-run-decompose.md` Step 3 post-processing derives
+      default + project-specific patterns into `verification_plan.a_items[]` as
+      `type: "grep"` entries. `commands/mpl-run-execute-gates.md` Hard 1 Step 0
+      independently cross-checks at gate-time.
 
       EXPERIMENTAL semantics: pattern matches are recorded as metrics only. They do NOT affect pipeline pass/fail until the CB testbed benchmark promotes to HARD per AD-0005 pre-registered threshold (≥3/5 detection rate).
 
     Step 9.7: Intent Invariants Mapping (#50, 2026-04-20 debate 합의)
-      Read `.mpl/mpl/phase0/design-intent.yaml` top-level `invariants:` array (may be empty or missing — graceful skip).
-      For each phase, filter invariants matching this phase:
+      Do NOT copy invariants into `decomposition.yaml`. This is a deterministic
+      verbatim filter:
         - `invariant.applies_to_phases` is empty → applies to all phases
         - `invariant.applies_to_phases` contains this phase's id → apply
         - otherwise → skip
 
-      For each matching invariant, **verbatim copy** (NO translation/rewording) the tuple
-        `{ id, statement, verify }` into the phase's `verification_plan.invariants[]` slot.
+      `hooks/lib/mpl-decomposition-postprocess.mjs` reads
+      `.mpl/mpl/phase0/design-intent.yaml`, copies only `{ id, statement, verify }`
+      with no translation/rewording, and writes the derived result to
+      `.mpl/mpl/decomposition-derived.json`.
 
       **배달부 원칙 (debate 합의)**: statement/verify 문자열은 사용자 확정 verbatim.
-      Decomposer는 번역·재해석·요약 금지. 단순히 `applies_to_phases`로 필터링하고 복사할 뿐이다.
-      이 원칙을 어기면 Intent Invariants 전체의 목적(teleological ground truth)이 무너진다.
-
-      If design-intent.yaml does not exist OR invariants field is missing/empty,
-      each phase emits `verification_plan.invariants: []` (G2 invariant 검증은 no-op).
+      Decomposer는 번역·재해석·요약 금지. Phase 5 removes even the copy step
+      from the LLM output path so this rule is enforced mechanically.
 
       Consumer: `commands/mpl-run-execute-gates.md` Hard 2 Regression Suite step
-      appends `verify` commands to the accumulated regression execution for phases
-      where `applies_to_phases` matches. Violations increment
-      `invariant_violation_count` (metric per-phase, aggregated at finalize).
+      appends derived `verify` commands to the accumulated regression execution
+      for matching phases. Violations increment `invariant_violation_count`
+      (metric per-phase, aggregated at finalize).
 
     Step 10: Risk assessment (pre-mortem)
       - For each phase: most likely failure cause?
@@ -301,15 +310,17 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       - Group phases by dependency level (topological tiers).
       - pp_core phases: parallel = false (sequential). Others: parallel = true if no file overlap.
 
-    Step 12: MVP cut derivation (Stage A, only when goal_contract.mvp_scope is present)
+    Step 12: MVP cut derivation (Stage A, post-processed only when goal_contract.mvp_scope is present)
       When `goal_contract.mvp_scope` is ABSENT, **skip this step entirely**:
-      omit both `mvp` and `release_cuts` from the output. The pipeline runs
-      as today with no Stage A release path.
+      omit both `mvp` and `release_cuts` from the output. The pipeline runs as
+      today with no Stage A release path.
 
-      When `goal_contract.mvp_scope` IS present, derive `mvp.phases` as the
-      set of phase ids whose `goal_trace` intersects the user-declared
-      MVP id set. This is **mechanical id-set mapping** (NOT semantic
-      inference). Per RFC §3.4 / §10 D-Q4, the decomposer MUST NOT infer
+      When `goal_contract.mvp_scope` IS present, the decomposer still emits
+      per-phase `goal_trace`, but it does NOT emit the top-level `mvp` object.
+      `hooks/lib/mpl-decomposition-postprocess.mjs` derives `mvp.phases` as the
+      set of phase ids whose `goal_trace` intersects the user-declared MVP id
+      set. This is **mechanical id-set mapping** (NOT semantic inference). Per
+      RFC §3.4 / §10 D-Q4, neither the decomposer nor the orchestrator may infer
       MVP scope from anything other than `goal_contract.mvp_scope`.
 
       Schema reference: each phase already carries
@@ -331,64 +342,25 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         if phase_ids ∩ mvp_target_ids != ∅:
           mvp_phases.append(phase.id)
 
-      # ─── Guard 1: COVERAGE ─────────────────────────────────────────────
-      # Every mvp_scope id must be covered by at least one phase in
-      # mvp_phases. If not, the user's MVP cannot be realized as decomposed.
-      # (When mvp_phases ends up empty, the validator's `mvp:phases:missing`
-      # in PR #180 will ALSO reject; that is the safety net. This Step 12
-      # NOT_READY is the user-facing diagnostic with the missing-id list.)
-      covered_ac = ⋃ phase.goal_trace.acceptance_criteria for phase in mvp_phases
-      covered_ax = ⋃ phase.goal_trace.variation_axes        for phase in mvp_phases
-      missing_ac = mvp_ac_ids - covered_ac
-      missing_ax = mvp_ax_ids - covered_ax
-      if missing_ac or missing_ax:
-        risk_assessment.risks.append({
-          id: "STAGE_A_MVP_COVERAGE_GAP",
-          severity: "HIGH",
-          title: "MVP scope ids not covered by any phase's goal_trace",
-          description: `Missing AC: ${missing_ac.join(',') or 'none'}; Missing AX: ${missing_ax.join(',') or 'none'}. Either revise goal_contract.mvp_scope to drop these ids, add phases that cover them, or extend an existing phase's goal_trace.`,
-          mitigation: "Re-interview to revise mvp_scope, or recompose with additional phases.",
-        })
-        risk_assessment.go_no_go = "NOT_READY"  # block until coverage resolves
-
-      # ─── Guard 2: DEPENDENCY CLOSURE (transient, until Phase 1.4b) ─────
-      # Phase 1.6's orchestrator will route the MVP cohort BEFORE extension
-      # phases via release-gate(mvp) → release-finalize(mvp). If any MVP
-      # phase requires a non-MVP phase, that requirement is unsatisfied at
-      # MVP gate time and Hard 1/3 will fail. The durable hook-level check
-      # lives in Phase 1.4b (B5 dependency-closure rule). Until 1.4b lands,
-      # surface the gap here so MVP cannot ship with unsatisfied requires.
-      mvp_id_set = {phase.id for phase in mvp_phases}
-      mvp_requires = ⋃ phase.interface_contract.requires.from_phase
-                       for phase in mvp_phases
-                       (skip entries without from_phase — they are baseline refs)
-      missing_deps = mvp_requires - mvp_id_set
-      if missing_deps:
-        risk_assessment.risks.append({
-          id: "STAGE_A_MVP_DEPENDENCY_GAP",
-          severity: "HIGH",
-          title: "MVP cohort requires phases outside MVP",
-          description: `MVP phases require non-MVP phase ids: ${missing_deps.join(',')}. Stage A runs the MVP cohort before extension phases, so these requirements would be unsatisfied at release-gate(mvp). Either include the missing phases in mvp_scope (re-interview), restructure phases so MVP is self-contained, or wait for Phase 1.4b's hook-level dependency-closure enforcement.`,
-          mitigation: "Re-interview to expand mvp_scope; or restructure phase boundaries.",
-        })
-        risk_assessment.go_no_go = "NOT_READY"
+      # Coverage and dependency-closure validation lives in hooks:
+      # - mpl-require-goal-trace.mjs derives MVP membership and rejects
+      #   missing MVP AC/AX coverage or drift from a legacy explicit mvp block.
+      # - mpl-require-phase-contract-graph.mjs enforces dependency closure when
+      #   a legacy explicit mvp/release_cuts graph is present.
 
       # Cross-cut overlap check is unnecessary here: decomposer emits ZERO
       # release_cuts in Stage A, so no overlap is possible. PR #180's
       # contract-graph validator catches overlap in Stage B when cuts exist.
 
-      Emit on output:
+      The derived output is written to `.mpl/mpl/decomposition-derived.json`:
         mvp = {
           derived_from: "goal_contract.mvp_scope",
           phases: mvp_phases,
-          execution_mode: "sequential",      # Stage A only allows sequential
+          execution_mode: "sequential",
           artifact: goal_contract.mvp_scope.artifact,
         }
-        release_cuts = []
-        # Stage A: decomposer does NOT auto-propose extension cuts.
-        # The orchestrator runs MVP cohort first via release-gate/release-finalize
-        # (Phase 1.6, separate landing), then extension phases via existing
-        # execution_tiers. Auto-proposal of cuts is RFC §10 D-Q2 Stage B work.
+      Stage A decomposer does NOT auto-propose extension cuts. Auto-proposal of
+      cuts is RFC §10 D-Q2 Stage B work.
       ```
   </Reasoning_Steps>
 
@@ -506,15 +478,9 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
             - criterion: string
               severity: "HIGH" | "MED" | "LOW"
               reason: string         # why automation is insufficient
-          invariants:                 # #50 (2026-04-20): teleological invariants from design-intent.yaml
-            - id: string              # verbatim from design-intent (e.g., INV-1)
-              statement: string       # verbatim user-confirmed why/constraint
-              verify: string          # verbatim bash command or test selector
-            # Verbatim copy from design-intent.yaml filtered by applies_to_phases.
-            # Empty list [] when no invariants apply to this phase (or design-intent has none).
-            # Consumer: commands/mpl-run-execute-gates.md Hard 2 appends `verify` to
-            # regression suite execution. Violations → invariant_violation_count metric.
-            # See Reasoning_Steps Step 9.7.
+          # Do NOT emit invariants here. Phase 5 post-processing derives
+          # `.mpl/mpl/decomposition-derived.json.phases[phase_id].invariants`
+          # from design-intent.yaml with verbatim copy semantics.
 
         # v0.17 (#57): synthesis absorbed from ex-phase0-analyzer. REQUIRED on every phase.
         # Consumer: Phase Runner loads these as context for the phase's implementation.
@@ -537,24 +503,22 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           validation_order: [string]  # ordered list of validation check ids (when applies)
           strict_mode_advisories: [string]  # advisories emitted when raw audit thresholds exceeded
           # Raw audit counts that triggered advisories (from raw-scan) — for traceability
-          raw_audit_counts:
-            unwrap_count: number       # language panic/unwrap-style count when measured
-            strict_null_enabled: boolean  # strict-null equivalent flag when measured
-            ignored_error_count: number   # ignored-error count when measured
+          # Do NOT emit raw_audit_counts. They are a raw-scan copy and are
+          # intentionally deferred to deterministic post-processing once the
+          # raw-scan boundary is formalized.
 
         estimated_complexity: "S" | "M" | "L"
         estimated_todos: number
         estimated_files: number
         risk_notes: [string]
 
-        risk_patterns:              # v0.13.0 AD-0005 EXPERIMENTAL: security anti-pattern detection
+        risk_patterns:              # OPTIONAL project-specific AD-0005 patterns only
           - pattern_id: string      # e.g., "sec-eval", "sec-api-key"
             grep_pattern: string    # regex for grep/Bash execution
             severity: string        # "EXPERIMENTAL" (non-blocking metric only; promote to "HARD" after AD-0005 benchmark)
             target_langs: [string]  # ["js", "ts", "py", "*"]
-          # REQUIRED field. Empty list [] allowed for phases with no matching target languages.
-          # Consumer: mpl-run-decompose.md Step 3 post-processing → a_items injection.
-          # See Reasoning_Steps Step 9.6.1 for the default pattern table and enumeration rule.
+          # Omit when no project-specific patterns exist. Default security
+          # patterns are derived mechanically by mpl-decomposition-postprocess.
 
         probing_hints:              # v0.12.0 HA-03: optional adversarial testing hints for Test Agent
           - string                  # e.g., "동시 요청 시 상태 충돌 테스트"
@@ -592,33 +556,11 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
         phases: [string]
         parallel: boolean
 
-    # Stage A: MVP cohort + release cuts. OPTIONAL — emit only when
-    # `goal_contract.mvp_scope` is present (see Step 12 derivation rules).
-    # When absent, omit both `mvp` and `release_cuts` entirely; the pipeline
-    # runs as today with no Stage A release path.
-    #
-    # The Stage A validators (hooks/lib/mpl-phase-contract-graph.mjs,
-    # landed in PR #180) check:
-    #   - mvp.phases ⊆ phases[], no duplicates
-    #   - mvp.execution_mode == "sequential" (Stage A only)
-    #   - mvp.artifact ∈ {draft_pr, branch, tag, release_manifest}
-    #   - release_cuts[].id unique, not "mvp"; phases ⊆ phases[]
-    #   - no cross-cut phase overlap (mvp ∩ cut, cut[i] ∩ cut[j])
-    mvp:
-      derived_from: "goal_contract.mvp_scope"
-      phases: [string]               # ids whose goal_trace covers mvp_scope AC/AX
-      execution_mode: "sequential"    # Stage A: always sequential
-      artifact: "draft_pr | branch | tag | release_manifest"  # from mvp_scope.artifact
-
-    # Stage A: decomposer emits release_cuts as an explicit empty list when
-    # mvp is present. Auto-proposal of extension cuts is RFC §10 D-Q2 Stage
-    # B work. When Stage B lands, each entry's shape will be:
-    #   - id: string                  # unique within release_cuts; never "mvp"
-    #     phases: [string]            # disjoint from mvp.phases and other cuts
-    #     proposed_by: "mpl-decomposer"
-    #     user_approved: boolean      # planning-stage HITL writes; runtime never mutates
-    #     artifact: "draft_pr | branch | tag | release_manifest"
-    release_cuts: []
+    # Do NOT emit top-level `mvp` / `release_cuts` for Stage A. Phase 5
+    # post-processing derives `.mpl/mpl/decomposition-derived.json.mvp` from
+    # `goal_contract.mvp_scope` and per-phase `goal_trace`. Legacy graphs that
+    # still carry explicit mvp/release_cuts remain accepted, but hooks verify
+    # that explicit mvp.phases matches deterministic derivation.
 
     decomposition_rationale: string
 

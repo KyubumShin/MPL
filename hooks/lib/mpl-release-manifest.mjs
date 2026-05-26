@@ -1,3 +1,5 @@
+import { deriveMvpFromGoalTrace } from './mpl-goal-trace.mjs';
+
 /**
  * Stage A Phase 1.6c-ii release-manifest serialization helpers.
  *
@@ -23,31 +25,32 @@ export const RELEASE_DIR_REL_PATH = '.mpl/mpl/releases';
 /**
  * Resolve which cut object describes the cohort being released.
  *
- * Stage A: when `cutId === 'mvp'`, source REQUIRES both `graph.mvp`
- * (decomposer-derived, see PR #182) AND `contract.mvp_scope`. The two
- * artifacts describe different facets of the cohort — graph carries the
- * mechanically-derived `phases[]` membership, contract carries the
- * user-declared `acceptance_criteria` / `variation_axes` goal trace.
- * Allowing one without the other lets a degraded manifest with empty
- * phases (or missing goal_trace) ship and silently flip D-Q6 immutability
- * for a cut that never had a real phase set. **Both must be present and
- * `graph.mvp.phases` must be non-empty.** Returns `null` when either side
- * is missing or phases are empty — the caller refuses to advance the
- * lifecycle (PR #187 codex review).
+ * Stage A: when `cutId === 'mvp'`, source REQUIRES `contract.mvp_scope` plus
+ * a mechanical phase-membership source. Newer lean decompositions may omit
+ * `graph.mvp`; in that case the caller can pass the parsed goal-trace
+ * decomposition and this helper derives the same `phases[]` from
+ * `goal_contract.mvp_scope`. Legacy graphs with `graph.mvp` still work.
+ * A missing membership source, missing contract scope, or empty derived phase
+ * list returns `null` so the caller refuses to advance the lifecycle.
  *
  * When `cutId` matches a `release_cuts[].id`, source is that entry.
  *
  * @param {string} cutId
- * @param {object|null} contract - parsed goal contract (parseGoalContractText)
- * @param {object|null} graph    - parsed phase-contract-graph (parsePhaseContractGraphText)
+ * @param {object|null} contract      - parsed goal contract (parseGoalContractText)
+ * @param {object|null} graph         - parsed phase-contract-graph (parsePhaseContractGraphText)
+ * @param {object|null} decomposition - parsed goal trace graph (parseDecompositionGoalTraceText)
  * @returns {{ phases: string[], artifact: string|null,
  *             acceptance_criteria: string[], variation_axes: string[] } | null}
  */
-export function resolveCutDescriptor(cutId, contract, graph) {
+export function resolveCutDescriptor(cutId, contract, graph, decomposition = null) {
   if (typeof cutId !== 'string' || !cutId) return null;
 
   if (cutId === 'mvp') {
-    const mvpGraph = graph?.mvp;
+    const mvpGraph = graph?.mvp || (
+      decomposition
+        ? deriveMvpFromGoalTrace(decomposition, contract, graph?.execution_tier_phase_refs)
+        : null
+    );
     const mvpScope = contract?.mvp_scope;
     // Strict: both sides required (RFC §5.4 — manifest must carry both
     // phase membership AND goal trace). PR #187 codex review caught the
@@ -78,11 +81,9 @@ export function resolveCutDescriptor(cutId, contract, graph) {
     return {
       phases,
       artifact:
-        // Stage A: the decomposer mechanically copies mvp_scope.artifact
-        // into graph.mvp.artifact (PR #182). Prefer the graph entry — it's
-        // the canonical mechanically-derived value. Fall back to the
-        // contract scope when the graph entry is missing (e.g., legacy
-        // decomposition predates 1.2).
+        // Prefer an explicit graph entry when present; lean decompositions
+        // may omit it and rely on the contract scope as the deterministic
+        // post-processing source.
         mvpGraph.artifact ?? mvpScope.artifact ?? null,
       acceptance_criteria: acceptance,
       variation_axes: axes,
@@ -122,8 +123,8 @@ export function resolveCutDescriptor(cutId, contract, graph) {
  *           graph: object|null, now?: string }} opts
  * @returns {object|null} manifest object, or null when cut descriptor is missing
  */
-export function buildReleaseManifest({ cutId, state, contract, graph, now }) {
-  const descriptor = resolveCutDescriptor(cutId, contract, graph);
+export function buildReleaseManifest({ cutId, state, contract, graph, decomposition = null, now }) {
+  const descriptor = resolveCutDescriptor(cutId, contract, graph, decomposition);
   if (!descriptor) return null;
 
   const release = state?.release || {};
@@ -223,8 +224,8 @@ export function buildGateResultsSnapshot(state, now) {
  * full forensics. The full evidence is preserved in `gate-results.json`
  * alongside it.
  */
-export function buildEvidenceSummary({ cutId, state, contract, graph, now }) {
-  const descriptor = resolveCutDescriptor(cutId, contract, graph) || {
+export function buildEvidenceSummary({ cutId, state, contract, graph, decomposition = null, now }) {
+  const descriptor = resolveCutDescriptor(cutId, contract, graph, decomposition) || {
     phases: [], artifact: null, acceptance_criteria: [], variation_axes: [],
   };
   const release = state?.release || {};

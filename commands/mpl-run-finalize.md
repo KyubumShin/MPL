@@ -693,7 +693,13 @@ Save to `.mpl/mpl/metrics.json`.
 
 **Intent Invariant aggregation rule (#50)**:
 ```
-total_declared = sum over phases: count of unique invariant.id in phase.verification_plan.invariants
+derived = Read(".mpl/mpl/decomposition-derived.json") or {}
+total_declared = sum over phases:
+  count of unique invariant.id in (
+    derived.phases[phase.id].invariants
+    or phase.verification_plan.invariants
+    or []
+  )
 total_violations = sum over phases: phase.hard2_result.invariant_violation_count
 discovery_from_intent_conflict = count of state.discoveries where type == "invariant_violation"
 violated_ids = unique set of invariant.id values that had invariant_violation_count > 0 in any phase

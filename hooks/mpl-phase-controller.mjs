@@ -56,6 +56,9 @@ const {
 const { parsePhaseContractGraphText } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-phase-contract-graph.mjs')).href
 );
+const { parseDecompositionGoalTraceText } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-goal-trace.mjs')).href
+);
 
 // Stage A Phase 1.6c-iii: snapshot ref + user-visible artifact creation.
 const { createSnapshotRef, attemptArtifactCreation } = await import(
@@ -738,17 +741,21 @@ async function main() {
       }
       const contract = gcRead.exists ? gcRead.contract : null;
       let graph = null;
+      let decomposition = null;
       try {
         const decompPath = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
         if (existsSync(decompPath)) {
-          graph = parsePhaseContractGraphText(readFileSync(decompPath, 'utf-8'));
+          const decompText = readFileSync(decompPath, 'utf-8');
+          graph = parsePhaseContractGraphText(decompText);
+          decomposition = parseDecompositionGoalTraceText(decompText);
         }
       } catch {
         graph = null;
+        decomposition = null;
       }
 
       const writtenAt = new Date().toISOString();
-      const manifest = buildReleaseManifest({ cutId: cur, state, contract, graph, now: writtenAt });
+      const manifest = buildReleaseManifest({ cutId: cur, state, contract, graph, decomposition, now: writtenAt });
       if (!manifest) {
         console.log(JSON.stringify({
           continue: true,
@@ -808,7 +815,7 @@ async function main() {
         }
       }
 
-      const evidence = buildEvidenceSummary({ cutId: cur, state, contract, graph, now: writtenAt });
+      const evidence = buildEvidenceSummary({ cutId: cur, state, contract, graph, decomposition, now: writtenAt });
       const gateSnapshot = buildGateResultsSnapshot(state, writtenAt);
 
       const releaseDir = join(cwd, RELEASE_DIR_REL_PATH, cur);

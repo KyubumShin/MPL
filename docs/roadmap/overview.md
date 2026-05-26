@@ -400,14 +400,14 @@ Feature release that closes the Hard 3 structural gap identified by cb-phase-a1 
 ### Part 3 — AD-0005: PR-02/03/04 Pattern Placement Decision (`000e24e`)
 
 - 3-agent debate (Pro/Con/Mutant) converged 3:0 after 2 rounds.
-- **PR-02 Security Pattern → EXPERIMENTAL**: decomposition-time artifact (Step 9.6.1 `risk_patterns[]`) + Hard 1 Step 0 cross-check. Non-blocking metric recording. HARD promotion gated on CB testbed ≥3/5 detection.
+- **PR-02 Security Pattern → EXPERIMENTAL**: deterministic decomposition post-processing derives default risk checks; optional `risk_patterns[]` is now project-specific only. Hard 1 Step 0 still cross-checks the full changed-file set. Non-blocking metric recording. HARD promotion gated on CB testbed ≥3/5 detection.
 - **PR-03 UI Hardcoding → DROP**: count-based threshold incompatible with binary 3H architecture.
 - **PR-04 Resource Lifecycle → LOST**: pair detection needs separate AD for `pair_pattern` mechanism.
 - Mutant reframing: "which gate?" → "which pipeline stage?" — decomposition-time artifact following AD-01 `contract_files` precedent.
 
 ### Part 4 — PR-02 EXPERIMENTAL Implementation (`db6d37d`)
 
-- `agents/mpl-decomposer.md` Step 9.6.1 + `risk_patterns[]` schema field.
+- `agents/mpl-decomposer.md` Step 9.6.1 keeps only project-specific `risk_patterns[]`; defaults are no longer LLM-emitted.
 - `commands/mpl-run-decompose.md` Step 3 item 2b: `default_risk_patterns` (5 security rules: eval, API keys, SQL concat, innerHTML, weak crypto).
 - `commands/mpl-run-execute-gates.md` Hard 1 Step 0 "Pattern Risk Check" (non-blocking, metrics to `.mpl/mpl/pattern-metrics.jsonl`).
 - Closes #27.

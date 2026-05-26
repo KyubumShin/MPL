@@ -636,7 +636,7 @@ Config: `config/enforcement.json`, `config/verification-tool-paths.json`.
 
 ### v0.17.2 — Decomposer Write Authority (2026-05-02)
 
-Patch fix surfaced from a ygg-exp12 pipeline run where the orchestrator, under an autonomous mandate, hand-rolled a 5-phase `.mpl/mpl/decomposition.yaml` and was caught only by `mpl-require-covers.mjs` (covers field missing). The shortcut bypassed the decomposer agent's Step 5.5 / 5.6 / 6.5 / 9.7 synthesis (type_policy, error_spec, contract_files, intent invariants) — the covers hook was the only line of defense, and it would not have caught a shortcut that happened to include `covers:` while omitting other synthesis fields. Closing the gap by moving Write authority into the agent itself, so the orchestrator no longer holds the surface area to fabricate.
+Patch fix surfaced from a ygg-exp12 pipeline run where the orchestrator, under an autonomous mandate, hand-rolled a 5-phase `.mpl/mpl/decomposition.yaml` and was caught only by `mpl-require-covers.mjs` (covers field missing). The shortcut bypassed the decomposer agent's Step 5.5 / 5.6 / 6.5 synthesis (type_policy, error_spec, contract_files) — the covers hook was the only line of defense, and it would not have caught a shortcut that happened to include `covers:` while omitting other synthesis fields. Closing the gap by moving semantic Write authority into the agent itself, while Phase 5 deterministic post-processing handles mechanical invariant/risk/MVP derivations.
 
 | Change | Before | After | Type | Rationale |
 |--------|--------|-------|------|-----------|
