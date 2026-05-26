@@ -110,6 +110,19 @@ phases:
     assert.match(apiKey.command, /src\/auth\.ts/);
     assert.doesNotMatch(apiKey.command, /\.mpl\/contracts\/phase-1\.json/);
   });
+
+  it('skips project-specific patterns when target_langs is omitted', () => {
+    const checks = deriveRiskPatternChecks({
+      id: 'phase-1',
+      impact: { modify: [{ path: 'src/auth.ts' }] },
+      risk_patterns: [{
+        pattern_id: 'missing-targets',
+        grep_pattern: 'customDanger',
+        severity: 'EXPERIMENTAL',
+      }],
+    });
+    assert.equal(checks.some((check) => check.pattern_id === 'missing-targets'), false);
+  });
 });
 
 describe('decomposition postprocess invariants', () => {

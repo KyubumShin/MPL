@@ -313,6 +313,7 @@ export function deriveRiskPatternChecks(phase) {
 
   for (const pattern of phase?.risk_patterns || []) {
     if (!pattern?.pattern_id || !pattern?.grep_pattern) continue;
+    if (!patternApplies(pattern, langs)) continue;
     const key = `${pattern.pattern_id}\0${pattern.grep_pattern}`;
     if (seen.has(key)) continue;
     const targetFiles = filesForPattern(pattern, files);

@@ -166,10 +166,13 @@ Run the full test suite **including accumulated regression tests and Intent Inva
   # invariant copying out of decomposition.yaml; fall back to legacy
   # verification_plan.invariants for older pipelines.
   derived = Read(".mpl/mpl/decomposition-derived.json") or {}
-  phase_invariants =
-    derived.phases[current_phase_id].invariants
-    or decomposition.phases[current_phase_id].verification_plan.invariants
-    or []
+  if derived.phases[current_phase_id] exists:
+    # Derived wins when present, even when the array is intentionally empty.
+    phase_invariants = derived.phases[current_phase_id].invariants or []
+  else:
+    phase_invariants =
+      decomposition.phases[current_phase_id].verification_plan.invariants
+      or []
   invariant_violation_count = 0
   invariant_results = []
 

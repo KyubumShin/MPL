@@ -695,11 +695,12 @@ Save to `.mpl/mpl/metrics.json`.
 ```
 derived = Read(".mpl/mpl/decomposition-derived.json") or {}
 total_declared = sum over phases:
-  count of unique invariant.id in (
-    derived.phases[phase.id].invariants
-    or phase.verification_plan.invariants
-    or []
-  )
+  if derived.phases[phase.id] exists:
+    # Derived wins when present, even when the array is intentionally empty.
+    active_invariants = derived.phases[phase.id].invariants or []
+  else:
+    active_invariants = phase.verification_plan.invariants or []
+  count of unique invariant.id in active_invariants
 total_violations = sum over phases: phase.hard2_result.invariant_violation_count
 discovery_from_intent_conflict = count of state.discoveries where type == "invariant_violation"
 violated_ids = unique set of invariant.id values that had invariant_violation_count > 0 in any phase

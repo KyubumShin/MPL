@@ -690,6 +690,25 @@ describe('mpl-require-phase-contract-graph hook integration', () => {
     assert.equal(r.continue, true);
   });
 
+  it('allows lean graphs without top-level mvp even when goal_contract declares mvp_scope', () => {
+    writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'), `
+version: 1
+goal:
+  summary: Ship auth MVP
+acceptance_criteria:
+  - id: AC-1
+    text: Auth works
+variation_axes: []
+ontology_entities: []
+mvp_scope:
+  acceptance_criteria: [AC-1]
+  variation_axes: []
+  artifact: release_manifest
+`);
+    const r = runHook(validGraph());
+    assert.equal(r.continue, true);
+  });
+
   it('blocks missing graph metadata and missing phase policy', () => {
     const r = runHook('phases:\n  - id: phase-1\n');
     assert.equal(r.decision, 'block');
