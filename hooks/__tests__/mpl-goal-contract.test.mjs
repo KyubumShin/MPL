@@ -146,6 +146,8 @@ describe('goal contract parsing', () => {
     const text = `${validGoalContract()}\n`;
     const c = parseGoalContractText(text);
     assert.equal(c.content_sha256, hashNormalizedGoalContractText(text));
+    assert.equal(hashNormalizedGoalContractText(`\n${text}`), c.content_sha256);
+    assert.equal(hashNormalizedGoalContractText(`\uFEFF${text}`), c.content_sha256);
   });
 
   it('validates baseline goal contract hashes as lowercase 64-char hex', () => {
@@ -161,6 +163,20 @@ artifacts:
     assert.equal(baseline.hash, null);
     assert.match(baseline.error, /expected 64 lowercase hex/);
     assert.equal(baseline.rawHash, '43aaf36b9bf7');
+  });
+
+  it('treats an existing baseline without goal_contract.sha256 as corrupt', () => {
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  pivot_points:
+    path: ".mpl/pivot-points.md"
+    sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+`);
+    const baseline = readBaselineGoalContractHash(tmp);
+    assert.equal(baseline.exists, true);
+    assert.equal(baseline.hash, null);
+    assert.equal(baseline.error, 'missing_goal_contract_sha256');
   });
 });
 

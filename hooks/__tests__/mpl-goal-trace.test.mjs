@@ -179,6 +179,7 @@ describe('mpl-require-goal-trace hook integration', () => {
       ambiguity: { final_score: 0.1, threshold_met: true, override: null, rounds: 1 },
       codebaseSkipped: true,
     });
+    assert.equal(baseline.artifacts.goal_contract.sha256, goalHash());
     writeBaseline(tmp, baseline);
 
     const r = runHook(decomposition());
@@ -232,6 +233,18 @@ phases:
     assert.match(r.reason, /corrupt baseline\.yaml goal_contract sha256/);
     assert.match(r.reason, /expected 64 lowercase hex/);
     assert.match(r.reason, /43aaf36b9bf7/);
+  });
+
+  it('blocks explicitly when baseline exists without goal_contract sha256', () => {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  pivot_points:
+    path: ".mpl/pivot-points.md"
+    sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+`);
+    const r = runHook(decomposition());
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /missing_goal_contract_sha256/);
   });
 
   it('allows opt-out via goal_trace_required=false', () => {

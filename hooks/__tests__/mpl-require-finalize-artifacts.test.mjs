@@ -184,4 +184,17 @@ artifacts:
     assert.match(r.reason, /expected 64 lowercase hex/);
     assert.match(r.reason, /43aaf36b9bf7/);
   });
+
+  it('blocks explicitly when baseline exists without goal_contract sha256', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  pivot_points:
+    path: ".mpl/pivot-points.md"
+    sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+`);
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /missing_goal_contract_sha256/);
+  });
 });

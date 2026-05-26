@@ -130,6 +130,8 @@ function idsInTopList(text, key, prefixRe) {
 }
 
 export function normalizeGoalContractText(text) {
+  // Goal contracts are YAML-shaped MPL artifacts. Leading/trailing whitespace
+  // and UTF-8 BOMs are non-semantic for this contract hash.
   return String(text || '').replace(/\r\n/g, '\n').trim();
 }
 
@@ -141,10 +143,6 @@ export function hashNormalizedGoalContractFile(cwd, relPath = GOAL_CONTRACT_REL_
   const path = join(cwd, relPath);
   if (!existsSync(path)) return null;
   return hashNormalizedGoalContractText(readFileSync(path, 'utf-8'));
-}
-
-function sha256(text) {
-  return hashNormalizedGoalContractText(text);
 }
 
 function parseMvpScope(text) {
@@ -206,7 +204,7 @@ export function parseGoalContractText(text) {
       require_finalize_timestamps: booleanInBlock(completionEvidence, 'require_finalize_timestamps'),
     },
     mvp_scope: parseMvpScope(text),
-    content_sha256: sha256(text),
+    content_sha256: hashNormalizedGoalContractText(text),
   };
 }
 
@@ -323,6 +321,14 @@ export function readBaselineGoalContractHash(cwd) {
     const goalBlockMatch = block.match(/^\s+goal_contract\s*:\s*\n((?:\s{4}.+\n?)*)/m);
     const goalBlock = goalBlockMatch ? goalBlockMatch[1] : '';
     const hash = scalarInBlock(goalBlock, 'sha256');
+    if (!hash) {
+      return {
+        exists: true,
+        hash: null,
+        error: 'missing_goal_contract_sha256',
+        rawHash: null,
+      };
+    }
     if (hash && !LOWER_HEX_SHA256_RE.test(hash)) {
       return {
         exists: true,
@@ -332,8 +338,13 @@ export function readBaselineGoalContractHash(cwd) {
       };
     }
     return { exists: true, hash, error: null, rawHash: hash };
-  } catch {
-    return { exists: true, hash: null, error: 'unreadable_baseline', rawHash: null };
+  } catch (error) {
+    return {
+      exists: true,
+      hash: null,
+      error: `unreadable_baseline: ${error?.message || 'unknown error'}`,
+      rawHash: null,
+    };
   }
 }
 
