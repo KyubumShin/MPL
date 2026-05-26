@@ -453,6 +453,9 @@ mpl small 재시도 로직 추가                      # → standard 강제
 
 # 진단
 /mpl:mpl-doctor
+
+# resume이 blocked_hook을 보고한 뒤 훅 차단 복구
+/mpl:mpl-recover
 ```
 
 Codex에서도 같은 MPL 스킬을 감지한다. Codex 세션에서 `mpl ...` 형태로 요청하거나 설치된 MPL 스킬을 직접 선택한다.

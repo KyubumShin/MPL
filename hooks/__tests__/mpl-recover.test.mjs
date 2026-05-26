@@ -126,7 +126,47 @@ phases:
 `;
 }
 
+function decompositionWithGoalTrace(hash) {
+  return `
+goal_contract_hash: "${hash}"
+phases:
+  - id: phase-1
+    scope: "Add editor"
+    covers: [UC-01]
+    impact: { create: [], modify: [], affected_tests: [] }
+    interface_contract: { requires: [], produces: [], contract_files: [] }
+    test_agent_required: true
+    success_criteria: []
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: [AX-1]
+      ontology_entities: [runtime]
+`;
+}
+
 describe('mpl recover', () => {
+  it('reports no_state and not_blocked without mutating state', () => {
+    assert.equal(inspectRecovery(tmp).status, 'no_state');
+    writeState({ session_status: null });
+    assert.equal(inspectRecovery(tmp).status, 'not_blocked');
+    assert.equal(recoverBlockedHook(tmp).status, 'not_blocked');
+  });
+
+  it('keeps unsupported block codes intact with recovery context', () => {
+    writeState(blocked({
+      block_code: 'phase_contract_graph_invalid',
+      retry_context: { issue_count: 1 },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'unsupported');
+
+    const state = readState();
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.block_code, 'phase_contract_graph_invalid');
+    assert.equal(state.retry_context.recovery.last_status, 'unsupported');
+  });
+
   it('repairs a corrupt baseline goal hash and clears blocked_hook', () => {
     const hash = writeGoalContract();
     writeBaseline('43aaf36b9bf7');
@@ -167,6 +207,57 @@ describe('mpl recover', () => {
     assert.equal(state.block_code, 'goal_contract_drift');
     assert.equal(state.retry_context.recovery.last_status, 'requires_approval');
     assert.match(state.block_reason, /Explicit approval is required/);
+  });
+
+  it('patches goal_trace hash-only mismatch with approval and clears the block', () => {
+    const hash = writeGoalContract();
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), decompositionWithGoalTrace('bad-hash'));
+    writeState(blocked({
+      block_code: 'goal_trace_incomplete',
+      retry_context: {
+        issue_count: 1,
+        issues: [`goal_contract_hash:mismatch:bad-hash->${hash}`],
+      },
+    }));
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'recovered');
+
+    const text = readFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), 'utf-8');
+    assert.match(text, new RegExp(`goal_contract_hash: "${hash}"`));
+    assert.equal(readState().session_status, null);
+  });
+
+  it('does not write a goal_trace hash patch when revalidation would still fail', () => {
+    const hash = writeGoalContract();
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    const original = `
+goal_contract_hash: "bad-hash"
+phases:
+  - id: phase-1
+    goal_trace:
+      acceptance_criteria: []
+      variation_axes: []
+      ontology_entities: [runtime]
+`;
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), original);
+    writeState(blocked({
+      block_code: 'goal_trace_incomplete',
+      retry_context: {
+        issue_count: 1,
+        issues: [`goal_contract_hash:mismatch:bad-hash->${hash}`],
+      },
+    }));
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'failed');
+
+    const text = readFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), 'utf-8');
+    assert.equal(text, original);
+    const state = readState();
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.retry_context.recovery.last_status, 'failed');
   });
 
   it('clears missing test-agent block when PASS evidence already exists', () => {

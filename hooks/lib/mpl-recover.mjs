@@ -220,9 +220,7 @@ function goalTraceHashOnlyIssue(state) {
   return issues.length > 0 && issues.every((issue) => /^goal_contract_hash:(missing|mismatch|corrupt)/.test(issue));
 }
 
-function validateCurrentDecompositionGoalTrace(cwd) {
-  const text = readText(cwd, DECOMPOSITION_REL_PATH);
-  if (text === null) return { valid: false, issues: ['decomposition:file_missing'] };
+function validateDecompositionGoalTraceText(cwd, text) {
   const goal = readGoalContract(cwd);
   if (!goal.exists || !goal.valid) return { valid: false, issues: ['goal_contract:invalid'] };
   const decomposition = parseDecompositionGoalTraceText(text);
@@ -235,9 +233,7 @@ function validateCurrentDecompositionGoalTrace(cwd) {
   return { valid: issues.length === 0, issues };
 }
 
-function validateCurrentArtifact(cwd, relPath) {
-  const text = readText(cwd, relPath);
-  if (text === null) return { valid: false, missing: ['file'], missingAnyOf: [] };
+function validateArtifactText(relPath, text) {
   const verdict = validateArtifactFile(relPath, text);
   return verdict || { valid: true, missing: [], missingAnyOf: [] };
 }
@@ -328,7 +324,7 @@ function recoverGoalBaselineHash(cwd, state, { approveUnsafe = false } = {}) {
 }
 
 function recoverGoalTraceHash(cwd, state, { approveUnsafe = false } = {}) {
-  if (!goalTraceHashOnlyIssue(state) && !BASELINE_DRIFT_CODES.has(state.block_code)) {
+  if (!goalTraceHashOnlyIssue(state)) {
     const reason = '[MPL Recover] Goal trace block includes coverage issues, not just hash mismatch.';
     keepBlocked(cwd, state, {
       status: 'unsupported',
@@ -369,8 +365,8 @@ function recoverGoalTraceHash(cwd, state, { approveUnsafe = false } = {}) {
     return buildResult(state, { status: 'failed', message: reason });
   }
 
-  writeText(cwd, DECOMPOSITION_REL_PATH, patchDecompositionGoalHash(text, goal.contract.content_sha256));
-  const verdict = validateCurrentDecompositionGoalTrace(cwd);
+  const patchedText = patchDecompositionGoalHash(text, goal.contract.content_sha256);
+  const verdict = validateDecompositionGoalTraceText(cwd, patchedText);
   if (!verdict.valid) {
     const reason = '[MPL Recover] Patched goal_contract_hash, but decomposition.yaml still fails goal trace validation.';
     keepBlocked(cwd, state, {
@@ -382,6 +378,7 @@ function recoverGoalTraceHash(cwd, state, { approveUnsafe = false } = {}) {
     return buildResult(state, { status: 'failed', message: reason, issues: verdict.issues });
   }
 
+  writeText(cwd, DECOMPOSITION_REL_PATH, patchedText);
   clearCurrentBlock(cwd, state);
   appendRecoverySignal(cwd, {
     ...summarizeState(state),
@@ -489,8 +486,7 @@ function recoverArtifactSchema(cwd, state, { approveUnsafe = false } = {}) {
     return buildResult(state, { status: 'failed', message: reason, missing: patched.missing });
   }
 
-  writeText(cwd, DECOMPOSITION_REL_PATH, patched.text);
-  const verdict = validateCurrentArtifact(cwd, DECOMPOSITION_REL_PATH);
+  const verdict = validateArtifactText(DECOMPOSITION_REL_PATH, patched.text);
   if (!verdict.valid) {
     const reason = '[MPL Recover] Patched test_agent_required defaults, but decomposition.yaml still fails artifact schema validation.';
     keepBlocked(cwd, state, {
@@ -512,6 +508,7 @@ function recoverArtifactSchema(cwd, state, { approveUnsafe = false } = {}) {
     });
   }
 
+  writeText(cwd, DECOMPOSITION_REL_PATH, patched.text);
   clearCurrentBlock(cwd, state);
   appendRecoverySignal(cwd, {
     ...summarizeState(state),
