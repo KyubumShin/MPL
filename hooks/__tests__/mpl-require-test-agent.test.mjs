@@ -136,6 +136,8 @@ phases:
       assert.equal(state.session_status, 'blocked_hook');
       assert.equal(state.blocked_phase, 'phase-1');
       assert.match(state.resume_instruction, /independent test author/);
+      assert.match(state.resume_instruction, /Task\(subagent_type="mpl-test-agent"/);
+      assert.match(state.resume_instruction, /N\/A - not declared in decomposition\.yaml/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

@@ -520,7 +520,9 @@ missing `test_agent_required` defaults to required, and `false` must carry
 requires_test_agent = phase_definition.test_agent_required != false
 
 if not requires_test_agent:
-  require phase_definition.test_agent_rationale is non-empty
+  if phase_definition.test_agent_rationale is empty:
+    FAIL: "[MPL AD-0007] test_agent_required=false requires test_agent_rationale. Re-run decomposition or set test_agent_required=true."
+    -> do not proceed past this phase transition
   Report: "[MPL] Phase {phase_id}: test_agent_required=false — {rationale}"
   -> proceed to 4.2.3
 

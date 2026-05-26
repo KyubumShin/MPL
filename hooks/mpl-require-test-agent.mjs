@@ -160,6 +160,9 @@ function trimTrailingBlankLines(lines) {
 function yamlScalarValue(value) {
   let v = String(value || '').trim();
   if (!v) return null;
+  // Minimal YAML subset: enough for MPL's simple scalar fields. Escaped
+  // double-quoted YAML strings are not decoded here; this hook degrades by
+  // showing the raw scalar in resume instructions.
   if (
     (v.startsWith('"') && v.endsWith('"')) ||
     (v.startsWith("'") && v.endsWith("'"))
@@ -170,12 +173,16 @@ function yamlScalarValue(value) {
 }
 
 function extractScalar(lines, key) {
-  const re = new RegExp(`^\\s+${key}:\\s*(.*?)\\s*$`);
+  const re = new RegExp(`^\\s+${escapeRegExp(key)}:\\s*(.*?)\\s*$`);
   for (const line of lines) {
     const match = line.match(re);
     if (match) return yamlScalarValue(match[1]);
   }
   return null;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseYamlBoolean(value) {
@@ -187,7 +194,7 @@ function parseYamlBoolean(value) {
 }
 
 function extractSection(lines, key) {
-  const re = new RegExp(`^(\\s*)${key}:\\s*(.*?)\\s*$`);
+  const re = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(.*?)\\s*$`);
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(re);
     if (!match) continue;
@@ -417,7 +424,7 @@ try {
       `.mpl/config/test-agent-override.json with a reason.`;
   const resumeInstruction = formatTestAgentResumeInstruction(phase, missingOrBad);
   recordBlockedHook(cwd, phaseId, reason, resumeInstruction);
-  block(`${reason}\n\n${resumeInstruction}`);
+  block(reason);
 } catch {
   // Hook must never wedge the pipeline.
   ok();
