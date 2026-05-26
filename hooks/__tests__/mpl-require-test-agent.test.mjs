@@ -41,6 +41,21 @@ describe('mpl-require-test-agent hook integration', () => {
       writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
 phases:
   - id: phase-1
+    phase_domain: api
+    impact:
+      modify:
+        - src/api/widgets.ts
+    interface_contract:
+      requires: []
+      produces:
+        - symbol: createWidget
+          path: src/api/widgets.ts
+    probing_hints:
+      - retry path returns structured error
+    verification_plan:
+      s_items:
+        - id: S-1
+          statement: rejected payload returns 422
     test_agent_required: true
     test_agent_rationale: "touches a boundary"
 `);
@@ -66,6 +81,61 @@ phases:
       assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
       assert.equal(state.blocked_phase, 'phase-1');
       assert.match(state.resume_instruction, /Dispatch mpl-test-agent for phase-1/);
+      assert.match(state.resume_instruction, /Task\(subagent_type="mpl-test-agent"/);
+      assert.match(state.resume_instruction, /Interface Contract:/);
+      assert.match(state.resume_instruction, /createWidget/);
+      assert.match(state.resume_instruction, /Impact Files \/ Phase Impact:/);
+      assert.match(state.resume_instruction, /src\/api\/widgets\.ts/);
+      assert.match(state.resume_instruction, /Probing Hints:/);
+      assert.match(state.resume_instruction, /retry path returns structured error/);
+      assert.match(state.resume_instruction, /Verification Plan:/);
+      assert.match(state.resume_instruction, /S-1/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks even when phase-runner self-tests have gate evidence but no independent test-agent PASS', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-self-test-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        gate_results: {
+          hard2_coverage: {
+            command: 'npm test',
+            exit_code: 0,
+            stdout_tail: 'all phase-runner tests passed',
+          },
+        },
+        test_agent_dispatched: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    test_agent_required: true
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, false);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /code_author == test_author is a tautology/);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_phase, 'phase-1');
+      assert.match(state.resume_instruction, /independent test author/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -83,6 +153,56 @@ phases:
         blocked_phase: 'phase-1',
         block_reason: 'old block',
         test_agent_dispatched: { 'phase-1': passingEvidence() },
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    test_agent_required: true
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, null);
+      assert.equal(state.blocked_by_hook, null);
+      assert.equal(state.blocked_phase, null);
+      assert.equal(state.block_reason, null);
+      assert.equal(state.resume_instruction, null);
+      assert.equal(state.blocked_at, null);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('clears its visible blocked state when a user-approved override exists', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-override-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      mkdirSync(join(tmp, '.mpl', 'config'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_phase: 'phase-1',
+        block_reason: 'old block',
+        resume_instruction: 'old instruction',
+        blocked_at: '2026-05-18T00:00:00Z',
+        test_agent_dispatched: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'config', 'test-agent-override.json'), JSON.stringify({
+        'phase-1': 'user approved manual verification',
       }));
       writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
 phases:
@@ -186,6 +306,12 @@ phases:
       assert.equal(r.continue, false);
       assert.equal(r.decision, 'block');
       assert.match(r.reason, /recorded mpl-test-agent evidence is verdict=PASS/);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
+      assert.equal(state.blocked_phase, 'phase-1');
+      assert.match(state.block_reason, /recorded mpl-test-agent evidence is verdict=PASS/);
+      assert.match(state.resume_instruction, /Prior evidence status:/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

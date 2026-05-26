@@ -143,6 +143,10 @@ if state.session_status == "blocked_hook":
 
     if state.blocked_by_hook == "mpl-require-test-agent":
         phase = decomposition.phases.find(p => p.id == state.blocked_phase)
+        # Prefer the exact Task(...) prompt embedded in state.resume_instruction.
+        # The hook records interface_contract, impact files, probing_hints, and
+        # verification_plan there so resume can be executed even when the block
+        # was encountered outside the normal phase runner context.
         Task(subagent_type="mpl-test-agent", model="sonnet",
           prompt=f"""
           Resume blocked MPL transition for {phase.id}.

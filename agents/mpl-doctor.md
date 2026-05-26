@@ -274,7 +274,7 @@ disallowedTools: Write, Edit, Task
     [d] self-report drift:          ✓         or ⚠️ 1 gate post-hoc fixed
     [e] null state PASS claim:      ✓ 0건     or ✗ 2건: hard3 PASS claimed but state.hard3_resilience=null
     [f] chain_seed integrity:       ✓         or ✗ enabled=true but chain-assignment.yaml missing
-    [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} mandatory-domain phases
+    [g] test_agent coverage:        ✓ N건     or ✗ 0건 despite {M} required phases
     [h] E2E scenario coverage:      ✓ N건     or ✗ missing/failing E2E-N
     [i] goal_contract integrity:    ✓ hash ok or ✗ missing fields: mission.goal
     [j] Build artifact resource risk: ✓ clean or ⚠️ profile path over threshold
