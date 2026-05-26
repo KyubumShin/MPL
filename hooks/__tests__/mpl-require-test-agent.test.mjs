@@ -57,7 +57,7 @@ phases:
         - id: S-1
           statement: rejected payload returns 422
     test_agent_required: true
-    test_agent_rationale: "touches a boundary"
+    test_agent_rationale: "touches a boundary" # inline comment stripped
 `);
 
       const input = {
@@ -76,6 +76,8 @@ phases:
       assert.equal(r.continue, false);
       assert.equal(r.decision, 'block');
       assert.match(r.reason, /mpl-test-agent was not dispatched/);
+      assert.match(r.reason, /rationale: touches a boundary\)/);
+      assert.doesNotMatch(r.reason, /inline comment stripped/);
       const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
       assert.equal(state.session_status, 'blocked_hook');
       assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
@@ -135,6 +137,8 @@ phases:
       const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
       assert.equal(state.session_status, 'blocked_hook');
       assert.equal(state.blocked_phase, 'phase-1');
+      assert.equal(state.gate_results.hard2_coverage.exit_code, 0);
+      assert.deepEqual(state.test_agent_dispatched, {});
       // The hook output stays concise; the executable recovery prompt lives in state.
       assert.match(state.resume_instruction, /independent test author/);
       assert.match(state.resume_instruction, /Task\(subagent_type="mpl-test-agent"/);

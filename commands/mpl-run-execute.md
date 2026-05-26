@@ -500,7 +500,8 @@ frontier proves no next phase can consume unverified behavior.
 The table below guides the Decomposer when writing `test_agent_required`. It is
 not a runtime executor skip table. Runtime enforcement is field-driven:
 missing `test_agent_required` defaults to required, and `false` must carry
-`test_agent_rationale`.
+`test_agent_rationale`. Null or empty `test_agent_required` values are treated
+the same as a missing field: required.
 
 | phase_domain | Test Agent | Rationale |
 |-------------|-----------|-----------|

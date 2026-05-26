@@ -163,6 +163,8 @@ function yamlScalarValue(value) {
   // Minimal YAML subset: enough for MPL's simple scalar fields. Escaped
   // double-quoted YAML strings are not decoded here; this hook degrades by
   // showing the raw scalar in resume instructions.
+  v = v.replace(/\s+#.*$/, '').trim();
+  if (!v) return null;
   if (
     (v.startsWith('"') && v.endsWith('"')) ||
     (v.startsWith("'") && v.endsWith("'"))
