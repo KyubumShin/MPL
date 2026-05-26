@@ -56,15 +56,14 @@ function block(reason) {
 
 const HOOK_ID = 'mpl-require-test-agent';
 
-function recordBlockedHook(cwd, phaseId, reason) {
+function recordBlockedHook(cwd, phaseId, reason, resumeInstruction) {
   try {
     writeState(cwd, {
       session_status: 'blocked_hook',
       blocked_by_hook: HOOK_ID,
       blocked_phase: phaseId,
       block_reason: reason,
-      resume_instruction:
-        `Dispatch mpl-test-agent for ${phaseId}, or record a user-approved ${phaseId} override in .mpl/config/test-agent-override.json, then retry the blocked phase transition.`,
+      resume_instruction: resumeInstruction,
       blocked_at: new Date().toISOString(),
     });
   } catch {
@@ -152,9 +151,137 @@ function extractPhaseId(text) {
   return m ? `phase-${m[1]}` : null;
 }
 
+function trimTrailingBlankLines(lines) {
+  const copy = [...lines];
+  while (copy.length > 0 && !copy[copy.length - 1].trim()) copy.pop();
+  return copy;
+}
+
+function yamlScalarValue(value) {
+  let v = String(value || '').trim();
+  if (!v) return null;
+  // Minimal YAML subset: enough for MPL's simple scalar fields. Escaped
+  // double-quoted YAML strings are not decoded here; this hook degrades by
+  // showing the raw scalar in resume instructions.
+  v = v.replace(/\s+#.*$/, '').trim();
+  if (!v) return null;
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    v = v.slice(1, -1);
+  }
+  return v.trim() || null;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractScalar(lines, key) {
+  const re = new RegExp(`^\\s+${escapeRegExp(key)}:\\s*(.*?)\\s*$`);
+  for (const line of lines) {
+    const match = line.match(re);
+    if (match) return yamlScalarValue(match[1]);
+  }
+  return null;
+}
+
+function parseYamlBoolean(value) {
+  if (value === null) return null;
+  const normalized = value.replace(/\s+#.*$/, '').trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return null;
+}
+
+function extractSection(lines, key) {
+  const re = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(.*?)\\s*$`);
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(re);
+    if (!match) continue;
+
+    const baseIndent = match[1].length;
+    const section = [lines[i]];
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim()) {
+        section.push(line);
+        continue;
+      }
+      const indent = line.match(/^\s*/)[0].length;
+      if (indent <= baseIndent) break;
+      section.push(line);
+    }
+    return trimTrailingBlankLines(section).join('\n');
+  }
+  return null;
+}
+
+function clampSnippet(text, limit = 1400) {
+  if (!text) return 'N/A - not declared in decomposition.yaml';
+  if (text.length <= limit) return text;
+  // Leave room for the truncation suffix so the returned section stays near
+  // the requested hard cap.
+  return `${text.slice(0, limit - 80).trimEnd()}\n... [truncated; read .mpl/mpl/decomposition.yaml for full context]`;
+}
+
+function finalizePhase(rawPhase) {
+  const lines = rawPhase.rawLines || [];
+  const required = parseYamlBoolean(extractScalar(lines, 'test_agent_required'));
+  const phaseDomain = extractScalar(lines, 'phase_domain');
+  return {
+    id: rawPhase.id,
+    phase_domain: phaseDomain,
+    test_agent_required: required,
+    test_agent_rationale: extractScalar(lines, 'test_agent_rationale'),
+    impact: extractSection(lines, 'impact'),
+    interface_contract: extractSection(lines, 'interface_contract'),
+    probing_hints: extractSection(lines, 'probing_hints'),
+    verification_plan: extractSection(lines, 'verification_plan'),
+    success_criteria: extractSection(lines, 'success_criteria'),
+  };
+}
+
+function formatTestAgentResumeInstruction(phase, priorDescription) {
+  const domain = phase.phase_domain || 'unknown';
+  return [
+    `Dispatch mpl-test-agent for ${phase.id}, then retry the blocked phase transition.`,
+    '',
+    'Use this exact recovery shape:',
+    'Task(subagent_type="mpl-test-agent", model="sonnet", prompt="""',
+    `Resume blocked MPL transition for ${phase.id} (phase_domain=${domain}).`,
+    'AD-0004: you are an independent test author. Do not treat phase-runner self-tests as evidence.',
+    `Prior evidence status: ${priorDescription}.`,
+    '',
+    'Interface Contract:',
+    clampSnippet(phase.interface_contract),
+    '',
+    'Impact Files / Phase Impact:',
+    clampSnippet(phase.impact),
+    '',
+    'Probing Hints:',
+    clampSnippet(phase.probing_hints),
+    '',
+    'Verification Plan:',
+    clampSnippet(phase.verification_plan || phase.success_criteria),
+    '',
+    'Write and run executable tests for this phase. Return valid JSON with:',
+    '- verdict: "PASS" only when all checks pass',
+    '- test_results.total > 0',
+    '- test_results.failed == 0 and test_results.skipped == 0',
+    '- test_files_created with at least one test file path',
+    '- commands_run[] with every exit_code == 0',
+    '- bugs_found: []',
+    '""")',
+    '',
+    `Override only with explicit user consent by adding "${phase.id}": "<reason>" to .mpl/config/test-agent-override.json.`,
+  ].join('\n');
+}
+
 /**
  * Parse decomposition.yaml (minimal YAML subset — we only need per-phase keys).
- * Returns { phases: [{ id, test_agent_required, test_agent_rationale }, ...] }.
+ * Returns { phases: [{ id, test_agent_required, test_agent_rationale, ... }, ...] }.
  * Uses naive line-based parsing to avoid pulling in a YAML dep; MPL project
  * policy forbids third-party runtime deps (see harness_lab CLAUDE.md).
  */
@@ -172,26 +299,15 @@ function parseDecomposition(cwd) {
     // Phase entry start: "  - id: phase-3"  (2-space indent) or "- id: phase-3"
     const idMatch = line.match(/^\s*-\s+id:\s*["']?(phase-[\w-]+)["']?/);
     if (idMatch) {
-      if (cur) phases.push(cur);
-      cur = { id: idMatch[1], test_agent_required: null, test_agent_rationale: null };
+      if (cur) phases.push(finalizePhase(cur));
+      cur = { id: idMatch[1], rawLines: [line] };
       continue;
     }
 
     if (!cur) continue;
-
-    const reqMatch = line.match(/^\s+test_agent_required:\s*(true|false)\s*$/i);
-    if (reqMatch) {
-      cur.test_agent_required = reqMatch[1].toLowerCase() === 'true';
-      continue;
-    }
-
-    const ratMatch = line.match(/^\s+test_agent_rationale:\s*["']?(.+?)["']?\s*$/);
-    if (ratMatch) {
-      cur.test_agent_rationale = ratMatch[1];
-      continue;
-    }
+    cur.rawLines.push(line);
   }
-  if (cur) phases.push(cur);
+  if (cur) phases.push(finalizePhase(cur));
 
   return { phases };
 }
@@ -310,7 +426,8 @@ try {
       `BEFORE proceeding to the next phase. code_author == test_author is a tautology, ` +
       `not a verification (AD-0004). To bypass with user consent, add ${phaseId} to ` +
       `.mpl/config/test-agent-override.json with a reason.`;
-  recordBlockedHook(cwd, phaseId, reason);
+  const resumeInstruction = formatTestAgentResumeInstruction(phase, missingOrBad);
+  recordBlockedHook(cwd, phaseId, reason, resumeInstruction);
   block(reason);
 } catch {
   // Hook must never wedge the pipeline.

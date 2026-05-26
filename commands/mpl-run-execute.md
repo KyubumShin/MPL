@@ -474,52 +474,58 @@ if result.status == "complete":
 
 ### 4.2.2: Test Agent — Mandatory Independent Verification (F-40)
 
-**⚠️ MANDATORY — NEVER SKIP, EVEN FOR Far/non_pp PROXIMITY:**
+**MANDATORY when `phase_definition.test_agent_required != false`:**
 
-This step MUST execute after EVERY Phase Runner completion. There are ZERO exceptions.
+This step MUST execute after every Phase Runner completion whose decomposition
+entry does not explicitly set `test_agent_required: false`. The
+`test_agent_required` field is the single runtime source of truth; `phase_domain`
+is decomposer guidance only and MUST NOT be used by the executor as a second
+skip rule.
 The F-40 independence property is the structural defense against the 37% D2 leak
 (cb-phase-a1). Without Test Agent dispatch, the pipeline has no adversarial verification
 and the "Gates: H1 ✓ H2 ✓ H3 ✓" report is meaningless — tests were written by the
 same session that wrote the code (self-rationalization bias, HC#3).
 
-If you are about to skip this step for ANY reason (complexity, time, proximity), STOP.
+If you are about to skip this step while `test_agent_required != false`, STOP.
 The skip is the bug. AD-0003 restored mpl-test-agent specifically because this dispatch
-was broken. AD-0004 Option A baseline depends on F-40 running on every mandatory-domain phase.
+was broken. AD-0004 Option A baseline depends on F-40 running on every required phase.
 
-After Phase Runner completes with status `"complete"`, the Test Agent is dispatched as a **mandatory gate** based on phase_domain rules. In v0.18.6, the dispatch may run in the background only when the dependency frontier proves no next phase can consume unverified behavior.
+After Phase Runner completes with status `"complete"`, the Test Agent is
+dispatched as a **mandatory gate** whenever `test_agent_required != false`.
+In v0.18.6, the dispatch may run in the background only when the dependency
+frontier proves no next phase can consume unverified behavior.
 
-#### Domain-Based Invocation Rules
+#### Decomposer Defaults For `test_agent_required`
+
+The table below guides the Decomposer when writing `test_agent_required`. It is
+not a runtime executor skip table. Runtime enforcement is field-driven:
+missing `test_agent_required` defaults to required, and `false` must carry
+`test_agent_rationale`. Null or empty `test_agent_required` values are treated
+the same as a missing field: required.
 
 | phase_domain | Test Agent | Rationale |
 |-------------|-----------|-----------|
-| `ui` | **MANDATORY** | Component, hook, store contract tests required |
-| `api` | **MANDATORY** | Integration, contract, error response tests required |
-| `algorithm` | **MANDATORY** | Edge case, boundary, complexity verification — highest ROI |
-| `db` | **MANDATORY** | Migration, CRUD, constraint tests required |
-| `ai` | **MANDATORY** | Structured output schema, retry logic, fallback path, API key non-exposure |
-| `test` | **SKIP** | Phase itself is test writing — avoid circular invocation |
-| `infra` | **CONDITIONAL** | Only if `affected_tests` in phase impact is non-empty |
-| `general` | **CONDITIONAL** | Only if source code files (.ts, .py, .rs, etc.) were created/modified |
+| `ui` | default `true` | Component, hook, store contract tests required |
+| `api` | default `true` | Integration, contract, error response tests required |
+| `algorithm` | default `true` | Edge case, boundary, complexity verification — highest ROI |
+| `db` | default `true` | Migration, CRUD, constraint tests required |
+| `ai` | default `true` | Structured output schema, retry logic, fallback path, API key non-exposure |
+| `test` | usually `false` | Phase itself is test writing; rationale should explain circularity |
+| `infra` | context-dependent | Set `true` when source or affected tests change |
+| `general` | context-dependent | Set `true` when source code files are created/modified |
 
 #### Dispatch Protocol
 
 ```
 // Determine if Test Agent is required
-domain = phase_definition.phase_domain
-is_mandatory = domain in ["ui", "api", "algorithm", "db", "ai"]
-is_conditional = domain in ["infra", "general"]
-is_skip = domain == "test"
+requires_test_agent = phase_definition.test_agent_required != false
 
-if is_skip:
-  Report: "[MPL] Phase {phase_id}: test domain — Test Agent skipped (circular)."
+if not requires_test_agent:
+  if phase_definition.test_agent_rationale is empty:
+    FAIL: "[MPL AD-0007] test_agent_required=false requires test_agent_rationale. Re-run decomposition or set test_agent_required=true."
+    -> do not proceed past this phase transition
+  Report: "[MPL] Phase {phase_id}: test_agent_required=false — {rationale}"
   -> proceed to 4.2.3
-
-if is_conditional:
-  has_source_changes = any file in changes matches *.ts|*.tsx|*.py|*.rs|*.go|*.java
-  has_affected_tests = phase_definition.impact.affected_tests is non-empty
-  if not (has_source_changes or has_affected_tests):
-    Report: "[MPL] Phase {phase_id}: {domain} domain — no source changes, Test Agent skipped."
-    -> proceed to 4.2.3
 
 // Dependency-frontier pipelining decision (v0.18.6)
 can_pipeline_verification =
@@ -528,11 +534,11 @@ can_pipeline_verification =
   AND next scheduler tier does not read phase_id contract_files
   AND phase_id is not immediately entering phase3-gate or phase5-finalize
 
-// Dispatch Test Agent (mandatory or conditional-triggered)
+// Dispatch Test Agent (required by decomposition field)
 test_handle_or_result = Task(subagent_type="mpl-test-agent", model="sonnet",
      prompt="""
      ## Phase: {phase_id} - {phase_name}
-     ## Phase Domain: {domain}
+     ## Phase Domain: {phase_definition.phase_domain}
      ### Verification Plan (A/S-items for this phase)
      {phase_verification_plan}
      ### Interface Contract
@@ -575,8 +581,8 @@ for each pending verification where join_before condition is met:
 #### Zero-Test Enforcement Gate
 
 ```
-if is_mandatory AND test_result.test_results.total == 0:
-  Report: "[MPL] FAIL: Phase {phase_id} ({domain}) — 0 tests generated for mandatory domain."
+if requires_test_agent AND test_result.test_results.total == 0:
+  Report: "[MPL] FAIL: Phase {phase_id} — 0 tests generated for required test-agent phase."
   -> Phase status = FAIL
   -> Enter fix loop: re-dispatch Test Agent with explicit failure context
   -> Max 2 re-attempts before circuit_break
@@ -593,7 +599,8 @@ Merge test_result into Phase Runner's verification data:
 #### Token Impact
 
 ~13-24K additional per Phase (Test Agent invocation). ~129K for a 9-Phase project (25-30% of total budget).
-Skip/conditional rules prevent unnecessary invocations, keeping actual additions at ~80-100K.
+Explicit `test_agent_required:false` opt-outs prevent unnecessary invocations,
+keeping actual additions at ~80-100K.
 
 
 > **Steps 4.2.3 (Task-based TODO) and 4.2.4 (Background Execution) and 4.3.7 (Context Cleanup) have been moved to `mpl-run-execute-parallel.md`.**
