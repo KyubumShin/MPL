@@ -142,7 +142,8 @@ if state.session_status == "blocked_hook":
     print(state.resume_instruction)
 
     if state.blocked_by_hook == "mpl-require-test-agent":
-        if "Task(subagent_type=\"mpl-test-agent\"" in state.resume_instruction:
+        if "Task(subagent_type=\"mpl-test-agent\"" in state.resume_instruction
+           and embedded Task(...) block is parseable:
             execute the embedded Task(...) recovery prompt from state.resume_instruction
             return
 

@@ -509,7 +509,7 @@ missing `test_agent_required` defaults to required, and `false` must carry
 | `algorithm` | default `true` | Edge case, boundary, complexity verification — highest ROI |
 | `db` | default `true` | Migration, CRUD, constraint tests required |
 | `ai` | default `true` | Structured output schema, retry logic, fallback path, API key non-exposure |
-| `test` | usually `false` | Phase itself is test writing; rationale must explain circularity |
+| `test` | usually `false` | Phase itself is test writing; rationale should explain circularity |
 | `infra` | context-dependent | Set `true` when source or affected tests change |
 | `general` | context-dependent | Set `true` when source code files are created/modified |
 

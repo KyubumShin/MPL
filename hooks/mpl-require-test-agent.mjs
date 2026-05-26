@@ -172,6 +172,10 @@ function yamlScalarValue(value) {
   return v.trim() || null;
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function extractScalar(lines, key) {
   const re = new RegExp(`^\\s+${escapeRegExp(key)}:\\s*(.*?)\\s*$`);
   for (const line of lines) {
@@ -179,10 +183,6 @@ function extractScalar(lines, key) {
     if (match) return yamlScalarValue(match[1]);
   }
   return null;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseYamlBoolean(value) {
@@ -219,6 +219,8 @@ function extractSection(lines, key) {
 function clampSnippet(text, limit = 1400) {
   if (!text) return 'N/A - not declared in decomposition.yaml';
   if (text.length <= limit) return text;
+  // Leave room for the truncation suffix so the returned section stays near
+  // the requested hard cap.
   return `${text.slice(0, limit - 80).trimEnd()}\n... [truncated; read .mpl/mpl/decomposition.yaml for full context]`;
 }
 
