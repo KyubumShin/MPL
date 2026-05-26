@@ -207,10 +207,21 @@ async function main() {
   const contract = goal.valid ? goal.contract : null;
   if (cfg.goal_contract_required !== false && contract?.content_sha256) {
     const baseline = readBaselineGoalContractHash(cwd);
+    if (baseline.error) {
+      block(
+        `[MPL Finalize Guard] Cannot set finalize_done=true — corrupt baseline.yaml goal_contract sha256 ` +
+          `(${baseline.error}${baseline.rawHash ? `: ${baseline.rawHash}` : ''}). ` +
+          `Expected the 64-character lowercase normalized SHA-256 for .mpl/goal-contract.yaml. ` +
+          `Raw shasum may differ because MPL normalizes CRLF to LF and trims surrounding whitespace before hashing. ` +
+          `Re-run Phase 0 renewal before finalizing.`
+      );
+      return;
+    }
     if (baseline.hash && baseline.hash !== contract.content_sha256) {
       block(
         `[MPL Finalize Guard] Cannot set finalize_done=true — goal contract drifted from baseline.yaml ` +
-          `(baseline=${baseline.hash.slice(0, 12)}, current=${contract.content_sha256.slice(0, 12)}). ` +
+          `(baseline=${baseline.hash}, current=${contract.content_sha256}). ` +
+          `These are MPL normalized hashes; raw shasum may differ because MPL normalizes CRLF to LF and trims surrounding whitespace. ` +
           `Re-run Phase 0 renewal before finalizing.`
       );
       return;

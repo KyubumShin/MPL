@@ -7,7 +7,9 @@ import { tmpdir } from 'os';
 import {
   GOAL_CONTRACT_REL_PATH,
   MVP_SCOPE_ARTIFACTS,
+  hashNormalizedGoalContractText,
   parseGoalContractText,
+  readBaselineGoalContractHash,
   readGoalContract,
   validateGoalContractText,
 } from '../lib/mpl-goal-contract.mjs';
@@ -138,6 +140,43 @@ describe('goal contract parsing', () => {
     assert.equal(verdict.exists, true);
     assert.equal(verdict.valid, true);
     assert.equal(verdict.contract.mission.project_pivot, 'Avoid false completion');
+  });
+
+  it('uses the shared normalized hash helper for content_sha256', () => {
+    const text = `${validGoalContract()}\n`;
+    const c = parseGoalContractText(text);
+    assert.equal(c.content_sha256, hashNormalizedGoalContractText(text));
+    assert.equal(hashNormalizedGoalContractText(`\n${text}`), c.content_sha256);
+    assert.equal(hashNormalizedGoalContractText(`\uFEFF${text}`), c.content_sha256);
+  });
+
+  it('validates baseline goal contract hashes as lowercase 64-char hex', () => {
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  goal_contract:
+    path: ".mpl/goal-contract.yaml"
+    sha256: "43aaf36b9bf7"
+`);
+    const baseline = readBaselineGoalContractHash(tmp);
+    assert.equal(baseline.exists, true);
+    assert.equal(baseline.hash, null);
+    assert.match(baseline.error, /expected 64 lowercase hex/);
+    assert.equal(baseline.rawHash, '43aaf36b9bf7');
+  });
+
+  it('treats an existing baseline without goal_contract.sha256 as corrupt', () => {
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  pivot_points:
+    path: ".mpl/pivot-points.md"
+    sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+`);
+    const baseline = readBaselineGoalContractHash(tmp);
+    assert.equal(baseline.exists, true);
+    assert.equal(baseline.hash, null);
+    assert.equal(baseline.error, 'missing_goal_contract_sha256');
   });
 });
 

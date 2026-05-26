@@ -41,6 +41,7 @@ import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'fs
 import { join, resolve } from 'path';
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
+import { GOAL_CONTRACT_REL_PATH, hashNormalizedGoalContractFile } from './mpl-goal-contract.mjs';
 
 const BASELINE_PATH = '.mpl/mpl/baseline.yaml';
 const RENEWAL_FLAG = '.mpl/mpl/.baseline-renewal';
@@ -100,8 +101,8 @@ export function buildBaseline(cwd, {
   const porcelain = git(cwd, 'status --porcelain');
   const workingTreeClean = porcelain === '';
 
-  const artifactFor = (relPath) => {
-    const hash = sha256File(cwd, relPath);
+  const artifactFor = (relPath, hashFn = sha256File) => {
+    const hash = hashFn(cwd, relPath);
     return hash ? { path: relPath, sha256: hash } : null;
   };
 
@@ -116,7 +117,7 @@ export function buildBaseline(cwd, {
       working_tree_clean: workingTreeClean,
     },
     artifacts: {
-      goal_contract: artifactFor('.mpl/goal-contract.yaml'),
+      goal_contract: artifactFor(GOAL_CONTRACT_REL_PATH, hashNormalizedGoalContractFile),
       pivot_points: artifactFor('.mpl/pivot-points.md'),
       core_scenarios: artifactFor('.mpl/mpl/core-scenarios.yaml'),
       design_intent: artifactFor('.mpl/mpl/phase0/design-intent.yaml'),

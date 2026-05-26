@@ -16,6 +16,7 @@ import {
   BASELINE_FILE,
   RENEWAL_FLAG_FILE,
 } from '../lib/mpl-baseline.mjs';
+import { hashNormalizedGoalContractText } from '../lib/mpl-goal-contract.mjs';
 
 function createTempRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'mpl-baseline-'));
@@ -63,7 +64,8 @@ describe('buildBaseline', () => {
 
   it('captures git base_sha and artifact hashes', () => {
     mkdirSync(join(dir, '.mpl'), { recursive: true });
-    writeFileSync(join(dir, '.mpl/goal-contract.yaml'), 'mission:\n  goal: test\n');
+    const goalContractText = 'mission:\n  goal: test\n';
+    writeFileSync(join(dir, '.mpl/goal-contract.yaml'), goalContractText);
     writeFileSync(join(dir, '.mpl/pivot-points.md'), '## PP-1\nAuth is immutable');
 
     const b = buildBaseline(dir, {
@@ -80,6 +82,8 @@ describe('buildBaseline', () => {
     assert.ok(b.artifacts.pivot_points);
     assert.ok(b.artifacts.goal_contract);
     assert.equal(b.artifacts.goal_contract.sha256.length, 64);
+    assert.equal(b.artifacts.goal_contract.sha256, hashNormalizedGoalContractText(goalContractText));
+    assert.notEqual(b.artifacts.goal_contract.sha256, sha256File(dir, '.mpl/goal-contract.yaml'));
     assert.equal(b.artifacts.pivot_points.sha256.length, 64);
     assert.equal(b.artifacts.core_scenarios, null);  // file absent
     assert.equal(b.ambiguity.final_score, 0.18);
