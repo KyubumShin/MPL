@@ -154,15 +154,34 @@ describe('mpl-require-finalize-artifacts hook', () => {
   it('blocks when current goal contract hash drifted from baseline', () => {
     writeArtifacts();
     const currentHash = readGoalContract(tmp).contract.content_sha256;
+    const baselineHash = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
     assert.equal(currentHash.length, 64);
     writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
 artifacts:
   goal_contract:
     path: ".mpl/goal-contract.yaml"
-    sha256: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    sha256: "${baselineHash}"
 `);
     const r = runHook();
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /goal contract drifted from baseline/);
+    assert.match(r.reason, new RegExp(baselineHash));
+    assert.match(r.reason, new RegExp(currentHash));
+    assert.match(r.reason, /raw shasum may differ/);
+  });
+
+  it('blocks explicitly when baseline goal contract hash is corrupt', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'baseline.yaml'), `
+artifacts:
+  goal_contract:
+    path: ".mpl/goal-contract.yaml"
+    sha256: "43aaf36b9bf7"
+`);
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /corrupt baseline\.yaml goal_contract sha256/);
+    assert.match(r.reason, /expected 64 lowercase hex/);
+    assert.match(r.reason, /43aaf36b9bf7/);
   });
 });

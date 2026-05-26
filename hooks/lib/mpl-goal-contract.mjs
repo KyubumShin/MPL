@@ -20,6 +20,7 @@ import { createHash } from 'crypto';
 
 export const GOAL_CONTRACT_REL_PATH = '.mpl/goal-contract.yaml';
 export const BASELINE_REL_PATH = '.mpl/mpl/baseline.yaml';
+const LOWER_HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 
 const DEFAULT_REQUIRED_ARTIFACTS = [
   '.mpl/mpl/audit-report.json',
@@ -128,8 +129,22 @@ function idsInTopList(text, key, prefixRe) {
   return out;
 }
 
+export function normalizeGoalContractText(text) {
+  return String(text || '').replace(/\r\n/g, '\n').trim();
+}
+
+export function hashNormalizedGoalContractText(text) {
+  return createHash('sha256').update(normalizeGoalContractText(text)).digest('hex');
+}
+
+export function hashNormalizedGoalContractFile(cwd, relPath = GOAL_CONTRACT_REL_PATH) {
+  const path = join(cwd, relPath);
+  if (!existsSync(path)) return null;
+  return hashNormalizedGoalContractText(readFileSync(path, 'utf-8'));
+}
+
 function sha256(text) {
-  return createHash('sha256').update(String(text || '').replace(/\r\n/g, '\n').trim()).digest('hex');
+  return hashNormalizedGoalContractText(text);
 }
 
 function parseMvpScope(text) {
@@ -301,16 +316,24 @@ export function readGoalContract(cwd) {
 
 export function readBaselineGoalContractHash(cwd) {
   const path = join(cwd, BASELINE_REL_PATH);
-  if (!existsSync(path)) return { exists: false, hash: null };
+  if (!existsSync(path)) return { exists: false, hash: null, error: null, rawHash: null };
   try {
     const text = readFileSync(path, 'utf-8');
     const block = extractTopBlock(text, 'artifacts');
     const goalBlockMatch = block.match(/^\s+goal_contract\s*:\s*\n((?:\s{4}.+\n?)*)/m);
     const goalBlock = goalBlockMatch ? goalBlockMatch[1] : '';
     const hash = scalarInBlock(goalBlock, 'sha256');
-    return { exists: true, hash };
+    if (hash && !LOWER_HEX_SHA256_RE.test(hash)) {
+      return {
+        exists: true,
+        hash: null,
+        error: `corrupt_goal_contract_sha256: expected 64 lowercase hex characters, got ${hash.length}`,
+        rawHash: hash,
+      };
+    }
+    return { exists: true, hash, error: null, rawHash: hash };
   } catch {
-    return { exists: true, hash: null };
+    return { exists: true, hash: null, error: 'unreadable_baseline', rawHash: null };
   }
 }
 

@@ -12,6 +12,7 @@ import {
   validateMvpGoalTraceCoverage,
 } from '../lib/mpl-goal-trace.mjs';
 import { readGoalContract } from '../lib/mpl-goal-contract.mjs';
+import { buildBaseline, writeBaseline } from '../lib/mpl-baseline.mjs';
 import { parsePhaseContractGraphText } from '../lib/mpl-phase-contract-graph.mjs';
 import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 
@@ -170,6 +171,20 @@ describe('mpl-require-goal-trace hook integration', () => {
     assert.equal(r.continue, true);
   });
 
+  it('allows complete goal trace when Phase 0 baseline used the normalized goal-contract hash', () => {
+    const baseline = buildBaseline(tmp, {
+      pipelineId: 'mpl-test',
+      userRequest: 'Build app',
+      accumulatedResponses: '',
+      ambiguity: { final_score: 0.1, threshold_met: true, override: null, rounds: 1 },
+      codebaseSkipped: true,
+    });
+    writeBaseline(tmp, baseline);
+
+    const r = runHook(decomposition());
+    assert.equal(r.continue, true);
+  });
+
   it('blocks MultiEdit writes with missing top-level goal_contract_hash', () => {
     const r = runHook(null, {
       toolName: 'MultiEdit',
@@ -201,9 +216,22 @@ phases:
   });
 
   it('blocks when baseline goal contract hash differs from current goal contract', () => {
-    const r = runHook(decomposition(), { baselineHash: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' });
+    const baselineHash = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    const currentHash = goalHash();
+    const r = runHook(decomposition(), { baselineHash });
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /drifted from baseline/);
+    assert.match(r.reason, new RegExp(baselineHash));
+    assert.match(r.reason, new RegExp(currentHash));
+    assert.match(r.reason, /raw shasum may differ/);
+  });
+
+  it('blocks explicitly when baseline goal contract hash is truncated', () => {
+    const r = runHook(decomposition(), { baselineHash: '43aaf36b9bf7' });
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /corrupt baseline\.yaml goal_contract sha256/);
+    assert.match(r.reason, /expected 64 lowercase hex/);
+    assert.match(r.reason, /43aaf36b9bf7/);
   });
 
   it('allows opt-out via goal_trace_required=false', () => {
