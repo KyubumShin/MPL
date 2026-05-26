@@ -72,6 +72,7 @@ mpl-init → mpl-decompose ⇌ mpl-ambiguity-resolve
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation with state preservation |
 | `/mpl:mpl-resume` | Resume from last phase |
+| `/mpl:mpl-recover` | Recover from hook-blocked state |
 | `/mpl:mpl-doctor` | Installation diagnostics |
 | `/mpl:mpl-setup` | Setup wizard |
 

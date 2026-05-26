@@ -337,7 +337,7 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>8 agents · 8 hooks · 11 skills · 5 protocol files</strong></summary>
+<summary><strong>8 agents · 8 hooks · 10 skills · 5 protocol files</strong></summary>
 
 ```
 MPL/
@@ -369,12 +369,15 @@ MPL/
 │       ├── mpl-cache.mjs         # Phase 0 caching
 │       ├── mpl-profile.mjs       # Token profiling
 │       └── mpl-routing-patterns.mjs # Routing pattern learning (F-22)
-├── skills/                 # 11 skills
+├── skills/                 # 10 skills
 │   ├── mpl/                # Main pipeline (single entry point)
 │   ├── mpl-pivot/          # PP interview
 │   ├── mpl-status/         # Dashboard
 │   ├── mpl-cancel/         # Clean cancellation
 │   ├── mpl-resume/         # Resume from checkpoint
+│   ├── mpl-recover/        # Hook-block recovery
+│   ├── mpl-gap-analysis/   # Standalone gap analysis
+│   ├── mpl-version-bump/   # Version bump checklist
 │   ├── mpl-doctor/         # Diagnostics
 │   └── mpl-setup/          # Setup wizard
 └── docs/
@@ -481,6 +484,9 @@ mpl small add retry logic                     # → forces Standard
 
 # Diagnostics
 /mpl:mpl-doctor
+
+# Hook-block recovery after resume reports blocked_hook
+/mpl:mpl-recover
 ```
 
 Codex also discovers the same MPL skills from the plugin. Use `mpl ...` in a Codex session, or invoke the installed MPL skill by name from the skills menu.
