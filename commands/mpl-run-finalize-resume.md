@@ -133,7 +133,7 @@ This processing runs **before** the existing Resume logic, cleans up `session_st
 
 v0.14.1 (#35) added `paused_checkpoint` handling: orchestrator verbal pauses (checkpoint report + carryover) write the same pause fields as F-33, so the same resume path clears them.
 
-#### Blocked Hook Self-Resume (v0.18.x, exp21 follow-up)
+#### Blocked Hook Recovery (v0.18.x, exp21 follow-up)
 
 ```python
 if state.session_status == "blocked_hook":
@@ -144,49 +144,19 @@ if state.session_status == "blocked_hook":
     print(state.resume_instruction)
     print(state.retry_context)
 
-    if state.blocked_by_hook == "mpl-require-test-agent":
-        # Parseable means subagent_type, model, and prompt can be extracted from
-        # the embedded Task(...) block without truncation; otherwise fall back.
-        if "Task(subagent_type=\"mpl-test-agent\"" in state.resume_instruction
-           and embedded Task(...) block is parseable:
-            execute the embedded Task(...) recovery prompt from state.resume_instruction
-            return
-
-        phase = decomposition.phases.find(p => p.id == state.blocked_phase)
-        # Fallback for older blocked_hook records that predate embedded
-        # state.resume_instruction Task prompts.
-        Task(subagent_type="mpl-test-agent", model="sonnet",
-          prompt=f"""
-          Resume blocked MPL transition for {phase.id}.
-          Required: independent verification PASS before phase routing may continue.
-          Interface contract: {phase.interface_contract}
-          Impact files: {phase.impact}
-          Probing hints: {phase.probing_hints or []}
-          Verification plan / success criteria: {phase.success_criteria}
-
-          Write and run executable tests. Return valid JSON with:
-          - verdict: "PASS" only when all checks pass
-          - test_results.total > 0
-          - test_results.failed == 0 and skipped == 0
-          - commands_run[] with exit_code 0 for every command
-          - bugs_found: []
-          """)
-        # mpl-gate-recorder records state.test_agent_dispatched[phase_id].
-        # On PASS evidence it clears blocked_hook atomically. If evidence is
-        # FAIL/INVALID, keep blocked_hook and ask the user whether to retry,
-        # override with .mpl/config/test-agent-override.json, or cancel.
-    else:
-        # For non-test-agent hook blocks, apply state.resume_instruction using
-        # state.blocked_artifact/state.retry_context, retry the same blocked
-        # artifact/action, and keep blocked_hook intact until the originating
-        # hook no longer blocks.
+    # Dedicated hook-block recovery path. Parse the JSON plan for display,
+    # then let /mpl:mpl-recover apply the block-code-specific handler.
+    recover_plan = JSON.parse(Bash("node hooks/lib/mpl-recover.mjs --plan"))
+    print(recover_plan)
+    follow /mpl:mpl-recover
+    return
 ```
 
-This processing is a self-healing path, not a bypass. A dispatch timestamp alone
-does not clear the block; `state.test_agent_dispatched[phase_id].verdict` must be
-explicitly `PASS` with executable tests, zero failed/skipped tests, at least one
-test file, non-empty `command_exit_codes[]` with every code `0`, and zero
-reported bugs.
+This processing is a self-healing path, not a bypass. `/mpl:mpl-recover` must
+leave `blocked_hook` intact when evidence is still missing. A dispatch timestamp
+alone does not clear a test-agent block; `state.test_agent_dispatched[phase_id]`
+must be valid PASS evidence with executable tests, zero failed/skipped tests, at
+least one test file, command exit codes all `0`, and zero reported bugs.
 
 #### Watcher-Based Auto-Resume (F-33, v3.9)
 
@@ -265,6 +235,7 @@ for each discovery in result.discoveries:
 | `/mpl:mpl-status` | Pipeline status dashboard |
 | `/mpl:mpl-cancel` | Clean cancellation |
 | `/mpl:mpl-resume` | Resume from last phase |
+| `/mpl:mpl-recover` | Recover from hook-blocked state |
 | `/mpl:mpl-doctor` | Installation diagnostics |
 | `/mpl:mpl-setup` | Setup wizard |
 | `/mpl:mpl-gap-analysis` | Gap analysis for missing requirements |

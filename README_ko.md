@@ -330,12 +330,15 @@ MPL/
 │       ├── mpl-cache.mjs         # Phase 0 캐싱
 │       ├── mpl-profile.mjs       # 토큰 프로파일링
 │       └── mpl-routing-patterns.mjs # 라우팅 패턴 학습 (F-22)
-├── skills/                 # 7개 스킬
+├── skills/                 # 10개 스킬
 │   ├── mpl/                # 메인 파이프라인 (단일 진입점)
 │   ├── mpl-pivot/          # PP 인터뷰
 │   ├── mpl-status/         # 대시보드
 │   ├── mpl-cancel/         # 클린 취소
 │   ├── mpl-resume/         # 체크포인트에서 재개
+│   ├── mpl-recover/        # 훅 차단 복구
+│   ├── mpl-gap-analysis/   # 요구사항 갭 분석
+│   ├── mpl-version-bump/   # 버전 업데이트 체크리스트
 │   ├── mpl-doctor/         # 진단
 │   └── mpl-setup/          # 셋업 위저드
 └── docs/
