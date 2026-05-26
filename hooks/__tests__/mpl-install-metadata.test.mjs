@@ -138,6 +138,8 @@ describe('dual-runtime install metadata', () => {
     assert.match(claudeInstaller, /MPL_CLAUDE_SCOPE/);
     assert.match(claudeInstaller, /CLI --scope overrides this environment value/);
     assert.match(claudeInstaller, /--scope ask requires an interactive terminal/);
+    assert.match(claudeInstaller, /tty -s < \/dev\/tty/);
+    assert.match(claudeInstaller, /failed to read Claude plugin scope from \/dev\/tty/);
     assert.match(claudeInstaller, /Choose scope \[1\/user\]/);
     assert.match(claudeInstaller, /plugin marketplace add --scope "\$\{CLAUDE_SCOPE\}"/);
     assert.match(claudeInstaller, /plugin install --scope "\$\{CLAUDE_SCOPE\}" mpl/);

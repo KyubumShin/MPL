@@ -65,14 +65,14 @@ Phase 0 없음          38% → 디버깅 지옥
 사용할 런타임에 맞춰 bootstrap 스크립트를 실행한다. Git은 선택 사항이다. checkout에서 실행하지 않으면 스크립트가 `curl`로 깨끗한 MPL source archive를 내려받는다.
 
 ```bash
-# Claude Code (scope를 Bash에서 선택, Enter는 user 선택)
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope ask
+# Claude Code
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope user
 
 # Codex CLI
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
 
 # 둘 다 (--scope는 Claude Code 설치에 적용됨)
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope ask
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope user
 ```
 
 다운로드된 MPL source는 기본적으로 `~/.mpl/install/source/mpl` 아래에 유지된다. Claude Code 설치는 기본적으로 `--scope user`이며, `--scope ask`를 넘기면 Bash 안에서 선택할 수 있고 Enter는 `user`를 선택한다. `--scope ask`는 `curl | bash` 형태에서도 실제 대화형 TTY가 필요하므로, CI나 headless 환경에서는 `--scope user`, `--scope project`, `--scope local` 중 하나를 명시한다. 재현 가능한 설치가 필요하면 `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`처럼 release tag를 `bash`에 전달한다. 설치 루트를 바꾸려면 `MPL_INSTALL_ROOT=<path>`를 설정한다.
@@ -401,7 +401,7 @@ curl bootstrap:
 
 ```bash
 # Claude Code
-curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope ask
+curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime claude --scope user
 
 # Codex CLI
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime codex
@@ -410,7 +410,7 @@ curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | ba
 로컬 checkout에서 설치할 때는 다음을 사용할 수 있다:
 
 ```bash
-./install.sh --runtime both --scope ask
+./install.sh --runtime both --scope user
 # 또는 Claude만 project scope에 설치
 ./install/claude.sh --scope project
 ```

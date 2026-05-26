@@ -46,7 +46,7 @@ case "${CLAUDE_SCOPE}" in
 esac
 
 prompt_claude_scope() {
-  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+  if ! tty -s < /dev/tty 2>/dev/null; then
     echo "error: --scope ask requires an interactive terminal" >&2
     echo "Use --scope user, --scope project, or --scope local for non-interactive installs." >&2
     exit 1
@@ -59,7 +59,10 @@ prompt_claude_scope() {
     printf '%s\n' "  2) project Install for the current project" > /dev/tty
     printf '%s\n' "  3) local   Install for the current local workspace" > /dev/tty
     printf '%s' "Choose scope [1/user]: " > /dev/tty
-    IFS= read -r choice < /dev/tty || choice=""
+    if ! IFS= read -r choice < /dev/tty; then
+      echo "error: failed to read Claude plugin scope from /dev/tty" >&2
+      exit 1
+    fi
     case "${choice}" in
       ""|1|u|U|user) CLAUDE_SCOPE="user"; break ;;
       2|p|P|project) CLAUDE_SCOPE="project"; break ;;
