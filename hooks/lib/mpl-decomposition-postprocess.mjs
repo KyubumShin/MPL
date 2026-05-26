@@ -8,8 +8,8 @@
  * the decomposer to re-emit it on every graph write.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { pathToFileURL } from 'url';
 import { parseDecompositionGoalTraceText, deriveMvpFromGoalTrace } from './mpl-goal-trace.mjs';
 import { parsePhaseContractGraphText } from './mpl-phase-contract-graph.mjs';
@@ -124,13 +124,65 @@ function scalarField(block, key) {
   return m ? normalizeScalar(m[1]) : null;
 }
 
-function collectPathFields(block) {
+function pathValuesFromImpactLine(line) {
   const out = [];
-  for (const match of String(block || '').matchAll(/^\s*(?:-\s+)?path\s*:\s*["']?([^"'\n]+)["']?\s*$/gm)) {
-    const path = normalizeScalar(match[1]);
+  const direct = String(line || '').match(/^\s*(?:-\s+)?path\s*:\s*(.+?)\s*$/);
+  if (direct) {
+    const path = normalizeScalar(direct[1].replace(/\s+#.*$/, ''));
     if (path) out.push(path);
   }
+
+  const inline = String(line || '').match(/\bpath\s*:\s*["']?([^"',}\n#]+)["']?/);
+  if (inline) {
+    const path = normalizeScalar(inline[1]);
+    if (path) out.push(path);
+  }
+
+  const scalar = String(line || '').match(/^\s*-\s+([^:{\[\]\n#][^:#\n]*)$/);
+  if (scalar) {
+    const path = normalizeScalar(scalar[1]);
+    if (path) out.push(path);
+  }
+
   return out;
+}
+
+function collectImpactPathFields(block) {
+  const lines = String(block || '').split('\n').map((line) => line.replace(/\r$/, ''));
+  const out = [];
+  const impactKeys = new Set(['create', 'modify', 'affected_tests', 'affected_config']);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const impactMatch = lines[i].match(/^(\s*)impact\s*:\s*$/);
+    if (!impactMatch) continue;
+
+    const impactIndent = impactMatch[1].length;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (!lines[j].trim()) continue;
+      const indent = lines[j].match(/^(\s*)/)?.[1]?.length || 0;
+      if (indent <= impactIndent) break;
+
+      const keyMatch = lines[j].match(/^(\s*)([A-Za-z_]+)\s*:\s*(.*?)\s*$/);
+      if (!keyMatch || !impactKeys.has(keyMatch[2])) continue;
+
+      const keyIndent = keyMatch[1].length;
+      const inlineValues = pathValuesFromImpactLine(keyMatch[3]);
+      out.push(...inlineValues);
+
+      for (let k = j + 1; k < lines.length; k += 1) {
+        if (!lines[k].trim()) continue;
+        const childIndent = lines[k].match(/^(\s*)/)?.[1]?.length || 0;
+        if (childIndent <= keyIndent) {
+          j = k - 1;
+          break;
+        }
+        out.push(...pathValuesFromImpactLine(lines[k]));
+        if (k === lines.length - 1) j = k;
+      }
+    }
+  }
+
+  return [...new Set(out)];
 }
 
 function parseRiskPatternBlocks(block) {
@@ -172,7 +224,7 @@ export function parseDecompositionPostprocessText(text) {
     const phase = byId.get(id) || { id };
     phase.phase_domain = scalarField(block, 'phase_domain');
     phase.phase_lang = scalarField(block, 'phase_lang');
-    phase.impact_files = collectPathFields(block);
+    phase.impact_files = collectImpactPathFields(block);
     phase.risk_patterns = parseRiskPatternBlocks(block);
     byId.set(id, phase);
   }
@@ -354,30 +406,46 @@ function readOptional(path) {
   }
 }
 
-function runCli() {
-  const args = new Set(process.argv.slice(2));
-  const cwdArg = process.argv.find((arg) => arg.startsWith('--cwd='));
-  const cwd = cwdArg ? cwdArg.slice('--cwd='.length) : process.cwd();
+export function buildDerivedDecompositionFieldsFromWorkspace(cwd = process.cwd()) {
   const decompText = readOptional(join(cwd, '.mpl', 'mpl', 'decomposition.yaml'));
   if (!decompText) {
-    console.log(JSON.stringify({ error: 'missing_decomposition' }, null, 2));
-    process.exitCode = 1;
-    return;
+    throw new Error('missing_decomposition');
   }
 
   const parsed = parseDecompositionPostprocessText(decompText);
   const goal = readGoalContract(cwd);
   const designText = readOptional(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'));
   const designIntent = parseDesignIntentText(designText || '');
-  const derived = buildDerivedDecompositionFields({
+  return buildDerivedDecompositionFields({
     decomposition: parsed,
     graph: parsed.graph,
     contract: goal.exists && goal.valid ? goal.contract : null,
     designIntent,
   });
+}
 
-  if (args.has('--write-json')) {
-    writeFileSync(join(cwd, DEFAULT_DERIVED_PATH), `${JSON.stringify(derived, null, 2)}\n`);
+export function writeDerivedDecompositionFields(cwd = process.cwd(), derivedRelPath = DEFAULT_DERIVED_PATH) {
+  const derived = buildDerivedDecompositionFieldsFromWorkspace(cwd);
+
+  const target = join(cwd, derivedRelPath);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `${JSON.stringify(derived, null, 2)}\n`);
+  return derived;
+}
+
+function runCli() {
+  const args = new Set(process.argv.slice(2));
+  const cwdArg = process.argv.find((arg) => arg.startsWith('--cwd='));
+  const cwd = cwdArg ? cwdArg.slice('--cwd='.length) : process.cwd();
+  let derived;
+  try {
+    derived = args.has('--write-json')
+      ? writeDerivedDecompositionFields(cwd)
+      : buildDerivedDecompositionFieldsFromWorkspace(cwd);
+  } catch (error) {
+    console.log(JSON.stringify({ error: error?.message || 'postprocess_failed' }, null, 2));
+    process.exitCode = 1;
+    return;
   }
   console.log(JSON.stringify(derived, null, 2));
 }

@@ -1,5 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 import {
   buildDerivedDecompositionFields,
@@ -8,6 +13,11 @@ import {
   parseDecompositionPostprocessText,
   parseDesignIntentText,
 } from '../lib/mpl-decomposition-postprocess.mjs';
+import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const ROOT = join(__dirname, '..', '..');
 
 describe('decomposition postprocess risk patterns', () => {
   it('injects default grep checks from impact file languages', () => {
@@ -76,6 +86,29 @@ phases:
     assert.ok(custom);
     assert.match(custom.command, /src\/page\.tsx/);
     assert.doesNotMatch(custom.command, /app\/models\.py/);
+  });
+
+  it('does not treat non-impact contract file paths as grep targets', () => {
+    const parsed = parseDecompositionPostprocessText(`
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    impact:
+      modify:
+        - path: src/auth.ts
+    interface_contract:
+      contract_files:
+        - path: .mpl/contracts/phase-1.json
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: []
+      ontology_entities: [auth]
+`);
+    const checks = deriveRiskPatternChecks(parsed.phases[0]);
+    const apiKey = checks.find((check) => check.pattern_id === 'sec-api-key');
+    assert.ok(apiKey);
+    assert.match(apiKey.command, /src\/auth\.ts/);
+    assert.doesNotMatch(apiKey.command, /\.mpl\/contracts\/phase-1\.json/);
   });
 });
 
@@ -183,4 +216,65 @@ phases:
     ]);
     assert.deepEqual(derived.phases['phase-2'].invariants, []);
   });
+});
+
+describe('decomposition postprocess hook', () => {
+  function withTmp(fn) {
+    const dir = mkdtempSync(join(tmpdir(), 'mpl-postprocess-hook-'));
+    try {
+      return fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('regenerates decomposition-derived.json after decomposition.yaml writes', () => withTmp((dir) => {
+    mkdirSync(join(dir, '.mpl', 'mpl', 'phase0'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: CURRENT_SCHEMA_VERSION,
+      current_phase: 'mpl-decompose',
+    }, null, 2));
+    writeFileSync(join(dir, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), `
+invariants:
+  - id: INV-1
+    statement: "Auth remains guarded"
+    verify: "npm test -- auth"
+    applies_to_phases: [phase-1]
+`);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: abc
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    impact:
+      modify:
+        - path: src/auth.ts
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: []
+      ontology_entities: [auth]
+`);
+
+    const input = {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Write',
+      cwd: dir,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml' },
+    };
+    const result = spawnSync(process.execPath, [join(ROOT, 'hooks', 'mpl-decomposition-postprocess.mjs')], {
+      cwd: dir,
+      input: JSON.stringify(input),
+      encoding: 'utf-8',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const hookResult = JSON.parse(result.stdout);
+    assert.equal(hookResult.continue, true);
+    const derived = JSON.parse(readFileSync(join(dir, '.mpl', 'mpl', 'decomposition-derived.json'), 'utf-8'));
+    assert.deepEqual(derived.phases['phase-1'].invariants, [
+      { id: 'INV-1', statement: 'Auth remains guarded', verify: 'npm test -- auth' },
+    ]);
+    assert.ok(derived.phases['phase-1'].risk_pattern_checks
+      .some((check) => check.pattern_id === 'sec-api-key'));
+  }));
 });
