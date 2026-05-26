@@ -82,6 +82,10 @@ phases:
       assert.equal(state.session_status, 'blocked_hook');
       assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
       assert.equal(state.blocked_phase, 'phase-1');
+      assert.equal(state.blocked_artifact, 'state.test_agent_dispatched.phase-1');
+      assert.equal(state.block_code, 'missing_or_invalid_test_agent_evidence');
+      assert.equal(state.retry_context.phase_id, 'phase-1');
+      assert.equal(state.retry_context.required_agent, 'mpl-test-agent');
       assert.match(state.resume_instruction, /Dispatch mpl-test-agent for phase-1/);
       assert.match(state.resume_instruction, /Task\(subagent_type="mpl-test-agent"/);
       assert.match(state.resume_instruction, /Interface Contract:/);
@@ -137,6 +141,8 @@ phases:
       const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
       assert.equal(state.session_status, 'blocked_hook');
       assert.equal(state.blocked_phase, 'phase-1');
+      assert.equal(state.blocked_artifact, 'state.test_agent_dispatched.phase-1');
+      assert.equal(state.block_code, 'missing_or_invalid_test_agent_evidence');
       assert.equal(state.gate_results.hard2_coverage.exit_code, 0);
       assert.deepEqual(state.test_agent_dispatched, {});
       // The hook output stays concise; the executable recovery prompt lives in state.
@@ -184,8 +190,11 @@ phases:
       assert.equal(state.session_status, null);
       assert.equal(state.blocked_by_hook, null);
       assert.equal(state.blocked_phase, null);
+      assert.equal(state.blocked_artifact, null);
+      assert.equal(state.block_code, null);
       assert.equal(state.block_reason, null);
       assert.equal(state.resume_instruction, null);
+      assert.equal(state.retry_context, null);
       assert.equal(state.blocked_at, null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -234,8 +243,11 @@ phases:
       assert.equal(state.session_status, null);
       assert.equal(state.blocked_by_hook, null);
       assert.equal(state.blocked_phase, null);
+      assert.equal(state.blocked_artifact, null);
+      assert.equal(state.block_code, null);
       assert.equal(state.block_reason, null);
       assert.equal(state.resume_instruction, null);
+      assert.equal(state.retry_context, null);
       assert.equal(state.blocked_at, null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -317,6 +329,9 @@ phases:
       assert.equal(state.session_status, 'blocked_hook');
       assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
       assert.equal(state.blocked_phase, 'phase-1');
+      assert.equal(state.blocked_artifact, 'state.test_agent_dispatched.phase-1');
+      assert.equal(state.block_code, 'missing_or_invalid_test_agent_evidence');
+      assert.equal(state.retry_context.override_path, '.mpl/config/test-agent-override.json');
       assert.match(state.block_reason, /recorded mpl-test-agent evidence is verdict=PASS/);
       assert.match(state.resume_instruction, /Prior evidence status:/);
     } finally {

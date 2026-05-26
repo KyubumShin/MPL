@@ -153,8 +153,11 @@ describe('mpl-gate-recorder test-agent evidence', () => {
         session_status: 'blocked_hook',
         blocked_by_hook: 'mpl-require-test-agent',
         blocked_phase: 'phase-1',
+        blocked_artifact: 'state.test_agent_dispatched.phase-1',
+        block_code: 'missing_or_invalid_test_agent_evidence',
         block_reason: 'missing test-agent',
         resume_instruction: 'Dispatch mpl-test-agent for phase-1',
+        retry_context: { phase_id: 'phase-1' },
         blocked_at: '2026-05-18T00:00:00Z',
       });
       runHook(tmp, responseJson({ failed: 1, verdict: 'FAIL' }));
@@ -173,8 +176,11 @@ describe('mpl-gate-recorder test-agent evidence', () => {
         session_status: 'blocked_hook',
         blocked_by_hook: 'mpl-require-test-agent',
         blocked_phase: 'phase-1',
+        blocked_artifact: 'state.test_agent_dispatched.phase-1',
+        block_code: 'missing_or_invalid_test_agent_evidence',
         block_reason: 'missing test-agent',
         resume_instruction: 'Dispatch mpl-test-agent for phase-1',
+        retry_context: { phase_id: 'phase-1' },
         blocked_at: '2026-05-18T00:00:00Z',
       });
       runHook(tmp, responseJson());
@@ -182,8 +188,11 @@ describe('mpl-gate-recorder test-agent evidence', () => {
       assert.equal(state.session_status, null);
       assert.equal(state.blocked_by_hook, null);
       assert.equal(state.blocked_phase, null);
+      assert.equal(state.blocked_artifact, null);
+      assert.equal(state.block_code, null);
       assert.equal(state.block_reason, null);
       assert.equal(state.resume_instruction, null);
+      assert.equal(state.retry_context, null);
       assert.equal(state.blocked_at, null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });

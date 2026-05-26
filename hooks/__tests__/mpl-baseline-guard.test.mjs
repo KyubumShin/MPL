@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -35,6 +35,12 @@ describe('mpl-baseline-guard hook integration', () => {
       }));
       assert.equal(r.hookSpecificOutput?.permissionDecision, 'deny');
       assert.match(r.hookSpecificOutput?.permissionDecisionReason || '', /Baseline Guard/);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_by_hook, 'mpl-baseline-guard');
+      assert.equal(state.blocked_artifact, '.mpl/mpl/baseline.yaml');
+      assert.equal(state.block_code, 'baseline_immutable');
+      assert.equal(state.retry_context.renewal_flag, '.mpl/mpl/.baseline-renewal');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

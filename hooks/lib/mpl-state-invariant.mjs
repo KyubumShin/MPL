@@ -321,11 +321,27 @@ function checkI11(state) {
   // present. Missing reason/instruction was the exp20 blocked_hook cleanup
   // failure mode.
   if (state.session_status !== 'blocked_hook') return null;
-  const required = ['blocked_by_hook', 'blocked_phase', 'block_reason', 'resume_instruction', 'blocked_at'];
+  const required = [
+    'blocked_by_hook',
+    'blocked_phase',
+    'blocked_artifact',
+    'block_code',
+    'block_reason',
+    'resume_instruction',
+    'blocked_at',
+  ];
   const missing = required.filter((key) => {
     const value = state[key];
     return typeof value !== 'string' || value.trim() === '';
   });
+  const retryContext = state.retry_context;
+  if (
+    !retryContext ||
+    typeof retryContext !== 'object' ||
+    Array.isArray(retryContext)
+  ) {
+    missing.push('retry_context');
+  }
   if (missing.length === 0) return null;
   return v(VIOLATION_IDS.BLOCKED_HOOK_STALE,
     `session_status='blocked_hook' but companion field(s) are missing: ${missing.join(', ')}. Hook block cleanup/recording must be atomic.`,

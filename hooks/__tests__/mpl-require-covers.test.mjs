@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -210,6 +210,54 @@ describe('mpl-require-covers hook integration', () => {
       }));
       assert.equal(r.decision, 'block');
       assert.match(r.reason, /covers field missing/);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_by_hook, 'mpl-require-covers');
+      assert.equal(state.blocked_artifact, '.mpl/mpl/decomposition.yaml');
+      assert.equal(state.block_code, 'covers_schema_violation');
+      assert.equal(state.retry_context.issue_count, 1);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('clears matching blocked_hook when covers pass on retry', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-covers-clear-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      mkdirSync(join(tmp, '.mpl', 'requirements'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'mpl-decompose',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-covers',
+        blocked_phase: 'mpl-decompose',
+        blocked_artifact: '.mpl/mpl/decomposition.yaml',
+        block_code: 'covers_schema_violation',
+        block_reason: 'missing covers',
+        resume_instruction: 'add covers',
+        retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+        blocked_at: '2026-05-26T00:00:00Z',
+      }));
+      writeFileSync(join(tmp, '.mpl', 'requirements', 'user-contract.md'), 'user_cases: []\n');
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Write',
+        tool_input: {
+          file_path: '.mpl/mpl/decomposition.yaml',
+          content: 'phases:\n  - id: phase-1\n    covers: [UC-01]\n',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.equal(state.session_status, null);
+      assert.equal(state.blocked_by_hook, null);
+      assert.equal(state.retry_context, null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

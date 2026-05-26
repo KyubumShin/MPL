@@ -30,6 +30,11 @@ const { readStdin } = await import(
 const { collectTargetPaths, isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+
+const HOOK_ID = 'mpl-baseline-guard';
 
 function normalizeRel(cwd, filePath) {
   if (!filePath) return '';
@@ -78,12 +83,14 @@ async function main() {
 
   // Baseline does not yet exist → first write is allowed (Step 2.9 initial snapshot).
   if (!baselineExists(cwd)) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BASELINE_FILE });
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
 
   // Baseline exists → allow only when renewal sentinel is present.
   if (renewalAuthorized(cwd)) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BASELINE_FILE });
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
@@ -104,6 +111,20 @@ async function main() {
     'Then retry the write. The orchestrator removes the flag after successful',
     'baseline rewrite.',
   ].join('\n');
+
+  recordBlockedHook(cwd, {
+    hookId: HOOK_ID,
+    artifact: BASELINE_FILE,
+    code: 'baseline_immutable',
+    reason,
+    resumeInstruction:
+      `Create the renewal sentinel (${RENEWAL_FLAG_FILE}), retry the baseline write, then let the orchestrator remove the sentinel after the rewrite succeeds.`,
+    retryContext: {
+      target: BASELINE_FILE,
+      renewal_flag: RENEWAL_FLAG_FILE,
+      requested_targets: relTargets,
+    },
+  });
 
   console.log(JSON.stringify({
     hookSpecificOutput: {

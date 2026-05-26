@@ -36,7 +36,7 @@ import { existsSync, readFileSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const { readState, writeState, isMplActive } = await import(
+const { readState, isMplActive } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 const { readStdin } = await import(
@@ -44,6 +44,12 @@ const { readStdin } = await import(
 );
 const { isPassingTestAgentEvidence } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-evidence.mjs')).href
+);
+const {
+  recordBlockedHook: recordBlockedHookEnvelope,
+  clearBlockedHook: clearBlockedHookEnvelope,
+} = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
 );
 
 function ok() {
@@ -57,40 +63,23 @@ function block(reason) {
 const HOOK_ID = 'mpl-require-test-agent';
 
 function recordBlockedHook(cwd, phaseId, reason, resumeInstruction) {
-  try {
-    writeState(cwd, {
-      session_status: 'blocked_hook',
-      blocked_by_hook: HOOK_ID,
-      blocked_phase: phaseId,
-      block_reason: reason,
-      resume_instruction: resumeInstruction,
-      blocked_at: new Date().toISOString(),
-    });
-  } catch {
-    // Visibility is best-effort; the hook block itself remains authoritative.
-  }
+  recordBlockedHookEnvelope(cwd, {
+    hookId: HOOK_ID,
+    phaseId,
+    artifact: `state.test_agent_dispatched.${phaseId}`,
+    code: 'missing_or_invalid_test_agent_evidence',
+    reason,
+    resumeInstruction,
+    retryContext: {
+      phase_id: phaseId,
+      required_agent: 'mpl-test-agent',
+      override_path: '.mpl/config/test-agent-override.json',
+    },
+  });
 }
 
 function clearBlockedHook(cwd, phaseId) {
-  try {
-    const state = readState(cwd) || {};
-    if (
-      state.session_status === 'blocked_hook' &&
-      state.blocked_by_hook === HOOK_ID &&
-      state.blocked_phase === phaseId
-    ) {
-      writeState(cwd, {
-        session_status: null,
-        blocked_by_hook: null,
-        blocked_phase: null,
-        block_reason: null,
-        resume_instruction: null,
-        blocked_at: null,
-      });
-    }
-  } catch {
-    // Best-effort cleanup only.
-  }
+  clearBlockedHookEnvelope(cwd, { hookId: HOOK_ID, phaseId });
 }
 
 function finiteNumber(value) {

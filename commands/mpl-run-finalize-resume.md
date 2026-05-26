@@ -138,8 +138,11 @@ v0.14.1 (#35) added `paused_checkpoint` handling: orchestrator verbal pauses (ch
 ```python
 if state.session_status == "blocked_hook":
     print(f"[MPL] Resuming from hook block: {state.blocked_by_hook} on {state.blocked_phase}")
+    print(f"Artifact: {state.blocked_artifact}")
+    print(f"Block code: {state.block_code}")
     print(state.block_reason)
     print(state.resume_instruction)
+    print(state.retry_context)
 
     if state.blocked_by_hook == "mpl-require-test-agent":
         # Parseable means subagent_type, model, and prompt can be extracted from
@@ -172,6 +175,11 @@ if state.session_status == "blocked_hook":
         # On PASS evidence it clears blocked_hook atomically. If evidence is
         # FAIL/INVALID, keep blocked_hook and ask the user whether to retry,
         # override with .mpl/config/test-agent-override.json, or cancel.
+    else:
+        # For non-test-agent hook blocks, apply state.resume_instruction using
+        # state.blocked_artifact/state.retry_context, retry the same blocked
+        # artifact/action, and keep blocked_hook intact until the originating
+        # hook no longer blocks.
 ```
 
 This processing is a self-healing path, not a bypass. A dispatch timestamp alone

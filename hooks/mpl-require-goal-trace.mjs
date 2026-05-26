@@ -35,6 +35,12 @@ const { collectFileWrites, isFileWriteTool } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-goal-trace';
+const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition.yaml';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -42,6 +48,21 @@ function ok() {
 
 function block(reason) {
   console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
+}
+
+function recordGoalTraceBlock(cwd, { code, reason, resumeInstruction, retryContext = {} }) {
+  recordBlockedHook(cwd, {
+    hookId: HOOK_ID,
+    artifact: BLOCKED_ARTIFACT,
+    code,
+    reason,
+    resumeInstruction,
+    retryContext: {
+      target: BLOCKED_ARTIFACT,
+      goal_contract_path: '.mpl/goal-contract.yaml',
+      ...retryContext,
+    },
+  });
 }
 
 export function targetsDecompositionFile(filePath) {
@@ -73,32 +94,54 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.goal_contract_required === false || cfg.goal_trace_required === false) return ok();
+  if (cfg.goal_contract_required === false || cfg.goal_trace_required === false) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return ok();
+  }
 
   const goal = readGoalContract(cwd);
   if (!goal.exists || !goal.valid) {
-    block(`[MPL Goal Trace] Cannot write decomposition.yaml — goal contract missing or invalid: ${goal.missing.join(', ')}.`);
+    const reason = `[MPL Goal Trace] Cannot write decomposition.yaml — goal contract missing or invalid: ${goal.missing.join(', ')}.`;
+    recordGoalTraceBlock(cwd, {
+      code: 'goal_contract_invalid',
+      reason,
+      resumeInstruction: 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.',
+      retryContext: { missing: goal.missing },
+    });
+    block(reason);
     return;
   }
 
   const baseline = readBaselineGoalContractHash(cwd);
   if (baseline.error) {
-    block(
+    const reason =
       `[MPL Goal Trace] Cannot write decomposition.yaml — corrupt baseline.yaml goal_contract sha256 ` +
         `(${baseline.error}${baseline.rawHash ? `: ${baseline.rawHash}` : ''}). ` +
         `Expected the 64-character lowercase normalized SHA-256 for .mpl/goal-contract.yaml. ` +
         `Raw shasum may differ because MPL normalizes CRLF to LF and trims surrounding whitespace before hashing. ` +
-        `Re-run Phase 0 renewal before recomposing.`
-    );
+        `Re-run Phase 0 renewal before recomposing.`;
+    recordGoalTraceBlock(cwd, {
+      code: 'goal_contract_baseline_corrupt',
+      reason,
+      resumeInstruction: 'Re-run Phase 0 renewal so baseline.yaml records a valid goal_contract sha256, then retry decomposition.',
+      retryContext: { baseline_error: baseline.error, raw_hash: baseline.rawHash || null },
+    });
+    block(reason);
     return;
   }
   if (baseline.hash && baseline.hash !== goal.contract.content_sha256) {
-    block(
+    const reason =
       `[MPL Goal Trace] Cannot write decomposition.yaml — .mpl/goal-contract.yaml drifted from baseline.yaml ` +
         `(baseline=${baseline.hash}, current=${goal.contract.content_sha256}). ` +
         `These are MPL normalized hashes; raw shasum may differ because MPL normalizes CRLF to LF and trims surrounding whitespace. ` +
-        `Re-run Phase 0 renewal before recomposing.`
-    );
+        `Re-run Phase 0 renewal before recomposing.`;
+    recordGoalTraceBlock(cwd, {
+      code: 'goal_contract_drift',
+      reason,
+      resumeInstruction: 'Resolve the Goal Contract drift via Phase 0 renewal before recomposing decomposition.yaml.',
+      retryContext: { baseline_hash: baseline.hash, current_hash: goal.contract.content_sha256 },
+    });
+    block(reason);
     return;
   }
 
@@ -126,14 +169,21 @@ async function main() {
   if (issues.length > 0) {
     const shown = issues.slice(0, 12).join(', ');
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
-    block(
+    const reason =
       `[MPL Goal Trace] decomposition.yaml does not cover the frozen Goal Contract: ${shown}${more}. ` +
         `Each phase needs goal_trace and the graph must cover every AC/AX from .mpl/goal-contract.yaml ` +
-        `(including the MVP subset when mvp_scope is declared).`
-    );
+        `(including the MVP subset when mvp_scope is declared).`;
+    recordGoalTraceBlock(cwd, {
+      code: 'goal_trace_incomplete',
+      reason,
+      resumeInstruction: 'Add or fix per-phase goal_trace coverage for every required AC/AX, including MVP subset coverage when declared, then retry decomposition.',
+      retryContext: { issue_count: issues.length, issues: issues.slice(0, 20) },
+    });
+    block(reason);
     return;
   }
 
+  clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
   ok();
 }
 

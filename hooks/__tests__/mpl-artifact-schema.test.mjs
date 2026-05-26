@@ -266,6 +266,51 @@ describe('mpl-artifact-schema PostToolUse hook (P0-K)', () => {
     assert.equal(r.suppressOutput, true);
   });
 
+  it('clears matching blocked_hook when the artifact schema passes on retry', () => {
+    writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: SCHEMA_V,
+      current_phase: 'phase2-sprint',
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-artifact-schema',
+      blocked_phase: 'phase2-sprint',
+      blocked_artifact: '.mpl/mpl/phases/phase-1/state-summary.md',
+      block_code: 'missing_artifact_schema',
+      block_reason: 'missing sections',
+      resume_instruction: 're-emit artifact',
+      retry_context: { file: '.mpl/mpl/phases/phase-1/state-summary.md' },
+      blocked_at: '2026-05-26T00:00:00Z',
+    }));
+    const content = '## Status\n## Files Changed\n## Verification\n## Decisions\n## Next Phase Context\n';
+    const r = runHook({ filePath: '.mpl/mpl/phases/phase-1/state-summary.md', content });
+    assert.equal(r.continue, true);
+    const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.session_status, null);
+    assert.equal(state.blocked_by_hook, null);
+    assert.equal(state.retry_context, null);
+  });
+
+  it('does not clear another artifact schema block on unrelated valid artifact writes', () => {
+    writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+      schema_version: SCHEMA_V,
+      current_phase: 'phase2-sprint',
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-artifact-schema',
+      blocked_phase: 'phase2-sprint',
+      blocked_artifact: '.mpl/pivot-points.md',
+      block_code: 'missing_artifact_schema',
+      block_reason: 'missing PP sections',
+      resume_instruction: 're-emit pivot points',
+      retry_context: { file: '.mpl/pivot-points.md' },
+      blocked_at: '2026-05-26T00:00:00Z',
+    }));
+    const content = '## Status\n## Files Changed\n## Verification\n## Decisions\n## Next Phase Context\n';
+    const r = runHook({ filePath: '.mpl/mpl/phases/phase-1/state-summary.md', content });
+    assert.equal(r.continue, true);
+    const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.blocked_artifact, '.mpl/pivot-points.md');
+  });
+
   it('default warn → systemMessage with missing sections', () => {
     const r = runHook({
       filePath: '.mpl/mpl/phases/phase-1/state-summary.md',
@@ -290,6 +335,12 @@ describe('mpl-artifact-schema PostToolUse hook (P0-K)', () => {
     assert.equal(r.decision, 'block');
     assert.match(r.reason || '', /artifact schema violation/);
     assert.match(r.reason || '', /PP_id/);
+    const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.blocked_by_hook, 'mpl-artifact-schema');
+    assert.equal(state.blocked_artifact, '.mpl/pivot-points.md');
+    assert.equal(state.block_code, 'missing_artifact_schema');
+    assert.equal(state.retry_context.failures[0].file, '.mpl/pivot-points.md');
   });
 
   it('off → silent + signal logged', () => {
