@@ -90,6 +90,34 @@ function parseInlineList(value) {
     .filter(Boolean);
 }
 
+function parseListField(block, key) {
+  const lines = String(block || '').split('\n').map((line) => line.replace(/\r$/, ''));
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^(\\s*)${escaped}\\s*:\\s*(.*?)\\s*$`);
+  const idx = lines.findIndex((line) => re.test(line));
+  if (idx === -1) return [];
+
+  const match = lines[idx].match(re);
+  const baseIndent = match[1].length;
+  const value = match[2] || '';
+  const inline = parseInlineList(value);
+  if (inline) return inline;
+  const scalar = normalizeScalar(value);
+  if (scalar) return [scalar];
+
+  const out = [];
+  for (const line of lines.slice(idx + 1)) {
+    if (!line.trim()) continue;
+    const indent = line.match(/^(\s*)/)?.[1]?.length || 0;
+    if (indent <= baseIndent) break;
+    const item = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (!item) continue;
+    const parsed = normalizeScalar(item[1]);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
 function scalarField(block, key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const m = String(block || '').match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+?)\\s*$`, 'm'));
@@ -118,7 +146,7 @@ function parseRiskPatternBlocks(block) {
     const patternId = normalizeScalar(match[1]);
     const grepPattern = scalarField(itemText, 'grep_pattern');
     const severity = scalarField(itemText, 'severity') || 'EXPERIMENTAL';
-    const targetLangs = parseInlineList(itemText.match(/^\s*target_langs\s*:\s*(.+?)\s*$/m)?.[1] || '') || [];
+    const targetLangs = parseListField(itemText, 'target_langs');
     if (patternId && grepPattern) {
       out.push({
         pattern_id: patternId,
@@ -198,6 +226,12 @@ function patternApplies(pattern, langs) {
   return targets.some((lang) => langs.includes(lang));
 }
 
+function filesForPattern(pattern, files) {
+  const targets = Array.isArray(pattern?.target_langs) ? pattern.target_langs : [];
+  if (targets.length === 0 || targets.includes('*')) return files;
+  return files.filter((path) => targets.includes(EXT_LANG.get(extensionOf(path))));
+}
+
 function toPatternAItem(pattern, files, source) {
   return {
     pattern_id: pattern.pattern_id,
@@ -219,15 +253,20 @@ export function deriveRiskPatternChecks(phase) {
 
   for (const pattern of DEFAULT_RISK_PATTERNS) {
     if (!patternApplies(pattern, langs)) continue;
-    checks.push(toPatternAItem(pattern, files, 'default'));
-    seen.add(pattern.pattern_id);
+    const targetFiles = filesForPattern(pattern, files);
+    if (targetFiles.length === 0) continue;
+    checks.push(toPatternAItem(pattern, targetFiles, 'default'));
+    seen.add(`${pattern.pattern_id}\0${pattern.grep_pattern}`);
   }
 
   for (const pattern of phase?.risk_patterns || []) {
     if (!pattern?.pattern_id || !pattern?.grep_pattern) continue;
-    if (seen.has(pattern.pattern_id)) continue;
-    checks.push(toPatternAItem(pattern, files, 'project'));
-    seen.add(pattern.pattern_id);
+    const key = `${pattern.pattern_id}\0${pattern.grep_pattern}`;
+    if (seen.has(key)) continue;
+    const targetFiles = filesForPattern(pattern, files);
+    if (targetFiles.length === 0) continue;
+    checks.push(toPatternAItem(pattern, targetFiles, 'project'));
+    seen.add(key);
   }
 
   return checks;
@@ -263,8 +302,7 @@ export function parseDesignIntentText(text) {
     const id = scalarField(block, 'id');
     const statement = scalarField(block, 'statement');
     const verify = scalarField(block, 'verify');
-    const appliesRaw = block.match(/^\s*applies_to_phases\s*:\s*(.+?)\s*$/m)?.[1] || '[]';
-    const applies = parseInlineList(appliesRaw) || [];
+    const applies = parseListField(block, 'applies_to_phases');
     if (id && statement && verify) {
       invariants.push({ id, statement, verify, applies_to_phases: applies });
     }

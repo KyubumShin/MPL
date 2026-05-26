@@ -177,6 +177,13 @@ function unknown(actual, allowed) {
   return actual.filter((id) => !allowedSet.has(id));
 }
 
+function sameSet(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((item) => bSet.has(item));
+}
+
 export function validateGoalTraceCoverage(decomposition, contract) {
   const issues = [];
   const phases = decomposition?.phases || [];
@@ -267,10 +274,8 @@ export function validateMvpGoalTraceCoverage(decomposition, contract, graph) {
   const mvpPhaseIds = hasGraphMvp ? graph.mvp.phases : (derived?.phases || []);
 
   if (hasGraphMvp && derived) {
-    const expected = derived.phases.join(',');
-    const actual = graph.mvp.phases.join(',');
-    if (actual !== expected) {
-      issues.push(`mvp:phases:derived_mismatch:expected=[${expected}]:actual=[${actual}]`);
+    if (!sameSet(graph.mvp.phases, derived.phases)) {
+      issues.push(`mvp:phases:derived_mismatch:expected=[${derived.phases.join(',')}]:actual=[${graph.mvp.phases.join(',')}]`);
     }
   }
 

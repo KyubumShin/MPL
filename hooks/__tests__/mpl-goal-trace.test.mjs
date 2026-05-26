@@ -433,6 +433,17 @@ describe('validateMvpGoalTraceCoverage (RFC §4.2, post-Stage-A audit fix #2)', 
     assert.ok(verdict.issues.some((issue) => issue.startsWith('mvp:phases:derived_mismatch:')));
   });
 
+  it('does not flag legacy explicit mvp.phases when only order differs', () => {
+    writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'),
+      goalContractWithMvp({ mvpAc: ['AC-1', 'AC-2'], mvpAx: [] }));
+    const goal = readGoalContract(tmp);
+    const text = decompositionWithMvp({ mvpPhases: ['phase-2', 'phase-1'] });
+    const decomp = parseDecompositionGoalTraceText(text);
+    const graph = parsePhaseContractGraphText(text);
+    const verdict = validateMvpGoalTraceCoverage(decomp, goal.contract, graph);
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
   it('validates MVP coverage from derived phases when graph.mvp is omitted', () => {
     writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'),
       goalContractWithMvp({ mvpAc: ['AC-1'], mvpAx: ['AX-1'] }));
