@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -695,6 +695,12 @@ describe('mpl-require-phase-contract-graph hook integration', () => {
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /graph_version:missing/);
     assert.match(r.reason, /phase-1:evidence_required:missing/);
+    const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.blocked_by_hook, 'mpl-require-phase-contract-graph');
+    assert.equal(state.blocked_artifact, '.mpl/mpl/decomposition.yaml');
+    assert.equal(state.block_code, 'phase_contract_graph_invalid');
+    assert.ok(state.retry_context.issue_count >= 1);
   });
 
   it('blocks MultiEdit writes with dangling requires.from_phase', () => {

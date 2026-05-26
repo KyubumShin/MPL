@@ -196,8 +196,11 @@ describe('readState / writeState', () => {
       session_status: 'blocked_hook',
       blocked_by_hook: 'mpl-require-test-agent',
       blocked_phase: 'phase-1',
+      blocked_artifact: 'state.test_agent_dispatched.phase-1',
+      block_code: 'missing_or_invalid_test_agent_evidence',
       block_reason: 'missing test agent',
       resume_instruction: 'dispatch test agent',
+      retry_context: { phase_id: 'phase-1' },
       blocked_at: '2026-05-19T00:00:00Z',
     });
     writeState(tmpDir, { session_status: null });
@@ -205,8 +208,11 @@ describe('readState / writeState', () => {
     assert.strictEqual(state.session_status, null);
     assert.strictEqual(state.blocked_by_hook, null);
     assert.strictEqual(state.blocked_phase, null);
+    assert.strictEqual(state.blocked_artifact, null);
+    assert.strictEqual(state.block_code, null);
     assert.strictEqual(state.block_reason, null);
     assert.strictEqual(state.resume_instruction, null);
+    assert.strictEqual(state.retry_context, null);
     assert.strictEqual(state.blocked_at, null);
   });
 

@@ -27,9 +27,14 @@ const __dirname = dirname(__filename);
 const { collectFileWrites, isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
 
 const DEFAULT_WARN_THRESHOLD = 0.4;
 const UC_ID_RE = /^UC-\d{2,}$/;
+const HOOK_ID = 'mpl-require-covers';
+const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition.yaml';
 
 export function targetsDecompositionFile(filePath) {
   if (!filePath || typeof filePath !== 'string') return false;
@@ -222,12 +227,27 @@ if (isMain) {
         })
         .join('; ');
       const more = allIssues.length > 10 ? ` (+${allIssues.length - 10} more)` : '';
-      block(
-        `Tier B schema violation in decomposition.yaml: ${summary}${more}. ` +
-          `See docs/schemas/user-contract.md for UC ids.`,
-      );
+      const reason = `Tier B schema violation in decomposition.yaml: ${summary}${more}. ` +
+        `See docs/schemas/user-contract.md for UC ids.`;
+      recordBlockedHook(cwd, {
+        hookId: HOOK_ID,
+        artifact: BLOCKED_ARTIFACT,
+        code: 'covers_schema_violation',
+        reason,
+        resumeInstruction:
+          'Add a non-empty covers list to every phase using UC-NN ids or "internal", then retry the decomposition write.',
+        retryContext: {
+          target: BLOCKED_ARTIFACT,
+          legacy_mode: legacy,
+          issue_count: allIssues.length,
+          issues: allIssues.slice(0, 20),
+        },
+      });
+      block(reason);
       process.exit(0);
     }
+
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 
     // warn on internal ratio
     const threshold = loadWarnThreshold(cwd);

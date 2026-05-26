@@ -277,8 +277,11 @@ const DEFAULT_STATE = {
   session_status: null,          // null | "active" | "paused_budget" | "paused_checkpoint" | "verification_hang" | "blocked_hook" | "cancelled"
   blocked_by_hook: null,          // hook id that set session_status="blocked_hook"
   blocked_phase: null,            // phase id associated with the active hook block
+  blocked_artifact: null,         // artifact/path/resource associated with the active hook block
+  block_code: null,               // stable short code for the hook block reason
   block_reason: null,             // user-visible block reason
   resume_instruction: null,       // concrete instruction for clearing the block
+  retry_context: null,            // structured context for automated resume/retry
   blocked_at: null,               // ISO timestamp when hook block was recorded
   pause_reason: null,            // human-readable pause reason
   resume_from_phase: null,       // phase ID to resume from
@@ -682,8 +685,11 @@ function normalizeBlockedHookState(state) {
   if (!state || state.session_status === 'blocked_hook') return;
   state.blocked_by_hook = null;
   state.blocked_phase = null;
+  state.blocked_artifact = null;
+  state.block_code = null;
   state.block_reason = null;
   state.resume_instruction = null;
+  state.retry_context = null;
   state.blocked_at = null;
 }
 

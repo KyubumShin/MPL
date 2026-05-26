@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -199,6 +199,12 @@ describe('mpl-require-goal-trace hook integration', () => {
     });
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /goal_contract_hash:missing/);
+    const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.blocked_by_hook, 'mpl-require-goal-trace');
+    assert.equal(state.blocked_artifact, '.mpl/mpl/decomposition.yaml');
+    assert.equal(state.block_code, 'goal_trace_incomplete');
+    assert.equal(state.retry_context.issue_count, 1);
   });
 
   it('blocks when AC or AX coverage is incomplete', () => {

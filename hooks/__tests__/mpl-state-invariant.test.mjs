@@ -327,8 +327,11 @@ describe('I11 blocked_hook companion fields', () => {
       session_status: 'blocked_hook',
       blocked_by_hook: 'mpl-require-test-agent',
       blocked_phase: 'phase-1',
+      blocked_artifact: 'state.test_agent_dispatched.phase-1',
+      block_code: 'missing_or_invalid_test_agent_evidence',
       block_reason: null,
       resume_instruction: '',
+      retry_context: { phase_id: 'phase-1' },
       blocked_at: '2026-05-19T00:00:00Z',
     }, { cwd: tmp });
     const v = r.violations.find((x) => x.id === VIOLATION_IDS.BLOCKED_HOOK_STALE);
@@ -336,13 +339,30 @@ describe('I11 blocked_hook companion fields', () => {
     assert.deepStrictEqual(v.missing.sort(), ['block_reason', 'resume_instruction']);
   });
 
+  it('requires artifact, code, and structured retry context', () => {
+    const r = checkInvariants({
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-baseline-guard',
+      blocked_phase: 'mpl-ambiguity-resolve',
+      block_reason: 'baseline is immutable',
+      resume_instruction: 'create renewal sentinel and retry',
+      blocked_at: '2026-05-19T00:00:00Z',
+    }, { cwd: tmp });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.BLOCKED_HOOK_STALE);
+    assert.ok(v);
+    assert.deepStrictEqual(v.missing.sort(), ['block_code', 'blocked_artifact', 'retry_context']);
+  });
+
   it('accepts a fully actionable blocked_hook state', () => {
     const r = checkInvariants({
       session_status: 'blocked_hook',
       blocked_by_hook: 'mpl-require-test-agent',
       blocked_phase: 'phase-1',
+      blocked_artifact: 'state.test_agent_dispatched.phase-1',
+      block_code: 'missing_or_invalid_test_agent_evidence',
       block_reason: 'missing test-agent dispatch',
       resume_instruction: 'dispatch mpl-test-agent for phase-1',
+      retry_context: { phase_id: 'phase-1' },
       blocked_at: '2026-05-19T00:00:00Z',
     }, { cwd: tmp });
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.BLOCKED_HOOK_STALE));

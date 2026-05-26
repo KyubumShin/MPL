@@ -30,6 +30,12 @@ const { collectFileWrites, isFileWriteTool } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-phase-contract-graph';
+const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition.yaml';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -165,7 +171,10 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.phase_contract_graph_required === false) return ok();
+  if (cfg.phase_contract_graph_required === false) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return ok();
+  }
 
   const issues = [];
   for (const text of texts) {
@@ -181,13 +190,27 @@ async function main() {
   if (issues.length > 0) {
     const shown = issues.slice(0, 12).join(', ');
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
-    block(
+    const reason =
       `[MPL Phase Contract Graph] decomposition.yaml is not a valid phase contract graph: ${shown}${more}. ` +
-        `Add graph metadata, execution_tiers, per-phase evidence_required/change_policy/resource_locks, valid interface requires.from_phase refs, and (when state.release exists) preserve released-cut phase membership.`
-    );
+        `Add graph metadata, execution_tiers, per-phase evidence_required/change_policy/resource_locks, valid interface requires.from_phase refs, and (when state.release exists) preserve released-cut phase membership.`;
+    recordBlockedHook(cwd, {
+      hookId: HOOK_ID,
+      artifact: BLOCKED_ARTIFACT,
+      code: 'phase_contract_graph_invalid',
+      reason,
+      resumeInstruction:
+        'Re-emit decomposition.yaml as a valid phase contract graph with metadata, execution tiers, per-phase policies, valid dependencies, and preserved released-cut memberships.',
+      retryContext: {
+        target: BLOCKED_ARTIFACT,
+        issue_count: issues.length,
+        issues: issues.slice(0, 20),
+      },
+    });
+    block(reason);
     return;
   }
 
+  clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
   ok();
 }
 

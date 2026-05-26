@@ -43,8 +43,12 @@ const { resolveRuleAction } = await import(
 const { matchArtifactSchema, validateArtifactFile } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-artifact-schema.mjs')).href
 );
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
 
 const SIGNALS_RELATIVE = '.mpl/signals/artifact-schema-hits.jsonl';
+const HOOK_ID = 'mpl-artifact-schema';
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -84,6 +88,12 @@ function formatVerdict(verdict) {
   return `${verdict.relPath}: ${parts.join('; ') || 'unknown'}`;
 }
 
+function clearCheckedArtifactBlocks(cwd, checkedArtifacts) {
+  for (const artifact of checkedArtifacts) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact });
+  }
+}
+
 async function main() {
   const input = await readStdin();
 
@@ -119,6 +129,7 @@ async function main() {
   const action = resolveRuleAction(cwd, state, 'missing_artifact_schema');
 
   const failures = [];
+  const checkedArtifacts = [];
   for (const fp of filePaths) {
     const abs = resolve(cwd, fp);
     const rel = workspaceRel(cwd, abs);
@@ -128,21 +139,47 @@ async function main() {
     try { content = readFileSync(abs, 'utf-8'); } catch { continue; }
     const verdict = validateArtifactFile(rel, content);
     if (!verdict) continue;
+    checkedArtifacts.push(verdict.relPath);
     // Always persist signals for audit trail, even when action='off'.
     logHit(cwd, verdict, action);
     if (!verdict.valid) failures.push(verdict);
   }
 
-  if (action === 'off') return silent();
-  if (failures.length === 0) return silent();
+  if (action === 'off') {
+    clearCheckedArtifactBlocks(cwd, checkedArtifacts);
+    return silent();
+  }
+  if (failures.length === 0) {
+    clearCheckedArtifactBlocks(cwd, checkedArtifacts);
+    return silent();
+  }
 
   const summary = failures.map(formatVerdict).join('\n');
 
   if (action === 'block') {
+    const reason = `[MPL P0-K] artifact schema violation:\n${summary}\n` +
+      `Re-emit the artifact with the required sections. Schema: docs/schemas/ (or hooks/lib/mpl-artifact-schema.mjs#ARTIFACT_SCHEMAS).`;
+    recordBlockedHook(cwd, {
+      hookId: HOOK_ID,
+      phaseId: state.current_phase,
+      artifact: failures[0]?.relPath || 'artifact-schema',
+      code: 'missing_artifact_schema',
+      reason,
+      resumeInstruction:
+        'Re-emit the blocked artifact with the required schema sections, overwriting the invalid version, then retry the next MPL step.',
+      retryContext: {
+        failures: failures.map((f) => ({
+          artifact: f.artifact,
+          file: f.relPath,
+          missing: f.missing,
+          missing_any_of: f.missingAnyOf,
+        })),
+        schema_reference: 'docs/schemas/',
+      },
+    });
     console.log(JSON.stringify({
       decision: 'block',
-      reason: `[MPL P0-K] artifact schema violation:\n${summary}\n` +
-        `Re-emit the artifact with the required sections. Schema: docs/schemas/ (or hooks/lib/mpl-artifact-schema.mjs#ARTIFACT_SCHEMAS).`,
+      reason,
     }));
     return;
   }
