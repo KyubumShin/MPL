@@ -487,6 +487,9 @@ mpl small add retry logic                     # → forces Standard
 
 # Hook-block recovery after resume reports blocked_hook
 /mpl:mpl-recover
+
+# Hook-chain visibility for a canonical artifact
+node hooks/lib/mpl-hook-trace.mjs .mpl/mpl/decomposition.yaml
 ```
 
 Codex also discovers the same MPL skills from the plugin. Use `mpl ...` in a Codex session, or invoke the installed MPL skill by name from the skills menu.
