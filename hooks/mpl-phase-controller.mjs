@@ -60,6 +60,33 @@ const { parseDecompositionGoalTraceText } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-trace.mjs')).href
 );
 
+// Exp22 R11 / #210 — codex r1 on PR #222. Phase-controller writes phase
+// transitions directly via writeState() which bypasses PreToolUse hooks,
+// so state-invariant I13 alone misses the controller's own transitions.
+// Call blockedPhaseTransitionReason() before any writeState that lands
+// in a phase listed in REQUIRES_PHASE0_ARTIFACTS.
+const { blockedPhaseTransitionReason } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-phase0-artifacts.mjs')).href
+);
+
+/**
+ * Emit a stopReason and return true when the controller's intended
+ * transition to `nextPhase` is blocked by missing Phase 0 artifacts.
+ * Caller should `return` immediately after a truthy result to skip the
+ * writeState. The transition is blocked, not deferred — the user must
+ * run /mpl:mpl-resume or restore Phase 0 before the controller will
+ * advance again.
+ */
+function emitPhase0BlockIfNeeded(cwd, nextPhase) {
+  const reason = blockedPhaseTransitionReason(cwd, nextPhase);
+  if (!reason) return false;
+  console.log(JSON.stringify({
+    continue: true,
+    stopReason: reason,
+  }));
+  return true;
+}
+
 // Stage A Phase 1.6c-iii: snapshot ref + user-visible artifact creation.
 const { createSnapshotRef, attemptArtifactCreation } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-release-artifact.mjs')).href
@@ -398,6 +425,7 @@ async function main() {
 
       // BUG-6 fix: handle research error state to prevent infinite loop
       if (research.error) {
+        if (emitPhase0BlockIfNeeded(cwd, 'phase1b-plan')) return;
         writeState(cwd, { current_phase: 'phase1b-plan', research: { status: 'skipped' } });
         console.log(JSON.stringify({
           continue: true,
@@ -408,7 +436,9 @@ async function main() {
 
       if (research.status === 'completed' || research.status === 'skipped') {
         // Research done → transition to Phase 1-B: Plan Generation
-        writeState(cwd, { current_phase: 'phase1b-plan' });
+        if (emitPhase0BlockIfNeeded(cwd, 'phase1b-plan')) return;
+                if (emitPhase0BlockIfNeeded(cwd, 'phase1b-plan')) return;
+                writeState(cwd, { current_phase: 'phase1b-plan' });
         const msg = research.status === 'skipped'
           ? '[MPL] Research skipped. Transitioning to Phase 1-B: Plan Generation.'
           : `[MPL] Research completed (${research.stages_completed?.length || 0} stages, ${research.findings_count || 0} findings, ${research.sources_count || 0} sources). Transitioning to Phase 1-B: Plan Generation.`;
@@ -567,7 +597,8 @@ async function main() {
       if (!cohort) {
         // Defensive: release-gate without an active cohort is a state
         // corruption. Surface and revert to phase3-gate (whole-pipeline).
-        writeState(cwd, { current_phase: 'phase3-gate' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase3-gate')) return;
+                writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: '[MPL] ⚠ release-gate entered with no active cohort. Reverting to phase3-gate.'
@@ -598,7 +629,8 @@ async function main() {
       const releaseResults = checkGateResults({ gate_results: releaseGates }, { strict: true });
 
       if (releaseResults.allPassed) {
-        writeState(cwd, { current_phase: 'release-finalize' });
+                if (emitPhase0BlockIfNeeded(cwd, 'release-finalize')) return;
+                writeState(cwd, { current_phase: 'release-finalize' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] release-gate(${cohort}): scoped Hard 1/2/3 passed (source=${releaseResults.source}). Transitioning to release-finalize.`
@@ -703,7 +735,8 @@ async function main() {
       // to `completed`. Both remain exclusive to phase5-finalize.
       const cur = state.release?.current_cut_id;
       if (!cur) {
-        writeState(cwd, { current_phase: 'phase3-gate' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase3-gate')) return;
+                writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: '[MPL] ⚠ release-finalize entered with no active cohort. Routing to phase3-gate.'
@@ -917,7 +950,8 @@ async function main() {
       // recompose-driven re-entry could still land here with a live cohort.
       // Surface and revert.
       if (state.release?.current_cut_id) {
-        writeState(cwd, { current_phase: 'phase2-sprint' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase2-sprint')) return;
+                writeState(cwd, { current_phase: 'phase2-sprint' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] ⚠ phase3-gate entered while release cohort "${state.release.current_cut_id}" is still active. ` +
@@ -943,7 +977,8 @@ async function main() {
 
       if (gateResults.allPassed) {
         // All gates passed → Phase 5
-        writeState(cwd, { current_phase: 'phase5-finalize' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+                writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] All Quality Gates passed (source=${gateResults.source}). Transitioning to Phase 5: Finalize.${fallbackWarn}`
@@ -996,7 +1031,8 @@ async function main() {
 
       if (fixCount >= maxFix) {
         // Fix loop limit reached → Phase 5 (partial completion)
-        writeState(cwd, { current_phase: 'phase5-finalize' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+                writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Transitioning to Phase 5: Finalize (partial completion).`
@@ -1005,7 +1041,8 @@ async function main() {
         // H1: Check convergence before continuing
         const convergenceResult = checkConvergence(state);
         if (convergenceResult.status === 'stagnating' || convergenceResult.status === 'regressing') {
-          writeState(cwd, { current_phase: 'phase5-finalize' });
+                    if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+                    writeState(cwd, { current_phase: 'phase5-finalize' });
           console.log(JSON.stringify({
             continue: true,
             stopReason: `[MPL] Convergence ${convergenceResult.status} detected (delta: ${convergenceResult.delta?.toFixed(3)}). Fix loop is not improving. Transitioning to Phase 5: Finalize (partial completion).`
@@ -1027,7 +1064,8 @@ async function main() {
       // and then manually set current_phase to 'completed' via writeState.
       const finalized = state.finalize_done === true;
       if (finalized) {
-        writeState(cwd, { current_phase: 'completed' });
+                if (emitPhase0BlockIfNeeded(cwd, 'completed')) return;
+                writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
           stopReason: '[MPL] Phase 5: Finalize complete. MPL pipeline finished.'
@@ -1124,7 +1162,8 @@ async function main() {
 
       if (smallGate.hard2_passed === true) {
         // Code review passed → completed
-        writeState(cwd, { current_phase: 'completed' });
+                if (emitPhase0BlockIfNeeded(cwd, 'completed')) return;
+                writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
           stopReason: '[MPL-Small] Verification passed. Pipeline complete. Extract learnings and commit.'
@@ -1135,7 +1174,8 @@ async function main() {
 
         if (smallFixCount >= smallMaxFix) {
           // Fix loop limit reached → completed (partial)
-          writeState(cwd, { current_phase: 'completed' });
+                    if (emitPhase0BlockIfNeeded(cwd, 'completed')) return;
+                    writeState(cwd, { current_phase: 'completed' });
           console.log(JSON.stringify({
             continue: false,
             stopReason: `[MPL-Small] Fix loop limit reached (${smallFixCount}/${smallMaxFix}). Completing with partial results. Extract learnings.`

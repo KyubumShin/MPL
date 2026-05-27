@@ -10,9 +10,27 @@ import { checkPlanStatus, checkGateResults } from '../mpl-phase-controller.mjs';
 
 const HOOK_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'mpl-phase-controller.mjs');
 
-function runStopHook(cwd, state) {
+function runStopHook(cwd, state, { skipPhase0Seed = false } = {}) {
   mkdirSync(join(cwd, '.mpl'), { recursive: true });
   writeFileSync(join(cwd, '.mpl', 'state.json'), JSON.stringify(state));
+  // Exp22 R11 / #210: phase-controller's transition writes now check
+  // Phase 0 artifacts. Seed them by default so existing transition tests
+  // don't accidentally exercise the I13 block. Tests that explicitly
+  // want to test the I13 path can pass `{ skipPhase0Seed: true }`.
+  if (!skipPhase0Seed) {
+    mkdirSync(join(cwd, '.mpl', 'mpl', 'phase0'), { recursive: true });
+    if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'))) {
+      writeFileSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'), '# raw scan');
+    }
+    if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'))) {
+      writeFileSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), 'goal: test\n');
+    }
+    mkdirSync(join(cwd, '.mpl', 'contracts'), { recursive: true });
+    if (!existsSync(join(cwd, '.mpl', 'contracts', '_no-boundaries.json'))) {
+      writeFileSync(join(cwd, '.mpl', 'contracts', '_no-boundaries.json'),
+        JSON.stringify({ boundary_id: '_no-boundaries' }));
+    }
+  }
   const stdin = JSON.stringify({ cwd });
   const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
   return JSON.parse(out);
@@ -424,6 +442,41 @@ describe('phase3-gate Stop hook integration (PR #119 review #5 follow-up)', () =
     assert.match(out.stopReason, /Phase 3: Quality Gate in progress\. Run all 3 gates before proceeding/);
     // source=='none' here, so the legacy fallback warn does NOT prepend (warn is for source=='legacy')
     assert.doesNotMatch(out.stopReason, /⚠ Using legacy gate boolean fallback/);
+  });
+});
+
+describe('I13 phase0 artifacts gate the controller transition (Exp22 R11 / #210)', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-i13-ctrl-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('phase1a-research → phase1b-plan transition is blocked when Phase 0 artifacts are missing', () => {
+    // codex r1 on PR #222: phase-controller writeState bypasses
+    // PreToolUse; the in-controller guard must catch the transition.
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase1a-research',
+      research: { status: 'skipped' },
+    }, { skipPhase0Seed: true });
+    assert.match(out.stopReason, /\[MPL I13\] Cannot transition to phase1b-plan/);
+    assert.match(out.stopReason, /raw-scan\.md/);
+    assert.match(out.stopReason, /design-intent\.yaml/);
+    assert.match(out.stopReason, /\.mpl\/contracts/);
+    // The state.json on disk must still be at phase1a-research — the
+    // controller skipped the writeState() because the guard short-circuited.
+    const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.current_phase, 'phase1a-research',
+      'controller MUST NOT advance current_phase when artifacts are missing');
+  });
+
+  it('phase1a-research → phase1b-plan transition lands when Phase 0 artifacts are present', () => {
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase1a-research',
+      research: { status: 'completed', stages_completed: ['s1', 's2', 's3'], findings_count: 5, sources_count: 10 },
+    });
+    // runStopHook seeds Phase 0 artifacts by default.
+    assert.match(out.stopReason, /Transitioning to Phase 1-B/);
+    const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.current_phase, 'phase1b-plan');
   });
 });
 

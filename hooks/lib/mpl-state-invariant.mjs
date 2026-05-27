@@ -21,6 +21,7 @@ import { join } from 'path';
 
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
 import { classifyGateCommand } from './mpl-gate-classify.mjs';
+import { REQUIRES_PHASE0_ARTIFACTS, missingPhase0Artifacts } from './mpl-phase0-artifacts.mjs';
 
 // Re-export so consumers (and the H8 single-source-of-truth test) can
 // confirm both modules agree on the version constant via a single
@@ -403,52 +404,18 @@ function checkGateFamilyForBlock(block, label) {
   return issues;
 }
 
-// Phases where the Phase-0 boundary/runtime artifacts MUST already
-// exist before the orchestrator transitions in. Phase 0 itself, the
-// decomposer, and ambiguity-resolve are exempt — that's where these
-// artifacts get produced. Anything from phase1b-plan onward must wait
-// for them to land.
-const REQUIRES_PHASE0_ARTIFACTS = new Set([
-  'phase1b-plan',
-  'phase2-sprint',
-  'phase3-gate',
-  'phase4-fix',
-  'phase5-finalize',
-  'release-gate',
-  'release-finalize',
-  'completed',
-]);
-
-function listDirSafe(dir) {
-  try { return existsSync(dir) ? readdirSync(dir) : []; } catch { return []; }
-}
-
 function checkI13(state, cwd, trigger) {
   // Exp22 R11 / #210: a fast-track run that skipped user interviews
   // must not also skip the boundary/runtime artifacts. Fire on
-  // STATE_WRITE so a transition write into phase1b-plan / phase2-sprint
-  // / phase3-gate / ... cannot land without the required artifacts.
+  // STATE_WRITE so a manual edit into phase1b-plan / phase2-sprint /
+  // phase3-gate / ... cannot land without the required artifacts.
+  // Phase-controller writes also call missingPhase0Artifacts directly
+  // for its writeState path (codex r1 on PR #222).
   if (trigger !== TRIGGERS.STATE_WRITE) return null;
   const phase = state?.current_phase;
   if (!phase || !REQUIRES_PHASE0_ARTIFACTS.has(phase)) return null;
 
-  const missing = [];
-  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'))) {
-    missing.push('.mpl/mpl/phase0/raw-scan.md');
-  }
-  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'))) {
-    missing.push('.mpl/mpl/phase0/design-intent.yaml');
-  }
-  // Contracts requirement: at least one .json file in `.mpl/contracts/`.
-  // The decomposer writes `_no-boundaries.json` when the project has no
-  // cross-layer boundary, so simple/non-boundary tasks still satisfy
-  // this without forcing irrelevant contract files.
-  const contractsDir = join(cwd, '.mpl', 'contracts');
-  const contractFiles = listDirSafe(contractsDir).filter((n) => n.endsWith('.json'));
-  if (contractFiles.length === 0) {
-    missing.push('.mpl/contracts/*.json (or _no-boundaries.json)');
-  }
-
+  const missing = missingPhase0Artifacts(cwd);
   if (missing.length === 0) return null;
   return v(VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING,
     `Phase ${phase} cannot start without the Phase 0 boundary/runtime artifacts. ` +
