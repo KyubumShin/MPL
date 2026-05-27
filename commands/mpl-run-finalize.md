@@ -730,8 +730,15 @@ decomposition = Read(".mpl/mpl/decomposition.yaml")
 expected_parallel_tiers = set of tier ids where
   decomposition.execution_tiers[].parallel == true
 
-events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
-         state.phase_scheduler_history or []
+raw_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
+             state.phase_scheduler_history or []
+// .mpl/mpl/profile/ is persistent across pipeline starts. Without
+// pipeline_id scoping, stale rows from a prior run can satisfy the
+// current decomposition's parallel-requested tiers and mask missing
+// telemetry. The executor stamps every event with pipeline_id; the
+// finalizer filters here.
+events = raw_events.filter(e => e.pipeline_id == state.pipeline_id)
+
 tiers_total = decomposition.execution_tiers.length
 tiers_parallel_requested = expected_parallel_tiers.size
 tiers_parallel_executed = count of distinct event.tier in

@@ -43,6 +43,7 @@ phase_ids = tier.phases.filter(id => !is_completed(id))
 
 if phase_ids.length == 0:
   record_scheduler_event({
+    pipeline_id: state.pipeline_id,
     tier: tier.tier,
     phases: tier.phases,
     selected_mode: "skipped",
@@ -55,6 +56,7 @@ if phase_ids.length == 0:
 
 if tier.parallel != true or phase_ids.length == 1:
   record_scheduler_event({
+    pipeline_id: state.pipeline_id,
     tier: tier.tier,
     phases: phase_ids,
     selected_mode: "sequential",
@@ -79,6 +81,7 @@ for each wave in waves:
   ready_but_blocked = phase_ids - wave when blocked by file overlap, resource lock, or dependency frontier
   record ready_but_blocked_reason for each blocked phase in the tier reconciliation artifact
   record_scheduler_event({
+    pipeline_id: state.pipeline_id,
     tier: tier.tier,
     phases: phase_ids,
     wave,
@@ -134,8 +137,12 @@ run_cumulative_tests(phase_ids)
 
 `record_scheduler_event(...)` is mandatory telemetry. Append one JSON line to
 `.mpl/mpl/profile/phase-scheduler.jsonl` and mirror the latest 50 entries in
-`state.phase_scheduler_history`. Every row must include:
+`state.phase_scheduler_history`. The JSONL file is persistent across pipeline
+starts — `pipeline_id` on every row is what scopes events to the current run
+when the finalizer aggregates. Every row must include:
 
+- `pipeline_id` (= `state.pipeline_id` at write time; required so the
+  finalizer can filter out rows from prior runs in the same profile file)
 - `timestamp`
 - `tier`
 - `phases`

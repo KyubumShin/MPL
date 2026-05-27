@@ -13,17 +13,21 @@ describe('execution_tiers observability contract', () => {
     assert.match(text, /Do not add a separate `phase_dependencies` field/);
   });
 
-  it('skipped, sequential, parallel, and parallel_rejected events all carry worker_cap + worktree_slots', () => {
+  it('skipped, sequential, parallel, and parallel_rejected events all carry pipeline_id + worker_cap + worktree_slots', () => {
     // Codex review on PR #213: the mandatory-fields paragraph lists worker_cap
     // and worktree_slots, but earlier examples omitted them for skipped /
-    // sequential events. Pin the executor prompt so every documented event
-    // block actually includes those fields.
+    // sequential events. Codex round 3 added pipeline_id (the JSONL profile
+    // file is persistent across pipeline starts, so without per-run scoping
+    // stale events can vacuously satisfy the current decomposition). Pin
+    // the executor prompt so every documented event block carries all three.
     const text = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
     const blockPattern = /record_scheduler_event\(\{[^}]*\}\)/gs;
     const blocks = text.match(blockPattern) || [];
     assert.ok(blocks.length >= 3,
       `expected at least 3 record_scheduler_event() blocks, found ${blocks.length}`);
     for (const block of blocks) {
+      assert.match(block, /pipeline_id/,
+        `record_scheduler_event block missing pipeline_id:\n${block}`);
       assert.match(block, /worker_cap/,
         `record_scheduler_event block missing worker_cap:\n${block}`);
       assert.match(block, /worktree_slots/,
@@ -59,6 +63,24 @@ describe('execution_tiers observability contract', () => {
     for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'tiers_with_missing_telemetry', 'rejection_reasons', 'no_parallel_explanation']) {
       assert.ok(k in schema.scheduler, `scheduler block missing required key: ${k}`);
     }
+  });
+
+  it('finalize filters scheduler events by pipeline_id so stale profile rows cannot satisfy a new run', () => {
+    // Codex round-3 review on PR #213: `.mpl/mpl/profile/` is persistent
+    // across pipeline starts, and tier numbers are reused across
+    // decompositions. Without per-run scoping, a prior run's
+    // selected_mode:"parallel" for tier 1 can make the current run report
+    // tiers_parallel_executed > 0 and avoid tiers_with_missing_telemetry,
+    // silently masking the exact failure mode this change exists to expose.
+    const exec = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
+    assert.match(exec, /pipeline_id` \(= `state\.pipeline_id` at write time/,
+      'execute prompt must require pipeline_id on every event with the rationale');
+
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /e\.pipeline_id == state\.pipeline_id/,
+      'finalize aggregation must filter events by the current pipeline_id');
+    assert.match(finalize, /persistent across pipeline starts/,
+      'finalize must explain why the filter exists so the contract cannot regress');
   });
 
   it('finalize derives tiers_parallel_requested from decomposition.yaml, not from the event log', () => {
