@@ -2,7 +2,22 @@
 import { existsSync, readFileSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { readState } from './mpl-state.mjs';
+
+// Read .mpl/state.json byte-for-byte without invoking readState() — that
+// helper persists schema migrations and can archive/remove the legacy
+// `.mpl/mpl/state.json`. A diagnostic command must never mutate run state
+// just by being run; codex r1 on PR #216 flagged this as a state-forensics
+// hazard. Return null when the file is missing or unparseable; callers
+// treat null as "no active blocked_hook info available".
+function readStateRaw(cwd) {
+  const path = join(cwd, '.mpl', 'state.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -139,7 +154,7 @@ export function traceHookChain({
 } = {}) {
   const resolvedTarget = targetPath || DECOMPOSITION_PATH;
   const config = hooksConfig || readHooksConfig(pluginRoot);
-  const activeState = state || (existsSync(join(cwd, '.mpl', 'state.json')) ? readState(cwd) : null);
+  const activeState = state || readStateRaw(cwd);
   const category = pathCategory(resolvedTarget);
   const rows = [];
 
