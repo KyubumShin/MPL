@@ -44,6 +44,7 @@ phase_ids = tier.phases.filter(id => !is_completed(id))
 if phase_ids.length == 0:
   record_scheduler_event({
     pipeline_id: state.pipeline_id,
+    run_started_at: state.started_at,
     tier: tier.tier,
     phases: tier.phases,
     selected_mode: "skipped",
@@ -57,6 +58,7 @@ if phase_ids.length == 0:
 if tier.parallel != true or phase_ids.length == 1:
   record_scheduler_event({
     pipeline_id: state.pipeline_id,
+    run_started_at: state.started_at,
     tier: tier.tier,
     phases: phase_ids,
     selected_mode: "sequential",
@@ -82,6 +84,7 @@ for each wave in waves:
   record ready_but_blocked_reason for each blocked phase in the tier reconciliation artifact
   record_scheduler_event({
     pipeline_id: state.pipeline_id,
+    run_started_at: state.started_at,
     tier: tier.tier,
     phases: phase_ids,
     wave,
@@ -138,12 +141,16 @@ run_cumulative_tests(phase_ids)
 `record_scheduler_event(...)` is mandatory telemetry. Append one JSON line to
 `.mpl/mpl/profile/phase-scheduler.jsonl` and mirror the latest 50 entries in
 `state.phase_scheduler_history`. The JSONL file is persistent across pipeline
-starts — `pipeline_id` on every row is what scopes events to the current run
-when the finalizer aggregates. Every row must include:
+starts and `state.pipeline_id` is NOT unique on its own (it is
+`mpl-{date}-{slug}`, so same-day reruns of the same feature share it). The
+unique per-run scope key is `state.started_at` (ISO timestamp set once at
+`initState`). The finalizer filters by both. Every row must include:
 
-- `pipeline_id` (= `state.pipeline_id` at write time; required so the
-  finalizer can filter out rows from prior runs in the same profile file)
-- `timestamp`
+- `pipeline_id` (= `state.pipeline_id` at write time)
+- `run_started_at` (= `state.started_at` at write time; the actual
+  per-run unique key. `pipeline_id` alone collides on same-day same-slug
+  reruns, so the finalizer filters by `pipeline_id AND run_started_at`.)
+- `timestamp` (event emission time; distinct from `run_started_at`)
 - `tier`
 - `phases`
 - `parallel_requested`

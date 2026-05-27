@@ -13,13 +13,12 @@ describe('execution_tiers observability contract', () => {
     assert.match(text, /Do not add a separate `phase_dependencies` field/);
   });
 
-  it('skipped, sequential, parallel, and parallel_rejected events all carry pipeline_id + worker_cap + worktree_slots', () => {
-    // Codex review on PR #213: the mandatory-fields paragraph lists worker_cap
-    // and worktree_slots, but earlier examples omitted them for skipped /
-    // sequential events. Codex round 3 added pipeline_id (the JSONL profile
-    // file is persistent across pipeline starts, so without per-run scoping
-    // stale events can vacuously satisfy the current decomposition). Pin
-    // the executor prompt so every documented event block carries all three.
+  it('every record_scheduler_event block carries pipeline_id + run_started_at + worker_cap + worktree_slots', () => {
+    // Codex r1: worker_cap/worktree_slots missing from skipped+sequential.
+    // Codex r3: pipeline_id added because JSONL profile is persistent.
+    // Codex r4: pipeline_id alone is not unique (mpl-{date}-{slug} collides
+    // on same-day same-feature reruns); add state.started_at as run_started_at
+    // for genuine per-run uniqueness.
     const text = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
     const blockPattern = /record_scheduler_event\(\{[^}]*\}\)/gs;
     const blocks = text.match(blockPattern) || [];
@@ -28,6 +27,8 @@ describe('execution_tiers observability contract', () => {
     for (const block of blocks) {
       assert.match(block, /pipeline_id/,
         `record_scheduler_event block missing pipeline_id:\n${block}`);
+      assert.match(block, /run_started_at/,
+        `record_scheduler_event block missing run_started_at:\n${block}`);
       assert.match(block, /worker_cap/,
         `record_scheduler_event block missing worker_cap:\n${block}`);
       assert.match(block, /worktree_slots/,
@@ -65,20 +66,23 @@ describe('execution_tiers observability contract', () => {
     }
   });
 
-  it('finalize filters scheduler events by pipeline_id so stale profile rows cannot satisfy a new run', () => {
-    // Codex round-3 review on PR #213: `.mpl/mpl/profile/` is persistent
-    // across pipeline starts, and tier numbers are reused across
-    // decompositions. Without per-run scoping, a prior run's
-    // selected_mode:"parallel" for tier 1 can make the current run report
-    // tiers_parallel_executed > 0 and avoid tiers_with_missing_telemetry,
-    // silently masking the exact failure mode this change exists to expose.
+  it('finalize filters scheduler events by both pipeline_id AND run_started_at so stale profile rows cannot satisfy a new run', () => {
+    // Codex r3: `.mpl/mpl/profile/` is persistent — stale rows from prior
+    // pipelines must drop out. Codex r4: pipeline_id is mpl-{date}-{slug},
+    // not unique on same-day same-feature reruns; state.started_at (ISO
+    // timestamp with ms resolution) is the actual per-run key. Filter on
+    // BOTH so rows survive only when they belong to this exact run.
     const exec = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
-    assert.match(exec, /pipeline_id` \(= `state\.pipeline_id` at write time/,
-      'execute prompt must require pipeline_id on every event with the rationale');
+    assert.match(exec, /run_started_at` \(= `state\.started_at` at write time/,
+      'execute prompt must require run_started_at on every event with the rationale');
+    assert.match(exec, /pipeline_id` alone collides on same-day same-slug/,
+      'execute prompt must document why pipeline_id alone is insufficient');
 
     const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
     assert.match(finalize, /e\.pipeline_id == state\.pipeline_id/,
-      'finalize aggregation must filter events by the current pipeline_id');
+      'finalize aggregation must filter events by pipeline_id');
+    assert.match(finalize, /e\.run_started_at == state\.started_at/,
+      'finalize aggregation must also filter events by run_started_at');
     assert.match(finalize, /persistent across pipeline starts/,
       'finalize must explain why the filter exists so the contract cannot regress');
   });

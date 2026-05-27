@@ -732,12 +732,16 @@ expected_parallel_tiers = set of tier ids where
 
 raw_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
              state.phase_scheduler_history or []
-// .mpl/mpl/profile/ is persistent across pipeline starts. Without
-// pipeline_id scoping, stale rows from a prior run can satisfy the
-// current decomposition's parallel-requested tiers and mask missing
-// telemetry. The executor stamps every event with pipeline_id; the
-// finalizer filters here.
-events = raw_events.filter(e => e.pipeline_id == state.pipeline_id)
+// .mpl/mpl/profile/ is persistent across pipeline starts. pipeline_id
+// alone is NOT a unique run key — initState derives it as
+// mpl-{date}-{slug}, so same-day reruns of the same feature collide.
+// state.started_at (set once at initState, ISO timestamp with ms
+// resolution) is the actual per-run key. Filter on BOTH so that:
+//   - prior pipelines (different slug/date) drop out via pipeline_id
+//   - prior reruns of the same pipeline_id drop out via run_started_at
+events = raw_events.filter(e =>
+  e.pipeline_id == state.pipeline_id &&
+  e.run_started_at == state.started_at)
 
 tiers_total = decomposition.execution_tiers.length
 tiers_parallel_requested = expected_parallel_tiers.size
