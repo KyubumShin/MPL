@@ -139,10 +139,35 @@ function extractCommandHead(command) {
   return '';
 }
 
+// Strict-mode head allowlist — codex r7 on PR #219 [data-integrity].
+// Manual `state.gate_results` writes must use a command whose HEAD is a
+// recognized test runner / build tool. Anything else — even with a
+// matching family keyword inside an argument (`node -e "npm test"`,
+// `python -c "print('e2e')"`) — fails closed. This is much tighter than
+// a denylist; it explicitly enumerates the only heads we accept as
+// manual gate evidence. The recorder path (`classifyRecordedCommand`)
+// still uses regex-only matching to keep wrapper invocations working.
+const STRICT_GATE_HEAD_ALLOWLIST = new Set([
+  // Hard 1 — lint / typecheck / build / compile
+  'tsc', 'eslint', 'ruff', 'mypy',
+  // Hard 2 — unit / integration test runners
+  'vitest', 'jest', 'pytest', 'mocha',
+  // Hard 3 — e2e / contract
+  'playwright', 'cypress', 'wdio',
+  // Package-manager invocations cover most build+test+e2e cases.
+  // The family regex still narrows: `npm test` → hard2, `npm run build`
+  // → hard1, `npm run test:e2e` → hard3.
+  'npm', 'pnpm', 'yarn', 'npx', 'pnpx',
+  // Compiled / system languages
+  'cargo', 'go',
+]);
+
 /**
  * Strict classifier — used by the I12 state-invariant on manual
- * `state.gate_results` writes. Rejects head-denylisted, empty-head, and
- * wrapper-with-flag forms (codex r1/r3/r4/r5 on PR #219).
+ * `state.gate_results` writes. The command's HEAD must be in the
+ * strict allowlist of recognized gate-evidence binaries; rejects
+ * head-denylisted, empty-head, and wrapper-with-flag forms (codex
+ * r1/r3/r4/r5/r7 on PR #219).
  *
  * Recorder events should NOT use this — they need to accept legitimate
  * execution wrappers (`docker compose run app npm test`, `kubectl exec
@@ -155,6 +180,12 @@ export function classifyGateCommand(command) {
   const head = extractCommandHead(command);
   if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
+  // Codex r7: even with a non-denied head, the head MUST be in the
+  // explicit allowlist. `node`, `python`, `ruby`, `perl`, etc. are NOT
+  // accepted manual gate evidence because their `-e`/`-c` forms can
+  // contain arbitrary text that the family regex would erroneously
+  // match.
+  if (!STRICT_GATE_HEAD_ALLOWLIST.has(head)) return null;
   return matchFamilyRegex(command);
 }
 

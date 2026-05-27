@@ -325,6 +325,54 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('script-interpreter eval forms (node -e, python -c) are rejected (codex r7 [data-integrity])', () => {
+    // Codex r7 on PR #219: even with the head denylist + wrapper-flag
+    // guards, a manual write like `node -e "console.log('npm test')"`
+    // would slip past because `node` was not denied AND the full
+    // command string contains the `npm test` keyword. Strict classifier
+    // is now allowlist-based: only known test/build heads.
+    for (const cmd of [
+      'node -e "console.log(\'npm test\')"',
+      'node -e "playwright"',
+      'python -c "print(\'e2e contract\')"',
+      'python3 -c "print(\'npm test\')"',
+      'ruby -e "puts \'jest\'"',
+      'perl -e "print qq{vitest}"',
+      'php -r "echo \'go test\';"',
+      'awk \'BEGIN{print "npm test"}\'',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard2_coverage: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `script-interpreter eval form must be rejected: ${cmd}`);
+    }
+  });
+
+  it('strict classifier still accepts known gate heads on the allowlist', () => {
+    // Sanity: pnpm/yarn/npx/cargo/go all in allowlist; family regex
+    // narrows them into the right slot.
+    const cases = [
+      { command: 'pnpm test', slot: 'hard2_coverage' },
+      { command: 'yarn run test', slot: 'hard2_coverage' },
+      { command: 'pnpm run build', slot: 'hard1_baseline' },
+      { command: 'cargo test', slot: 'hard2_coverage' },
+      { command: 'cargo build', slot: 'hard1_baseline' },
+      { command: 'go test ./...', slot: 'hard2_coverage' },
+      { command: 'npx playwright test', slot: 'hard3_resilience' },
+      { command: 'tsc --noEmit', slot: 'hard1_baseline' },
+    ];
+    for (const c of cases) {
+      const r = checkInvariants({
+        gate_results: { [c.slot]: gateEntry(c.command) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH),
+        `allowlisted head should pass: ${c.command}`);
+    }
+  });
+
   it('prefix wrappers with flag options still resolve to inner head (codex r5 [data-integrity])', () => {
     // Codex r5 on PR #219: `sudo -E git`, `env -u FOO git`, `time -p git`,
     // `nice -n 5 git` would all bypass denylist if the head extractor
