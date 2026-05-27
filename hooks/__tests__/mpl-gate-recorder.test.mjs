@@ -496,6 +496,49 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }
   });
 
+  it('phase-runner clean re-dispatch self-clears a prior phase_runner_* block (codex r6)', () => {
+    // Codex r6 on PR #218: after a phase-runner anomaly installs a
+    // phase_runner_* block, a subsequent non-anomalous phase-runner
+    // completion must clear that block; otherwise transient anomalies
+    // permanently pause the pipeline with no recovery path.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-self-clear-'));
+    try {
+      seedState(tmp, {
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-gate-recorder',
+        blocked_phase: 'phase-1',
+        blocked_artifact: 'state.subagent_return_anomalies[empty_response]',
+        block_code: 'phase_runner_empty_response',
+        block_reason: 'prior anomaly',
+        resume_instruction: 'rerun',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { agent_type: 'mpl-phase-runner' },
+      });
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Re-execute phase-1.',
+        },
+        tool_response: 'Phase 1 completed successfully.',
+        usage: { output_tokens: 1500 },
+        metrics: { tools_used: 12, duration_ms: 5 * 60 * 1000 },
+      };
+      execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+      const state = readState(tmp);
+      assert.equal(state.session_status, null,
+        'clean phase-runner re-dispatch must clear its own phase_runner_* block');
+      assert.equal(state.blocked_by_hook, null);
+      assert.equal(state.block_code, null);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('phase-runner anomaly does NOT clobber a pre-existing blocked_hook (codex r4)', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-noclobber-'));
     try {
