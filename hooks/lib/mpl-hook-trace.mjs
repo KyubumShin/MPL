@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
+import { missingBlockedHookFields } from './mpl-blocked-hook.mjs';
+
 // Read .mpl/state.json byte-for-byte without invoking readState() — that
 // helper persists schema migrations and can archive/remove the legacy
 // `.mpl/mpl/state.json`. A diagnostic command must never mutate run state
@@ -137,15 +139,20 @@ function shouldIncludeHook({ eventName, matcher, hookId, category }) {
 function blockStatusFor(hookId, state, targetPath) {
   if (!state || state.session_status !== 'blocked_hook') return 'registered';
   if (state.blocked_by_hook !== hookId) return 'registered';
-  // Codex r2 on PR #216: a blocked_hook envelope without blocked_artifact
-  // (or without a target the tracer was asked about) is a corrupt /
-  // zombie state — surfacing it as `currently_blocking` would point the
-  // operator at the wrong artifact and hide the real invariant failure.
-  // Demand a non-empty artifact field AND a non-empty target, then match
-  // them; otherwise report the envelope as invalid.
+  // Codex r2/r3 on PR #216: a blocked_hook envelope is only actionable
+  // when ALL companion fields required by the state-invariant are present
+  // (blocked_phase, block_code, block_reason, resume_instruction,
+  // blocked_at, retry_context object — same list as
+  // mpl-state-invariant BLOCKED_HOOK_STALE). A stale or partially-cleared
+  // zombie state would otherwise print BLOCKING for the requested target
+  // and hide the real state-invariant failure. Reuse the shared validator.
+  const missing = missingBlockedHookFields(state);
+  if (missing.length > 0) {
+    return 'invalid_blocked_envelope';
+  }
   const artifact = String(state.blocked_artifact || '').trim();
   const target = String(targetPath || '').trim();
-  if (!artifact || !target) {
+  if (!target) {
     return 'invalid_blocked_envelope';
   }
   if (artifact === target || target.endsWith(artifact) || artifact.endsWith(target)) {

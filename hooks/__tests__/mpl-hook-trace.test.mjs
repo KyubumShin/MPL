@@ -43,7 +43,13 @@ describe('mpl-hook-trace', () => {
         current_phase: 'mpl-decompose',
         session_status: 'blocked_hook',
         blocked_by_hook: 'mpl-require-goal-trace',
+        blocked_phase: 'mpl-decompose',
         blocked_artifact: '.mpl/mpl/decomposition.yaml',
+        block_code: 'goal_trace_drift',
+        block_reason: 'goal_contract_hash drift detected',
+        resume_instruction: 'Refresh the goal contract hash and retry.',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { hook: 'mpl-require-goal-trace' },
       });
       writeFileSync(join(tmp, '.mpl', 'state.json'), stateBefore);
       const legacyPath = join(tmp, '.mpl', 'mpl', 'state.json');
@@ -69,10 +75,11 @@ describe('mpl-hook-trace', () => {
   });
 
   it('surfaces incomplete blocked_hook envelopes as invalid instead of currently_blocking', () => {
-    // Codex r2 on PR #216: a zombie state with blocked_by_hook set but
-    // empty/missing blocked_artifact must not be reported as actively
-    // blocking — that would point recovery at the wrong artifact and
-    // hide the real state-invariant failure.
+    // Codex r2/r3 on PR #216: any stale/zombie state missing a required
+    // companion field (artifact, block_code, retry_context, etc.) must
+    // not be reported as actively blocking — that would send the operator
+    // toward editing the wrong artifact and hide the real state-invariant
+    // failure. Validation reuses the BLOCKED_HOOK_STALE invariant.
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-invalid-'));
     try {
       mkdirSync(join(tmp, '.mpl'), { recursive: true });
@@ -81,7 +88,7 @@ describe('mpl-hook-trace', () => {
         current_phase: 'mpl-decompose',
         session_status: 'blocked_hook',
         blocked_by_hook: 'mpl-require-goal-trace',
-        // blocked_artifact intentionally absent
+        // blocked_artifact + block_code + retry_context all intentionally absent
       }));
       const trace = traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
@@ -97,6 +104,31 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('surfaces a blocked_hook missing block_code/retry_context as invalid (matches BLOCKED_HOOK_STALE invariant)', () => {
+    // Codex r3 on PR #216: blocked_artifact alone is not enough.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-partial-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'mpl-decompose',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-goal-trace',
+        blocked_artifact: '.mpl/mpl/decomposition.yaml',
+        // block_code, block_reason, resume_instruction, blocked_at, retry_context all absent
+      }));
+      const trace = traceHookChain({
+        targetPath: '.mpl/mpl/decomposition.yaml',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-goal-trace');
+      assert.equal(row.status, 'invalid_blocked_envelope');
+      assert.doesNotMatch(formatHookTrace(trace), /\[BLOCKING\]/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('marks the active blocked_hook as currently_blocking', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-'));
     try {
@@ -106,7 +138,13 @@ describe('mpl-hook-trace', () => {
         current_phase: 'mpl-decompose',
         session_status: 'blocked_hook',
         blocked_by_hook: 'mpl-require-goal-trace',
+        blocked_phase: 'mpl-decompose',
         blocked_artifact: '.mpl/mpl/decomposition.yaml',
+        block_code: 'goal_trace_drift',
+        block_reason: 'goal_contract_hash drift detected',
+        resume_instruction: 'Refresh the goal contract hash and retry.',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { hook: 'mpl-require-goal-trace' },
       }));
       const trace = traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
