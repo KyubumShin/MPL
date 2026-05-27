@@ -727,8 +727,20 @@ silently pass the no-parallel MUST.
 
 ```
 decomposition = Read(".mpl/mpl/decomposition.yaml")
+// Mirror the executor's legacy fallback (mpl-run-execute.md Step 4.0):
+// when execution_tiers is missing or empty, synthesize one
+// {tier, phases:[phase.id], parallel:false} entry per phase. Without
+// this, a legacy/resumed run with no execution_tiers would crash here
+// (empty set, undefined .length) before run-summary.json is written, and
+// the completion guard would fail closed even though the run executed.
+execution_tiers = decomposition.execution_tiers
+if not execution_tiers or execution_tiers.length == 0:
+  execution_tiers = decomposition.phases.map((p, i) => ({
+    tier: i + 1, phases: [p.id], parallel: false
+  }))
+
 expected_parallel_tiers = set of tier ids where
-  decomposition.execution_tiers[].parallel == true
+  execution_tiers[].parallel == true
 
 raw_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
              state.phase_scheduler_history or []
@@ -743,8 +755,12 @@ events = raw_events.filter(e =>
   e.pipeline_id == state.pipeline_id &&
   e.run_started_at == state.started_at)
 
-tiers_total = decomposition.execution_tiers.length
+tiers_total = execution_tiers.length
 tiers_parallel_requested = expected_parallel_tiers.size
+// "parallel" is the proof-of-execution mode in the executor — emitted only
+// after parallel_map returns successfully. Pool setup, worker dispatch,
+// and per-phase failures emit selected_mode:"parallel_failed" instead, so
+// they are not counted here.
 tiers_parallel_executed = count of distinct event.tier in
   expected_parallel_tiers where any event for that tier has
   selected_mode == "parallel"
@@ -756,6 +772,12 @@ tiers_parallel_rejected = tiers_parallel_requested - tiers_parallel_executed
 // above would otherwise hide the partial-rejection signal.
 waves_parallel_rejected = count of events where
   event.selected_mode == "parallel_rejected"
+// Failed parallel waves (pool setup, dispatch, or per-phase errors that
+// caused the wave to raise). Distinct from parallel_rejected (planning
+// could not parallelize) — these are runtime failures of a wave that was
+// supposed to execute in parallel.
+waves_parallel_failed = count of events where
+  event.selected_mode == "parallel_failed"
 tiers_with_partial_rejection = set of event.tier where the tier has
   BOTH a selected_mode == "parallel" event AND a selected_mode ==
   "parallel_rejected" event
@@ -767,6 +789,7 @@ scheduler = {
   tiers_parallel_rejected,
   tiers_with_missing_telemetry: <list of tier ids>,
   waves_parallel_rejected,
+  waves_parallel_failed,
   tiers_with_partial_rejection: <list of tier ids>,
   rejection_reasons: union of event.rejection_reasons and the values of
                      event.rejection_reasons_by_phase across all events
@@ -775,11 +798,13 @@ scheduler = {
     tiers_parallel_requested > 0 AND
     (tiers_parallel_executed == 0 OR
      tiers_with_missing_telemetry is non-empty OR
-     tiers_with_partial_rejection is non-empty);
+     tiers_with_partial_rejection is non-empty OR
+     waves_parallel_failed > 0);
     otherwise null. The string MUST name either the dominant rejection
     reasons (when telemetry is present), the list of tiers with missing
-    telemetry (when not), or the tiers with partial rejection plus
-    their rejection reasons (when some waves rejected and others ran).
+    telemetry (when not), the tiers with partial rejection plus their
+    rejection reasons (when some waves rejected and others ran), or the
+    failure reasons (when waves attempted parallel execution and failed).
 }
 ```
 

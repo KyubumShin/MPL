@@ -61,9 +61,48 @@ describe('execution_tiers observability contract', () => {
     const schemaText = readFileSync(join(process.cwd(), 'commands', 'schemas', 'run-summary.json'), 'utf-8');
     const schema = JSON.parse(schemaText);
     assert.ok(schema.scheduler, 'run-summary.json must include a scheduler example block');
-    for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'tiers_with_missing_telemetry', 'waves_parallel_rejected', 'tiers_with_partial_rejection', 'rejection_reasons', 'no_parallel_explanation']) {
+    for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'tiers_with_missing_telemetry', 'waves_parallel_rejected', 'waves_parallel_failed', 'tiers_with_partial_rejection', 'rejection_reasons', 'no_parallel_explanation']) {
       assert.ok(k in schema.scheduler, `scheduler block missing required key: ${k}`);
     }
+  });
+
+  it('parallel event is emitted AFTER parallel_map success; pool/dispatch failures emit parallel_failed', () => {
+    // Codex round-6 review on PR #213: emitting selected_mode:"parallel"
+    // before ensure_worktree_pool/parallel_map run lets a setup or worker
+    // failure leave a successful-looking row that satisfies the run
+    // summary. The lifecycle must be:
+    //   - wave.length == 1: emit parallel_rejected before single-phase exec
+    //   - wave.length > 1: emit parallel AFTER parallel_map succeeds, or
+    //                      parallel_failed in the catch branch
+    const exec = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
+    assert.match(exec, /parallel_failed/,
+      'execute prompt must define a parallel_failed mode for pool/dispatch errors');
+    assert.match(exec, /MUST NOT be emitted before the wave finishes successfully/,
+      'execute prompt must state the lifecycle invariant in prose');
+    // The parallel-event block must sit AFTER parallel_map(...) in the prompt.
+    const parallelMapIdx = exec.indexOf('parallel_map(wave,');
+    const parallelEventIdx = exec.indexOf('selected_mode: "parallel",');
+    assert.ok(parallelMapIdx > 0, 'parallel_map(...) block must exist');
+    assert.ok(parallelEventIdx > 0, 'selected_mode:"parallel" event must exist');
+    assert.ok(parallelEventIdx > parallelMapIdx,
+      'selected_mode:"parallel" event must appear AFTER the parallel_map(...) call in the executor prompt');
+
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /waves_parallel_failed/,
+      'finalize aggregation must surface waves_parallel_failed');
+    assert.match(finalize, /waves_parallel_failed > 0/,
+      'no_parallel_explanation must trigger on parallel_failed waves');
+  });
+
+  it('finalize handles missing/empty execution_tiers with the same legacy fallback as the executor', () => {
+    // Codex round-6 review on PR #213: finalize read decomposition.execution_tiers
+    // directly, but the executor still documents a synthesized fallback
+    // when the field is missing/empty. A legacy or resumed run would have
+    // crashed finalize aggregation before run-summary.json was written.
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /Mirror the executor's legacy fallback/);
+    assert.match(finalize, /if not execution_tiers or execution_tiers\.length == 0/);
+    assert.match(finalize, /decomposition\.phases\.map/);
   });
 
   it('finalize aggregation preserves wave-level partial rejection within a tier', () => {

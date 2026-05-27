@@ -22,6 +22,7 @@
     "tiers_parallel_rejected": 0,
     "tiers_with_missing_telemetry": [],
     "waves_parallel_rejected": 0,
+    "waves_parallel_failed": 0,
     "tiers_with_partial_rejection": [],
     "rejection_reasons": [],
     "no_parallel_explanation": null
