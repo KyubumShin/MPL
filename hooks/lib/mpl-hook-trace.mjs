@@ -137,9 +137,18 @@ function shouldIncludeHook({ eventName, matcher, hookId, category }) {
 function blockStatusFor(hookId, state, targetPath) {
   if (!state || state.session_status !== 'blocked_hook') return 'registered';
   if (state.blocked_by_hook !== hookId) return 'registered';
-  const artifact = String(state.blocked_artifact || '');
-  const target = String(targetPath || '');
-  if (!artifact || !target || artifact === target || target.endsWith(artifact) || artifact.endsWith(target)) {
+  // Codex r2 on PR #216: a blocked_hook envelope without blocked_artifact
+  // (or without a target the tracer was asked about) is a corrupt /
+  // zombie state — surfacing it as `currently_blocking` would point the
+  // operator at the wrong artifact and hide the real invariant failure.
+  // Demand a non-empty artifact field AND a non-empty target, then match
+  // them; otherwise report the envelope as invalid.
+  const artifact = String(state.blocked_artifact || '').trim();
+  const target = String(targetPath || '').trim();
+  if (!artifact || !target) {
+    return 'invalid_blocked_envelope';
+  }
+  if (artifact === target || target.endsWith(artifact) || artifact.endsWith(target)) {
     return 'currently_blocking';
   }
   return 'registered_blocking_other_artifact';
@@ -203,7 +212,10 @@ export function formatHookTrace(trace) {
       currentEvent = hook.event;
       lines.push(`${currentEvent}:`);
     }
-    const marker = hook.status === 'currently_blocking' ? 'BLOCKING' : hook.status;
+    let marker;
+    if (hook.status === 'currently_blocking') marker = 'BLOCKING';
+    else if (hook.status === 'invalid_blocked_envelope') marker = 'INVALID_BLOCKED_ENVELOPE';
+    else marker = hook.status;
     lines.push(`  - ${hook.hook_id} [${marker}] matcher=${hook.matcher} :: ${hook.purpose}`);
   }
   return lines.join('\n');

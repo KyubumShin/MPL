@@ -68,6 +68,35 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('surfaces incomplete blocked_hook envelopes as invalid instead of currently_blocking', () => {
+    // Codex r2 on PR #216: a zombie state with blocked_by_hook set but
+    // empty/missing blocked_artifact must not be reported as actively
+    // blocking — that would point recovery at the wrong artifact and
+    // hide the real state-invariant failure.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-invalid-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'mpl-decompose',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-goal-trace',
+        // blocked_artifact intentionally absent
+      }));
+      const trace = traceHookChain({
+        targetPath: '.mpl/mpl/decomposition.yaml',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-goal-trace');
+      assert.equal(row.status, 'invalid_blocked_envelope');
+      assert.match(formatHookTrace(trace), /INVALID_BLOCKED_ENVELOPE/);
+      assert.doesNotMatch(formatHookTrace(trace), /\[BLOCKING\]/,
+        'must not surface an incomplete envelope as actively blocking');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('marks the active blocked_hook as currently_blocking', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-'));
     try {
