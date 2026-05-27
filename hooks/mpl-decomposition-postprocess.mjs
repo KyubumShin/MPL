@@ -2,12 +2,12 @@
 /**
  * MPL Decomposition Postprocess Hook (PostToolUse on Edit|Write|MultiEdit).
  *
- * Regenerates `.mpl/mpl/decomposition-derived.json` immediately after
- * `.mpl/mpl/decomposition.yaml` changes so derived risk checks, invariants,
- * and MVP membership cannot silently go stale when the command protocol is
- * skipped or interrupted.
+ * Regenerates `.mpl/mpl/decomposition-derived.json` immediately after any
+ * source artifact for derived risk checks, invariants, or MVP membership
+ * changes so the command protocol cannot silently keep stale derived data.
  */
 
+import { existsSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -32,6 +32,12 @@ const { recordBlockedHook, clearBlockedHook } = await import(
 
 const HOOK_ID = 'mpl-decomposition-postprocess';
 const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition-derived.json';
+const DECOMPOSITION_PATH = '.mpl/mpl/decomposition.yaml';
+const DERIVED_SOURCE_KINDS = new Map([
+  [DECOMPOSITION_PATH, 'decomposition'],
+  ['.mpl/mpl/phase0/design-intent.yaml', 'design_intent'],
+  ['.mpl/goal-contract.yaml', 'goal_contract'],
+]);
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -44,9 +50,9 @@ function block(cwd, reason, retryContext = {}) {
     code: 'decomposition_derived_stale',
     reason,
     resumeInstruction:
-      'Fix .mpl/mpl/decomposition.yaml if needed, then rewrite it or run the deterministic decomposition postprocess before continuing.',
+      'Fix the changed derived source artifact if needed, then rewrite it or run the deterministic decomposition postprocess before continuing.',
     retryContext: {
-      target: '.mpl/mpl/decomposition.yaml',
+      target: DECOMPOSITION_PATH,
       derived_path: BLOCKED_ARTIFACT,
       ...retryContext,
     },
@@ -60,9 +66,13 @@ function workspaceRel(cwd, filePath) {
   return abs.startsWith(cwdAbs + '/') ? abs.slice(cwdAbs.length + 1) : filePath;
 }
 
-function targetsDecomposition(filePath, cwd) {
+function derivedSourceKind(filePath, cwd) {
   const rel = workspaceRel(cwd, filePath);
-  return rel === '.mpl/mpl/decomposition.yaml';
+  return DERIVED_SOURCE_KINDS.get(rel) || null;
+}
+
+function decompositionExists(cwd) {
+  return existsSync(join(cwd, '.mpl', 'mpl', 'decomposition.yaml'));
 }
 
 async function main() {
@@ -79,8 +89,13 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const toolInput = data.tool_input || data.toolInput || {};
-  const targets = collectTargetPaths(toolInput).filter((path) => targetsDecomposition(path, cwd));
+  const targets = collectTargetPaths(toolInput)
+    .map((path) => ({ path, kind: derivedSourceKind(path, cwd) }))
+    .filter((target) => target.kind);
   if (targets.length === 0) return ok();
+  if (!targets.some((target) => target.kind === 'decomposition') && !decompositionExists(cwd)) {
+    return ok();
+  }
 
   try {
     writeDerivedDecompositionFields(cwd);

@@ -241,21 +241,30 @@ describe('decomposition postprocess hook', () => {
     }
   }
 
-  it('regenerates decomposition-derived.json after decomposition.yaml writes', () => withTmp((dir) => {
+  function writeActiveState(dir) {
     mkdirSync(join(dir, '.mpl', 'mpl', 'phase0'), { recursive: true });
     writeFileSync(join(dir, '.mpl', 'state.json'), JSON.stringify({
       schema_version: CURRENT_SCHEMA_VERSION,
       current_phase: 'mpl-decompose',
     }, null, 2));
+  }
+
+  function writeDesignIntent(dir, statement = 'Auth remains guarded') {
     writeFileSync(join(dir, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), `
 invariants:
   - id: INV-1
-    statement: "Auth remains guarded"
+    statement: "${statement}"
     verify: "npm test -- auth"
     applies_to_phases: [phase-1]
 `);
+  }
+
+  function writeDecomposition(dir) {
     writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
 goal_contract_hash: abc
+execution_tiers:
+  - tier: 1
+    phases: [phase-1, phase-2]
 phases:
   - id: phase-1
     phase_lang: typescript
@@ -266,13 +275,60 @@ phases:
       acceptance_criteria: [AC-1]
       variation_axes: []
       ontology_entities: [auth]
+  - id: phase-2
+    phase_lang: typescript
+    impact:
+      modify:
+        - path: src/checkout.ts
+    goal_trace:
+      acceptance_criteria: [AC-2]
+      variation_axes: []
+      ontology_entities: [checkout]
 `);
+  }
 
+  function writeGoalContract(dir, mvpAcceptanceCriteria = 'AC-1') {
+    writeFileSync(join(dir, '.mpl', 'goal-contract.yaml'), `
+source:
+  user_request: "Build app"
+  user_request_hash: "req"
+mission:
+  goal: "Build app"
+  project_pivot: "real runtime"
+  must_ship_outcomes:
+    - "usable app"
+ontology:
+  entities:
+    - app
+variation_axes:
+  - id: AX-1
+acceptance_criteria:
+  - id: AC-1
+  - id: AC-2
+e2e_policy:
+  real_runtime_required: true
+  mock_allowed: false
+  placeholder_assertions_allowed: false
+security_policy:
+  required: false
+completion_evidence:
+  required_artifacts:
+    - .mpl/mpl/RUNBOOK.md
+  require_commit: false
+  require_finalize_timestamps: true
+mvp_scope:
+  acceptance_criteria: [${mvpAcceptanceCriteria}]
+  variation_axes: []
+  artifact: release_manifest
+`);
+  }
+
+  function runHook(dir, filePath) {
     const input = {
       hook_event_name: 'PostToolUse',
       tool_name: 'Write',
       cwd: dir,
-      tool_input: { file_path: '.mpl/mpl/decomposition.yaml' },
+      tool_input: { file_path: filePath },
     };
     const result = spawnSync(process.execPath, [join(ROOT, 'hooks', 'mpl-decomposition-postprocess.mjs')], {
       cwd: dir,
@@ -281,7 +337,15 @@ phases:
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const hookResult = JSON.parse(result.stdout);
+    return JSON.parse(result.stdout);
+  }
+
+  it('regenerates decomposition-derived.json after decomposition.yaml writes', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeDecomposition(dir);
+
+    const hookResult = runHook(dir, '.mpl/mpl/decomposition.yaml');
     assert.equal(hookResult.continue, true);
     const derived = JSON.parse(readFileSync(join(dir, '.mpl', 'mpl', 'decomposition-derived.json'), 'utf-8'));
     assert.deepEqual(derived.phases['phase-1'].invariants, [
@@ -289,5 +353,50 @@ phases:
     ]);
     assert.ok(derived.phases['phase-1'].risk_pattern_checks
       .some((check) => check.pattern_id === 'sec-api-key'));
+  }));
+
+  it('regenerates decomposition-derived.json after design-intent.yaml writes', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir, 'Old invariant');
+    writeDecomposition(dir);
+    assert.equal(runHook(dir, '.mpl/mpl/decomposition.yaml').continue, true);
+
+    writeDesignIntent(dir, 'Updated invariant');
+    const hookResult = runHook(dir, '.mpl/mpl/phase0/design-intent.yaml');
+
+    assert.equal(hookResult.continue, true);
+    const derived = JSON.parse(readFileSync(join(dir, '.mpl', 'mpl', 'decomposition-derived.json'), 'utf-8'));
+    assert.deepEqual(derived.phases['phase-1'].invariants, [
+      { id: 'INV-1', statement: 'Updated invariant', verify: 'npm test -- auth' },
+    ]);
+  }));
+
+  it('regenerates decomposition-derived.json after goal-contract.yaml writes', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeDecomposition(dir);
+    writeGoalContract(dir, 'AC-1');
+    assert.equal(runHook(dir, '.mpl/mpl/decomposition.yaml').continue, true);
+
+    writeGoalContract(dir, 'AC-2');
+    const hookResult = runHook(dir, '.mpl/goal-contract.yaml');
+
+    assert.equal(hookResult.continue, true);
+    const derived = JSON.parse(readFileSync(join(dir, '.mpl', 'mpl', 'decomposition-derived.json'), 'utf-8'));
+    assert.deepEqual(derived.mvp, {
+      derived_from: 'goal_contract.mvp_scope',
+      phases: ['phase-2'],
+      execution_mode: 'sequential',
+      artifact: 'release_manifest',
+    });
+  }));
+
+  it('does not block Phase 0 source writes before decomposition.yaml exists', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+
+    const hookResult = runHook(dir, '.mpl/mpl/phase0/design-intent.yaml');
+
+    assert.equal(hookResult.continue, true);
   }));
 });
