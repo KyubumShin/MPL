@@ -87,6 +87,8 @@ phases:
       assert.equal(state.retry_context.phase_id, 'phase-1');
       assert.equal(state.retry_context.required_agent, 'mpl-test-agent');
       assert.match(state.resume_instruction, /Dispatch mpl-test-agent for phase-1/);
+      assert.match(state.resume_instruction, /FINAL OUTPUT RULE/);
+      assert.match(state.resume_instruction, /MUST start with ```json/);
       assert.match(state.resume_instruction, /Task\(subagent_type="mpl-test-agent"/);
       assert.match(state.resume_instruction, /Interface Contract:/);
       assert.match(state.resume_instruction, /createWidget/);
@@ -147,6 +149,7 @@ phases:
       assert.deepEqual(state.test_agent_dispatched, {});
       // The hook output stays concise; the executable recovery prompt lives in state.
       assert.match(state.resume_instruction, /independent test author/);
+      assert.match(state.resume_instruction, /No prior mpl-test-agent evidence is recorded/);
       assert.match(state.resume_instruction, /Task\(subagent_type="mpl-test-agent"/);
       assert.match(state.resume_instruction, /N\/A - not declared in decomposition\.yaml/);
     } finally {
@@ -334,6 +337,53 @@ phases:
       assert.equal(state.retry_context.override_path, '.mpl/config/test-agent-override.json');
       assert.match(state.block_reason, /recorded mpl-test-agent evidence is verdict=PASS/);
       assert.match(state.resume_instruction, /Prior evidence status:/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces invalid test-agent diagnostics in the recovery prompt', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-invalid-diag-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        test_agent_dispatched: {
+          'phase-1': {
+            valid_json: false,
+            verdict: 'INVALID',
+            invalid_reason: 'missing_json_block',
+            response_len: 13426,
+            response_preview: 'Natural-language report that said tests passed.',
+          },
+        },
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    test_agent_required: true
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+        },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, false);
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.match(r.reason, /response_len=13426/);
+      assert.match(state.resume_instruction, /invalid_reason=missing_json_block/);
+      assert.match(state.resume_instruction, /response_preview=/);
+      assert.match(state.resume_instruction, /no prose outside the fence/);
+      assert.equal(state.retry_context.schema_reminder, 'Final response must be a single fenced ```json block with no prose outside it.');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

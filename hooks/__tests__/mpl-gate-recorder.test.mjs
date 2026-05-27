@@ -10,6 +10,7 @@ import {
   isPassingTestAgentEvidence,
   parseTestAgentEvidence,
   TEST_AGENT_EVIDENCE_PREVIEW_LIMIT,
+  TEST_AGENT_RESPONSE_PREVIEW_LIMIT,
 } from '../lib/mpl-test-agent-evidence.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -235,6 +236,66 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     assert.equal(ev.valid_json, false);
     assert.equal(ev.verdict, 'INVALID');
     assert.equal(ev.invalid_reason, 'missing_test_agent_fields');
+    assert.match(ev.response_preview, /completed without structured payload/);
+  });
+
+  it('records prose-only test-agent diagnostics without accepting PASS', () => {
+    const prose = `Tests passed.\n${'x'.repeat(TEST_AGENT_RESPONSE_PREVIEW_LIMIT + 30)}`;
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: prose,
+    });
+    assert.equal(ev.valid_json, false);
+    assert.equal(ev.verdict, 'INVALID');
+    assert.equal(ev.invalid_reason, 'missing_json_block');
+    assert.ok(ev.response_preview.length <= TEST_AGENT_RESPONSE_PREVIEW_LIMIT);
+    assert.match(ev.response_preview, /\[truncated\]/);
+    assert.equal(isPassingTestAgentEvidence(ev), false);
+  });
+
+  it('marks empty test-agent returns with an explicit anomaly reason', () => {
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: '',
+      anomaly: { type: 'zero_token_after_tools' },
+    });
+    assert.equal(ev.valid_json, false);
+    assert.equal(ev.verdict, 'INVALID');
+    assert.equal(ev.invalid_reason, 'empty_response_anomaly');
+    assert.equal(ev.subagent_anomaly_type, 'zero_token_after_tools');
+  });
+
+  it('records empty test-agent Task returns as anomalies without rewriting response_len', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-anomaly-'));
+    try {
+      seedState(tmp);
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-test-agent',
+          prompt: 'Verify phase-1 from the contract.',
+        },
+        tool_response: '',
+        usage: { output_tokens: 0 },
+        metrics: { tools_used: 32, duration_ms: 34 * 60 * 1000 },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      assert.match(r.systemMessage, /SUBAGENT RETURN ANOMALY/);
+      const state = readState(tmp);
+      assert.equal(state.subagent_return_anomalies.length, 1);
+      assert.equal(state.subagent_return_anomalies[0].type, 'zero_token_after_tools');
+      const ev = state.test_agent_dispatched['phase-1'];
+      assert.equal(ev.response_len, 0);
+      assert.equal(ev.invalid_reason, 'empty_response_anomaly');
+      assert.equal(ev.subagent_anomaly_type, 'zero_token_after_tools');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('requires the full evidence contract, not verdict alone, for PASS consumption', () => {

@@ -14,6 +14,7 @@ function normalizeStatus(value) {
 // Keep enough context for debugging while preventing large sharded verifier
 // responses from bloating .mpl/state.json.
 export const TEST_AGENT_EVIDENCE_PREVIEW_LIMIT = 20;
+export const TEST_AGENT_RESPONSE_PREVIEW_LIMIT = 600;
 
 function firstJsonCandidate(text) {
   if (typeof text !== 'string') return null;
@@ -63,6 +64,12 @@ function boundedPreview(values, limit = TEST_AGENT_EVIDENCE_PREVIEW_LIMIT) {
   };
 }
 
+function responsePreview(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= TEST_AGENT_RESPONSE_PREVIEW_LIMIT) return clean;
+  return `${clean.slice(0, TEST_AGENT_RESPONSE_PREVIEW_LIMIT - 20).trimEnd()}... [truncated]`;
+}
+
 function coverageStatuses(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.map((r) => normalizeStatus(r?.status)).filter(Boolean);
@@ -72,14 +79,17 @@ export function parseTestAgentEvidence({
   phaseId,
   prompt = '',
   response,
+  anomaly = null,
   timestamp = new Date().toISOString(),
 } = {}) {
   const responseText = typeof response === 'string' ? response : JSON.stringify(response || '');
   const parsed = parseResponseJson(response);
+  const anomalyReason = anomaly?.type ? 'empty_response_anomaly' : null;
   const base = {
     timestamp,
     prompt_len: String(prompt || '').length,
     response_len: responseText.length,
+    response_preview: responsePreview(responseText),
     valid_json: parsed.valid,
     verdict: 'INVALID',
     phase_id: phaseId || null,
@@ -96,7 +106,8 @@ export function parseTestAgentEvidence({
     command_exit_codes_nonzero_count: 0,
     command_exit_codes_truncated: false,
     bugs_found_count: null,
-    invalid_reason: parsed.reason || null,
+    invalid_reason: anomalyReason || parsed.reason || null,
+    subagent_anomaly_type: anomaly?.type || null,
   };
 
   if (!parsed.valid) return base;

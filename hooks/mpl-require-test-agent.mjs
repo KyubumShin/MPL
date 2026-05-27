@@ -74,6 +74,7 @@ function recordBlockedHook(cwd, phaseId, reason, resumeInstruction) {
       phase_id: phaseId,
       required_agent: 'mpl-test-agent',
       override_path: '.mpl/config/test-agent-override.json',
+      schema_reminder: 'Final response must be a single fenced ```json block with no prose outside it.',
     },
   });
 }
@@ -120,13 +121,28 @@ function isLegacyArrayOnlyPassEvidence(evidence) {
 
 function describePriorEvidence(prior, phaseId) {
   if (!prior) return 'but mpl-test-agent was not dispatched';
+  const len = typeof prior.response_len === 'number' ? `, response_len=${prior.response_len}` : '';
+  const anomaly = prior.subagent_anomaly_type ? `, anomaly=${prior.subagent_anomaly_type}` : '';
   const summary = `but the recorded mpl-test-agent evidence is verdict=${prior.verdict || 'UNKNOWN'} ` +
-    `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'})`;
+    `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'}${len}${anomaly})`;
   if (!isLegacyArrayOnlyPassEvidence(prior)) return summary;
 
   return `${summary}; missing scalar count fields (${missingScalarCountFields(prior).join(', ')}) ` +
     `in a pre-v0.18.7 legacy record. Re-run mpl-test-agent for ${phaseId} so MPL records ` +
     `lossless scalar counts`;
+}
+
+function formatPriorEvidenceDetails(prior) {
+  if (!prior) return 'No prior mpl-test-agent evidence is recorded.';
+  const lines = [
+    `verdict=${prior.verdict || 'UNKNOWN'}`,
+    `valid_json=${prior.valid_json === true}`,
+    `invalid_reason=${prior.invalid_reason || 'none'}`,
+  ];
+  if (typeof prior.response_len === 'number') lines.push(`response_len=${prior.response_len}`);
+  if (prior.subagent_anomaly_type) lines.push(`subagent_anomaly_type=${prior.subagent_anomaly_type}`);
+  if (prior.response_preview) lines.push(`response_preview=${JSON.stringify(prior.response_preview)}`);
+  return lines.join('\n');
 }
 
 /**
@@ -232,10 +248,19 @@ function finalizePhase(rawPhase) {
   };
 }
 
-function formatTestAgentResumeInstruction(phase, priorDescription) {
+function formatTestAgentResumeInstruction(phase, priorDescription, priorEvidence = null) {
   const domain = phase.phase_domain || 'unknown';
   return [
     `Dispatch mpl-test-agent for ${phase.id}, then retry the blocked phase transition.`,
+    '',
+    'Prior mpl-test-agent evidence diagnostics:',
+    formatPriorEvidenceDetails(priorEvidence),
+    '',
+    'FINAL OUTPUT RULE:',
+    '- The final assistant message MUST start with ```json.',
+    '- The final assistant message MUST end with the closing ``` fence.',
+    '- Do not put prose before or after the JSON block.',
+    '- Put any human-readable summary inside JSON fields only.',
     '',
     'Use this exact recovery shape:',
     'Task(subagent_type="mpl-test-agent", model="sonnet", prompt="""',
@@ -256,6 +281,7 @@ function formatTestAgentResumeInstruction(phase, priorDescription) {
     clampSnippet(phase.verification_plan || phase.success_criteria),
     '',
     'Write and run executable tests for this phase. Return valid JSON with:',
+    '- final response starts with ```json and has no prose outside the fence',
     '- verdict: "PASS" only when all checks pass',
     '- test_results.total > 0',
     '- test_results.failed == 0 and test_results.skipped == 0',
@@ -415,7 +441,7 @@ try {
       `BEFORE proceeding to the next phase. code_author == test_author is a tautology, ` +
       `not a verification (AD-0004). To bypass with user consent, add ${phaseId} to ` +
       `.mpl/config/test-agent-override.json with a reason.`;
-  const resumeInstruction = formatTestAgentResumeInstruction(phase, missingOrBad);
+  const resumeInstruction = formatTestAgentResumeInstruction(phase, missingOrBad, prior);
   recordBlockedHook(cwd, phaseId, reason, resumeInstruction);
   block(reason);
 } catch {

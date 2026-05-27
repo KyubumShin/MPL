@@ -45,8 +45,19 @@ const { readStdin } = await import(
 const { parseTestAgentEvidence, isPassingTestAgentEvidence } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-evidence.mjs')).href
 );
+const {
+  appendSubagentReturnAnomaly,
+  detectSubagentReturnAnomaly,
+  formatSubagentAnomalyMessage,
+} = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-subagent-anomaly.mjs')).href
+);
 
-function ok() {
+function ok(systemMessage = null) {
+  if (systemMessage) {
+    console.log(JSON.stringify({ continue: true, systemMessage }));
+    return;
+  }
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
@@ -220,7 +231,7 @@ try {
 
   const toolName = String(data.tool_name || data.toolName || '');
   const toolInput = data.tool_input || data.toolInput || {};
-  const toolResponse = data.tool_response || data.toolResponse || {};
+  const toolResponse = data.tool_response ?? data.toolResponse ?? {};
 
   // Tool response may be string or object — normalize
   const exitCode =
@@ -345,16 +356,24 @@ try {
     }
 
     const patch = {};
+    const phaseIdFromPrompt = extractPhaseId(toolInput.prompt || toolInput.description || '');
+    const anomaly = detectSubagentReturnAnomaly({
+      data,
+      agentType,
+      phaseId: phaseIdFromPrompt,
+    });
+    if (anomaly) appendSubagentReturnAnomaly(cwd, anomaly);
 
     // Branch 2: test-agent dispatch record (AD-0004 empirical gap)
     if (/mpl-test-agent$/.test(agentType)) {
-      const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
+      const phaseId = phaseIdFromPrompt;
       if (phaseId) {
         const dispatched = state.test_agent_dispatched || {};
         const evidence = parseTestAgentEvidence({
           phaseId,
           prompt: toolInput.prompt || toolInput.description || '',
           response: toolResponse,
+          anomaly,
         });
         dispatched[phaseId] = evidence;
         patch.test_agent_dispatched = dispatched;
@@ -386,7 +405,7 @@ try {
     if (Object.keys(patch).length > 0) {
       writeState(cwd, patch);
     }
-    ok();
+    ok(formatSubagentAnomalyMessage(anomaly));
     process.exit(0);
   }
 
