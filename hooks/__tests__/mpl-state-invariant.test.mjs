@@ -505,6 +505,80 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
   });
 });
 
+describe('I13 fast-track Phase 0 artifacts (Exp22 R11 / #210)', () => {
+  function seedPhase0Artifacts(dir) {
+    mkdirSync(join(dir, '.mpl', 'mpl', 'phase0'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'mpl', 'phase0', 'raw-scan.md'), '# raw scan');
+    writeFileSync(join(dir, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), 'goal: test\n');
+    mkdirSync(join(dir, '.mpl', 'contracts'), { recursive: true });
+    writeFileSync(join(dir, '.mpl', 'contracts', '_no-boundaries.json'),
+      JSON.stringify({ boundary_id: '_no-boundaries' }));
+  }
+
+  it('phase2-sprint transition without Phase 0 artifacts → I13 violation lists missing files', () => {
+    const r = checkInvariants({ current_phase: 'phase2-sprint' },
+      { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING);
+    assert.ok(v);
+    assert.match(v.message, /raw-scan\.md/);
+    assert.match(v.message, /design-intent\.yaml/);
+    assert.match(v.message, /\.mpl\/contracts\/\*\.json/);
+    assert.match(v.message, /_no-boundaries\.json/);
+    assert.equal(v.phase, 'phase2-sprint');
+  });
+
+  it('phase2-sprint transition WITH all Phase 0 artifacts → silent', () => {
+    seedPhase0Artifacts(tmp);
+    const r = checkInvariants({ current_phase: 'phase2-sprint' },
+      { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING));
+  });
+
+  it('phase5-finalize / release-finalize / completed transitions are also guarded', () => {
+    for (const phase of ['phase3-gate', 'phase4-fix', 'phase5-finalize',
+                         'release-gate', 'release-finalize', 'completed']) {
+      const r = checkInvariants({ current_phase: phase },
+        { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      assert.ok(
+        r.violations.some((v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING),
+        `I13 must fire for phase=${phase} without artifacts`
+      );
+    }
+  });
+
+  it('Phase 0 itself and pre-Phase-0 lifecycle markers are exempt', () => {
+    for (const phase of ['mpl-init', 'mpl-ambiguity-resolve', 'mpl-decompose',
+                         'phase1-plan', 'phase1a-research']) {
+      const r = checkInvariants({ current_phase: phase },
+        { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      assert.ok(
+        !r.violations.some((v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING),
+        `I13 must NOT fire for phase=${phase} (Phase 0 itself produces the artifacts)`
+      );
+    }
+  });
+
+  it('contracts/_no-boundaries.json alone satisfies the contracts requirement (simple/non-boundary tasks)', () => {
+    // Operator opted out of cross-layer boundaries by writing only _no-boundaries.json.
+    mkdirSync(join(tmp, '.mpl', 'mpl', 'phase0'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'phase0', 'raw-scan.md'), '# raw scan');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), 'goal: simple\n');
+    mkdirSync(join(tmp, '.mpl', 'contracts'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'contracts', '_no-boundaries.json'), '{}');
+    const r = checkInvariants({ current_phase: 'phase2-sprint' },
+      { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING));
+  });
+
+  it('STOP trigger is not the right surface — only STATE_WRITE fires this', () => {
+    // Phase-controller's Stop logic is the legitimate transition writer.
+    // I13 fires on the state-write BEFORE the transition lands.
+    const r = checkInvariants({ current_phase: 'phase2-sprint' },
+      { cwd: tmp, trigger: TRIGGERS.STOP });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING));
+  });
+});
+
 describe('I7 current_phase folder lifecycle', () => {
   it('flags missing folder for concrete phase id', () => {
     const r = checkInvariants({ current_phase: 'phase-7' }, { cwd: tmp });
@@ -825,9 +899,17 @@ describe('mpl-state-invariant hook integration', () => {
 
   it('Write that ADDS structured evidence (clean transition) → silent, no I6', () => {
     // Inverse case: a Write that introduces structured evidence to a state
-    // that previously had none should NOT surface I6 (or I12).
+    // that previously had none should NOT surface I6 (or I12, or I13).
     const stateJsonPath = join(tmp, '.mpl', 'state.json');
     const ent = (cmd, e) => ({ command: cmd, exit_code: e, stdout_tail: '', timestamp: 'now' });
+    // Seed Phase 0 artifacts so I13 doesn't trip on the phase3-gate
+    // transition (#210).
+    mkdirSync(join(tmp, '.mpl', 'mpl', 'phase0'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'phase0', 'raw-scan.md'), '# raw scan');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), 'goal: test\n');
+    mkdirSync(join(tmp, '.mpl', 'contracts'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'contracts', '_no-boundaries.json'),
+      JSON.stringify({ boundary_id: '_no-boundaries' }));
     writeFileSync(stateJsonPath, JSON.stringify({
       schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',

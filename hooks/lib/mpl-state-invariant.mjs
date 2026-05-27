@@ -62,6 +62,11 @@ export const VIOLATION_IDS = Object.freeze({
   // H1, test for H2, e2e/contract for H3). Manual state.json patches
   // putting `git commit` into hard2_coverage are rejected here.
   GATE_COMMAND_FAMILY_MISMATCH: 'I12',
+  // Exp22 R11 / #210: a transition into phase2-sprint or later must
+  // not happen until the Phase 0 boundary/runtime artifacts exist.
+  // Fast-track (run_mode=auto) makes this especially important because
+  // user review is reduced.
+  FAST_TRACK_PHASE0_ARTIFACTS_MISSING: 'I13',
 });
 
 const ACTIVE_PHASES = new Set([
@@ -398,6 +403,63 @@ function checkGateFamilyForBlock(block, label) {
   return issues;
 }
 
+// Phases where the Phase-0 boundary/runtime artifacts MUST already
+// exist before the orchestrator transitions in. Phase 0 itself, the
+// decomposer, and ambiguity-resolve are exempt — that's where these
+// artifacts get produced. Anything from phase1b-plan onward must wait
+// for them to land.
+const REQUIRES_PHASE0_ARTIFACTS = new Set([
+  'phase1b-plan',
+  'phase2-sprint',
+  'phase3-gate',
+  'phase4-fix',
+  'phase5-finalize',
+  'release-gate',
+  'release-finalize',
+  'completed',
+]);
+
+function listDirSafe(dir) {
+  try { return existsSync(dir) ? readdirSync(dir) : []; } catch { return []; }
+}
+
+function checkI13(state, cwd, trigger) {
+  // Exp22 R11 / #210: a fast-track run that skipped user interviews
+  // must not also skip the boundary/runtime artifacts. Fire on
+  // STATE_WRITE so a transition write into phase1b-plan / phase2-sprint
+  // / phase3-gate / ... cannot land without the required artifacts.
+  if (trigger !== TRIGGERS.STATE_WRITE) return null;
+  const phase = state?.current_phase;
+  if (!phase || !REQUIRES_PHASE0_ARTIFACTS.has(phase)) return null;
+
+  const missing = [];
+  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'))) {
+    missing.push('.mpl/mpl/phase0/raw-scan.md');
+  }
+  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'))) {
+    missing.push('.mpl/mpl/phase0/design-intent.yaml');
+  }
+  // Contracts requirement: at least one .json file in `.mpl/contracts/`.
+  // The decomposer writes `_no-boundaries.json` when the project has no
+  // cross-layer boundary, so simple/non-boundary tasks still satisfy
+  // this without forcing irrelevant contract files.
+  const contractsDir = join(cwd, '.mpl', 'contracts');
+  const contractFiles = listDirSafe(contractsDir).filter((n) => n.endsWith('.json'));
+  if (contractFiles.length === 0) {
+    missing.push('.mpl/contracts/*.json (or _no-boundaries.json)');
+  }
+
+  if (missing.length === 0) return null;
+  return v(VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING,
+    `Phase ${phase} cannot start without the Phase 0 boundary/runtime artifacts. ` +
+      `Missing: ${missing.join(', ')}. ` +
+      `Fast-track (run_mode=auto) may shorten user interviews but MUST NOT skip ` +
+      `boundary/runtime evidence. Re-run Phase 0 to produce the missing artifacts, ` +
+      `or write '_no-boundaries.json' under .mpl/contracts/ as the explicit ` +
+      `opt-out for non-boundary tasks.`,
+    { phase, missing });
+}
+
 function checkI12(state, trigger) {
   // Exp22 R13 / #209. Surface on STATE_WRITE so manual patches that try
   // to land malformed evidence are caught at the write boundary.
@@ -448,6 +510,7 @@ export function checkInvariants(state, opts = {}) {
     () => checkI10(state),
     () => checkI11(state),
     () => checkI12(state, trigger),
+    () => checkI13(state, cwd, trigger),
   ];
 
   const violations = [];
