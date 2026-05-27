@@ -237,6 +237,106 @@ describe('I6 phase3-gate state-write missing structured evidence', () => {
   });
 });
 
+describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
+  function gateEntry(command) {
+    return { command, exit_code: 0, stdout_tail: '', timestamp: 'now' };
+  }
+
+  it('valid Hard 1/2/3 commands → no violation', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard1_baseline: gateEntry('npm run build'),
+        hard2_coverage: gateEntry('npm test'),
+        hard3_resilience: gateEntry('npx playwright test'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('git commit in hard2_coverage → violation names offending key+command', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard2_coverage: gateEntry('git commit -m "tests done"'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v, 'violation must fire');
+    assert.match(v.message, /state\.gate_results\.hard2_coverage/);
+    assert.match(v.message, /git commit/);
+    assert.equal(v.mismatches[0].gate, 'state.gate_results.hard2_coverage');
+    assert.equal(v.mismatches[0].expected_family, 'hard2_coverage');
+  });
+
+  it('git commit in hard3_resilience → violation', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard3_resilience: gateEntry('git commit -m "e2e"'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v);
+    assert.match(v.message, /hard3_resilience/);
+  });
+
+  it('release-scoped state.release.gate_results is also checked', () => {
+    const r = checkInvariants({
+      release: {
+        gate_results: {
+          hard2_coverage: gateEntry('echo done'),
+        },
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v);
+    assert.match(v.message, /state\.release\.gate_results\.hard2_coverage/);
+  });
+
+  it('legacy booleans true with invalid structured command still blocks', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard1_passed: true,
+        hard2_passed: true,
+        hard3_passed: true,
+        hard1_baseline: gateEntry('git commit'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('wrong-family classified command also blocks (build in hard2 slot)', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard2_coverage: gateEntry('npm run build'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v);
+    assert.equal(v.mismatches[0].classified_as, 'hard1_baseline');
+    assert.equal(v.mismatches[0].expected_family, 'hard2_coverage');
+  });
+
+  it('STOP trigger → not checked (state-write boundary only)', () => {
+    const r = checkInvariants({
+      gate_results: { hard2_coverage: gateEntry('git commit') },
+    }, { cwd: tmp, trigger: TRIGGERS.STOP });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('null entry → not flagged', () => {
+    const r = checkInvariants({
+      gate_results: { hard2_coverage: null },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('entry without command → not flagged', () => {
+    const r = checkInvariants({
+      gate_results: { hard2_coverage: { exit_code: 0 } },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+});
+
 describe('I7 current_phase folder lifecycle', () => {
   it('flags missing folder for concrete phase id', () => {
     const r = checkInvariants({ current_phase: 'phase-7' }, { cwd: tmp });
@@ -557,9 +657,9 @@ describe('mpl-state-invariant hook integration', () => {
 
   it('Write that ADDS structured evidence (clean transition) → silent, no I6', () => {
     // Inverse case: a Write that introduces structured evidence to a state
-    // that previously had none should NOT surface I6.
+    // that previously had none should NOT surface I6 (or I12).
     const stateJsonPath = join(tmp, '.mpl', 'state.json');
-    const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    const ent = (cmd, e) => ({ command: cmd, exit_code: e, stdout_tail: '', timestamp: 'now' });
     writeFileSync(stateJsonPath, JSON.stringify({
       schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
@@ -569,9 +669,9 @@ describe('mpl-state-invariant hook integration', () => {
       schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: {
-        hard1_baseline: ent(0),
-        hard2_coverage: ent(0),
-        hard3_resilience: ent(0),
+        hard1_baseline: ent('npm run build', 0),
+        hard2_coverage: ent('npm test', 0),
+        hard3_resilience: ent('npx playwright test', 0),
       },
     };
     const stdin = JSON.stringify({

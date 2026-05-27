@@ -55,6 +55,9 @@ const {
 const { buildBlockedHookPatch } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
 );
+const { classifyGateCommand } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-gate-classify.mjs')).href
+);
 
 function ok(systemMessage = null) {
   if (systemMessage) {
@@ -72,57 +75,16 @@ function ok(systemMessage = null) {
  *   hard2_coverage  — unit/integration test commands
  *   hard3_resilience — e2e/playwright/contract/a11y test commands
  *
+ * The actual pattern lists live in hooks/lib/mpl-gate-classify.mjs so the
+ * state-invariant (I12) can apply the SAME family check on proposed
+ * manual writes to state.gate_results.
+ *
  * Users can override by putting a `.mpl/verify.sh` that emits exit codes tagged
  * via the `MPL_GATE=<name>` environment variable; this heuristic is the fallback
  * when no verify.sh is in use.
  */
-function classifyGate(command) {
-  if (typeof command !== 'string' || !command.trim()) return null;
-  const c = command.trim().toLowerCase();
-
-  const hard3Patterns = [
-    /\bplaywright\b/,
-    /\bcypress\b/,
-    /\be2e\b/,
-    /\bcontract\b/,
-    /jest.*\be2e\b/,
-    /wdio/,
-  ];
-  if (hard3Patterns.some((re) => re.test(c))) return 'hard3_resilience';
-
-  const hard2Patterns = [
-    /\bpnpm\s+(run\s+)?test\b/,
-    /\bnpm\s+(run\s+)?test\b/,
-    /\byarn\s+(run\s+)?test\b/,
-    /\bvitest\b/,
-    /\bjest\b/,
-    /\bcargo\s+test\b/,
-    /\bpytest\b/,
-    /\bgo\s+test\b/,
-    /\bmocha\b/,
-  ];
-  if (hard2Patterns.some((re) => re.test(c))) return 'hard2_coverage';
-
-  const hard1Patterns = [
-    /\bpnpm\s+(run\s+)?lint\b/,
-    /\bnpm\s+(run\s+)?lint\b/,
-    /\bpnpm\s+(run\s+)?build\b/,
-    /\bnpm\s+(run\s+)?build\b/,
-    /\bpnpm\s+(run\s+)?typecheck\b/,
-    /\btsc\b/,
-    /\beslint\b/,
-    /\bcargo\s+clippy\b/,
-    /\bcargo\s+build\b/,
-    /\bcargo\s+check\b/,
-    /\bruff\b/,
-    /\bmypy\b/,
-    /\bgo\s+build\b/,
-    /\bgo\s+vet\b/,
-  ];
-  if (hard1Patterns.some((re) => re.test(c))) return 'hard1_baseline';
-
-  return null;
-}
+// Re-exported as classifyGateCommand from hooks/lib/mpl-gate-classify.mjs.
+const classifyGate = (command) => classifyGateCommand(command);
 
 function tailOf(text, n = 500) {
   const s = typeof text === 'string' ? text : JSON.stringify(text || '');
