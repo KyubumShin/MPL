@@ -31,6 +31,10 @@ describe('execution_tiers observability contract', () => {
         `record_scheduler_event block missing run_started_at:\n${block}`);
       assert.match(block, /recompose_count/,
         `record_scheduler_event block missing recompose_count:\n${block}`);
+      assert.match(block, /wave_index/,
+        `record_scheduler_event block missing wave_index:\n${block}`);
+      assert.match(block, /timestamp: now_iso\(\)/,
+        `record_scheduler_event block missing timestamp:\n${block}`);
       assert.match(block, /worker_cap/,
         `record_scheduler_event block missing worker_cap:\n${block}`);
       assert.match(block, /worktree_slots/,

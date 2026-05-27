@@ -25,6 +25,7 @@
     "waves_parallel_failed": 0,
     "tiers_with_partial_rejection": [],
     "rejection_reasons": [],
+    "affected_tier_ids": [],
     "no_parallel_explanation": null
   }
 }

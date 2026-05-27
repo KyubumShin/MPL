@@ -230,10 +230,14 @@ execution_tiers:
   // current-run scope keys (pipeline_id, run_started_at, recompose_count)
   // so the aggregator includes it.
   function writeSchedulerEvents(events) {
-    const stamped = events.map((e) => ({
+    const stamped = events.map((e, i) => ({
       pipeline_id: TEST_PIPELINE_ID,
       run_started_at: TEST_STARTED_AT,
       recompose_count: 0,
+      wave_index: i,
+      // Distinct ISO timestamps so the dedupe key cannot collapse
+      // multiple events sharing the same coarse time.
+      timestamp: `2026-05-27T00:00:${String(10 + i).padStart(2, '0')}.000Z`,
       ...e,
     }));
     // patch state.phase_scheduler_history
@@ -263,7 +267,8 @@ execution_tiers:
     // Real evidence: a parallel_rejected event for tier 1 (planning could
     // not split into a parallel wave). The hook recomputes from this.
     writeSchedulerEvents([
-      { tier: 1, selected_mode: 'parallel_rejected', timestamp: '2026-05-27T00:00:01Z' },
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
     ]);
     writeSummaryScheduler({
       tiers_total: 1,
@@ -473,6 +478,96 @@ execution_tiers:
     const r = runHook();
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /scheduler:decomposition_execution_tiers_unparseable/);
+  });
+
+  it('preserves two same-tier rejected waves through dedupe via wave_index', () => {
+    // Codex round-12 review on PR #213: dedupe-by-timestamp let same-tier
+    // rejected waves collapse onto one event. wave_index is the per-tier
+    // counter that guarantees distinct dedupe keys.
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-2': ['resource_lock'] } },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 2,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap', 'resource_lock'],
+      no_parallel_explanation: 'tier 1: both waves rejected by file_overlap and resource_lock; fell back to sequential',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
+  it('blocks finalize when no_parallel_explanation is non-empty but fails to reference the affected tier ids', () => {
+    // Codex round-12 review on PR #213: a non-empty string is not enough.
+    // The explanation must name each affected tier id by number so an
+    // operator can find which tiers lost parallelism.
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers:
+  - tier: 5
+    phases: [phase-1, phase-2]
+    parallel: true
+`);
+    writeSchedulerEvents([
+      { tier: 5, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      no_parallel_explanation: 'n/a',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:no_parallel_explanation_missing_tier_refs:\[5\]/);
+  });
+
+  it('blocks finalize when summary.scheduler.rejection_reasons disagrees with the computed set', () => {
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['something_unrelated'],   // drift
+      no_parallel_explanation: 'tier 1 rejected',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:rejection_reasons_mismatch/);
+    assert.match(r.reason, /file_overlap/);
+    assert.match(r.reason, /something_unrelated/);
   });
 
   it('does not enforce the scheduler MUST when decomposition declares no parallel tier', () => {

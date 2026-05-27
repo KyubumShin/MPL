@@ -814,7 +814,11 @@ scheduler = {
   tiers_with_partial_rejection: <list of tier ids>,
   rejection_reasons: union of event.rejection_reasons and the values of
                      event.rejection_reasons_by_phase across all events
-                     (deduplicated),
+                     (deduplicated), plus event.failure_reason values for
+                     parallel_failed waves,
+  affected_tier_ids: sorted list of expected_parallel_tiers that did not
+                     reach selected_mode == "parallel", that the
+                     no_parallel_explanation MUST reference by id,
   no_parallel_explanation: required (non-null) when
     tiers_parallel_requested > 0 AND
     (tiers_parallel_executed < tiers_parallel_requested OR

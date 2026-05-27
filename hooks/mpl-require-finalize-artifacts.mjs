@@ -227,10 +227,42 @@ function schedulerExplanationMissing(cwd, state) {
     }
   }
 
+  // rejection_reasons set must match what we observed in events.
+  const computedReasons = [...(computed.rejection_reasons || [])].sort();
+  const summaryReasons = Array.isArray(sched.rejection_reasons)
+    ? [...sched.rejection_reasons].filter((r) => typeof r === 'string' && r).sort()
+    : null;
+  if (summaryReasons === null) {
+    return 'scheduler:rejection_reasons_not_array_in_summary';
+  }
+  // Set equality (order-independent, deduplicated).
+  const computedReasonSet = new Set(computedReasons);
+  const summaryReasonSet = new Set(summaryReasons);
+  const reasonsMatch =
+    computedReasonSet.size === summaryReasonSet.size &&
+    [...computedReasonSet].every((r) => summaryReasonSet.has(r));
+  if (!reasonsMatch) {
+    return `scheduler:rejection_reasons_mismatch:computed=[${[...computedReasonSet].sort().join(',')}],summary=[${[...summaryReasonSet].sort().join(',')}]`;
+  }
+
   const explanation = sched.no_parallel_explanation;
   const explanationFilled = typeof explanation === 'string' && explanation.trim().length > 0;
   if (explanationRequiredFromAggregate(computed) && !explanationFilled) {
     return 'scheduler:no_parallel_explanation_required_but_missing';
+  }
+  // The explanation must reference each affected tier id by number, so an
+  // operator reading the summary can find which tiers lost parallelism.
+  // `n/a`-style placeholders fail this check.
+  if (explanationFilled && Array.isArray(computed.affected_tier_ids) && computed.affected_tier_ids.length > 0) {
+    const missingMentions = computed.affected_tier_ids.filter((tid) => {
+      // Match the tier id as a standalone integer (not embedded in another
+      // number). Accept both "tier 1" and bare "1" anywhere in the text.
+      const re = new RegExp(`(^|[^\\d])${tid}(?=[^\\d]|$)`);
+      return !re.test(explanation);
+    });
+    if (missingMentions.length > 0) {
+      return `scheduler:no_parallel_explanation_missing_tier_refs:[${missingMentions.join(',')}]`;
+    }
   }
   return null;
 }

@@ -47,6 +47,8 @@ if phase_ids.length == 0:
     run_started_at: state.started_at,
     recompose_count: decomposition.recompose_count,
     tier: tier.tier,
+    wave_index: 0,
+    timestamp: now_iso(),
     phases: tier.phases,
     selected_mode: "skipped",
     parallel_requested: tier.parallel == true,
@@ -62,6 +64,8 @@ if tier.parallel != true or phase_ids.length == 1:
     run_started_at: state.started_at,
     recompose_count: decomposition.recompose_count,
     tier: tier.tier,
+    wave_index: 0,
+    timestamp: now_iso(),
     phases: phase_ids,
     selected_mode: "sequential",
     parallel_requested: tier.parallel == true,
@@ -79,7 +83,7 @@ waves = split_into_conflict_free_waves(phase_ids, rules:
   - every interface_contract.requires[].from_phase is already completed or in an earlier tier
 )
 
-for each wave in waves:
+for each (wave, wave_index) in enumerate(waves):
   announce: "[MPL] Tier {tier.tier}: executing {wave.length} phase(s) with max {max_phase_workers} workers"
 
   ready_but_blocked = phase_ids - wave when blocked by file overlap, resource lock, or dependency frontier
@@ -94,6 +98,8 @@ for each wave in waves:
       run_started_at: state.started_at,
       recompose_count: decomposition.recompose_count,
       tier: tier.tier,
+      wave_index: wave_index,
+      timestamp: now_iso(),
       phases: phase_ids,
       wave,
       selected_mode: "parallel_rejected",
@@ -137,6 +143,8 @@ for each wave in waves:
       run_started_at: state.started_at,
       recompose_count: decomposition.recompose_count,
       tier: tier.tier,
+      wave_index: wave_index,
+      timestamp: now_iso(),
       phases: phase_ids,
       wave,
       selected_mode: "parallel",
@@ -154,6 +162,8 @@ for each wave in waves:
       run_started_at: state.started_at,
       recompose_count: decomposition.recompose_count,
       tier: tier.tier,
+      wave_index: wave_index,
+      timestamp: now_iso(),
       phases: phase_ids,
       wave,
       selected_mode: "parallel_failed",
@@ -211,8 +221,14 @@ unique per-run scope key is `state.started_at` (ISO timestamp set once at
   recompose. Without this key, a stale parallel event for tier N
   pre-recompose could satisfy the post-recompose tier N. Finalizer
   filters on this too.)
-- `timestamp` (event emission time; distinct from `run_started_at`)
 - `tier`
+- `wave_index` (per-tier wave counter, 0 for the skipped/sequential
+  branches and the zero-based wave index inside the `for each wave`
+  loop. Required so two same-tier `parallel_rejected` or
+  `parallel_failed` events do not collapse on the dedupe key.)
+- `timestamp` (ISO event-emission time; distinct from `run_started_at`.
+  Always set via `now_iso()` so two events emitted in the same
+  millisecond still differ when combined with `wave_index`.)
 - `phases`
 - `parallel_requested`
 - `selected_mode`: `skipped | sequential | parallel | parallel_rejected |

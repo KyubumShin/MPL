@@ -132,7 +132,18 @@ function readJsonl(cwd) {
 }
 
 function eventKey(e) {
-  return `${e?.pipeline_id ?? ''}|${e?.run_started_at ?? ''}|${e?.recompose_count ?? ''}|${e?.tier ?? ''}|${e?.timestamp ?? ''}|${e?.selected_mode ?? ''}`;
+  // wave_index is the per-tier wave counter and prevents two same-tier
+  // rejected/failed waves from collapsing onto the same dedupe key when
+  // the timestamps happen to share the same coarse value.
+  return [
+    e?.pipeline_id ?? '',
+    e?.run_started_at ?? '',
+    e?.recompose_count ?? '',
+    e?.tier ?? '',
+    e?.wave_index ?? '',
+    e?.timestamp ?? '',
+    e?.selected_mode ?? '',
+  ].join('|');
 }
 
 /**
@@ -188,8 +199,25 @@ export function aggregateScheduler(cwd, state) {
   const tiersWithParallelEvent = new Set();
   const tiersWithRejectedEvent = new Set();
   const tiersSeen = new Set();
+  const rejectionReasonSet = new Set();
   let wavesParallelRejected = 0;
   let wavesParallelFailed = 0;
+
+  function collectRejectionReasons(e) {
+    if (Array.isArray(e?.rejection_reasons)) {
+      for (const r of e.rejection_reasons) if (typeof r === 'string' && r) rejectionReasonSet.add(r);
+    }
+    const byPhase = e?.rejection_reasons_by_phase;
+    if (byPhase && typeof byPhase === 'object') {
+      for (const v of Object.values(byPhase)) {
+        if (typeof v === 'string' && v) rejectionReasonSet.add(v);
+        else if (Array.isArray(v)) for (const r of v) if (typeof r === 'string' && r) rejectionReasonSet.add(r);
+      }
+    }
+    if (typeof e?.failure_reason === 'string' && e.failure_reason) {
+      rejectionReasonSet.add(e.failure_reason);
+    }
+  }
 
   for (const e of events) {
     tiersSeen.add(Number(e.tier));
@@ -197,8 +225,12 @@ export function aggregateScheduler(cwd, state) {
     if (e.selected_mode === 'parallel_rejected') {
       tiersWithRejectedEvent.add(Number(e.tier));
       wavesParallelRejected += 1;
+      collectRejectionReasons(e);
     }
-    if (e.selected_mode === 'parallel_failed') wavesParallelFailed += 1;
+    if (e.selected_mode === 'parallel_failed') {
+      wavesParallelFailed += 1;
+      collectRejectionReasons(e);
+    }
   }
 
   const tiersParallelExecuted = [...expectedParallel].filter((t) =>
@@ -211,6 +243,18 @@ export function aggregateScheduler(cwd, state) {
     tiersWithParallelEvent.has(t) && tiersWithRejectedEvent.has(t)
   );
 
+  // Tiers for which the run-summary's no_parallel_explanation MUST name an
+  // affected tier id. The union of: missing telemetry, partial rejection,
+  // and any expected parallel tier where the only event(s) were rejected or
+  // failed (no successful parallel event).
+  const affectedTierSet = new Set();
+  for (const t of tiersWithMissingTelemetry) affectedTierSet.add(t);
+  for (const t of tiersWithPartialRejection) affectedTierSet.add(t);
+  for (const t of expectedParallel) {
+    if (!tiersWithParallelEvent.has(t) && tiersSeen.has(t)) affectedTierSet.add(t);
+  }
+  const affected_tier_ids = [...affectedTierSet].sort((a, b) => a - b);
+
   return {
     tiers_total: decomp.tiers.length,
     tiers_parallel_requested: expectedParallel.size,
@@ -220,6 +264,8 @@ export function aggregateScheduler(cwd, state) {
     waves_parallel_rejected: wavesParallelRejected,
     waves_parallel_failed: wavesParallelFailed,
     tiers_with_partial_rejection: tiersWithPartialRejection,
+    rejection_reasons: [...rejectionReasonSet].sort(),
+    affected_tier_ids,
   };
 }
 
