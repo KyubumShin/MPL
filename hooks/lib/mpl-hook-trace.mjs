@@ -174,15 +174,16 @@ export function traceHookChain({
   const category = pathCategory(resolvedTarget);
   const rows = [];
 
-  // Codex r4 on PR #216: when there is an active blocked_hook envelope
-  // that matches the queried target, the offending hook MUST appear in
-  // the trace regardless of the category/matcher filter — otherwise a
-  // valid block on e.g. `state.test_agent_dispatched.<phase>` (not a
-  // decomposition path) would have `mpl-require-test-agent` filtered out
-  // and never reach blockStatusFor.
+  // Codex r4/r5 on PR #216: when there is an active blocked_hook envelope
+  // that names the queried target, the offending hook MUST appear in the
+  // trace regardless of the category/matcher filter AND regardless of
+  // whether the envelope is complete. blockStatusFor decides between
+  // currently_blocking (complete envelope) and invalid_blocked_envelope
+  // (stale/corrupt envelope); both diagnoses are useful and either is
+  // better than silently filtering out the hook that is actually keeping
+  // the run blocked.
   const activeBlockHookId = activeState
     && activeState.session_status === 'blocked_hook'
-    && missingBlockedHookFields(activeState).length === 0
     ? String(activeState.blocked_by_hook || '').trim()
     : null;
   const activeBlockArtifact = activeBlockHookId

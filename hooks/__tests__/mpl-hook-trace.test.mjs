@@ -129,6 +129,36 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('surfaces a stale/invalid block on a non-decomposition path as invalid_blocked_envelope (does not silently filter)', () => {
+    // Codex r5 on PR #216: a stale envelope (missing retry_context etc.)
+    // pointing at state.test_agent_dispatched.<phase> would otherwise be
+    // filtered out by the category check and disappear from the trace.
+    // The offending hook id is still meaningful to the operator and must
+    // appear, just with an invalid_blocked_envelope status.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-stale-task-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_artifact: 'state.test_agent_dispatched.phase-1',
+        // retry_context, block_code, blocked_at intentionally absent
+      }));
+      const trace = traceHookChain({
+        targetPath: 'state.test_agent_dispatched.phase-1',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+      assert.ok(row, 'mpl-require-test-agent must appear even with a stale envelope');
+      assert.equal(row.status, 'invalid_blocked_envelope');
+      assert.match(formatHookTrace(trace), /INVALID_BLOCKED_ENVELOPE/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('always includes the blocked_by_hook entry for an active block, even when the path category would filter it out', () => {
     // Codex r4 on PR #216: a valid mpl-require-test-agent block records
     // blocked_artifact as `state.test_agent_dispatched.<phase>`, which the
