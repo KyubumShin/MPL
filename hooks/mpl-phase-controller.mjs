@@ -678,6 +678,8 @@ async function main() {
         // Budget remaining → route back to phase2-sprint. Reset scoped
         // evidence on retry so mpl-gate-recorder writes fresh exits on
         // the next attempt (same pattern as phase3-gate FAIL path).
+        // codex r3 on PR #222: protect this composite writeState too.
+        if (emitPhase0BlockIfNeeded(cwd, 'phase2-sprint')) return;
         writeState(cwd, {
           current_phase: 'phase2-sprint',
           release: {
@@ -993,6 +995,12 @@ async function main() {
         // Preserve existing fix_loop_count to prevent infinite loop bypass
         // (only initialize to 0 on first entry, not on re-entry from Phase 3)
         const currentFixCount = state.fix_loop_count || 0;
+        // codex r3 on PR #222: composite writeState into a protected phase
+        // needs the Phase 0 artifact guard too — without it, a gate-failure
+        // transition would not only advance into phase4-fix unprotected
+        // but also nuke the recorded failure evidence (the gate_results
+        // reset below).
+        if (emitPhase0BlockIfNeeded(cwd, 'phase4-fix')) return;
         // Reset both legacy and structured gate evidence on retry to prevent stale data.
         writeState(cwd, {
           current_phase: 'phase4-fix',

@@ -510,6 +510,27 @@ describe('I13 phase0 artifacts gate the controller transition (Exp22 R11 / #210)
     assert.equal(state.current_phase, 'completed');
   });
 
+  it('phase3-gate FAIL → phase4-fix is blocked when artifacts missing (codex r3 [data-integrity])', () => {
+    // codex r3 on PR #222: the gate-failure composite writeState writes
+    // current_phase: 'phase4-fix' along with clearing gate_results. If
+    // artifacts are missing, the guard must short-circuit BEFORE the
+    // gate-evidence reset — otherwise failed evidence gets wiped.
+    const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    const out = runStopHook(tmpDir, {
+      current_phase: 'phase3-gate',
+      gate_results: {
+        hard1_baseline: ent(0), hard2_coverage: ent(1), hard3_resilience: ent(0),
+      },
+    }, { skipPhase0Seed: true });
+    assert.match(out.stopReason, /\[MPL I13\] Cannot transition to phase4-fix/);
+    const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.current_phase, 'phase3-gate',
+      'controller MUST NOT advance to phase4-fix when Phase 0 artifacts are missing');
+    // Failure evidence MUST be preserved — guard short-circuits before the reset.
+    assert.equal(state.gate_results.hard2_coverage.exit_code, 1,
+      'recorded failure evidence MUST be preserved when transition is blocked');
+  });
+
   it('phase1a-research → phase1b-plan transition lands when Phase 0 artifacts are present', () => {
     const out = runStopHook(tmpDir, {
       current_phase: 'phase1a-research',
