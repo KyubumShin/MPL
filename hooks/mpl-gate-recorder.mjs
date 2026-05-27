@@ -55,7 +55,7 @@ const {
 const { buildBlockedHookPatch } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
 );
-const { classifyGateCommand } = await import(
+const { classifyRecordedCommand } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-gate-classify.mjs')).href
 );
 
@@ -83,8 +83,13 @@ function ok(systemMessage = null) {
  * via the `MPL_GATE=<name>` environment variable; this heuristic is the fallback
  * when no verify.sh is in use.
  */
-// Re-exported as classifyGateCommand from hooks/lib/mpl-gate-classify.mjs.
-const classifyGate = (command) => classifyGateCommand(command);
+// Re-exported as classifyRecordedCommand from hooks/lib/mpl-gate-classify.mjs.
+// Recorder path uses the LOOSE classifier (no head denylist) so legitimate
+// execution wrappers (`docker compose run app npm test`, `kubectl exec ...
+// npm test`, `bash -lc "playwright test"`) still record coverage evidence
+// — codex r6 on PR #219 regression. The strict denylist applies only to
+// manual `state.gate_results` writes via the I12 invariant.
+const classifyGate = (command) => classifyRecordedCommand(command);
 
 function tailOf(text, n = 500) {
   const s = typeof text === 'string' ? text : JSON.stringify(text || '');

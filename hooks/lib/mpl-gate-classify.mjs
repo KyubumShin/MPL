@@ -139,15 +139,46 @@ function extractCommandHead(command) {
   return '';
 }
 
+/**
+ * Strict classifier — used by the I12 state-invariant on manual
+ * `state.gate_results` writes. Rejects head-denylisted, empty-head, and
+ * wrapper-with-flag forms (codex r1/r3/r4/r5 on PR #219).
+ *
+ * Recorder events should NOT use this — they need to accept legitimate
+ * execution wrappers (`docker compose run app npm test`, `kubectl exec
+ * pod -- npm test`, `bash -lc "npm test"`) that the strict path denies.
+ * Codex r6 on PR #219 caught the recorder regression. Use
+ * `classifyRecordedCommand` for that path.
+ */
 export function classifyGateCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
   const head = extractCommandHead(command);
-  // Fail closed if extractCommandHead couldn't resolve a real head —
-  // either nothing significant was found OR it explicitly returned ''
-  // to signal a wrapper-with-flag form (codex r5). Empty head must
-  // NOT fall through to the full-string family regex.
   if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
+  return matchFamilyRegex(command);
+}
+
+/**
+ * Loose classifier — used by `mpl-gate-recorder` on real Bash
+ * PostToolUse events. Matches family regexes against the full command
+ * regardless of head. Recovers the pre-refactor behavior of the
+ * recorder: a `docker compose run app npm test` invocation records as
+ * hard2_coverage; a `bash -lc "npx playwright test"` records as
+ * hard3_resilience. Commands that mention no family keyword at all
+ * (e.g. `git commit`) still classify as null — the recorder didn't
+ * record those either, so no regression.
+ *
+ * The strict head-denylist intentionally does NOT apply here because
+ * an operator running a real test inside a wrapper is legitimate
+ * coverage evidence; the strict denylist exists only to stop manual
+ * `state.json` patches from masquerading as evidence.
+ */
+export function classifyRecordedCommand(command) {
+  if (typeof command !== 'string' || !command.trim()) return null;
+  return matchFamilyRegex(command);
+}
+
+function matchFamilyRegex(command) {
   const c = command.trim().toLowerCase();
   if (HARD3_PATTERNS.some((re) => re.test(c))) return 'hard3_resilience';
   if (HARD2_PATTERNS.some((re) => re.test(c))) return 'hard2_coverage';
