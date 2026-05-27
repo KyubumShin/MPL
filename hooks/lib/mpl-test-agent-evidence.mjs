@@ -75,14 +75,16 @@ function hasTextBearingField(obj) {
 }
 
 function parseResponseJson(responseText) {
-  // Already-parsed test-agent body — accept directly.
-  if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)
-      && (responseText.test_results || responseText.phase_id)) {
-    return { valid: true, value: responseText };
-  }
-  // Object payload that carries neither a recognized test-agent field nor
-  // any text-bearing wrapper key is structurally malformed for this hook.
-  // Preserve the historical reason so resume diagnostics keep their label.
+  // Codex r2 on PR #218: a bare object with test_results/phase_id used to
+  // bypass strict-fence enforcement, contradicting the new final-output
+  // contract. The Task tool never produces an already-parsed body; the
+  // test-agent emits a string carrying a fenced JSON block. Route every
+  // payload through extractTextFromResponse + strictFencedJsonCandidate.
+  //
+  // Object payload with no text-bearing wrapper key (no content/output/
+  // response/text in string or array form) is structurally malformed —
+  // preserve the historical reason 'missing_test_agent_fields' so the
+  // resume diagnostics keep their label.
   if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)
       && !hasTextBearingField(responseText)) {
     return { valid: false, value: null, reason: 'missing_test_agent_fields' };

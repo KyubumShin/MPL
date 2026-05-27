@@ -360,6 +360,29 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     assert.equal(ev.invalid_reason, 'prose_outside_json_fence');
   });
 
+  it('rejects bare objects bypassing strict-fence even with test-agent fields (codex r2)', () => {
+    // Codex r2 on PR #218: a bare object with test_results/phase_id used
+    // to short-circuit and become valid PASS evidence, defeating the new
+    // strict-fence rule. All payloads must pass through text extraction
+    // and the fenced-JSON gate.
+    const bareObject = {
+      phase_id: 'phase-1',
+      verdict: 'PASS',
+      test_results: { total: 1, passed: 1, failed: 0, skipped: 0, pass_rate: 100 },
+      test_files_created: ['tests/phase-1.test.ts'],
+      commands_run: [{ command: 'npm test', exit_code: 0 }],
+      bugs_found: [],
+    };
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: bareObject,
+    });
+    assert.equal(ev.valid_json, false);
+    assert.equal(ev.verdict, 'INVALID');
+    assert.equal(ev.invalid_reason, 'missing_test_agent_fields');
+    assert.equal(isPassingTestAgentEvidence(ev), false);
+  });
+
   it('rejects bare JSON (no fence) with missing_json_block (codex r1)', () => {
     const bare = JSON.stringify({ phase_id: 'phase-1', verdict: 'PASS' });
     const ev = parseTestAgentEvidence({
