@@ -74,10 +74,12 @@ const NON_GATE_HEAD_COMMANDS = new Set([
 const COMMAND_PREFIX_TOKENS = new Set(['sudo', 'time', 'nice', 'env', 'exec']);
 
 function extractCommandHead(command) {
-  // First, strip the command up to the first real shell word. We don't
-  // try to parse full shell syntax — just enough to find the head
-  // program name. Leading env-var assignments (FOO=bar npm test) and
-  // common prefix tokens (sudo, time) are skipped.
+  // Find the head program after skipping env-var assignments
+  // (FOO=bar npm test) and common prefix tokens (sudo, time). Reduce
+  // the head to its BASENAME so path-qualified invocations like
+  // `/usr/bin/git` are recognized as `git` against the denylist.
+  // Codex r1 on PR #219: without basename reduction, an absolute-path
+  // git invocation would bypass the gate-family invariant.
   const tokens = command.trim().split(/\s+/);
   let i = 0;
   while (i < tokens.length) {
@@ -85,8 +87,13 @@ function extractCommandHead(command) {
     if (!t) { i++; continue; }
     // env assignment "VAR=value"
     if (/^[A-Z_][A-Z0-9_]*=/i.test(t)) { i++; continue; }
-    if (COMMAND_PREFIX_TOKENS.has(t.toLowerCase())) { i++; continue; }
-    return t.toLowerCase().replace(/^\.\//, '');
+    const lower = t.toLowerCase();
+    if (COMMAND_PREFIX_TOKENS.has(lower)) { i++; continue; }
+    // Take basename: last `/`-separated component. Strip leading `./`
+    // first so `./scripts/run.sh` reduces to `run.sh`.
+    const stripped = lower.replace(/^\.\//, '');
+    const lastSlash = stripped.lastIndexOf('/');
+    return lastSlash === -1 ? stripped : stripped.slice(lastSlash + 1);
   }
   return '';
 }

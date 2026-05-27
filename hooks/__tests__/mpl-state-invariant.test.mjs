@@ -303,6 +303,26 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
   });
 
+  it('path-qualified git command still blocks (codex r1 [data-integrity])', () => {
+    // Codex r1 on PR #219: `/usr/bin/git commit -m "e2e"` would bypass
+    // the head denylist if we only matched the literal token. extractCommandHead
+    // now reduces to basename so the denylist catches it.
+    for (const cmd of [
+      '/usr/bin/git commit -m "e2e fix"',
+      '/opt/homebrew/bin/git push origin main',
+      'env VAR=1 /usr/local/bin/git tag',
+      'sudo /usr/bin/git commit -am "release"',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `path-qualified git must still be rejected: ${cmd}`);
+    }
+  });
+
   it('wrong-family classified command also blocks (build in hard2 slot)', () => {
     const r = checkInvariants({
       gate_results: {
