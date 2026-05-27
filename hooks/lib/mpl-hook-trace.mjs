@@ -4,21 +4,35 @@ import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import { missingBlockedHookFields } from './mpl-blocked-hook.mjs';
+import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
 
 // Read .mpl/state.json byte-for-byte without invoking readState() — that
 // helper persists schema migrations and can archive/remove the legacy
 // `.mpl/mpl/state.json`. A diagnostic command must never mutate run state
 // just by being run; codex r1 on PR #216 flagged this as a state-forensics
-// hazard. Return null when the file is missing or unparseable; callers
-// treat null as "no active blocked_hook info available".
+// hazard. Return value: either { state } when the parsed object passes
+// minimal shape/version checks, { error: 'unparseable' } / { error:
+// 'unsupported_schema', schemaVersion } when not, or null when no file
+// exists. Codex r6: a future schema_version must fail closed rather than
+// being treated as a valid block envelope and pointing recovery at the
+// wrong artifact.
 function readStateRaw(cwd) {
   const path = join(cwd, '.mpl', 'state.json');
   if (!existsSync(path)) return null;
+  let parsed;
   try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    parsed = JSON.parse(readFileSync(path, 'utf-8'));
   } catch {
-    return null;
+    return { error: 'unparseable' };
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { error: 'unparseable' };
+  }
+  const sv = parsed.schema_version;
+  if (typeof sv === 'number' && sv > CURRENT_SCHEMA_VERSION) {
+    return { error: 'unsupported_schema', schemaVersion: sv };
+  }
+  return { state: parsed };
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -170,7 +184,20 @@ export function traceHookChain({
 } = {}) {
   const resolvedTarget = targetPath || DECOMPOSITION_PATH;
   const config = hooksConfig || readHooksConfig(pluginRoot);
-  const activeState = state || readStateRaw(cwd);
+  // state can be either a parsed state object (when caller injects one)
+  // or null / { error, ... } / { state } from readStateRaw.
+  let activeState = null;
+  let stateError = null;
+  if (state) {
+    activeState = state;
+  } else {
+    const raw = readStateRaw(cwd);
+    if (raw && raw.error) {
+      stateError = raw;
+    } else if (raw && raw.state) {
+      activeState = raw.state;
+    }
+  }
   const category = pathCategory(resolvedTarget);
   const rows = [];
 
@@ -221,6 +248,7 @@ export function traceHookChain({
     category,
     cwd,
     plugin_root: pluginRoot,
+    state_error: stateError,
     hooks: rows,
   };
 }
@@ -231,6 +259,14 @@ export function formatHookTrace(trace) {
     `category: ${trace.category}`,
     '',
   ];
+  if (trace.state_error) {
+    if (trace.state_error.error === 'unsupported_schema') {
+      lines.push(`WARNING: state.json schema_version=${trace.state_error.schemaVersion} is newer than the installed plugin supports — upgrade the plugin or restore a compatible state before relying on this trace.`);
+    } else if (trace.state_error.error === 'unparseable') {
+      lines.push('WARNING: .mpl/state.json is unreadable / not valid JSON — block status cannot be computed for this trace.');
+    }
+    lines.push('');
+  }
   if (!trace.hooks.length) {
     lines.push('No matching hooks registered.');
     return lines.join('\n');

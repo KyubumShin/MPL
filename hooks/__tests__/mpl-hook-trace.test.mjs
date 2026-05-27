@@ -195,6 +195,57 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('fail-closes on a future schema_version: no BLOCKING line, explicit unsupported_schema warning', () => {
+    // Codex r6 on PR #216: a downgraded plugin must not classify a future
+    // state.json envelope as actively blocking — that would point recovery
+    // at the wrong artifact instead of surfacing the schema mismatch.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-future-schema-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION + 1,
+        current_phase: 'mpl-decompose',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-goal-trace',
+        blocked_phase: 'mpl-decompose',
+        blocked_artifact: '.mpl/mpl/decomposition.yaml',
+        block_code: 'goal_trace_drift',
+        block_reason: 'goal_contract_hash drift detected',
+        resume_instruction: 'Refresh the goal contract hash and retry.',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { hook: 'mpl-require-goal-trace' },
+      }));
+      const trace = traceHookChain({
+        targetPath: '.mpl/mpl/decomposition.yaml',
+        cwd: tmp,
+      });
+      assert.equal(trace.state_error?.error, 'unsupported_schema');
+      assert.equal(trace.state_error.schemaVersion, CURRENT_SCHEMA_VERSION + 1);
+      // The future envelope must not bleed into a BLOCKING marker.
+      assert.doesNotMatch(formatHookTrace(trace), /\[BLOCKING\]/);
+      assert.match(formatHookTrace(trace), /schema_version=\d+ is newer than the installed plugin supports/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('fail-closes on malformed JSON: explicit unparseable warning, no block status', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-malformed-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), '{ this is not valid json');
+      const trace = traceHookChain({
+        targetPath: '.mpl/mpl/decomposition.yaml',
+        cwd: tmp,
+      });
+      assert.equal(trace.state_error?.error, 'unparseable');
+      assert.doesNotMatch(formatHookTrace(trace), /\[BLOCKING\]/);
+      assert.match(formatHookTrace(trace), /not valid JSON/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('marks the active blocked_hook as currently_blocking', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-'));
     try {
