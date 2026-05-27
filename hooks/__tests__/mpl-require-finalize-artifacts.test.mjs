@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -13,6 +13,9 @@ const __filename = fileURLToPath(import.meta.url);
 const HOOK_PATH = join(dirname(__filename), '..', 'mpl-require-finalize-artifacts.mjs');
 const SCHEMA_V = CURRENT_SCHEMA_VERSION;
 
+const TEST_PIPELINE_ID = 'mpl-test-205';
+const TEST_STARTED_AT = '2026-05-27T00:00:00.000Z';
+
 let tmp;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'mpl-finalize-art-'));
@@ -20,6 +23,9 @@ beforeEach(() => {
   writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
     schema_version: SCHEMA_V,
     current_phase: 'phase5-finalize',
+    pipeline_id: TEST_PIPELINE_ID,
+    started_at: TEST_STARTED_AT,
+    phase_scheduler_history: [],
     security_results: {
       dependency_audit: { command: 'npm audit --omit=dev', exit_code: 0 },
     },
@@ -200,8 +206,9 @@ artifacts:
 
   /* ───────── Exp22 R6 / #205: scheduler observability guard ───────── */
 
-  function writeDecompositionWithParallelTier() {
+  function writeDecompositionWithParallelTier({ recompose_count = 0 } = {}) {
     writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: ${recompose_count}
 phases:
   - id: phase-1
   - id: phase-2
@@ -215,6 +222,28 @@ execution_tiers:
   function writeSummaryScheduler(scheduler) {
     writeFileSync(join(tmp, '.mpl', 'mpl', 'profile', 'run-summary.json'),
       JSON.stringify({ run_id: 'r1', scheduler }));
+  }
+
+  // Write phase-scheduler events into BOTH state.phase_scheduler_history
+  // (the ring-buffered mirror that hooks/lib/mpl-scheduler-aggregate reads)
+  // and the persistent JSONL profile file. Each event carries the
+  // current-run scope keys (pipeline_id, run_started_at, recompose_count)
+  // so the aggregator includes it.
+  function writeSchedulerEvents(events) {
+    const stamped = events.map((e) => ({
+      pipeline_id: TEST_PIPELINE_ID,
+      run_started_at: TEST_STARTED_AT,
+      recompose_count: 0,
+      ...e,
+    }));
+    // patch state.phase_scheduler_history
+    const statePath = join(tmp, '.mpl', 'state.json');
+    const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+    state.phase_scheduler_history = stamped;
+    writeFileSync(statePath, JSON.stringify(state));
+    // mirror to persistent JSONL
+    const jsonlPath = join(tmp, '.mpl', 'mpl', 'profile', 'phase-scheduler.jsonl');
+    writeFileSync(jsonlPath, stamped.map((e) => JSON.stringify(e)).join('\n') + '\n');
   }
 
   it('blocks finalize when decomposition declares a parallel tier but run-summary.scheduler is missing', () => {
@@ -231,6 +260,11 @@ execution_tiers:
     writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
     writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
     writeDecompositionWithParallelTier();
+    // Real evidence: a parallel_rejected event for tier 1 (planning could
+    // not split into a parallel wave). The hook recomputes from this.
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected', timestamp: '2026-05-27T00:00:01Z' },
+    ]);
     writeSummaryScheduler({
       tiers_total: 1,
       tiers_parallel_requested: 1,
@@ -251,11 +285,14 @@ execution_tiers:
   it('allows finalize when parallel-requested tier failed at runtime but no_parallel_explanation is filled', () => {
     writeArtifacts();
     writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_failed', timestamp: '2026-05-27T00:00:02Z', failure_reason: 'worker_dispatch_error' },
+    ]);
     writeSummaryScheduler({
       tiers_total: 1,
       tiers_parallel_requested: 1,
       tiers_parallel_executed: 0,
-      tiers_parallel_rejected: 0,
+      tiers_parallel_rejected: 1,
       tiers_with_missing_telemetry: [],
       waves_parallel_rejected: 0,
       waves_parallel_failed: 1,
@@ -268,11 +305,9 @@ execution_tiers:
   });
 
   it('blocks finalize when summary.scheduler.tiers_parallel_requested is lower than decomposition truth (drift/spoof guard)', () => {
-    // Codex round-9 review on PR #213: the original guard used the summary's
-    // self-reported tiers_parallel_requested as the denominator. A prompt-
-    // drifted or hand-edited summary could set requested=0/executed=0 with
-    // explanation=null to vacuously pass. decomposition.yaml is the
-    // authority; the summary's count must match it.
+    // Codex round-9 review on PR #213: a prompt-drifted or hand-edited
+    // summary that reports requested=0 must be rejected because the
+    // hook now computes that count from decomposition.yaml itself.
     writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
     writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
     writeDecompositionWithParallelTier();
@@ -291,13 +326,40 @@ execution_tiers:
     const r = runHook();
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /scheduler:tiers_parallel_requested_mismatch/);
-    assert.match(r.reason, /decomp=1/);
+    assert.match(r.reason, /computed=1/);
     assert.match(r.reason, /summary=0/);
+  });
+
+  it('blocks finalize when run-summary falsely claims executed parallelism but no current-run event exists', () => {
+    // Codex round-10 review on PR #213: the hook must not trust
+    // summary.scheduler.tiers_parallel_executed. Re-derive it from the
+    // event stream. A summary that lies (executed=1) with no actual
+    // selected_mode:"parallel" event in JSONL/state must be blocked.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeDecompositionWithParallelTier();
+    // Intentionally no scheduler events written — telemetry is missing.
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 1,   // lie — there is no parallel event
+      tiers_parallel_rejected: 0,
+      tiers_with_missing_telemetry: [],   // lie — tier 1 is missing
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:tiers_parallel_executed_mismatch:computed=0,summary=1/);
   });
 
   it('does not enforce the scheduler MUST when decomposition declares no parallel tier', () => {
     writeArtifacts();
     writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
 phases:
   - id: phase-1
 execution_tiers:

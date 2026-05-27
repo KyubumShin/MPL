@@ -29,6 +29,9 @@ const { readGoalContract, readBaselineGoalContractHash, defaultRequiredArtifacts
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { aggregateScheduler, explanationRequiredFromAggregate } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-scheduler-aggregate.mjs')).href
+);
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -164,69 +167,49 @@ function hasCommitSinceBaseline(cwd) {
   }
 }
 
-function readDecompositionTiers(cwd) {
-  // Minimal YAML peek: we only need execution_tiers[].parallel bool flags.
-  // Parsing the whole decomposition.yaml here would couple this hook to
-  // every decomposer field. Use a regex over the execution_tiers block.
-  const path = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
-  if (!existsSync(path)) return null;
-  let text;
-  try { text = readFileSync(path, 'utf-8'); } catch { return null; }
-  const block = text.match(/(^|\n)execution_tiers:\s*\n([\s\S]*?)(\n[a-zA-Z_]+:|\n*$)/);
-  if (!block) return { tiers: [], parallelTierCount: 0 };
-  const tiers = [];
-  for (const line of block[2].split('\n')) {
-    const parallelMatch = line.match(/^\s*parallel:\s*(true|false)/i);
-    if (parallelMatch) tiers.push({ parallel: parallelMatch[1].toLowerCase() === 'true' });
-  }
-  const parallelTierCount = tiers.filter((t) => t.parallel).length;
-  return { tiers, parallelTierCount };
-}
-
-function schedulerExplanationMissing(cwd) {
+function schedulerExplanationMissing(cwd, state) {
   // Exp22 R6 / #205: when decomposition.yaml declares any
   // execution_tiers[].parallel:true, the run-summary scheduler block must
   // either show full execution or carry a non-null no_parallel_explanation.
-  // The prompt in commands/mpl-run-finalize.md already documents this MUST;
-  // this guard makes it machine-enforceable so prompt drift cannot ship a
+  // The prompt in commands/mpl-run-finalize.md documents this MUST; the
+  // hook makes it machine-enforceable so prompt drift cannot ship a
   // completed run with rejected/missing parallelism and no explanation.
-  const decomp = readDecompositionTiers(cwd);
-  if (!decomp || decomp.parallelTierCount === 0) return null;
+  //
+  // The hook re-derives the aggregation itself from phase-scheduler.jsonl
+  // and state.phase_scheduler_history (see hooks/lib/mpl-scheduler-aggregate.mjs).
+  // A drifted or hand-edited run-summary can self-report a clean state, so
+  // the summary cannot be trusted as the source of truth — only as an
+  // informational mirror that must MATCH the computed evidence.
+  const computed = aggregateScheduler(cwd, state);
+  if (!computed) return null;
+  if (computed.tiers_parallel_requested === 0) return null;
 
   const summary = readJsonIfExists(cwd, '.mpl/mpl/profile/run-summary.json');
   if (!summary) return 'scheduler:run_summary_missing';
   const sched = summary.scheduler;
   if (!sched || typeof sched !== 'object') return 'scheduler:block_missing';
 
-  // decomposition.yaml is the truth for "did this run request parallelism".
-  // The summary self-reports tiers_parallel_requested — if the finalizer
-  // prompt drifted or someone hand-edited run-summary.json, that field can
-  // be set to 0 to vacuously satisfy "executed >= requested". Use the
-  // decomposition-derived count instead, and additionally require the
-  // summary's self-reported count to match it.
-  const requestedFromDecomp = decomp.parallelTierCount;
-  const requestedFromSummary = Number(sched.tiers_parallel_requested);
-  if (!Number.isInteger(requestedFromSummary) || requestedFromSummary !== requestedFromDecomp) {
-    return `scheduler:tiers_parallel_requested_mismatch:decomp=${requestedFromDecomp},summary=${sched.tiers_parallel_requested ?? 'null'}`;
+  // The summary's self-report must match what we just recomputed from the
+  // raw event stream. Mismatches indicate prompt drift, hand-edits, or
+  // missing telemetry that the finalizer prompt failed to surface.
+  for (const k of ['tiers_parallel_requested', 'tiers_parallel_executed', 'waves_parallel_failed']) {
+    const a = Number(computed[k]);
+    const b = Number(sched[k]);
+    if (!Number.isInteger(b) || a !== b) {
+      return `scheduler:${k}_mismatch:computed=${a},summary=${sched[k] ?? 'null'}`;
+    }
+  }
+  for (const k of ['tiers_with_missing_telemetry', 'tiers_with_partial_rejection']) {
+    const a = Array.isArray(computed[k]) ? computed[k].length : 0;
+    const b = Array.isArray(sched[k]) ? sched[k].length : -1;
+    if (a !== b) {
+      return `scheduler:${k}_length_mismatch:computed=${a},summary=${b === -1 ? 'not_array' : b}`;
+    }
   }
 
-  const executed = Number(sched.tiers_parallel_executed) || 0;
-  const missingTelemetry = Array.isArray(sched.tiers_with_missing_telemetry)
-    ? sched.tiers_with_missing_telemetry.length : 0;
-  const partial = Array.isArray(sched.tiers_with_partial_rejection)
-    ? sched.tiers_with_partial_rejection.length : 0;
-  const wavesFailed = Number(sched.waves_parallel_failed) || 0;
   const explanation = sched.no_parallel_explanation;
   const explanationFilled = typeof explanation === 'string' && explanation.trim().length > 0;
-
-  const explanationRequired = (
-    executed < requestedFromDecomp ||
-    missingTelemetry > 0 ||
-    partial > 0 ||
-    wavesFailed > 0
-  );
-
-  if (explanationRequired && !explanationFilled) {
+  if (explanationRequiredFromAggregate(computed) && !explanationFilled) {
     return 'scheduler:no_parallel_explanation_required_but_missing';
   }
   return null;
@@ -326,7 +309,7 @@ async function main() {
   // Independent of contract.completion_evidence so even runs without an
   // explicit completion contract still satisfy the no-parallel
   // explanation rule when decomposition declared parallel tiers.
-  const schedulerProblem = schedulerExplanationMissing(cwd);
+  const schedulerProblem = schedulerExplanationMissing(cwd, state);
   if (schedulerProblem) missing.push(schedulerProblem);
 
   if (missing.length > 0) {
