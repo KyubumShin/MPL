@@ -751,6 +751,14 @@ tiers_parallel_executed = count of distinct event.tier in
 tiers_with_missing_telemetry = expected_parallel_tiers minus
   the set of event.tier values present in events
 tiers_parallel_rejected = tiers_parallel_requested - tiers_parallel_executed
+// Wave-level visibility. A tier can split into multiple waves and emit
+// both a parallel and a parallel_rejected event; the tier-level rollup
+// above would otherwise hide the partial-rejection signal.
+waves_parallel_rejected = count of events where
+  event.selected_mode == "parallel_rejected"
+tiers_with_partial_rejection = set of event.tier where the tier has
+  BOTH a selected_mode == "parallel" event AND a selected_mode ==
+  "parallel_rejected" event
 
 scheduler = {
   tiers_total,
@@ -758,22 +766,29 @@ scheduler = {
   tiers_parallel_executed,
   tiers_parallel_rejected,
   tiers_with_missing_telemetry: <list of tier ids>,
+  waves_parallel_rejected,
+  tiers_with_partial_rejection: <list of tier ids>,
   rejection_reasons: union of event.rejection_reasons and the values of
                      event.rejection_reasons_by_phase across all events
                      (deduplicated),
   no_parallel_explanation: required (non-null) when
     tiers_parallel_requested > 0 AND
-    (tiers_parallel_executed == 0 OR tiers_with_missing_telemetry is
-     non-empty); otherwise null. The string MUST name either the
-     dominant rejection reasons (when telemetry is present) or the list
-     of tiers with missing telemetry (when not).
+    (tiers_parallel_executed == 0 OR
+     tiers_with_missing_telemetry is non-empty OR
+     tiers_with_partial_rejection is non-empty);
+    otherwise null. The string MUST name either the dominant rejection
+    reasons (when telemetry is present), the list of tiers with missing
+    telemetry (when not), or the tiers with partial rejection plus
+    their rejection reasons (when some waves rejected and others ran).
 }
 ```
 
 The `no_parallel_explanation` field is the enforcement point for the MUST in
 `commands/mpl-run-execute.md`: a run that requested parallelism but never
 reached it — including because the scheduler never recorded an event for a
-parallel-requested tier — cannot finalize with a null/missing explanation.
+parallel-requested tier, or because some waves within a tier rejected
+parallelism even though others ran — cannot finalize with a null/missing
+explanation.
 
 Profile data enables:
 1. **Learn optimal token budget by complexity**: derive average tokens per grade from past profiles

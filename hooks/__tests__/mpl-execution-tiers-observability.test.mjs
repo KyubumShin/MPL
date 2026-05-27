@@ -61,9 +61,24 @@ describe('execution_tiers observability contract', () => {
     const schemaText = readFileSync(join(process.cwd(), 'commands', 'schemas', 'run-summary.json'), 'utf-8');
     const schema = JSON.parse(schemaText);
     assert.ok(schema.scheduler, 'run-summary.json must include a scheduler example block');
-    for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'tiers_with_missing_telemetry', 'rejection_reasons', 'no_parallel_explanation']) {
+    for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'tiers_with_missing_telemetry', 'waves_parallel_rejected', 'tiers_with_partial_rejection', 'rejection_reasons', 'no_parallel_explanation']) {
       assert.ok(k in schema.scheduler, `scheduler block missing required key: ${k}`);
     }
+  });
+
+  it('finalize aggregation preserves wave-level partial rejection within a tier', () => {
+    // Codex round-5 review on PR #213: one tier can split into multiple
+    // waves and emit BOTH a parallel and a parallel_rejected event. The
+    // tier-level rollup (tiers_parallel_rejected = requested - executed)
+    // would otherwise treat the tier as fully executed and hide the
+    // single-wave rejection — the exact partial-parallelism case the
+    // telemetry is meant to surface. Pin the wave-level signal.
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /waves_parallel_rejected/);
+    assert.match(finalize, /tiers_with_partial_rejection/);
+    // The no_parallel_explanation MUST trigger when partial rejection occurs,
+    // not only when full rejection or missing telemetry occurs.
+    assert.match(finalize, /tiers_with_partial_rejection is non-empty/);
   });
 
   it('finalize filters scheduler events by both pipeline_id AND run_started_at so stale profile rows cannot satisfy a new run', () => {
