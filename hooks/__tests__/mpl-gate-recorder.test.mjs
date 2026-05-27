@@ -640,6 +640,41 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }
   });
 
+  it('phase-runner anomaly does NOT overwrite paused_budget / verification_hang / cancelled session states (codex r10)', () => {
+    // Codex r10 bounded review [logic]: !== 'blocked_hook' would overwrite
+    // any non-blocked-hook status, including the global pause/hang/cancel
+    // states. Anomaly block must only install when session is null/active.
+    for (const status of ['paused_budget', 'paused_checkpoint', 'verification_hang', 'cancelled']) {
+      const tmp = mkdtempSync(join(tmpdir(), `mpl-gate-recorder-status-${status}-`));
+      try {
+        seedState(tmp, { session_status: status });
+        const input = {
+          cwd: tmp,
+          tool_name: 'Task',
+          tool_input: {
+            subagent_type: 'mpl-phase-runner',
+            prompt: 'Execute phase-3.',
+          },
+          tool_response: '',
+          usage: { output_tokens: 0 },
+          metrics: { tools_used: 40, duration_ms: 28 * 60 * 1000 },
+        };
+        execFileSync('node', [HOOK_PATH], {
+          input: JSON.stringify(input),
+          encoding: 'utf-8',
+        });
+        const state = readState(tmp);
+        assert.equal(state.session_status, status,
+          `session_status=${status} must NOT be overwritten by anomaly block`);
+        // The anomaly is still recorded for visibility.
+        assert.equal(state.subagent_return_anomalies.length, 1,
+          `anomaly should still be recorded even when block install is skipped (status=${status})`);
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  });
+
   it('phase-runner anomaly does NOT clobber a pre-existing blocked_hook (codex r4)', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-noclobber-'));
     try {

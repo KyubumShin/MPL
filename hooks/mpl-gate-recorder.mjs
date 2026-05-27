@@ -415,10 +415,18 @@ try {
     // The anomaly is also persisted in state.subagent_return_anomalies.
     if (/mpl-phase-runner$/.test(agentType) && !isBackgroundDispatch) {
       if (anomaly) {
-        // Only install the block if there isn't already an active one we
-        // could clobber. Operators may have a more specific block already
-        // recorded (e.g. mpl-require-test-agent) — don't overwrite it.
-        if (state.session_status !== 'blocked_hook') {
+        // Only install the block when no stronger session state is
+        // already in effect. Codex r5/r10 on PR #218: do not clobber
+        // - blocked_hook (operator may have a more specific block)
+        // - paused_budget / paused_checkpoint (budget guard)
+        // - verification_hang (verification gate)
+        // - cancelled (user-cancelled run)
+        // The anomaly is still recorded in state.subagent_return_anomalies
+        // for visibility, but the session status takes precedence.
+        const installableFromStatus = state.session_status === null
+          || state.session_status === undefined
+          || state.session_status === 'active';
+        if (installableFromStatus) {
           Object.assign(patch, buildBlockedHookPatch({
             hookId: 'mpl-gate-recorder',
             phaseId: anomaly.phase_id || state.current_phase || 'unknown',
