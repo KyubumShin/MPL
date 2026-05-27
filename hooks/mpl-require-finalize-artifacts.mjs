@@ -198,7 +198,18 @@ function schedulerExplanationMissing(cwd) {
   const sched = summary.scheduler;
   if (!sched || typeof sched !== 'object') return 'scheduler:block_missing';
 
-  const requested = Number(sched.tiers_parallel_requested) || 0;
+  // decomposition.yaml is the truth for "did this run request parallelism".
+  // The summary self-reports tiers_parallel_requested — if the finalizer
+  // prompt drifted or someone hand-edited run-summary.json, that field can
+  // be set to 0 to vacuously satisfy "executed >= requested". Use the
+  // decomposition-derived count instead, and additionally require the
+  // summary's self-reported count to match it.
+  const requestedFromDecomp = decomp.parallelTierCount;
+  const requestedFromSummary = Number(sched.tiers_parallel_requested);
+  if (!Number.isInteger(requestedFromSummary) || requestedFromSummary !== requestedFromDecomp) {
+    return `scheduler:tiers_parallel_requested_mismatch:decomp=${requestedFromDecomp},summary=${sched.tiers_parallel_requested ?? 'null'}`;
+  }
+
   const executed = Number(sched.tiers_parallel_executed) || 0;
   const missingTelemetry = Array.isArray(sched.tiers_with_missing_telemetry)
     ? sched.tiers_with_missing_telemetry.length : 0;
@@ -208,8 +219,8 @@ function schedulerExplanationMissing(cwd) {
   const explanation = sched.no_parallel_explanation;
   const explanationFilled = typeof explanation === 'string' && explanation.trim().length > 0;
 
-  const explanationRequired = requested > 0 && (
-    executed < requested ||
+  const explanationRequired = (
+    executed < requestedFromDecomp ||
     missingTelemetry > 0 ||
     partial > 0 ||
     wavesFailed > 0

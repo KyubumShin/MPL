@@ -267,6 +267,34 @@ execution_tiers:
     assert.equal(r.continue, true);
   });
 
+  it('blocks finalize when summary.scheduler.tiers_parallel_requested is lower than decomposition truth (drift/spoof guard)', () => {
+    // Codex round-9 review on PR #213: the original guard used the summary's
+    // self-reported tiers_parallel_requested as the denominator. A prompt-
+    // drifted or hand-edited summary could set requested=0/executed=0 with
+    // explanation=null to vacuously pass. decomposition.yaml is the
+    // authority; the summary's count must match it.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeDecompositionWithParallelTier();
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 0,   // drift — decomposition says 1
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 0,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:tiers_parallel_requested_mismatch/);
+    assert.match(r.reason, /decomp=1/);
+    assert.match(r.reason, /summary=0/);
+  });
+
   it('does not enforce the scheduler MUST when decomposition declares no parallel tier', () => {
     writeArtifacts();
     writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
