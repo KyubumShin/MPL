@@ -394,6 +394,18 @@ try {
     process.exit(0);
   }
 
+  // Background Task dispatches return a handle stub on the first
+  // PostToolUse event, not a real phase completion. Skip the gate until
+  // the eventual completion event arrives with the real response — same
+  // reasoning as mpl-gate-recorder's background guard (codex r8/r9 on
+  // PR #218). Treating a handle as a completed phase would otherwise
+  // install a missing_or_invalid_test_agent_evidence block before the
+  // runner has even produced final output.
+  if (toolInput?.run_in_background === true || toolInput?.runInBackground === true) {
+    ok();
+    process.exit(0);
+  }
+
   const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
   if (!phaseId) {
     // Non-phase task — conservatively allow.

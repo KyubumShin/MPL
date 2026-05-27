@@ -103,6 +103,60 @@ phases:
     }
   });
 
+  it('passes through background phase-runner dispatch without installing a block (codex r9 bundle)', () => {
+    // Codex r9 on PR #218: gate-recorder learned to skip background Task
+    // dispatches but require-test-agent did not, so a required phase
+    // dispatched with run_in_background:true would have its handle-stub
+    // event trigger a missing_or_invalid_test_agent_evidence block before
+    // the real completion arrived.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-bg-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        test_agent_dispatched: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    phase_domain: api
+    impact:
+      modify:
+        - src/api/widgets.ts
+    interface_contract:
+      requires: []
+      produces:
+        - symbol: createWidget
+          path: src/api/widgets.ts
+    test_agent_required: true
+    test_agent_rationale: "touches a boundary"
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1 and report completion.',
+          run_in_background: true,
+        },
+        tool_response: { handle: 'task-bg-abc123' },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      // No block installed for a background handle.
+      const state = JSON.parse(readFileSync(join(tmp, '.mpl', 'state.json'), 'utf-8'));
+      assert.notEqual(state.session_status, 'blocked_hook',
+        'background phase-runner dispatch must NOT install a block before the real completion fires');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('blocks even when phase-runner self-tests have gate evidence but no independent test-agent PASS', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-self-test-'));
     try {
