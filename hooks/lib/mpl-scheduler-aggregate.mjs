@@ -39,9 +39,18 @@ export function readDecompositionScope(cwd) {
   let text;
   try { text = readFileSync(path, 'utf-8'); } catch { return null; }
 
+  // Strip YAML line comments before regex parsing so `key: # comment` and
+  // `parallel: true # note` are recognized. Quoted-string-aware: `#`
+  // inside double or single quotes does NOT start a comment. Decomposition
+  // values are simple scalars; this is sufficient.
+  text = stripYamlComments(text);
+
   const recomposeMatch = text.match(/(^|\n)recompose_count:\s*(\d+)/);
   const recompose_count = recomposeMatch ? Number(recomposeMatch[2]) : 0;
 
+  // Allow optional trailing whitespace and an optional same-line value
+  // marker (e.g. `execution_tiers: |` or just a newline). Block ends at
+  // the next top-level YAML key.
   const blockMatch = text.match(/(^|\n)execution_tiers:\s*\n([\s\S]*?)(?=\n[a-zA-Z_][a-zA-Z0-9_]*:|\n*$)/);
   if (!blockMatch) return { tiers: [], recompose_count };
 
@@ -61,8 +70,21 @@ export function readDecompositionScope(cwd) {
       parseError = true;
       continue;
     }
-    const parallelBool = parallel !== null && /^true$/i.test(String(parallel).trim());
-    tiers.push({ tier: tierNum, parallel: parallelBool });
+    // Normalize the parallel value. A missing parallel field is an
+    // explicit failure rather than an implicit false — `parallel:` is
+    // required on every execution_tiers item by the decomposer schema,
+    // and silently treating absence as false would let a malformed
+    // decomposition vacuously skip the MUST.
+    if (parallel === null) {
+      parseError = true;
+      continue;
+    }
+    const raw = String(parallel).trim().toLowerCase();
+    if (raw !== 'true' && raw !== 'false') {
+      parseError = true;
+      continue;
+    }
+    tiers.push({ tier: tierNum, parallel: raw === 'true' });
   }
   return { tiers, recompose_count, parse_error: parseError };
 }
@@ -100,6 +122,32 @@ function splitYamlListItems(text) {
  * (newline-separated key: value) or inline-map form (`{ k: v, k2: v2 }`).
  * Returns the raw string value or null if not found.
  */
+/**
+ * Strip YAML `# comment` segments from each line, except when the `#` is
+ * inside a single- or double-quoted string. Keeps escape behavior simple
+ * (no backslash handling) — decomposition.yaml scalars are plain enough
+ * that this matches js-yaml's behavior for the cases we parse.
+ */
+function stripYamlComments(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    let inSingle = false;
+    let inDouble = false;
+    let cut = -1;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === "'" && !inDouble) inSingle = !inSingle;
+      else if (c === '"' && !inSingle) inDouble = !inDouble;
+      else if (c === '#' && !inSingle && !inDouble) {
+        const prev = i === 0 ? ' ' : line[i - 1];
+        if (/\s/.test(prev)) { cut = i; break; }
+      }
+    }
+    out.push(cut === -1 ? line : line.slice(0, cut).replace(/\s+$/, ''));
+  }
+  return out.join('\n');
+}
+
 function extractField(item, key) {
   // Block form first: key on its own line (or the start of the item),
   // possibly indented. Works for both reordered-key block items and

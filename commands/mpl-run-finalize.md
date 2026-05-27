@@ -750,13 +750,18 @@ expected_parallel_tiers = set of tier ids where
 // de-duplicate so a degraded write on one side cannot manufacture
 // false missing telemetry.
 //
-// Two events are the same when they share
-// (pipeline_id, run_started_at, tier, timestamp, selected_mode).
+// Two events are the same when they share the full identity tuple. The
+// dedupe key MUST match hooks/lib/mpl-scheduler-aggregate.mjs:eventKey
+// exactly — including recompose_count and wave_index — or a generated
+// summary will be rejected by the finalize-artifacts guard for an
+// aggregate mismatch:
+//   (pipeline_id, run_started_at, recompose_count, tier, wave_index,
+//    timestamp, selected_mode)
 jsonl_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or []
 state_events = state.phase_scheduler_history or []
 raw_events = dedupe_by(
   jsonl_events.concat(state_events),
-  e => `${e.pipeline_id}|${e.run_started_at}|${e.tier}|${e.timestamp}|${e.selected_mode}`
+  e => `${e.pipeline_id}|${e.run_started_at}|${e.recompose_count}|${e.tier}|${e.wave_index}|${e.timestamp}|${e.selected_mode}`
 )
 
 // .mpl/mpl/profile/ is persistent across pipeline starts. pipeline_id

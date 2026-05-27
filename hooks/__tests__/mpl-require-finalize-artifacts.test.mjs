@@ -361,6 +361,43 @@ execution_tiers:
     assert.match(r.reason, /scheduler:tiers_parallel_executed_mismatch:computed=0,summary=1/);
   });
 
+  it('parses execution_tiers with YAML line comments and still enforces the MUST', () => {
+    // Codex round-13 review on PR #213: `execution_tiers: # scheduler`
+    // and `parallel: true  # independent` are valid YAML. The previous
+    // peek parsed those as zero tiers / parallel=false and skipped the
+    // MUST. Comments must be stripped before regex matching.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0  # initial decomposition
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers: # scheduler
+  - tier: 1   # tier of order
+    phases: [phase-1, phase-2]
+    parallel: true   # independent
+`);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [1],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    // Either the missing-explanation or a contents check should trip; what
+    // matters is that the comment-bearing YAML did NOT silently disable
+    // enforcement.
+    assert.match(r.reason, /scheduler:no_parallel_explanation_required_but_missing/);
+  });
+
   it('parses inline-map execution_tiers and still enforces the MUST', () => {
     // Codex round-11 review on PR #213: the YAML peek only recognized the
     // block form. Inline-map `- { tier: 4, parallel: true, ... }` (a valid

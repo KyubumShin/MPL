@@ -138,6 +138,23 @@ describe('execution_tiers observability contract', () => {
     assert.match(finalize, /decomposition\.phases\.map/);
   });
 
+  it('finalize prompt dedupe key includes recompose_count + wave_index (must match hook eventKey)', () => {
+    // Codex round-13 review on PR #213: a narrower dedupe key in the
+    // finalize prompt than in hooks/lib/mpl-scheduler-aggregate.mjs would
+    // generate a run-summary that the hook then rejects. Pin both keys
+    // to the same 7-tuple.
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /pipeline_id.*run_started_at.*recompose_count.*tier.*wave_index.*timestamp.*selected_mode/s,
+      'finalize prompt dedupe key must include all 7 identity fields');
+    // The hook side (eventKey) — pin the same fields so a future refactor
+    // cannot drift the two apart.
+    const aggregateSrc = readFileSync(join(process.cwd(), 'hooks', 'lib', 'mpl-scheduler-aggregate.mjs'), 'utf-8');
+    for (const field of ['pipeline_id', 'run_started_at', 'recompose_count', 'tier', 'wave_index', 'timestamp', 'selected_mode']) {
+      assert.match(aggregateSrc, new RegExp(`e\\?\\.${field}`),
+        `mpl-scheduler-aggregate eventKey must reference ${field}`);
+    }
+  });
+
   it('finalize aggregation preserves wave-level partial rejection within a tier', () => {
     // Codex round-5 review on PR #213: one tier can split into multiple
     // waves and emit BOTH a parallel and a parallel_rejected event. The
