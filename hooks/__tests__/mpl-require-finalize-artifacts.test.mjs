@@ -356,6 +356,125 @@ execution_tiers:
     assert.match(r.reason, /scheduler:tiers_parallel_executed_mismatch:computed=0,summary=1/);
   });
 
+  it('parses inline-map execution_tiers and still enforces the MUST', () => {
+    // Codex round-11 review on PR #213: the YAML peek only recognized the
+    // block form. Inline-map `- { tier: 4, parallel: true, ... }` (a valid
+    // YAML form used elsewhere in the repo) parsed as zero tiers and the
+    // guard skipped the scheduler MUST. Pin support for inline form.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers:
+  - { tier: 4, phases: [phase-1, phase-2], parallel: true }
+`);
+    // No events — telemetry missing — should block.
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [4],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:no_parallel_explanation_required_but_missing/);
+  });
+
+  it('parses reordered-key execution_tiers (parallel before tier) without skipping the MUST', () => {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers:
+  - parallel: true
+    tier: 7
+    phases: [phase-1, phase-2]
+`);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [7],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:no_parallel_explanation_required_but_missing/);
+  });
+
+  it('blocks finalize when summary under-reports a rejected wave or names the wrong missing tier', () => {
+    // Codex round-11 review on PR #213: scalar+length checks let a summary
+    // pass with the right shape but wrong contents. Compare the full
+    // aggregate, including exact tier ids and waves_parallel_rejected.
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    // Two parallel_rejected events for tier 1.
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected', timestamp: '2026-05-27T00:00:03Z' },
+      { tier: 1, selected_mode: 'parallel_rejected', timestamp: '2026-05-27T00:00:04Z' },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,   // lie — actually 2
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: 'parallelism rejected by file overlap',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:waves_parallel_rejected_mismatch:computed=2,summary=1/);
+  });
+
+  it('blocks finalize when execution_tiers is present but unparseable (fail-closed)', () => {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+execution_tiers:
+  - this_is_not_a_tier_field: 1
+    parallel: true
+`);
+    writeSummaryScheduler({
+      tiers_total: 0,
+      tiers_parallel_requested: 0,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 0,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:decomposition_execution_tiers_unparseable/);
+  });
+
   it('does not enforce the scheduler MUST when decomposition declares no parallel tier', () => {
     writeArtifacts();
     writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `

@@ -182,6 +182,9 @@ function schedulerExplanationMissing(cwd, state) {
   // informational mirror that must MATCH the computed evidence.
   const computed = aggregateScheduler(cwd, state);
   if (!computed) return null;
+  if (computed.__decomposition_unparseable__) {
+    return 'scheduler:decomposition_execution_tiers_unparseable';
+  }
   if (computed.tiers_parallel_requested === 0) return null;
 
   const summary = readJsonIfExists(cwd, '.mpl/mpl/profile/run-summary.json');
@@ -191,8 +194,19 @@ function schedulerExplanationMissing(cwd, state) {
 
   // The summary's self-report must match what we just recomputed from the
   // raw event stream. Mismatches indicate prompt drift, hand-edits, or
-  // missing telemetry that the finalizer prompt failed to surface.
-  for (const k of ['tiers_parallel_requested', 'tiers_parallel_executed', 'waves_parallel_failed']) {
+  // missing telemetry that the finalizer prompt failed to surface. Compare
+  // every aggregate field, not just a sentinel subset — codex r11 noted a
+  // narrow subset still let drift through (mis-named missing tier ids,
+  // under-reported rejected waves).
+  const scalarKeys = [
+    'tiers_total',
+    'tiers_parallel_requested',
+    'tiers_parallel_executed',
+    'tiers_parallel_rejected',
+    'waves_parallel_rejected',
+    'waves_parallel_failed',
+  ];
+  for (const k of scalarKeys) {
     const a = Number(computed[k]);
     const b = Number(sched[k]);
     if (!Number.isInteger(b) || a !== b) {
@@ -200,10 +214,16 @@ function schedulerExplanationMissing(cwd, state) {
     }
   }
   for (const k of ['tiers_with_missing_telemetry', 'tiers_with_partial_rejection']) {
-    const a = Array.isArray(computed[k]) ? computed[k].length : 0;
-    const b = Array.isArray(sched[k]) ? sched[k].length : -1;
-    if (a !== b) {
-      return `scheduler:${k}_length_mismatch:computed=${a},summary=${b === -1 ? 'not_array' : b}`;
+    const computedSorted = Array.isArray(computed[k])
+      ? [...computed[k]].map(Number).sort((x, y) => x - y) : [];
+    const summarySorted = Array.isArray(sched[k])
+      ? [...sched[k]].map(Number).sort((x, y) => x - y) : null;
+    if (summarySorted === null) {
+      return `scheduler:${k}_not_array_in_summary`;
+    }
+    if (computedSorted.length !== summarySorted.length ||
+        computedSorted.some((v, i) => v !== summarySorted[i])) {
+      return `scheduler:${k}_contents_mismatch:computed=[${computedSorted.join(',')}],summary=[${summarySorted.join(',')}]`;
     }
   }
 

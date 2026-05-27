@@ -20,7 +20,18 @@ import { join } from 'path';
  * Minimal YAML peek over `execution_tiers:` and top-level
  * `recompose_count:` in decomposition.yaml. We only need the parallel
  * boolean per tier and recompose_count — no need to pull in a full YAML
- * parser for this hook. If the file is missing or malformed, returns null.
+ * parser for this hook. Supports:
+ *  - Block form with arbitrary key order:
+ *      - tier: 4
+ *        parallel: true
+ *        phases: [...]
+ *  - Inline-map form:
+ *      - { tier: 4, parallel: true, phases: [...] }
+ * Returns null when the file is missing. Returns
+ * `{ tiers: [], recompose_count, parse_error }` when execution_tiers is
+ * present but cannot be parsed; the caller treats parse_error as fail-
+ * closed because a present-but-unparseable execution_tiers block must not
+ * vacuously skip the scheduler MUST.
  */
 export function readDecompositionScope(cwd) {
   const path = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
@@ -31,23 +42,79 @@ export function readDecompositionScope(cwd) {
   const recomposeMatch = text.match(/(^|\n)recompose_count:\s*(\d+)/);
   const recompose_count = recomposeMatch ? Number(recomposeMatch[2]) : 0;
 
-  const block = text.match(/(^|\n)execution_tiers:\s*\n([\s\S]*?)(\n[a-zA-Z_]+:|\n*$)/);
+  const blockMatch = text.match(/(^|\n)execution_tiers:\s*\n([\s\S]*?)(?=\n[a-zA-Z_][a-zA-Z0-9_]*:|\n*$)/);
+  if (!blockMatch) return { tiers: [], recompose_count };
+
+  const items = splitYamlListItems(blockMatch[2]);
   const tiers = [];
-  if (block) {
-    let currentTier = null;
-    for (const line of block[2].split('\n')) {
-      const tierIdMatch = line.match(/^\s*-\s*tier:\s*(\d+)/);
-      const parallelMatch = line.match(/^\s*parallel:\s*(true|false)/i);
-      if (tierIdMatch) {
-        if (currentTier) tiers.push(currentTier);
-        currentTier = { tier: Number(tierIdMatch[1]), parallel: false };
-      } else if (parallelMatch && currentTier) {
-        currentTier.parallel = parallelMatch[1].toLowerCase() === 'true';
+  let parseError = false;
+  for (const item of items) {
+    const tier = extractField(item, 'tier');
+    const parallel = extractField(item, 'parallel');
+    if (tier === null) {
+      // List item present but no tier field recognized — fail closed.
+      parseError = true;
+      continue;
+    }
+    const tierNum = Number(tier);
+    if (!Number.isInteger(tierNum)) {
+      parseError = true;
+      continue;
+    }
+    const parallelBool = parallel !== null && /^true$/i.test(String(parallel).trim());
+    tiers.push({ tier: tierNum, parallel: parallelBool });
+  }
+  return { tiers, recompose_count, parse_error: parseError };
+}
+
+/**
+ * Split an indented YAML list block into raw item strings. Each item
+ * starts at a line beginning with the list-item marker `- ` at the same
+ * indentation, and ends at the next item marker (or end of block).
+ * Inline-map items (`- { ... }`) come back as a single line; block-form
+ * items come back as multiple lines.
+ */
+function splitYamlListItems(text) {
+  const lines = text.split('\n');
+  let markerIndent = null;
+  const items = [];
+  let current = null;
+  for (const line of lines) {
+    const itemMatch = line.match(/^(\s*)-\s+(.*)$/);
+    if (itemMatch) {
+      if (markerIndent === null) markerIndent = itemMatch[1].length;
+      if (itemMatch[1].length === markerIndent) {
+        if (current !== null) items.push(current);
+        current = itemMatch[2];
+        continue;
       }
     }
-    if (currentTier) tiers.push(currentTier);
+    if (current !== null) current += '\n' + line;
   }
-  return { tiers, recompose_count };
+  if (current !== null) items.push(current);
+  return items;
+}
+
+/**
+ * Extract a scalar field from a YAML list item that may be block-form
+ * (newline-separated key: value) or inline-map form (`{ k: v, k2: v2 }`).
+ * Returns the raw string value or null if not found.
+ */
+function extractField(item, key) {
+  // Block form first: key on its own line (or the start of the item),
+  // possibly indented. Works for both reordered-key block items and
+  // straight block items.
+  const blockMatch = item.match(new RegExp(`(^|\\n)\\s*${key}\\s*:\\s*([^\\n,}]+)`, 'i'));
+  if (blockMatch) return blockMatch[2].trim();
+  // Inline map form fallback: `{ k: v, k2: v2 }` on one line. Strip
+  // surrounding braces. The character class excludes newlines and the
+  // map terminators so the lazy quantifier stops at the next field.
+  const inlineCandidate = item.trim().replace(/^\{\s*/, '').replace(/\s*\}$/, '');
+  const inlineMatch = inlineCandidate.match(
+    new RegExp(`(^|,)\\s*${key}\\s*:\\s*([^,\\n}]+?)(?=\\s*[,\\n}]|$)`, 'i')
+  );
+  if (inlineMatch) return inlineMatch[2].trim();
+  return null;
 }
 
 function readJsonl(cwd) {
@@ -85,6 +152,13 @@ function eventKey(e) {
 export function aggregateScheduler(cwd, state) {
   const decomp = readDecompositionScope(cwd);
   if (!decomp) return null;
+
+  // If execution_tiers exists but items could not be parsed, fail closed:
+  // the caller treats this as a guard violation rather than vacuously
+  // skipping the MUST.
+  if (decomp.parse_error) {
+    return { __decomposition_unparseable__: true };
+  }
 
   const expectedParallel = new Set(
     decomp.tiers.filter((t) => t.parallel).map((t) => t.tier)
