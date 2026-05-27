@@ -97,20 +97,37 @@ function extractCommandHead(command) {
   // `` `git ...` ``, `$(git ...)`) must also be normalized so the inner
   // head reaches the denylist check. Strip any leading shell-opener
   // characters from the first significant token before basename
-  // reduction. This is a heuristic — full shell parsing is out of
-  // scope, and the right answer for "command i don't understand" is
-  // null (classifier returns null → I12 rejects unclassified entries).
+  // reduction.
+  //
+  // Codex r5 on PR #219: after consuming a wrapper prefix token, the
+  // next token may be a flag (`sudo -E`, `env -u FOO`, `time -p`,
+  // `nice -n 5`). Skip flag tokens (starting with `-`) until we reach
+  // a real executable head.
+  //
+  // This is a heuristic — full shell parsing is out of scope, and the
+  // right answer for "command i don't understand" is null (classifier
+  // returns null → I12 rejects unclassified entries).
   const tokens = command.trim().split(/\s+/);
   let i = 0;
+  let sawPrefix = false;
   while (i < tokens.length) {
     const t = tokens[i];
     if (!t) { i++; continue; }
     // env assignment "VAR=value"
     if (/^[A-Z_][A-Z0-9_]*=/i.test(t)) { i++; continue; }
     const lower = t.toLowerCase();
-    if (COMMAND_PREFIX_TOKENS.has(lower)) { i++; continue; }
-    // Strip leading subshell / eval-opener chars: `(`, `` ` ``, `$(`,
-    // and any trailing `;` from a previous statement.
+    if (COMMAND_PREFIX_TOKENS.has(lower)) { sawPrefix = true; i++; continue; }
+    // Codex r5: after a wrapper prefix (sudo, env, time, nice, ...),
+    // any `-`-prefixed flag token is ambiguous — `-E` takes no value,
+    // `-u` takes one, etc. Heuristic flag-value consumption is wrong in
+    // both directions. Fail closed: return empty head so the classifier
+    // returns null and I12 rejects the entry. Manual gate evidence
+    // doesn't need wrapper flags; recorder-produced commands never
+    // wrap with flags either, so this denial is safe.
+    if (sawPrefix && t.startsWith('-')) {
+      return '';
+    }
+    // Strip leading subshell / eval-opener chars: `(`, `` ` ``, `$(`.
     const stripped = lower
       .replace(/^[`(]+/, '')
       .replace(/^\$\(/, '')
@@ -125,6 +142,11 @@ function extractCommandHead(command) {
 export function classifyGateCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
   const head = extractCommandHead(command);
+  // Fail closed if extractCommandHead couldn't resolve a real head —
+  // either nothing significant was found OR it explicitly returned ''
+  // to signal a wrapper-with-flag form (codex r5). Empty head must
+  // NOT fall through to the full-string family regex.
+  if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
   const c = command.trim().toLowerCase();
   if (HARD3_PATTERNS.some((re) => re.test(c))) return 'hard3_resilience';

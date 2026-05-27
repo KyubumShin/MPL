@@ -325,6 +325,29 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('prefix wrappers with flag options still resolve to inner head (codex r5 [data-integrity])', () => {
+    // Codex r5 on PR #219: `sudo -E git`, `env -u FOO git`, `time -p git`,
+    // `nice -n 5 git` would all bypass denylist if the head extractor
+    // stopped at `-E` / `-u` / `-p` / `-n`. Skip flag tokens after a
+    // wrapper prefix until the real executable is reached.
+    for (const cmd of [
+      'sudo -E git commit -m e2e',
+      'sudo -u root git commit -m e2e',
+      'env -u FOO git commit -m e2e',
+      'env --unset=FOO git commit -m e2e',
+      'time -p git commit -m e2e',
+      'nice -n 5 git commit -m e2e',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `wrapper-with-flags command must be rejected: ${cmd}`);
+    }
+  });
+
   it('eval/subshell-wrapped non-gate commands are rejected (codex+claude r4 [data-integrity])', () => {
     // Codex+claude r4 on PR #219: shell-evaluation primitives (`eval`,
     // subshell `(...)`, backticks, `$(...)`) must not let git commit
