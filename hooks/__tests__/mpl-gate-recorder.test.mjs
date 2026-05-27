@@ -932,4 +932,38 @@ describe('mpl-gate-recorder Bash gate routing — release-gate vs whole-pipeline
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it('recorder accepts legitimate execution wrappers (docker / kubectl / bash) — codex r6 regression guard', () => {
+    // Codex r6 on PR #219: the strict I12 head denylist must NOT apply
+    // to the recorder path. A real `docker compose run app npm test` or
+    // `bash -lc "npx playwright test"` is genuine evidence; rejecting
+    // it would corrupt the gate SSOT (older PASS staying in state, or
+    // required evidence permanently missing).
+    const cases = [
+      { command: 'docker compose run app npm test', exit_code: 0,
+        slot: 'hard2_coverage', expect_pass: true },
+      { command: 'kubectl exec pod -- npm test', exit_code: 0,
+        slot: 'hard2_coverage', expect_pass: true },
+      { command: 'bash -lc "npm test"', exit_code: 0,
+        slot: 'hard2_coverage', expect_pass: true },
+      { command: 'bash -lc "npx playwright test"', exit_code: 0,
+        slot: 'hard3_resilience', expect_pass: true },
+      { command: 'docker compose run app npm run build', exit_code: 0,
+        slot: 'hard1_baseline', expect_pass: true },
+    ];
+    for (const c of cases) {
+      const tmp = mkdtempSync(join(tmpdir(), 'mpl-gr-wrapper-'));
+      try {
+        seedState(tmp, { current_phase: 'phase3-gate' });
+        runBashHook(tmp, { command: c.command, exit_code: c.exit_code });
+        const state = readState(tmp);
+        assert.ok(state.gate_results[c.slot],
+          `command must record into ${c.slot}: ${c.command}`);
+        assert.equal(state.gate_results[c.slot].exit_code, c.exit_code);
+        assert.equal(state.gate_results[c.slot].command, c.command);
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  });
 });

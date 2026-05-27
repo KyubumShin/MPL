@@ -20,6 +20,7 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
+import { classifyGateCommand } from './mpl-gate-classify.mjs';
 
 // Re-export so consumers (and the H8 single-source-of-truth test) can
 // confirm both modules agree on the version constant via a single
@@ -56,6 +57,11 @@ export const VIOLATION_IDS = Object.freeze({
   SESSION_STATUS_INVALID: 'I9',
   COMPLETION_EXECUTION_STALE: 'I10',
   BLOCKED_HOOK_STALE: 'I11',
+  // Exp22 R13 / #209: a hard{1,2,3}_baseline/coverage/resilience entry's
+  // `command` must belong to the matching gate family (lint/build for
+  // H1, test for H2, e2e/contract for H3). Manual state.json patches
+  // putting `git commit` into hard2_coverage are rejected here.
+  GATE_COMMAND_FAMILY_MISMATCH: 'I12',
 });
 
 const ACTIVE_PHASES = new Set([
@@ -348,6 +354,70 @@ function checkI11(state) {
     { missing });
 }
 
+function checkGateFamilyForBlock(block, label) {
+  // A "structured gate entry" carries { command, exit_code, ... }. Check
+  // that the recorded `command` belongs to the family this slot expects.
+  // mpl-gate-recorder produces commands the classifier recognizes; manual
+  // patches that put unrelated commands here (Exp22 R13: `git commit` in
+  // hard2_coverage) are rejected.
+  //
+  // Codex r2 on PR #219: a structured entry with a numeric exit_code but
+  // NO command is also a violation — manual `{exit_code: 0}` writes can
+  // otherwise claim a verified gate without any recorded command family.
+  // Treat missing/blank command as the strongest mismatch ("absent").
+  if (!block || typeof block !== 'object') return [];
+  const slots = [
+    ['hard1_baseline', 'hard1_baseline'],
+    ['hard2_coverage', 'hard2_coverage'],
+    ['hard3_resilience', 'hard3_resilience'],
+  ];
+  const issues = [];
+  for (const [slot, expectedFamily] of slots) {
+    const entry = block[slot];
+    if (!entry || typeof entry !== 'object') continue;
+    const command = entry.command;
+    if (typeof command !== 'string' || !command.trim()) {
+      issues.push({
+        gate: `${label}.${slot}`,
+        command: command === undefined ? '(missing)' : String(command),
+        classified_as: 'missing_command',
+        expected_family: expectedFamily,
+      });
+      continue;
+    }
+    const family = classifyGateCommand(command);
+    if (family !== expectedFamily) {
+      issues.push({
+        gate: `${label}.${slot}`,
+        command,
+        classified_as: family ?? 'unclassified',
+        expected_family: expectedFamily,
+      });
+    }
+  }
+  return issues;
+}
+
+function checkI12(state, trigger) {
+  // Exp22 R13 / #209. Surface on STATE_WRITE so manual patches that try
+  // to land malformed evidence are caught at the write boundary.
+  if (trigger !== TRIGGERS.STATE_WRITE) return null;
+  const issues = [
+    ...checkGateFamilyForBlock(state?.gate_results, 'state.gate_results'),
+    ...checkGateFamilyForBlock(state?.release?.gate_results, 'state.release.gate_results'),
+  ];
+  if (issues.length === 0) return null;
+  const messages = issues
+    .map((x) => `${x.gate}.command='${x.command}' (classified as ${x.classified_as}, expected ${x.expected_family})`);
+  return v(VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH,
+    `Gate evidence command family mismatch: ${messages.join('; ')}. ` +
+      `Hard 1 expects lint/typecheck/build/compile; Hard 2 expects test runner; ` +
+      `Hard 3 expects e2e/contract/a11y. Manual state.json patches MUST use a ` +
+      `recognized command, or record evidence by running the verification command ` +
+      `(mpl-gate-recorder hook auto-routes).`,
+    { mismatches: issues });
+}
+
 /* ────────────────────────── aggregator ──────────────────────────────────── */
 
 /**
@@ -377,6 +447,7 @@ export function checkInvariants(state, opts = {}) {
     () => checkI9(state),
     () => checkI10(state),
     () => checkI11(state),
+    () => checkI12(state, trigger),
   ];
 
   const violations = [];

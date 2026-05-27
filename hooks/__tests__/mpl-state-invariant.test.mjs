@@ -237,6 +237,274 @@ describe('I6 phase3-gate state-write missing structured evidence', () => {
   });
 });
 
+describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
+  function gateEntry(command) {
+    return { command, exit_code: 0, stdout_tail: '', timestamp: 'now' };
+  }
+
+  it('valid Hard 1/2/3 commands → no violation', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard1_baseline: gateEntry('npm run build'),
+        hard2_coverage: gateEntry('npm test'),
+        hard3_resilience: gateEntry('npx playwright test'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('git commit in hard2_coverage → violation names offending key+command', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard2_coverage: gateEntry('git commit -m "tests done"'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v, 'violation must fire');
+    assert.match(v.message, /state\.gate_results\.hard2_coverage/);
+    assert.match(v.message, /git commit/);
+    assert.equal(v.mismatches[0].gate, 'state.gate_results.hard2_coverage');
+    assert.equal(v.mismatches[0].expected_family, 'hard2_coverage');
+  });
+
+  it('git commit in hard3_resilience → violation', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard3_resilience: gateEntry('git commit -m "e2e"'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v);
+    assert.match(v.message, /hard3_resilience/);
+  });
+
+  it('release-scoped state.release.gate_results is also checked', () => {
+    const r = checkInvariants({
+      release: {
+        gate_results: {
+          hard2_coverage: gateEntry('echo done'),
+        },
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v);
+    assert.match(v.message, /state\.release\.gate_results\.hard2_coverage/);
+  });
+
+  it('legacy booleans true with invalid structured command still blocks', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard1_passed: true,
+        hard2_passed: true,
+        hard3_passed: true,
+        hard1_baseline: gateEntry('git commit'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('shell-wrapped non-gate commands are rejected (codex r3 [data-integrity])', () => {
+    // Codex r3 on PR #219: `bash -lc "git commit -m e2e"` would otherwise
+    // classify as hard3_resilience via the embedded `e2e` keyword. Adding
+    // shell wrappers to the denylist forces the classifier to return null
+    // for any bash/sh/zsh/... -wrapped command.
+    for (const cmd of [
+      'bash -lc "git commit -m e2e"',
+      'bash -lc "echo e2e contract"',
+      'sh -c "git push origin main"',
+      '/bin/zsh -lc "playwright test"',
+      'dash -c "echo skipped"',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `shell-wrapped command must be rejected: ${cmd}`);
+    }
+  });
+
+  it('script-interpreter eval forms (node -e, python -c) are rejected (codex r7 [data-integrity])', () => {
+    // Codex r7 on PR #219: even with the head denylist + wrapper-flag
+    // guards, a manual write like `node -e "console.log('npm test')"`
+    // would slip past because `node` was not denied AND the full
+    // command string contains the `npm test` keyword. Strict classifier
+    // is now allowlist-based: only known test/build heads.
+    for (const cmd of [
+      'node -e "console.log(\'npm test\')"',
+      'node -e "playwright"',
+      'python -c "print(\'e2e contract\')"',
+      'python3 -c "print(\'npm test\')"',
+      'ruby -e "puts \'jest\'"',
+      'perl -e "print qq{vitest}"',
+      'php -r "echo \'go test\';"',
+      'awk \'BEGIN{print "npm test"}\'',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard2_coverage: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `script-interpreter eval form must be rejected: ${cmd}`);
+    }
+  });
+
+  it('strict classifier still accepts known gate heads on the allowlist', () => {
+    // Sanity: pnpm/yarn/npx/cargo/go all in allowlist; family regex
+    // narrows them into the right slot.
+    const cases = [
+      { command: 'pnpm test', slot: 'hard2_coverage' },
+      { command: 'yarn run test', slot: 'hard2_coverage' },
+      { command: 'pnpm run build', slot: 'hard1_baseline' },
+      { command: 'cargo test', slot: 'hard2_coverage' },
+      { command: 'cargo build', slot: 'hard1_baseline' },
+      { command: 'go test ./...', slot: 'hard2_coverage' },
+      { command: 'npx playwright test', slot: 'hard3_resilience' },
+      { command: 'tsc --noEmit', slot: 'hard1_baseline' },
+    ];
+    for (const c of cases) {
+      const r = checkInvariants({
+        gate_results: { [c.slot]: gateEntry(c.command) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH),
+        `allowlisted head should pass: ${c.command}`);
+    }
+  });
+
+  it('prefix wrappers with flag options still resolve to inner head (codex r5 [data-integrity])', () => {
+    // Codex r5 on PR #219: `sudo -E git`, `env -u FOO git`, `time -p git`,
+    // `nice -n 5 git` would all bypass denylist if the head extractor
+    // stopped at `-E` / `-u` / `-p` / `-n`. Skip flag tokens after a
+    // wrapper prefix until the real executable is reached.
+    for (const cmd of [
+      'sudo -E git commit -m e2e',
+      'sudo -u root git commit -m e2e',
+      'env -u FOO git commit -m e2e',
+      'env --unset=FOO git commit -m e2e',
+      'time -p git commit -m e2e',
+      'nice -n 5 git commit -m e2e',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `wrapper-with-flags command must be rejected: ${cmd}`);
+    }
+  });
+
+  it('eval/subshell-wrapped non-gate commands are rejected (codex+claude r4 [data-integrity])', () => {
+    // Codex+claude r4 on PR #219: shell-evaluation primitives (`eval`,
+    // subshell `(...)`, backticks, `$(...)`) must not let git commit
+    // smuggle the e2e keyword into hard3_resilience.
+    for (const cmd of [
+      'eval "git commit -m e2e"',
+      'eval git push',
+      '(git commit -m e2e)',
+      '`git commit -m e2e`',
+      '$(git commit -m e2e)',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `wrapped command must be rejected: ${cmd}`);
+    }
+  });
+
+  it('path-qualified git command still blocks (codex r1 [data-integrity])', () => {
+    // Codex r1 on PR #219: `/usr/bin/git commit -m "e2e"` would bypass
+    // the head denylist if we only matched the literal token. extractCommandHead
+    // now reduces to basename so the denylist catches it.
+    for (const cmd of [
+      '/usr/bin/git commit -m "e2e fix"',
+      '/opt/homebrew/bin/git push origin main',
+      'env VAR=1 /usr/local/bin/git tag',
+      'sudo /usr/bin/git commit -am "release"',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `path-qualified git must still be rejected: ${cmd}`);
+    }
+  });
+
+  it('wrong-family classified command also blocks (build in hard2 slot)', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard2_coverage: gateEntry('npm run build'),
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v);
+    assert.equal(v.mismatches[0].classified_as, 'hard1_baseline');
+    assert.equal(v.mismatches[0].expected_family, 'hard2_coverage');
+  });
+
+  it('STOP trigger → not checked (state-write boundary only)', () => {
+    const r = checkInvariants({
+      gate_results: { hard2_coverage: gateEntry('git commit') },
+    }, { cwd: tmp, trigger: TRIGGERS.STOP });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('structured entry without command is rejected (codex r2 [data-integrity])', () => {
+    // Codex r2 on PR #219: `{ exit_code: 0 }` with no command is a valid
+    // structured entry by I6 but must NOT count as gate evidence.
+    const r = checkInvariants({
+      gate_results: {
+        hard1_baseline: { exit_code: 0 },
+        hard2_coverage: { exit_code: 0 },
+        hard3_resilience: { exit_code: 0 },
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v, 'commandless gate entries must trigger I12');
+    // All three slots must be in the mismatches list.
+    const gates = v.mismatches.map((m) => m.gate).sort();
+    assert.deepStrictEqual(gates, [
+      'state.gate_results.hard1_baseline',
+      'state.gate_results.hard2_coverage',
+      'state.gate_results.hard3_resilience',
+    ]);
+    assert.equal(v.mismatches[0].classified_as, 'missing_command');
+  });
+
+  it('blank-command structured entry is rejected', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard2_coverage: { command: '   ', exit_code: 0 },
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('null entry → not flagged', () => {
+    const r = checkInvariants({
+      gate_results: { hard2_coverage: null },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
+  it('entry without command IS flagged (manual exit_code-only writes are not gate evidence — codex r2)', () => {
+    // Replaces the prior "not flagged" expectation. Per codex r2,
+    // commandless entries MUST be rejected — a structured shape alone
+    // without a recognized command does not constitute gate evidence.
+    const r = checkInvariants({
+      gate_results: { hard2_coverage: { exit_code: 0 } },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+});
+
 describe('I7 current_phase folder lifecycle', () => {
   it('flags missing folder for concrete phase id', () => {
     const r = checkInvariants({ current_phase: 'phase-7' }, { cwd: tmp });
@@ -557,9 +825,9 @@ describe('mpl-state-invariant hook integration', () => {
 
   it('Write that ADDS structured evidence (clean transition) → silent, no I6', () => {
     // Inverse case: a Write that introduces structured evidence to a state
-    // that previously had none should NOT surface I6.
+    // that previously had none should NOT surface I6 (or I12).
     const stateJsonPath = join(tmp, '.mpl', 'state.json');
-    const ent = (e) => ({ command: 'npm test', exit_code: e, stdout_tail: '', timestamp: 'now' });
+    const ent = (cmd, e) => ({ command: cmd, exit_code: e, stdout_tail: '', timestamp: 'now' });
     writeFileSync(stateJsonPath, JSON.stringify({
       schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
@@ -569,9 +837,9 @@ describe('mpl-state-invariant hook integration', () => {
       schema_version: SCHEMA_V,
       current_phase: 'phase3-gate',
       gate_results: {
-        hard1_baseline: ent(0),
-        hard2_coverage: ent(0),
-        hard3_resilience: ent(0),
+        hard1_baseline: ent('npm run build', 0),
+        hard2_coverage: ent('npm test', 0),
+        hard3_resilience: ent('npx playwright test', 0),
       },
     };
     const stdin = JSON.stringify({
