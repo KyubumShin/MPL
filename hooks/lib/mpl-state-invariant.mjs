@@ -360,6 +360,11 @@ function checkGateFamilyForBlock(block, label) {
   // mpl-gate-recorder produces commands the classifier recognizes; manual
   // patches that put unrelated commands here (Exp22 R13: `git commit` in
   // hard2_coverage) are rejected.
+  //
+  // Codex r2 on PR #219: a structured entry with a numeric exit_code but
+  // NO command is also a violation — manual `{exit_code: 0}` writes can
+  // otherwise claim a verified gate without any recorded command family.
+  // Treat missing/blank command as the strongest mismatch ("absent").
   if (!block || typeof block !== 'object') return [];
   const slots = [
     ['hard1_baseline', 'hard1_baseline'],
@@ -371,7 +376,15 @@ function checkGateFamilyForBlock(block, label) {
     const entry = block[slot];
     if (!entry || typeof entry !== 'object') continue;
     const command = entry.command;
-    if (typeof command !== 'string' || !command.trim()) continue;
+    if (typeof command !== 'string' || !command.trim()) {
+      issues.push({
+        gate: `${label}.${slot}`,
+        command: command === undefined ? '(missing)' : String(command),
+        classified_as: 'missing_command',
+        expected_family: expectedFamily,
+      });
+      continue;
+    }
     const family = classifyGateCommand(command);
     if (family !== expectedFamily) {
       issues.push({

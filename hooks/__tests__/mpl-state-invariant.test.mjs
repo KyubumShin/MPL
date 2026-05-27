@@ -342,6 +342,37 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
   });
 
+  it('structured entry without command is rejected (codex r2 [data-integrity])', () => {
+    // Codex r2 on PR #219: `{ exit_code: 0 }` with no command is a valid
+    // structured entry by I6 but must NOT count as gate evidence.
+    const r = checkInvariants({
+      gate_results: {
+        hard1_baseline: { exit_code: 0 },
+        hard2_coverage: { exit_code: 0 },
+        hard3_resilience: { exit_code: 0 },
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+    assert.ok(v, 'commandless gate entries must trigger I12');
+    // All three slots must be in the mismatches list.
+    const gates = v.mismatches.map((m) => m.gate).sort();
+    assert.deepStrictEqual(gates, [
+      'state.gate_results.hard1_baseline',
+      'state.gate_results.hard2_coverage',
+      'state.gate_results.hard3_resilience',
+    ]);
+    assert.equal(v.mismatches[0].classified_as, 'missing_command');
+  });
+
+  it('blank-command structured entry is rejected', () => {
+    const r = checkInvariants({
+      gate_results: {
+        hard2_coverage: { command: '   ', exit_code: 0 },
+      },
+    }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+  });
+
   it('null entry → not flagged', () => {
     const r = checkInvariants({
       gate_results: { hard2_coverage: null },
@@ -349,11 +380,14 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
   });
 
-  it('entry without command → not flagged', () => {
+  it('entry without command IS flagged (manual exit_code-only writes are not gate evidence — codex r2)', () => {
+    // Replaces the prior "not flagged" expectation. Per codex r2,
+    // commandless entries MUST be rejected — a structured shape alone
+    // without a recognized command does not constitute gate evidence.
     const r = checkInvariants({
       gate_results: { hard2_coverage: { exit_code: 0 } },
     }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
-    assert.ok(!r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
+    assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
   });
 });
 
