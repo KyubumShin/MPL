@@ -74,6 +74,11 @@ const NON_GATE_HEAD_COMMANDS = new Set([
   // (it sees the actual command executed); manual writes that go
   // through a wrapper are not credible gate evidence.
   'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
+  // Shell-evaluation primitives — codex+claude r4 on PR #219. `eval`
+  // takes a string and evaluates it as a shell command, the same
+  // bypass shape as r3's `bash -c`. Subshell openers `(` are normalized
+  // out by extractCommandHead so they reach this set as the inner head.
+  'eval',
 ]);
 
 // Tokens commonly used as prefixes that should be peeled before the
@@ -87,6 +92,14 @@ function extractCommandHead(command) {
   // `/usr/bin/git` are recognized as `git` against the denylist.
   // Codex r1 on PR #219: without basename reduction, an absolute-path
   // git invocation would bypass the gate-family invariant.
+  //
+  // Codex+claude r4 on PR #219: subshell/eval prefixes (`(git ...)`,
+  // `` `git ...` ``, `$(git ...)`) must also be normalized so the inner
+  // head reaches the denylist check. Strip any leading shell-opener
+  // characters from the first significant token before basename
+  // reduction. This is a heuristic — full shell parsing is out of
+  // scope, and the right answer for "command i don't understand" is
+  // null (classifier returns null → I12 rejects unclassified entries).
   const tokens = command.trim().split(/\s+/);
   let i = 0;
   while (i < tokens.length) {
@@ -96,9 +109,13 @@ function extractCommandHead(command) {
     if (/^[A-Z_][A-Z0-9_]*=/i.test(t)) { i++; continue; }
     const lower = t.toLowerCase();
     if (COMMAND_PREFIX_TOKENS.has(lower)) { i++; continue; }
-    // Take basename: last `/`-separated component. Strip leading `./`
-    // first so `./scripts/run.sh` reduces to `run.sh`.
-    const stripped = lower.replace(/^\.\//, '');
+    // Strip leading subshell / eval-opener chars: `(`, `` ` ``, `$(`,
+    // and any trailing `;` from a previous statement.
+    const stripped = lower
+      .replace(/^[`(]+/, '')
+      .replace(/^\$\(/, '')
+      .replace(/^\.\//, '');
+    if (!stripped) { i++; continue; }
     const lastSlash = stripped.lastIndexOf('/');
     return lastSlash === -1 ? stripped : stripped.slice(lastSlash + 1);
   }

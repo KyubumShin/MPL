@@ -325,6 +325,27 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('eval/subshell-wrapped non-gate commands are rejected (codex+claude r4 [data-integrity])', () => {
+    // Codex+claude r4 on PR #219: shell-evaluation primitives (`eval`,
+    // subshell `(...)`, backticks, `$(...)`) must not let git commit
+    // smuggle the e2e keyword into hard3_resilience.
+    for (const cmd of [
+      'eval "git commit -m e2e"',
+      'eval git push',
+      '(git commit -m e2e)',
+      '`git commit -m e2e`',
+      '$(git commit -m e2e)',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `wrapped command must be rejected: ${cmd}`);
+    }
+  });
+
   it('path-qualified git command still blocks (codex r1 [data-integrity])', () => {
     // Codex r1 on PR #219: `/usr/bin/git commit -m "e2e"` would bypass
     // the head denylist if we only matched the literal token. extractCommandHead
