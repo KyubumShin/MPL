@@ -319,6 +319,56 @@ describe('mpl-gate-recorder test-agent evidence', () => {
       bugs_found_count: 0,
     }), false);
   });
+
+  it('accepts content-array Task responses by extracting the text payload (codex r1)', () => {
+    // Real Task tool responses arrive shaped as
+    // { content: [{ type: 'text', text: '<assistant message>' }, ...] }
+    // The parser must extract that text and parse the fenced JSON inside.
+    const fenced = '```json\n' + JSON.stringify({
+      phase_id: 'phase-1',
+      verdict: 'PASS',
+      test_results: { total: 3, passed: 3, failed: 0, skipped: 0, pass_rate: 100 },
+      test_files_created: ['tests/phase-1.test.ts'],
+      commands_run: [{ command: 'npm test', exit_code: 0 }],
+      bugs_found: [],
+      a_item_coverage: [{ id: 'A-1', status: 'PASS' }],
+      s_item_coverage: [{ id: 'S-1', status: 'PASS' }],
+    }) + '\n```';
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: { content: [{ type: 'text', text: fenced }] },
+    });
+    assert.equal(ev.valid_json, true);
+    assert.equal(ev.verdict, 'PASS');
+    assert.equal(ev.invalid_reason, null);
+  });
+
+  it('rejects prose-before-fence outputs with prose_outside_json_fence (codex r1)', () => {
+    // The test-agent prompt requires the final message to start with the
+    // fence and have no prose outside. A response with leading prose must
+    // not slip through to PASS even when the fenced JSON itself is valid.
+    const promiseProse = 'Tests passed. Summary follows.\n\n```json\n' + JSON.stringify({
+      phase_id: 'phase-1', verdict: 'PASS',
+      test_results: { total: 1, passed: 1, failed: 0, skipped: 0 },
+    }) + '\n```';
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: promiseProse,
+    });
+    assert.equal(ev.valid_json, false);
+    assert.equal(ev.verdict, 'INVALID');
+    assert.equal(ev.invalid_reason, 'prose_outside_json_fence');
+  });
+
+  it('rejects bare JSON (no fence) with missing_json_block (codex r1)', () => {
+    const bare = JSON.stringify({ phase_id: 'phase-1', verdict: 'PASS' });
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: bare,
+    });
+    assert.equal(ev.valid_json, false);
+    assert.equal(ev.invalid_reason, 'missing_json_block');
+  });
 });
 
 /* ─── Stage A Phase 1.6c-i (PR #186 review fix): Bash gate routing ─── */

@@ -16,27 +16,80 @@ function normalizeStatus(value) {
 export const TEST_AGENT_EVIDENCE_PREVIEW_LIMIT = 20;
 export const TEST_AGENT_RESPONSE_PREVIEW_LIMIT = 600;
 
-function firstJsonCandidate(text) {
-  if (typeof text !== 'string') return null;
-  const fenced = text.match(/```json\s*([\s\S]*?)```/i);
-  if (fenced) return fenced[1].trim();
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  return text.slice(start, end + 1);
+/**
+ * The agent prompt requires the final assistant message to be a single
+ * `json` fence with no prose before or after. Codex r1 on PR #218 noted
+ * the previous parser accepted JSON anywhere in the response (and fell
+ * back to bare braces), defeating the strict-output contract.
+ * Reject anything that does not match `\s*```json ... ```\s*` as the
+ * entire trimmed string, with a distinct invalid reason so the recovery
+ * envelope can name the precise violation.
+ */
+function strictFencedJsonCandidate(text) {
+  if (typeof text !== 'string') return { candidate: null, reason: 'missing_json_block' };
+  const trimmed = text.trim();
+  if (!trimmed) return { candidate: null, reason: 'missing_json_block' };
+  const m = trimmed.match(/^```json\s*([\s\S]*?)```$/i);
+  if (m) return { candidate: m[1].trim(), reason: null };
+  if (/```json/i.test(trimmed)) {
+    return { candidate: null, reason: 'prose_outside_json_fence' };
+  }
+  return { candidate: null, reason: 'missing_json_block' };
+}
+
+/**
+ * Extract the final assistant-text payload from a Task tool response.
+ * Codex r1 on PR #218: real Task responses arrive as
+ * `{ content: [{ type: 'text', text: '...' }, ...] }` and the previous
+ * recurse-on-string path rejected that shape as missing_test_agent_fields.
+ * Concatenate every text segment from the array; otherwise fall through
+ * to the legacy string-wrapped fields.
+ */
+function extractTextFromResponse(response) {
+  if (response == null) return '';
+  if (typeof response === 'string') return response;
+  if (Array.isArray(response)) {
+    return response
+      .map((p) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+      .join('\n');
+  }
+  if (typeof response === 'object') {
+    if (Array.isArray(response.content)) return extractTextFromResponse(response.content);
+    for (const key of ['content', 'output', 'response', 'text']) {
+      const nested = response[key];
+      if (typeof nested === 'string') return nested;
+      if (Array.isArray(nested)) return extractTextFromResponse(nested);
+    }
+  }
+  return '';
+}
+
+function hasTextBearingField(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  if (Array.isArray(obj.content)) return true;
+  for (const key of ['content', 'output', 'response', 'text']) {
+    const v = obj[key];
+    if (typeof v === 'string' || Array.isArray(v)) return true;
+  }
+  return false;
 }
 
 function parseResponseJson(responseText) {
-  if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)) {
-    if (responseText.test_results || responseText.phase_id) {
-      return { valid: true, value: responseText };
-    }
-    const nested = responseText.content ?? responseText.output ?? responseText.response ?? responseText.text;
-    if (typeof nested === 'string') return parseResponseJson(nested);
+  // Already-parsed test-agent body — accept directly.
+  if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)
+      && (responseText.test_results || responseText.phase_id)) {
+    return { valid: true, value: responseText };
+  }
+  // Object payload that carries neither a recognized test-agent field nor
+  // any text-bearing wrapper key is structurally malformed for this hook.
+  // Preserve the historical reason so resume diagnostics keep their label.
+  if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)
+      && !hasTextBearingField(responseText)) {
     return { valid: false, value: null, reason: 'missing_test_agent_fields' };
   }
-  const candidate = firstJsonCandidate(String(responseText || ''));
-  if (!candidate) return { valid: false, value: null, reason: 'missing_json_block' };
+  const text = extractTextFromResponse(responseText);
+  const { candidate, reason } = strictFencedJsonCandidate(text);
+  if (!candidate) return { valid: false, value: null, reason };
   try {
     return { valid: true, value: JSON.parse(candidate) };
   } catch {
