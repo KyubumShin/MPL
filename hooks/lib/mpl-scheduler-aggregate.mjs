@@ -361,6 +361,15 @@ export function aggregateScheduler(cwd, state) {
       wavesParallelFailed += 1;
       collectRejectionReasons(e);
     }
+    // Sequential / skipped events for a parallel-requested tier also carry
+    // rejection reasons (e.g. `single_ready_phase`, `tier_parallel_false`,
+    // `all_phases_already_completed`). The finalize prompt's
+    // `rejection_reasons` union is supposed to include those, so the hook
+    // must collect them too — otherwise a correctly-generated summary
+    // gets blocked by a rejection_reasons set mismatch.
+    if (e.selected_mode === 'sequential' || e.selected_mode === 'skipped') {
+      collectRejectionReasons(e);
+    }
   }
 
   const tiersParallelExecuted = [...expectedParallel].filter((t) =>

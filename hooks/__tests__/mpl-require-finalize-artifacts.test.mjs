@@ -564,6 +564,37 @@ execution_tiers:
     assert.match(r.reason, /scheduler:decomposition_execution_tiers_unparseable/);
   });
 
+  it('collects rejection_reasons from sequential/skipped events on parallel-requested tiers', () => {
+    // Codex round-15 review on PR #213: the executor emits
+    // rejection_reasons (e.g. ["single_ready_phase"]) on sequential
+    // events for parallel:true tiers. The aggregator must collect those
+    // too — otherwise a correctly-generated summary listing
+    // ["single_ready_phase"] gets blocked by a rejection_reasons set
+    // mismatch.
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      // parallel:true tier reduced to 1 ready phase → sequential branch
+      // with rejection_reasons: ["single_ready_phase"].
+      { tier: 1, selected_mode: 'sequential',
+        rejection_reasons: ['single_ready_phase'] },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['single_ready_phase'],
+      no_parallel_explanation: 'tier 1 ran sequentially: only one phase ready in the wave',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
   it('preserves two same-tier rejected waves through dedupe via wave_index', () => {
     // Codex round-12 review on PR #213: dedupe-by-timestamp let same-tier
     // rejected waves collapse onto one event. wave_index is the per-tier
