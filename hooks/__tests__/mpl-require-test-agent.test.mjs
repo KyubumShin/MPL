@@ -103,6 +103,59 @@ phases:
     }
   });
 
+  it('string-form content on background dispatch is treated as completion, not handle stub (codex r12 [logic])', () => {
+    // Codex r12 on PR #218: `{ id: "...", content: "phase complete" }` is
+    // a valid completion shape. The handle-stub predicate must not exit
+    // early on string-form content. Required phase MUST still hit the
+    // missing-evidence gate.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-test-agent-bg-string-content-'));
+    try {
+      mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        test_agent_dispatched: {},
+      }));
+      writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    phase_domain: api
+    impact:
+      modify:
+        - src/api/widgets.ts
+    interface_contract:
+      requires: []
+      produces:
+        - symbol: createWidget
+          path: src/api/widgets.ts
+    test_agent_required: true
+    test_agent_rationale: "touches a boundary"
+`);
+
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Run phase-1.',
+          run_in_background: true,
+        },
+        // id + STRING content — NOT a handle stub, it's a real completion.
+        tool_response: { id: 'task-bg-abc', content: 'phase complete' },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      // Required phase with no test-agent evidence must block — not pass through.
+      assert.equal(r.continue, false);
+      assert.equal(r.decision, 'block');
+      assert.match(r.reason, /mpl-test-agent was not dispatched/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('passes through background phase-runner dispatch without installing a block (codex r9 bundle)', () => {
     // Codex r9 on PR #218: gate-recorder learned to skip background Task
     // dispatches but require-test-agent did not, so a required phase

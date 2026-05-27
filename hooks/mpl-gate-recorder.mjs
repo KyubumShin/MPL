@@ -388,6 +388,7 @@ try {
       && typeof toolResponse.text !== 'string'
       && typeof toolResponse.response !== 'string'
       && typeof toolResponse.output !== 'string'
+      && typeof toolResponse.content !== 'string'
       && !Array.isArray(toolResponse.content)
     );
     const isBackgroundDispatch = isHandleStubShape;
