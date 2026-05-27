@@ -56,8 +56,24 @@ describe('execution_tiers observability contract', () => {
     const schemaText = readFileSync(join(process.cwd(), 'commands', 'schemas', 'run-summary.json'), 'utf-8');
     const schema = JSON.parse(schemaText);
     assert.ok(schema.scheduler, 'run-summary.json must include a scheduler example block');
-    for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'rejection_reasons', 'no_parallel_explanation']) {
+    for (const k of ['tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed', 'tiers_parallel_rejected', 'tiers_with_missing_telemetry', 'rejection_reasons', 'no_parallel_explanation']) {
       assert.ok(k in schema.scheduler, `scheduler block missing required key: ${k}`);
     }
+  });
+
+  it('finalize derives tiers_parallel_requested from decomposition.yaml, not from the event log', () => {
+    // Codex round-2 review on PR #213: deriving the denominator from the
+    // event log lets a run with empty/missing telemetry silently pass the
+    // no-parallel MUST with tiers_parallel_requested == 0. The truth lives
+    // in decomposition.execution_tiers[].parallel; the event log is only
+    // the evidence-of-execution side. Pin the aggregation prompt so the
+    // denominator cannot regress back to event-only.
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /decomposition\.yaml/);
+    assert.match(finalize, /execution_tiers\[\]\.parallel == true/);
+    assert.match(finalize, /tiers_with_missing_telemetry/);
+    // The MUST must trigger when telemetry is missing for a parallel-requested
+    // tier, not only when an event with selected_mode:"parallel" is absent.
+    assert.match(finalize, /tiers_with_missing_telemetry is\s*non-empty/);
   });
 });

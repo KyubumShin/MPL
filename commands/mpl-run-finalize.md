@@ -719,14 +719,26 @@ Generate full run profile at `.mpl/mpl/profile/run-summary.json`.
 
 **Scheduler aggregation (Exp22 R6 / #205)**:
 
+The truth of "did this run request parallelism" lives in
+`.mpl/mpl/decomposition.yaml`, not in the event log. Deriving
+`tiers_parallel_requested` from `phase-scheduler.jsonl` alone would let a run
+with empty/missing telemetry collapse to `tiers_parallel_requested == 0` and
+silently pass the no-parallel MUST.
+
 ```
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+expected_parallel_tiers = set of tier ids where
+  decomposition.execution_tiers[].parallel == true
+
 events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
          state.phase_scheduler_history or []
-tiers_total = count of distinct event.tier
-tiers_parallel_requested = count of distinct event.tier where any
-  event for that tier has parallel_requested == true
-tiers_parallel_executed = count of distinct event.tier where any
-  event for that tier has selected_mode == "parallel"
+tiers_total = decomposition.execution_tiers.length
+tiers_parallel_requested = expected_parallel_tiers.size
+tiers_parallel_executed = count of distinct event.tier in
+  expected_parallel_tiers where any event for that tier has
+  selected_mode == "parallel"
+tiers_with_missing_telemetry = expected_parallel_tiers minus
+  the set of event.tier values present in events
 tiers_parallel_rejected = tiers_parallel_requested - tiers_parallel_executed
 
 scheduler = {
@@ -734,18 +746,23 @@ scheduler = {
   tiers_parallel_requested,
   tiers_parallel_executed,
   tiers_parallel_rejected,
+  tiers_with_missing_telemetry: <list of tier ids>,
   rejection_reasons: union of event.rejection_reasons and the values of
                      event.rejection_reasons_by_phase across all events
                      (deduplicated),
-  no_parallel_explanation: <string> when
-    tiers_parallel_requested > 0 AND tiers_parallel_executed == 0, naming
-    the dominant rejection reasons; null otherwise.
+  no_parallel_explanation: required (non-null) when
+    tiers_parallel_requested > 0 AND
+    (tiers_parallel_executed == 0 OR tiers_with_missing_telemetry is
+     non-empty); otherwise null. The string MUST name either the
+     dominant rejection reasons (when telemetry is present) or the list
+     of tiers with missing telemetry (when not).
 }
 ```
 
 The `no_parallel_explanation` field is the enforcement point for the MUST in
 `commands/mpl-run-execute.md`: a run that requested parallelism but never
-reached it cannot finalize with a null/missing explanation.
+reached it — including because the scheduler never recorded an event for a
+parallel-requested tier — cannot finalize with a null/missing explanation.
 
 Profile data enables:
 1. **Learn optimal token budget by complexity**: derive average tokens per grade from past profiles
