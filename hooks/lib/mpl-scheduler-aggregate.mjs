@@ -48,13 +48,40 @@ export function readDecompositionScope(cwd) {
   const recomposeMatch = text.match(/(^|\n)recompose_count:\s*(\d+)/);
   const recompose_count = recomposeMatch ? Number(recomposeMatch[2]) : 0;
 
-  // Allow optional trailing whitespace and an optional same-line value
-  // marker (e.g. `execution_tiers: |` or just a newline). Block ends at
-  // the next top-level YAML key.
-  const blockMatch = text.match(/(^|\n)execution_tiers:\s*\n([\s\S]*?)(?=\n[a-zA-Z_][a-zA-Z0-9_]*:|\n*$)/);
-  if (!blockMatch) return { tiers: [], recompose_count };
+  // Two supported forms for the execution_tiers value:
+  //   (a) block list — `execution_tiers:` on its own line, items indented
+  //       below as `- ...`
+  //   (b) top-level inline list — `execution_tiers: [{...}, {...}]` on the
+  //       same line (still valid YAML)
+  // The previous parser only recognized (a), so form (b) silently returned
+  // zero tiers and bypassed enforcement.
+  const headerMatch = text.match(/(^|\n)execution_tiers:[ \t]*(.*)$/m);
+  if (!headerMatch) return { tiers: [], recompose_count };
+  const sameLineValue = headerMatch[2].trim();
 
-  const items = splitYamlListItems(blockMatch[2]);
+  let items;
+  if (sameLineValue.startsWith('[')) {
+    // Inline list form. Find the matching closing `]` (nesting-aware) so
+    // multi-line inline lists are handled too.
+    const headerEnd = headerMatch.index + headerMatch[0].length - headerMatch[2].length + (headerMatch[2].indexOf('[') >= 0 ? headerMatch[2].indexOf('[') : 0);
+    const startBracket = text.indexOf('[', headerEnd);
+    const endBracket = matchClosingBracket(text, startBracket);
+    if (endBracket === -1) {
+      return { tiers: [], recompose_count, parse_error: true };
+    }
+    const inner = text.slice(startBracket + 1, endBracket);
+    items = splitTopLevelCommaItems(inner);
+  } else if (sameLineValue === '' || sameLineValue.startsWith('#')) {
+    // Block list form. Block ends at the next top-level YAML key.
+    const blockMatch = text.match(/(^|\n)execution_tiers:[ \t]*(?:#[^\n]*)?\n([\s\S]*?)(?=\n[a-zA-Z_][a-zA-Z0-9_]*:|\n*$)/);
+    if (!blockMatch) return { tiers: [], recompose_count };
+    items = splitYamlListItems(blockMatch[2]);
+  } else {
+    // Same-line non-list value (e.g. `execution_tiers: null`). Treat as
+    // unparseable — fail closed rather than pretending zero tiers.
+    return { tiers: [], recompose_count, parse_error: true };
+  }
+
   const tiers = [];
   let parseError = false;
   for (const item of items) {
@@ -122,6 +149,61 @@ function splitYamlListItems(text) {
  * (newline-separated key: value) or inline-map form (`{ k: v, k2: v2 }`).
  * Returns the raw string value or null if not found.
  */
+/**
+ * Find the closing `]` matching the opening `[` at `start`, ignoring
+ * brackets inside single/double quotes. Returns -1 if unmatched.
+ */
+function matchClosingBracket(text, start) {
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let pairs = { '[': ']', '{': '}' };
+  let opens = new Set(['[', '{']);
+  let closes = new Set([']', '}']);
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (c === "'" && !inDouble) inSingle = !inSingle;
+    else if (c === '"' && !inSingle) inDouble = !inDouble;
+    else if (!inSingle && !inDouble) {
+      if (opens.has(c)) depth++;
+      else if (closes.has(c)) {
+        depth--;
+        if (depth === 0 && c === ']') return i;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split an inline-list body on top-level commas (not inside nested
+ * brackets or quotes). Returns each item as a raw string. For our parse
+ * needs, items are either inline maps `{ ... }` or bare YAML values.
+ */
+function splitTopLevelCommaItems(text) {
+  const out = [];
+  let buf = '';
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  for (const c of text) {
+    if (c === "'" && !inDouble) inSingle = !inSingle;
+    else if (c === '"' && !inSingle) inDouble = !inDouble;
+    if (!inSingle && !inDouble) {
+      if (c === '[' || c === '{') depth++;
+      else if (c === ']' || c === '}') depth--;
+      if (c === ',' && depth === 0) {
+        if (buf.trim().length > 0) out.push(buf.trim());
+        buf = '';
+        continue;
+      }
+    }
+    buf += c;
+  }
+  if (buf.trim().length > 0) out.push(buf.trim());
+  return out;
+}
+
 /**
  * Strip YAML `# comment` segments from each line, except when the `#` is
  * inside a single- or double-quoted string. Keeps escape behavior simple

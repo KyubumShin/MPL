@@ -361,6 +361,53 @@ execution_tiers:
     assert.match(r.reason, /scheduler:tiers_parallel_executed_mismatch:computed=0,summary=1/);
   });
 
+  it('parses top-level inline execution_tiers (`execution_tiers: [{...}]`) and still enforces the MUST', () => {
+    // Codex round-14 review on PR #213: same-line top-level inline list
+    // is valid YAML and used elsewhere in the repo. Previously this
+    // returned zero tiers and silently disabled enforcement.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers: [{ tier: 9, phases: [phase-1, phase-2], parallel: true }]
+`);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [9],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:no_parallel_explanation_required_but_missing/);
+  });
+
+  it('fails closed when execution_tiers has an unsupported same-line scalar value', () => {
+    // Codex round-14 review on PR #213: any non-list same-line value
+    // (e.g. `execution_tiers: null`) must fail closed instead of being
+    // treated as zero tiers.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+execution_tiers: null
+`);
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:decomposition_execution_tiers_unparseable/);
+  });
+
   it('parses execution_tiers with YAML line comments and still enforces the MUST', () => {
     // Codex round-13 review on PR #213: `execution_tiers: # scheduler`
     // and `parallel: true  # independent` are valid YAML. The previous
