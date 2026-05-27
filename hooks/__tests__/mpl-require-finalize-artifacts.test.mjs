@@ -564,6 +564,43 @@ execution_tiers:
     assert.match(r.reason, /scheduler:decomposition_execution_tiers_unparseable/);
   });
 
+  it('collects rejection_reasons from successful parallel events too (wave-split deferred phases)', () => {
+    // Codex/claude round-16 review on PR #213: the executor records
+    // ready_but_blocked_reason on the parallel event itself when a wave
+    // split defers some phases to a later wave. The hook must include
+    // those reasons in its computed union or a faithful summary gets
+    // wedged.
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+recompose_count: 0
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers:
+  - tier: 1
+    phases: [phase-1, phase-2]
+    parallel: true
+`);
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel',
+        rejection_reasons_by_phase: { 'phase-3': ['file_overlap'] } },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 1,
+      tiers_parallel_rejected: 0,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
   it('collects rejection_reasons from sequential/skipped events on parallel-requested tiers', () => {
     // Codex round-15 review on PR #213: the executor emits
     // rejection_reasons (e.g. ["single_ready_phase"]) on sequential

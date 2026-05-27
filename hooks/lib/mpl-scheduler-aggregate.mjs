@@ -355,21 +355,16 @@ export function aggregateScheduler(cwd, state) {
     if (e.selected_mode === 'parallel_rejected') {
       tiersWithRejectedEvent.add(Number(e.tier));
       wavesParallelRejected += 1;
-      collectRejectionReasons(e);
     }
     if (e.selected_mode === 'parallel_failed') {
       wavesParallelFailed += 1;
-      collectRejectionReasons(e);
     }
-    // Sequential / skipped events for a parallel-requested tier also carry
-    // rejection reasons (e.g. `single_ready_phase`, `tier_parallel_false`,
-    // `all_phases_already_completed`). The finalize prompt's
-    // `rejection_reasons` union is supposed to include those, so the hook
-    // must collect them too — otherwise a correctly-generated summary
-    // gets blocked by a rejection_reasons set mismatch.
-    if (e.selected_mode === 'sequential' || e.selected_mode === 'skipped') {
-      collectRejectionReasons(e);
-    }
+    // Collect rejection reasons from EVERY event — the finalize prompt's
+    // rejection_reasons rule is "union across all events", including
+    // successful parallel events that record ready_but_blocked_reason on
+    // deferred phases. Limiting this to non-parallel events would wedge a
+    // correctly generated summary that mentions wave-split block reasons.
+    collectRejectionReasons(e);
   }
 
   const tiersParallelExecuted = [...expectedParallel].filter((t) =>
