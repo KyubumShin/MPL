@@ -198,6 +198,11 @@ export function parseTestAgentEvidence({
   };
 
   const issues = [];
+  // Codex r4 on PR #218: a detector-flagged anomaly (zero_token_after_tools,
+  // empty_response, agent_init_failure) must not yield PASS even when the
+  // JSON parses cleanly. Keep the anomaly visible as a top-priority issue
+  // so isPassingTestAgentEvidence cannot ignore it.
+  if (anomaly?.type) issues.push(`subagent_anomaly:${anomaly.type}`);
   if (phaseId && body.phase_id && body.phase_id !== phaseId) issues.push('phase_id_mismatch');
   if (evidence.tests_total <= 0) issues.push('no_executable_tests');
   if (evidence.tests_failed > 0) issues.push('failed_tests');
@@ -212,7 +217,9 @@ export function parseTestAgentEvidence({
   if (body.verdict && normalizeStatus(body.verdict) !== 'PASS') issues.push('reported_non_pass_verdict');
 
   if (issues.length > 0) {
-    evidence.verdict = issues.includes('phase_id_mismatch') ||
+    const anomalyIssue = issues.find((i) => i.startsWith('subagent_anomaly:'));
+    evidence.verdict = anomalyIssue ||
+      issues.includes('phase_id_mismatch') ||
       issues.includes('missing_command_exit_codes') ||
       issues.includes('missing_verdict')
       ? 'INVALID'

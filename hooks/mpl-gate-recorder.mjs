@@ -52,6 +52,9 @@ const {
 } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-subagent-anomaly.mjs')).href
 );
+const { buildBlockedHookPatch } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
 
 function ok(systemMessage = null) {
   if (systemMessage) {
@@ -394,17 +397,37 @@ try {
     }
 
     // Branch 3: phase-runner completion → sync completed_todos with disk
-    // truth. Codex r3 on PR #218: when the phase-runner returned anomalous
-    // output (empty response, zero-token-after-tools, init failure), the
-    // hook MUST NOT advance completed_todos based on a possibly-stale
-    // state-summary.md file. The anomaly is already persisted in
-    // state.subagent_return_anomalies; let the operator verify and either
-    // re-dispatch the runner or fix state by hand before counts advance.
-    if (/mpl-phase-runner$/.test(agentType) && !anomaly) {
-      const diskCount = countCompletedPhases(cwd);
-      const prior = state.sprint_status || {};
-      if (prior.completed_todos !== diskCount) {
-        patch.sprint_status = { ...prior, completed_todos: diskCount };
+    // truth. Codex r3+r4 on PR #218: when the phase-runner returned
+    // anomalous output, the hook MUST NOT advance completed_todos AND
+    // MUST install a structural block (session_status='blocked_hook')
+    // so the orchestrator pauses regardless of PLAN.md / TODO state.
+    // The anomaly is also persisted in state.subagent_return_anomalies.
+    if (/mpl-phase-runner$/.test(agentType)) {
+      if (anomaly) {
+        // Only install the block if there isn't already an active one we
+        // could clobber. Operators may have a more specific block already
+        // recorded (e.g. mpl-require-test-agent) — don't overwrite it.
+        if (state.session_status !== 'blocked_hook') {
+          Object.assign(patch, buildBlockedHookPatch({
+            hookId: 'mpl-gate-recorder',
+            phaseId: anomaly.phase_id || state.current_phase || 'unknown',
+            artifact: `state.subagent_return_anomalies[${anomaly.type}]`,
+            code: `phase_runner_${anomaly.type}`,
+            reason: `mpl-phase-runner returned ${anomaly.type} (tools=${anomaly.tools_used ?? '?'}, tokens=${anomaly.output_tokens ?? '?'}). Recorded in state.subagent_return_anomalies; cannot advance until verified.`,
+            resumeInstruction: 'Verify on-disk artifacts for the phase, then either re-dispatch mpl-phase-runner or correct state by hand and clear the block.',
+            retryContext: {
+              agent_type: 'mpl-phase-runner',
+              anomaly_type: anomaly.type,
+              phase_id: anomaly.phase_id,
+            },
+          }));
+        }
+      } else {
+        const diskCount = countCompletedPhases(cwd);
+        const prior = state.sprint_status || {};
+        if (prior.completed_todos !== diskCount) {
+          patch.sprint_status = { ...prior, completed_todos: diskCount };
+        }
       }
     }
 

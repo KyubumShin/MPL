@@ -393,6 +393,108 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     assert.equal(ev.invalid_reason, 'missing_json_block');
   });
 
+  it('test-agent valid PASS JSON with anomaly is INVALID, not PASS (codex r4)', () => {
+    // Codex r4 on PR #218: a syntactically valid PASS JSON paired with a
+    // recorded subagent anomaly must NOT clear the verifier trust
+    // boundary. The anomaly is added to the issues list so invalid_reason
+    // stays non-null and isPassingTestAgentEvidence returns false.
+    const fenced = '```json\n' + JSON.stringify({
+      phase_id: 'phase-1',
+      verdict: 'PASS',
+      test_results: { total: 3, passed: 3, failed: 0, skipped: 0, pass_rate: 100 },
+      test_files_created: ['tests/phase-1.test.ts'],
+      commands_run: [{ command: 'npm test', exit_code: 0 }],
+      bugs_found: [],
+      a_item_coverage: [{ id: 'A-1', status: 'PASS' }],
+      s_item_coverage: [{ id: 'S-1', status: 'PASS' }],
+    }) + '\n```';
+    const ev = parseTestAgentEvidence({
+      phaseId: 'phase-1',
+      response: fenced,
+      anomaly: { type: 'zero_token_after_tools' },
+    });
+    assert.equal(ev.valid_json, true);
+    assert.equal(ev.verdict, 'INVALID');
+    assert.match(ev.invalid_reason, /subagent_anomaly:zero_token_after_tools/);
+    assert.equal(ev.subagent_anomaly_type, 'zero_token_after_tools');
+    assert.equal(isPassingTestAgentEvidence(ev), false);
+  });
+
+  it('phase-runner anomaly installs blocked_hook envelope (codex r4)', () => {
+    // Codex r4 on PR #218: phase-runner anomaly must structurally block
+    // progression — the orchestrator advances from PLAN.md state, not
+    // sprint_status, so a non-blocking systemMessage is insufficient.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-block-'));
+    try {
+      seedState(tmp);
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Execute phase-3.',
+        },
+        tool_response: '',
+        usage: { output_tokens: 0 },
+        metrics: { tools_used: 40, duration_ms: 28 * 60 * 1000 },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      const state = readState(tmp);
+      assert.equal(state.session_status, 'blocked_hook',
+        'phase-runner anomaly must install a blocked_hook envelope');
+      assert.equal(state.blocked_by_hook, 'mpl-gate-recorder');
+      assert.match(state.block_code, /^phase_runner_/);
+      assert.equal(typeof state.retry_context, 'object');
+      assert.equal(state.retry_context.agent_type, 'mpl-phase-runner');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('phase-runner anomaly does NOT clobber a pre-existing blocked_hook (codex r4)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-noclobber-'));
+    try {
+      seedState(tmp, {
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_phase: 'phase-1',
+        blocked_artifact: 'state.test_agent_dispatched.phase-1',
+        block_code: 'missing_or_invalid_test_agent_evidence',
+        block_reason: 'pre-existing more specific block',
+        resume_instruction: 'follow existing recovery',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { from: 'earlier' },
+      });
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Execute phase-3.',
+        },
+        tool_response: '',
+        usage: { output_tokens: 0 },
+        metrics: { tools_used: 40, duration_ms: 28 * 60 * 1000 },
+      };
+      execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+      const state = readState(tmp);
+      // The pre-existing more-specific block must survive.
+      assert.equal(state.blocked_by_hook, 'mpl-require-test-agent');
+      assert.equal(state.block_code, 'missing_or_invalid_test_agent_evidence');
+      // Anomaly is still recorded for visibility.
+      assert.equal(state.subagent_return_anomalies.length, 1);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('phase-runner anomaly does not advance sprint_status.completed_todos (codex r3)', () => {
     // Codex r3 on PR #218: when the phase-runner returns anomalous output
     // (empty / zero tokens after substantial tool work), the hook must not
