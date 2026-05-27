@@ -84,7 +84,12 @@ disallowedTools: Task
   </Execution_Flow>
 
   <Output_Schema>
-    Your final output MUST be a valid JSON block wrapped in ```json fences.
+    FINAL OUTPUT RULE:
+    - Your final assistant message MUST start with a ```json fence.
+    - Your final assistant message MUST end with the closing ``` fence.
+    - Do NOT put prose, headings, bullets, or commentary before or after the JSON block.
+    - Put any human-readable summary inside JSON fields only.
+    - A natural-language final report is INVALID even when tests passed.
 
     ```json
     {

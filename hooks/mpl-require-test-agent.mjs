@@ -63,6 +63,21 @@ function block(reason) {
 const HOOK_ID = 'mpl-require-test-agent';
 
 function recordBlockedHook(cwd, phaseId, reason, resumeInstruction) {
+  // Codex r5 on PR #218: do not clobber an existing blocked_hook owned by
+  // a different hook. mpl-gate-recorder runs ahead of this PreToolUse
+  // hook for the same Task completion event and may have already set a
+  // higher-priority phase_runner_<anomaly> block; overwriting it would
+  // hide the structural anomaly signal and let a later test-agent PASS
+  // clear the only visible block while the anomaly remained un-recovered.
+  try {
+    const existing = readState(cwd);
+    if (existing && existing.session_status === 'blocked_hook'
+        && existing.blocked_by_hook && existing.blocked_by_hook !== HOOK_ID) {
+      return;  // defer to the more-specific existing block
+    }
+  } catch {
+    // Fall through to recordBlockedHookEnvelope, which has its own try/catch.
+  }
   recordBlockedHookEnvelope(cwd, {
     hookId: HOOK_ID,
     phaseId,
@@ -74,6 +89,7 @@ function recordBlockedHook(cwd, phaseId, reason, resumeInstruction) {
       phase_id: phaseId,
       required_agent: 'mpl-test-agent',
       override_path: '.mpl/config/test-agent-override.json',
+      schema_reminder: 'Final response must be a single fenced ```json block with no prose outside it.',
     },
   });
 }
@@ -120,13 +136,28 @@ function isLegacyArrayOnlyPassEvidence(evidence) {
 
 function describePriorEvidence(prior, phaseId) {
   if (!prior) return 'but mpl-test-agent was not dispatched';
+  const len = typeof prior.response_len === 'number' ? `, response_len=${prior.response_len}` : '';
+  const anomaly = prior.subagent_anomaly_type ? `, anomaly=${prior.subagent_anomaly_type}` : '';
   const summary = `but the recorded mpl-test-agent evidence is verdict=${prior.verdict || 'UNKNOWN'} ` +
-    `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'})`;
+    `(valid_json=${prior.valid_json === true}, reason=${prior.invalid_reason || 'none'}${len}${anomaly})`;
   if (!isLegacyArrayOnlyPassEvidence(prior)) return summary;
 
   return `${summary}; missing scalar count fields (${missingScalarCountFields(prior).join(', ')}) ` +
     `in a pre-v0.18.7 legacy record. Re-run mpl-test-agent for ${phaseId} so MPL records ` +
     `lossless scalar counts`;
+}
+
+function formatPriorEvidenceDetails(prior) {
+  if (!prior) return 'No prior mpl-test-agent evidence is recorded.';
+  const lines = [
+    `verdict=${prior.verdict || 'UNKNOWN'}`,
+    `valid_json=${prior.valid_json === true}`,
+    `invalid_reason=${prior.invalid_reason || 'none'}`,
+  ];
+  if (typeof prior.response_len === 'number') lines.push(`response_len=${prior.response_len}`);
+  if (prior.subagent_anomaly_type) lines.push(`subagent_anomaly_type=${prior.subagent_anomaly_type}`);
+  if (prior.response_preview) lines.push(`response_preview=${JSON.stringify(prior.response_preview)}`);
+  return lines.join('\n');
 }
 
 /**
@@ -232,10 +263,19 @@ function finalizePhase(rawPhase) {
   };
 }
 
-function formatTestAgentResumeInstruction(phase, priorDescription) {
+function formatTestAgentResumeInstruction(phase, priorDescription, priorEvidence = null) {
   const domain = phase.phase_domain || 'unknown';
   return [
     `Dispatch mpl-test-agent for ${phase.id}, then retry the blocked phase transition.`,
+    '',
+    'Prior mpl-test-agent evidence diagnostics:',
+    formatPriorEvidenceDetails(priorEvidence),
+    '',
+    'FINAL OUTPUT RULE:',
+    '- The final assistant message MUST start with ```json.',
+    '- The final assistant message MUST end with the closing ``` fence.',
+    '- Do not put prose before or after the JSON block.',
+    '- Put any human-readable summary inside JSON fields only.',
     '',
     'Use this exact recovery shape:',
     'Task(subagent_type="mpl-test-agent", model="sonnet", prompt="""',
@@ -256,6 +296,7 @@ function formatTestAgentResumeInstruction(phase, priorDescription) {
     clampSnippet(phase.verification_plan || phase.success_criteria),
     '',
     'Write and run executable tests for this phase. Return valid JSON with:',
+    '- final response starts with ```json and has no prose outside the fence',
     '- verdict: "PASS" only when all checks pass',
     '- test_results.total > 0',
     '- test_results.failed == 0 and test_results.skipped == 0',
@@ -353,6 +394,39 @@ try {
     process.exit(0);
   }
 
+  // Background Task dispatches can return a handle stub on the first
+  // PostToolUse event, not a real phase completion. Skip the gate ONLY
+  // when both run_in_background is true AND the response looks like a
+  // handle stub (object with id/handle field and no text payload).
+  // Codex r8/r9 on PR #218 caught the original false-block on the stub;
+  // r11 [data-integrity] sharpened it so that an actual background
+  // completion with substantive content still gets gated. Same heuristic
+  // as mpl-gate-recorder.
+  {
+    const bgFlag = toolInput?.run_in_background === true
+      || toolInput?.runInBackground === true;
+    const toolResponse = data.tool_response ?? data.toolResponse ?? null;
+    const isHandleStubShape = (
+      bgFlag
+      && toolResponse !== null
+      && typeof toolResponse === 'object'
+      && !Array.isArray(toolResponse)
+      && (toolResponse.handle !== undefined
+          || toolResponse.taskId !== undefined
+          || toolResponse.task_id !== undefined
+          || toolResponse.id !== undefined)
+      && typeof toolResponse.text !== 'string'
+      && typeof toolResponse.response !== 'string'
+      && typeof toolResponse.output !== 'string'
+      && typeof toolResponse.content !== 'string'
+      && !Array.isArray(toolResponse.content)
+    );
+    if (isHandleStubShape) {
+      ok();
+      process.exit(0);
+    }
+  }
+
   const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
   if (!phaseId) {
     // Non-phase task — conservatively allow.
@@ -415,7 +489,7 @@ try {
       `BEFORE proceeding to the next phase. code_author == test_author is a tautology, ` +
       `not a verification (AD-0004). To bypass with user consent, add ${phaseId} to ` +
       `.mpl/config/test-agent-override.json with a reason.`;
-  const resumeInstruction = formatTestAgentResumeInstruction(phase, missingOrBad);
+  const resumeInstruction = formatTestAgentResumeInstruction(phase, missingOrBad, prior);
   recordBlockedHook(cwd, phaseId, reason, resumeInstruction);
   block(reason);
 } catch {

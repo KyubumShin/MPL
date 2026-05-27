@@ -45,8 +45,22 @@ const { readStdin } = await import(
 const { parseTestAgentEvidence, isPassingTestAgentEvidence } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-evidence.mjs')).href
 );
+const {
+  appendSubagentReturnAnomaly,
+  detectSubagentReturnAnomaly,
+  formatSubagentAnomalyMessage,
+} = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-subagent-anomaly.mjs')).href
+);
+const { buildBlockedHookPatch } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
 
-function ok() {
+function ok(systemMessage = null) {
+  if (systemMessage) {
+    console.log(JSON.stringify({ continue: true, systemMessage }));
+    return;
+  }
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
@@ -220,7 +234,7 @@ try {
 
   const toolName = String(data.tool_name || data.toolName || '');
   const toolInput = data.tool_input || data.toolInput || {};
-  const toolResponse = data.tool_response || data.toolResponse || {};
+  const toolResponse = data.tool_response ?? data.toolResponse ?? {};
 
   // Tool response may be string or object — normalize
   const exitCode =
@@ -345,16 +359,57 @@ try {
     }
 
     const patch = {};
+    const phaseIdFromPrompt = extractPhaseId(toolInput.prompt || toolInput.description || '');
 
-    // Branch 2: test-agent dispatch record (AD-0004 empirical gap)
-    if (/mpl-test-agent$/.test(agentType)) {
-      const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
+    // Codex r8/r11 on PR #218: background Task dispatches can deliver a
+    // handle stub on the first PostToolUse event, not the final assistant
+    // text. The anomaly detector would otherwise classify that blank as
+    // empty_response and freeze the pipeline before the real completion
+    // is joined.
+    //
+    // r11 [data-integrity]: skipping on run_in_background ALONE was too
+    // coarse — if the same hook later sees the actual completion through
+    // PostToolUse with substantive content, we still want to record
+    // test-agent evidence. So skip ONLY when run_in_background is true
+    // AND the response looks like a handle stub (object-shaped, no
+    // usable text payload). Real completion content lands in the normal
+    // anomaly + evidence pipeline.
+    const bgFlag = toolInput?.run_in_background === true
+      || toolInput?.runInBackground === true;
+    const isHandleStubShape = (
+      bgFlag
+      && toolResponse !== null
+      && typeof toolResponse === 'object'
+      && !Array.isArray(toolResponse)
+      && (toolResponse.handle !== undefined
+          || toolResponse.taskId !== undefined
+          || toolResponse.task_id !== undefined
+          || toolResponse.id !== undefined)
+      && typeof toolResponse.text !== 'string'
+      && typeof toolResponse.response !== 'string'
+      && typeof toolResponse.output !== 'string'
+      && typeof toolResponse.content !== 'string'
+      && !Array.isArray(toolResponse.content)
+    );
+    const isBackgroundDispatch = isHandleStubShape;
+    const anomaly = isBackgroundDispatch ? null : detectSubagentReturnAnomaly({
+      data,
+      agentType,
+      phaseId: phaseIdFromPrompt,
+    });
+    if (anomaly) appendSubagentReturnAnomaly(cwd, anomaly);
+
+    // Branch 2: test-agent dispatch record (AD-0004 empirical gap).
+    // Skip background dispatches — same reasoning as the anomaly branch.
+    if (/mpl-test-agent$/.test(agentType) && !isBackgroundDispatch) {
+      const phaseId = phaseIdFromPrompt;
       if (phaseId) {
         const dispatched = state.test_agent_dispatched || {};
         const evidence = parseTestAgentEvidence({
           phaseId,
           prompt: toolInput.prompt || toolInput.description || '',
           response: toolResponse,
+          anomaly,
         });
         dispatched[phaseId] = evidence;
         patch.test_agent_dispatched = dispatched;
@@ -374,19 +429,81 @@ try {
       }
     }
 
-    // Branch 3: phase-runner completion → sync completed_todos with disk truth
-    if (/mpl-phase-runner$/.test(agentType)) {
-      const diskCount = countCompletedPhases(cwd);
-      const prior = state.sprint_status || {};
-      if (prior.completed_todos !== diskCount) {
-        patch.sprint_status = { ...prior, completed_todos: diskCount };
+    // Branch 3: phase-runner completion → sync completed_todos with disk
+    // truth. Codex r3+r4 on PR #218: when the phase-runner returned
+    // anomalous output, the hook MUST NOT advance completed_todos AND
+    // MUST install a structural block (session_status='blocked_hook')
+    // so the orchestrator pauses regardless of PLAN.md / TODO state.
+    // The anomaly is also persisted in state.subagent_return_anomalies.
+    if (/mpl-phase-runner$/.test(agentType) && !isBackgroundDispatch) {
+      if (anomaly) {
+        // Only install the block when no stronger session state is
+        // already in effect. Codex r5/r10 on PR #218: do not clobber
+        // - blocked_hook (operator may have a more specific block)
+        // - paused_budget / paused_checkpoint (budget guard)
+        // - verification_hang (verification gate)
+        // - cancelled (user-cancelled run)
+        // The anomaly is still recorded in state.subagent_return_anomalies
+        // for visibility, but the session status takes precedence.
+        const installableFromStatus = state.session_status === null
+          || state.session_status === undefined
+          || state.session_status === 'active';
+        if (installableFromStatus) {
+          Object.assign(patch, buildBlockedHookPatch({
+            hookId: 'mpl-gate-recorder',
+            phaseId: anomaly.phase_id || state.current_phase || 'unknown',
+            artifact: `state.subagent_return_anomalies[${anomaly.type}]`,
+            code: `phase_runner_${anomaly.type}`,
+            reason: `mpl-phase-runner returned ${anomaly.type} (tools=${anomaly.tools_used ?? '?'}, tokens=${anomaly.output_tokens ?? '?'}). Recorded in state.subagent_return_anomalies; cannot advance until verified.`,
+            resumeInstruction: 'Verify on-disk artifacts for the phase, then either re-dispatch mpl-phase-runner or correct state by hand and clear the block.',
+            retryContext: {
+              agent_type: 'mpl-phase-runner',
+              anomaly_type: anomaly.type,
+              phase_id: anomaly.phase_id,
+            },
+          }));
+        }
+      } else {
+        // Codex r6/r7 on PR #218: a clean re-dispatch must self-clear
+        // our own phase_runner_* block, otherwise transient anomalies
+        // leave the run permanently paused. Only clear when ALL of:
+        //   - the block is owned by mpl-gate-recorder
+        //   - block_code starts with phase_runner_
+        //   - the clean completion is for the SAME phase that was
+        //     blocked (match state.blocked_phase or
+        //     retry_context.phase_id). A different phase's clean
+        //     completion must NOT clear another phase's anomaly block.
+        if (state.session_status === 'blocked_hook'
+            && state.blocked_by_hook === 'mpl-gate-recorder'
+            && typeof state.block_code === 'string'
+            && state.block_code.startsWith('phase_runner_')) {
+          const blockedPhaseId = state.blocked_phase
+            || (state.retry_context && state.retry_context.phase_id)
+            || null;
+          if (phaseIdFromPrompt && blockedPhaseId && phaseIdFromPrompt === blockedPhaseId) {
+            patch.session_status = null;
+            patch.blocked_by_hook = null;
+            patch.blocked_phase = null;
+            patch.blocked_artifact = null;
+            patch.block_code = null;
+            patch.block_reason = null;
+            patch.resume_instruction = null;
+            patch.retry_context = null;
+            patch.blocked_at = null;
+          }
+        }
+        const diskCount = countCompletedPhases(cwd);
+        const prior = state.sprint_status || {};
+        if (prior.completed_todos !== diskCount) {
+          patch.sprint_status = { ...prior, completed_todos: diskCount };
+        }
       }
     }
 
     if (Object.keys(patch).length > 0) {
       writeState(cwd, patch);
     }
-    ok();
+    ok(formatSubagentAnomalyMessage(anomaly));
     process.exit(0);
   }
 

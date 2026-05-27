@@ -14,28 +14,84 @@ function normalizeStatus(value) {
 // Keep enough context for debugging while preventing large sharded verifier
 // responses from bloating .mpl/state.json.
 export const TEST_AGENT_EVIDENCE_PREVIEW_LIMIT = 20;
+export const TEST_AGENT_RESPONSE_PREVIEW_LIMIT = 600;
 
-function firstJsonCandidate(text) {
-  if (typeof text !== 'string') return null;
-  const fenced = text.match(/```json\s*([\s\S]*?)```/i);
-  if (fenced) return fenced[1].trim();
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  return text.slice(start, end + 1);
+/**
+ * The agent prompt requires the final assistant message to be a single
+ * `json` fence with no prose before or after. Codex r1 on PR #218 noted
+ * the previous parser accepted JSON anywhere in the response (and fell
+ * back to bare braces), defeating the strict-output contract.
+ * Reject anything that does not match `\s*```json ... ```\s*` as the
+ * entire trimmed string, with a distinct invalid reason so the recovery
+ * envelope can name the precise violation.
+ */
+function strictFencedJsonCandidate(text) {
+  if (typeof text !== 'string') return { candidate: null, reason: 'missing_json_block' };
+  const trimmed = text.trim();
+  if (!trimmed) return { candidate: null, reason: 'missing_json_block' };
+  const m = trimmed.match(/^```json\s*([\s\S]*?)```$/i);
+  if (m) return { candidate: m[1].trim(), reason: null };
+  if (/```json/i.test(trimmed)) {
+    return { candidate: null, reason: 'prose_outside_json_fence' };
+  }
+  return { candidate: null, reason: 'missing_json_block' };
+}
+
+/**
+ * Extract the final assistant-text payload from a Task tool response.
+ * Codex r1 on PR #218: real Task responses arrive as
+ * `{ content: [{ type: 'text', text: '...' }, ...] }` and the previous
+ * recurse-on-string path rejected that shape as missing_test_agent_fields.
+ * Concatenate every text segment from the array; otherwise fall through
+ * to the legacy string-wrapped fields.
+ */
+function extractTextFromResponse(response) {
+  if (response == null) return '';
+  if (typeof response === 'string') return response;
+  if (Array.isArray(response)) {
+    return response
+      .map((p) => (typeof p === 'string' ? p : (p && typeof p.text === 'string' ? p.text : '')))
+      .join('\n');
+  }
+  if (typeof response === 'object') {
+    if (Array.isArray(response.content)) return extractTextFromResponse(response.content);
+    for (const key of ['content', 'output', 'response', 'text']) {
+      const nested = response[key];
+      if (typeof nested === 'string') return nested;
+      if (Array.isArray(nested)) return extractTextFromResponse(nested);
+    }
+  }
+  return '';
+}
+
+function hasTextBearingField(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  if (Array.isArray(obj.content)) return true;
+  for (const key of ['content', 'output', 'response', 'text']) {
+    const v = obj[key];
+    if (typeof v === 'string' || Array.isArray(v)) return true;
+  }
+  return false;
 }
 
 function parseResponseJson(responseText) {
-  if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)) {
-    if (responseText.test_results || responseText.phase_id) {
-      return { valid: true, value: responseText };
-    }
-    const nested = responseText.content ?? responseText.output ?? responseText.response ?? responseText.text;
-    if (typeof nested === 'string') return parseResponseJson(nested);
+  // Codex r2 on PR #218: a bare object with test_results/phase_id used to
+  // bypass strict-fence enforcement, contradicting the new final-output
+  // contract. The Task tool never produces an already-parsed body; the
+  // test-agent emits a string carrying a fenced JSON block. Route every
+  // payload through extractTextFromResponse + strictFencedJsonCandidate.
+  //
+  // Object payload with no text-bearing wrapper key (no content/output/
+  // response/text in string or array form) is structurally malformed —
+  // preserve the historical reason 'missing_test_agent_fields' so the
+  // resume diagnostics keep their label.
+  if (responseText && typeof responseText === 'object' && !Array.isArray(responseText)
+      && !hasTextBearingField(responseText)) {
     return { valid: false, value: null, reason: 'missing_test_agent_fields' };
   }
-  const candidate = firstJsonCandidate(String(responseText || ''));
-  if (!candidate) return { valid: false, value: null, reason: 'missing_json_block' };
+  const text = extractTextFromResponse(responseText);
+  const { candidate, reason } = strictFencedJsonCandidate(text);
+  if (!candidate) return { valid: false, value: null, reason };
   try {
     return { valid: true, value: JSON.parse(candidate) };
   } catch {
@@ -63,6 +119,12 @@ function boundedPreview(values, limit = TEST_AGENT_EVIDENCE_PREVIEW_LIMIT) {
   };
 }
 
+function responsePreview(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= TEST_AGENT_RESPONSE_PREVIEW_LIMIT) return clean;
+  return `${clean.slice(0, TEST_AGENT_RESPONSE_PREVIEW_LIMIT - 20).trimEnd()}... [truncated]`;
+}
+
 function coverageStatuses(rows) {
   if (!Array.isArray(rows)) return [];
   return rows.map((r) => normalizeStatus(r?.status)).filter(Boolean);
@@ -72,14 +134,17 @@ export function parseTestAgentEvidence({
   phaseId,
   prompt = '',
   response,
+  anomaly = null,
   timestamp = new Date().toISOString(),
 } = {}) {
   const responseText = typeof response === 'string' ? response : JSON.stringify(response || '');
   const parsed = parseResponseJson(response);
+  const anomalyReason = anomaly?.type ? 'empty_response_anomaly' : null;
   const base = {
     timestamp,
     prompt_len: String(prompt || '').length,
     response_len: responseText.length,
+    response_preview: responsePreview(responseText),
     valid_json: parsed.valid,
     verdict: 'INVALID',
     phase_id: phaseId || null,
@@ -96,7 +161,8 @@ export function parseTestAgentEvidence({
     command_exit_codes_nonzero_count: 0,
     command_exit_codes_truncated: false,
     bugs_found_count: null,
-    invalid_reason: parsed.reason || null,
+    invalid_reason: anomalyReason || parsed.reason || null,
+    subagent_anomaly_type: anomaly?.type || null,
   };
 
   if (!parsed.valid) return base;
@@ -132,6 +198,11 @@ export function parseTestAgentEvidence({
   };
 
   const issues = [];
+  // Codex r4 on PR #218: a detector-flagged anomaly (zero_token_after_tools,
+  // empty_response, agent_init_failure) must not yield PASS even when the
+  // JSON parses cleanly. Keep the anomaly visible as a top-priority issue
+  // so isPassingTestAgentEvidence cannot ignore it.
+  if (anomaly?.type) issues.push(`subagent_anomaly:${anomaly.type}`);
   if (phaseId && body.phase_id && body.phase_id !== phaseId) issues.push('phase_id_mismatch');
   if (evidence.tests_total <= 0) issues.push('no_executable_tests');
   if (evidence.tests_failed > 0) issues.push('failed_tests');
@@ -146,7 +217,9 @@ export function parseTestAgentEvidence({
   if (body.verdict && normalizeStatus(body.verdict) !== 'PASS') issues.push('reported_non_pass_verdict');
 
   if (issues.length > 0) {
-    evidence.verdict = issues.includes('phase_id_mismatch') ||
+    const anomalyIssue = issues.find((i) => i.startsWith('subagent_anomaly:'));
+    evidence.verdict = anomalyIssue ||
+      issues.includes('phase_id_mismatch') ||
       issues.includes('missing_command_exit_codes') ||
       issues.includes('missing_verdict')
       ? 'INVALID'

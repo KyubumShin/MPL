@@ -19,6 +19,15 @@ Run:
 node hooks/lib/mpl-recover.mjs --plan
 ```
 
+When the blocking hook is unclear, trace the relevant artifact first:
+
+```bash
+node hooks/lib/mpl-hook-trace.mjs .mpl/mpl/decomposition.yaml
+```
+
+The trace distinguishes registered hooks from the hook currently blocking the
+active `blocked_hook` envelope.
+
 If the result is:
 - `no_state` or `not_blocked` → report that there is no hook block to recover.
 - `recoverable` → continue to the matching handler below.
