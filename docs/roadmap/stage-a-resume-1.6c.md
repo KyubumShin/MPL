@@ -30,7 +30,7 @@ This brief is **self-contained**. A new session should be able to checkout the b
 What works today on `main`:
 1. User opts into MVP via the Stage 1.4.5 guided checklist (#181)
 2. Goal-contract parser stores `mvp_scope` (#178)
-3. Decomposer derives `mvp.phases` via mechanical id-set mapping (#182)
+3. Decomposition post-processing derives `mvp.phases` via mechanical id-set mapping (#182, Phase 5 moved it out of the LLM output path)
 4. Contract-graph validator + hook reject malformed mvp/release_cuts and mutated released cuts (#180, #183)
 5. Orchestrator routes phase2-sprint → release-gate (cohort active) or phase3-gate (no cohort) (#185)
 6. release-finalize appends cohort to `completed_cut_ids`, clears `current_cut_id`, routes to phase3-gate (#185)

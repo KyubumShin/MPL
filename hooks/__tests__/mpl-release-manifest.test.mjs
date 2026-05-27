@@ -61,9 +61,30 @@ describe('resolveCutDescriptor', () => {
   // PR #187 codex review High: strict-both-required regression suite.
   it('returns null when ONLY contract.mvp_scope is present (no graph.mvp) — strict', () => {
     // Pre-fix: would have returned a descriptor with phases:[] and shipped
-    // a degraded manifest. Now rejects so release-finalize bails.
+    // a degraded manifest. Still rejects unless a parsed decomposition is
+    // supplied for deterministic phase derivation.
     const d = resolveCutDescriptor('mvp', mvpContract(), { mvp: null, release_cuts: [] });
     assert.equal(d, null);
+  });
+
+  it('derives mvp descriptor from goal_trace when graph.mvp is omitted', () => {
+    const contract = mvpContract({ ac: ['AC-1'], ax: ['AX-1'], artifact: 'tag' });
+    const graph = {
+      mvp: null,
+      release_cuts: [],
+      execution_tier_phase_refs: ['phase-2', 'phase-1'],
+    };
+    const decomposition = {
+      phases: [
+        { id: 'phase-1', acceptance_criteria: ['AC-1'], variation_axes: [] },
+        { id: 'phase-2', acceptance_criteria: [], variation_axes: ['AX-1'] },
+      ],
+    };
+    const d = resolveCutDescriptor('mvp', contract, graph, decomposition);
+    assert.deepEqual(d.phases, ['phase-2', 'phase-1']);
+    assert.deepEqual(d.acceptance_criteria, ['AC-1']);
+    assert.deepEqual(d.variation_axes, ['AX-1']);
+    assert.equal(d.artifact, 'tag');
   });
 
   it('returns null when ONLY graph.mvp is present (no contract.mvp_scope) — strict', () => {
@@ -193,6 +214,33 @@ describe('buildReleaseManifest', () => {
     assert.equal(m.artifact, 'draft_pr');
     assert.equal(m.created_at, NOW);
     assert.equal(m.pipeline_id, 'mpl-20260524-mvp-test');
+  });
+
+  it('builds an mvp manifest from derived goal_trace membership when graph.mvp is absent', () => {
+    const state = {
+      pipeline_id: 'mpl-20260524-mvp-test',
+      release: {
+        current_cut_id: 'mvp',
+        gate_results: {
+          hard1_baseline: { exit_code: 0 },
+          hard2_coverage: { exit_code: 0 },
+          hard3_resilience: { exit_code: 0 },
+        },
+      },
+    };
+    const manifest = buildReleaseManifest({
+      cutId: 'mvp',
+      state,
+      contract: mvpContract({ ac: ['AC-1'], ax: [], artifact: 'release_manifest' }),
+      graph: { mvp: null, release_cuts: [], execution_tier_phase_refs: ['phase-1'] },
+      decomposition: {
+        phases: [{ id: 'phase-1', acceptance_criteria: ['AC-1'], variation_axes: [] }],
+      },
+      now: NOW,
+    });
+    assert.deepEqual(manifest.phases, ['phase-1']);
+    assert.deepEqual(manifest.goal_trace.acceptance_criteria, ['AC-1']);
+    assert.equal(manifest.artifact, 'release_manifest');
   });
 
   it('returns null when no descriptor can be resolved', () => {

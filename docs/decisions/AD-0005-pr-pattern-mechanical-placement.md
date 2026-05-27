@@ -91,7 +91,7 @@ No restoration, no implementation. v0.13.0 budget to #19 AD-05 only. **Dealbreak
 - `.mpl/mpl/pattern-metrics.jsonl` — EXPERIMENTAL metric output (created at runtime)
 
 **Files to modify:**
-- `agents/mpl-decomposer.md` — Step 9.6 `risk_patterns[]` field in schema + Reasoning_Steps
+- `agents/mpl-decomposer.md` — Step 9.6 keeps optional project-specific `risk_patterns[]`; default patterns are derived in post-processing
 - `commands/mpl-run-decompose.md` — Step 3 post-processing: `default_risk_patterns` injection into a_items
 - `commands/mpl-run-execute-gates.md` — Hard 1 Step 0 "Pattern Risk Check" (non-blocking during EXPERIMENTAL)
 - `commands/mpl-run-execute.md` — Phase Runner context assembly: load risk_patterns into verification context

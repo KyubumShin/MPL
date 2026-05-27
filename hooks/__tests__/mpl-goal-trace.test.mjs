@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 
 import {
+  deriveMvpFromGoalTrace,
   parseDecompositionGoalTraceText,
   validateGoalTraceCoverage,
   validateMvpGoalTraceCoverage,
@@ -345,6 +346,22 @@ release_cuts: []
 }
 
 describe('validateMvpGoalTraceCoverage (RFC §4.2, post-Stage-A audit fix #2)', () => {
+  it('derives mvp.phases mechanically from mvp_scope and execution-tier order', () => {
+    writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'),
+      goalContractWithMvp({ mvpAc: ['AC-2', 'AC-1'], mvpAx: [] }));
+    const goal = readGoalContract(tmp);
+    const text = decompositionWithMvp({ mvpPhases: ['phase-1', 'phase-2'] });
+    const decomp = parseDecompositionGoalTraceText(text);
+    const graph = parsePhaseContractGraphText(text);
+    const derived = deriveMvpFromGoalTrace(decomp, goal.contract, graph.execution_tier_phase_refs);
+    assert.deepEqual(derived, {
+      derived_from: 'goal_contract.mvp_scope',
+      phases: ['phase-1', 'phase-2'],
+      execution_mode: 'sequential',
+      artifact: 'draft_pr',
+    });
+  });
+
   it('returns valid (no-op) when contract has no mvp_scope (whole-pipeline only)', () => {
     // Plain decomposition with no mvp block; whole-pipeline validator
     // already covers this case. MVP validator must skip silently.
@@ -387,8 +404,8 @@ describe('validateMvpGoalTraceCoverage (RFC §4.2, post-Stage-A audit fix #2)', 
     // MVP subset coverage fails — phase-1 (only MVP phase) does not cover AC-2.
     const mvpVerdict = validateMvpGoalTraceCoverage(decomp, goal.contract, graph);
     assert.equal(mvpVerdict.valid, false);
-    assert.ok(mvpVerdict.issues.includes('mvp_scope.acceptance_criteria:uncovered:AC-2'),
-      `expected AC-2 uncovered, got: ${mvpVerdict.issues.join(', ')}`);
+    assert.ok(mvpVerdict.issues.some((issue) => issue.startsWith('mvp:phases:derived_mismatch:')),
+      `expected mvp derived mismatch, got: ${mvpVerdict.issues.join(', ')}`);
   });
 
   it('flags mvp_scope.variation_axes uncovered when MVP phase set misses an AX', () => {
@@ -400,13 +417,11 @@ describe('validateMvpGoalTraceCoverage (RFC §4.2, post-Stage-A audit fix #2)', 
     const graph = parsePhaseContractGraphText(text);
     const verdict = validateMvpGoalTraceCoverage(decomp, goal.contract, graph);
     assert.equal(verdict.valid, false);
-    assert.ok(verdict.issues.includes('mvp_scope.variation_axes:uncovered:AX-2'));
+    assert.ok(verdict.issues.some((issue) => issue.startsWith('mvp:phases:derived_mismatch:')),
+      `expected mvp derived mismatch, got: ${verdict.issues.join(', ')}`);
   });
 
-  it('returns valid (no-op) when graph.mvp.phases is empty (other validators handle that)', () => {
-    // Empty mvp.phases is already caught by mpl-require-phase-contract-graph
-    // and resolveCutDescriptor. The goal-trace validator should not
-    // double-report.
+  it('flags explicit empty mvp.phases when deterministic derivation finds a phase', () => {
     writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'),
       goalContractWithMvp({ mvpAc: ['AC-1'], mvpAx: ['AX-1'] }));
     const goal = readGoalContract(tmp);
@@ -414,7 +429,31 @@ describe('validateMvpGoalTraceCoverage (RFC §4.2, post-Stage-A audit fix #2)', 
     const decomp = parseDecompositionGoalTraceText(text);
     const graph = parsePhaseContractGraphText(text);
     const verdict = validateMvpGoalTraceCoverage(decomp, goal.contract, graph);
-    assert.equal(verdict.valid, true);
+    assert.equal(verdict.valid, false);
+    assert.ok(verdict.issues.some((issue) => issue.startsWith('mvp:phases:derived_mismatch:')));
+  });
+
+  it('does not flag legacy explicit mvp.phases when only order differs', () => {
+    writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'),
+      goalContractWithMvp({ mvpAc: ['AC-1', 'AC-2'], mvpAx: [] }));
+    const goal = readGoalContract(tmp);
+    const text = decompositionWithMvp({ mvpPhases: ['phase-2', 'phase-1'] });
+    const decomp = parseDecompositionGoalTraceText(text);
+    const graph = parsePhaseContractGraphText(text);
+    const verdict = validateMvpGoalTraceCoverage(decomp, goal.contract, graph);
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('validates MVP coverage from derived phases when graph.mvp is omitted', () => {
+    writeFileSync(join(tmp, '.mpl', 'goal-contract.yaml'),
+      goalContractWithMvp({ mvpAc: ['AC-1'], mvpAx: ['AX-1'] }));
+    const goal = readGoalContract(tmp);
+    const text = decompositionWithMvp({ mvpPhases: ['phase-1'] })
+      .replace(/\nmvp:\n(?:  .+\n)+release_cuts: \[\]\n/, '\n');
+    const decomp = parseDecompositionGoalTraceText(text);
+    const graph = parsePhaseContractGraphText(text);
+    const verdict = validateMvpGoalTraceCoverage(decomp, goal.contract, graph);
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
   });
 });
 

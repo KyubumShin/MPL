@@ -162,8 +162,17 @@ Run the full test suite **including accumulated regression tests and Intent Inva
   ```
 - **Intent Invariants verification (#50, 2026-04-20 debate 합의)**:
   ```
-  # Verbatim — no translation/interpretation
-  phase_invariants = decomposition.phases[current_phase_id].verification_plan.invariants or []
+  # Verbatim — no translation/interpretation. Phase 5 decomposer diet moves
+  # invariant copying out of decomposition.yaml; fall back to legacy
+  # verification_plan.invariants for older pipelines.
+  derived = Read(".mpl/mpl/decomposition-derived.json") or {}
+  if derived.phases[current_phase_id] exists:
+    # Derived wins when present, even when the array is intentionally empty.
+    phase_invariants = derived.phases[current_phase_id].invariants or []
+  else:
+    phase_invariants =
+      decomposition.phases[current_phase_id].verification_plan.invariants
+      or []
   invariant_violation_count = 0
   invariant_results = []
 

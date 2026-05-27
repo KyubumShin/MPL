@@ -265,7 +265,7 @@ Context structure reference:
 context = {
   phase0_artifacts, pivot_points, phase_decisions, phase_definition,
   phase_seed, impact_files, pp_proximity, prev_summary, dep_summaries,
-  verification_plan, learnings, error_files, regression_suite
+  derived_fields, verification_plan, learnings, error_files, regression_suite
 }
 ```
 

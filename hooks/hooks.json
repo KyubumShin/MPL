@@ -234,6 +234,16 @@
         ]
       },
       {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-decomposition-postprocess.mjs\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Task|Agent",
         "hooks": [
           {

@@ -125,9 +125,63 @@ function difference(required, actual) {
   return required.filter((id) => !actualSet.has(id));
 }
 
+function stablePhaseOrder(phases, phaseOrder) {
+  const phaseById = new Map((phases || []).map((phase) => [phase.id, phase]));
+  const ordered = [];
+  const seen = new Set();
+
+  for (const id of Array.isArray(phaseOrder) ? phaseOrder : []) {
+    const phase = phaseById.get(id);
+    if (!phase || seen.has(id)) continue;
+    ordered.push(phase);
+    seen.add(id);
+  }
+
+  for (const phase of phases || []) {
+    if (!phase?.id || seen.has(phase.id)) continue;
+    ordered.push(phase);
+    seen.add(phase.id);
+  }
+
+  return ordered;
+}
+
+export function deriveMvpFromGoalTrace(decomposition, contract, phaseOrder = null) {
+  const mvpScope = contract?.mvp_scope;
+  if (!mvpScope) return null;
+
+  const targetIds = new Set([
+    ...(Array.isArray(mvpScope.acceptance_criteria) ? mvpScope.acceptance_criteria : []),
+    ...(Array.isArray(mvpScope.variation_axes) ? mvpScope.variation_axes : []),
+  ]);
+  const phases = [];
+
+  for (const phase of stablePhaseOrder(decomposition?.phases || [], phaseOrder)) {
+    const phaseIds = [
+      ...(phase.acceptance_criteria || []),
+      ...(phase.variation_axes || []),
+    ];
+    if (phaseIds.some((id) => targetIds.has(id))) phases.push(phase.id);
+  }
+
+  return {
+    derived_from: 'goal_contract.mvp_scope',
+    phases,
+    execution_mode: 'sequential',
+    artifact: mvpScope.artifact ?? null,
+  };
+}
+
 function unknown(actual, allowed) {
   const allowedSet = new Set(allowed);
   return actual.filter((id) => !allowedSet.has(id));
+}
+
+function sameSet(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((item) => bSet.has(item));
 }
 
 export function validateGoalTraceCoverage(decomposition, contract) {
@@ -211,16 +265,32 @@ export function validateMvpGoalTraceCoverage(decomposition, contract, graph) {
   const mvpScope = contract?.mvp_scope;
   if (!mvpScope) return { valid: true, issues };
 
-  const mvpPhaseIds = Array.isArray(graph?.mvp?.phases) ? graph.mvp.phases : [];
-  // Empty mvp.phases is caught by mpl-require-phase-contract-graph (B5
-  // dependency-closure rule + resolveCutDescriptor empty-phases guard).
-  // Don't double-report here.
-  if (mvpPhaseIds.length === 0) return { valid: true, issues };
+  const derived = deriveMvpFromGoalTrace(
+    decomposition,
+    contract,
+    graph?.execution_tier_phase_refs,
+  );
+  const hasGraphMvp = Array.isArray(graph?.mvp?.phases);
+  const mvpPhaseIds = hasGraphMvp ? graph.mvp.phases : (derived?.phases || []);
 
-  const mvpPhaseSet = new Set(mvpPhaseIds);
+  if (hasGraphMvp && derived) {
+    if (!sameSet(graph.mvp.phases, derived.phases)) {
+      issues.push(`mvp:phases:derived_mismatch:expected=[${derived.phases.join(',')}]:actual=[${graph.mvp.phases.join(',')}]`);
+    }
+  }
+
   const requiredAc = Array.isArray(mvpScope.acceptance_criteria) ? mvpScope.acceptance_criteria : [];
   const requiredAx = Array.isArray(mvpScope.variation_axes) ? mvpScope.variation_axes : [];
 
+  // Empty derived membership means the MVP scope does not intersect any
+  // phase goal_trace. Report the same uncovered-id shape used below.
+  if (mvpPhaseIds.length === 0) {
+    for (const id of requiredAc) issues.push(`mvp_scope.acceptance_criteria:uncovered:${id}`);
+    for (const id of requiredAx) issues.push(`mvp_scope.variation_axes:uncovered:${id}`);
+    return { valid: issues.length === 0, issues };
+  }
+
+  const mvpPhaseSet = new Set(mvpPhaseIds);
   const mvpAc = [];
   const mvpAx = [];
   for (const phase of (decomposition?.phases || [])) {

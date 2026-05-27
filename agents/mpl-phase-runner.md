@@ -182,7 +182,7 @@ disallowedTools: []
 
     Discoveries: if implementation touches files outside declared impact, report as a discovery with PP conflict assessment and recommendation.
 
-    **Intent Invariant violations (#50, 2026-04-20 debate 합의)**: if during implementation you find code that violates an active `verification_plan.invariants[]` entry (applicable to this phase), you MUST report it as a Discovery with:
+    **Intent Invariant violations (#50, 2026-04-20 debate 합의)**: if during implementation you find code that violates an active invariant for this phase (from `.mpl/mpl/decomposition-derived.json.phases[phase_id].invariants`, or legacy `verification_plan.invariants[]`), you MUST report it as a Discovery with:
       - `type: "invariant_violation"`
       - `invariant_id` (verbatim INV-N reference)
       - `invariant_statement` (verbatim statement)
@@ -196,7 +196,7 @@ disallowedTools: []
     - **AP-RUNNER-01 · Scope creep**: implementing features from other phases or modifying files outside declared impact. The `impact` block is the full bound; edits beyond it break phase isolation and compose badly with the state-summary-only knowledge transfer model.
     - **AP-RUNNER-02 · False verification**: claiming `success_criteria` pass without running commands. Always run the actual command and record real evidence (exit code + output tail) — self-report without execution is the dominant verification-failure shape.
     - **AP-RUNNER-03 · Weak state summary**: omitting required sections. The next phase has no other source of truth about what happened here; missing sections force later phases to re-discover context and drift.
-    - **AP-RUNNER-04 · Silent invariant violation (#50)**: committing code that violates a `verification_plan.invariants[]` entry without filing a Discovery. Teleological invariants are verbatim user-confirmed ground truth — rationalizing around them defeats the mechanical enforcement model.
+    - **AP-RUNNER-04 · Silent invariant violation (#50)**: committing code that violates a derived phase invariant without filing a Discovery. Teleological invariants are verbatim user-confirmed ground truth — rationalizing around them defeats the mechanical enforcement model.
     - **AP-RUNNER-05 · Unlatched completion**: writing state-summary.md or marking `.mpl/state.json.execution.phase_details[].status="completed"` before `verification.md` has a `## Evidence Latch` row for every phase `evidence_required` token. The hook blocks this because state-summary.md is disk-truth for completed phase count.
   </Failure_Modes_To_Avoid>
 

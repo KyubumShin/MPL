@@ -24,7 +24,7 @@ Core rule: **do not reuse or shrink `phase3-gate` / `phase5-finalize` for partia
 
 ## 2. Goals
 
-1. User can declare MVP scope at interview time as AC/AX ids; decomposer maps it to phases and never infers it.
+1. User can declare MVP scope at interview time as AC/AX ids; deterministic decomposition post-processing maps it to phases from `goal_trace` and never infers it.
 2. Orchestrator delivers a real, runnable artifact at the MVP boundary before extension phases start.
 3. `phase3-gate` remains whole-pipeline gate entry after all phases complete.
 4. `phase5-finalize` remains whole-goal closure; `finalize_done=true` is still set exactly once by final pipeline finalize.

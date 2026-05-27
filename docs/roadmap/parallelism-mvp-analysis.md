@@ -18,7 +18,7 @@ Initial conclusion, refined after codebase review and two follow-up rebaselines:
 **Review rebaseline (2026-05-23):** the original direction is right, but several proposed implementation details should change before RFC:
 
 - Do not add `tier: mvp | extension` on phases; `execution_tiers[].tier` already uses `tier` as a numeric scheduler field.
-- Do not base MVP/extension routing on `pp_proximity`; v0.17 removed PP-proximity routing. MVP scope must be **user-declared** at interview time via a new `mvp_scope` field on Goal Contract; decomposer maps it to phases but never infers it.
+- Do not base MVP/extension routing on `pp_proximity`; v0.17 removed PP-proximity routing. MVP scope must be **user-declared** at interview time via a new `mvp_scope` field on Goal Contract; deterministic decomposition post-processing maps it to phases but never infers it.
 - **MVP and release_cut are different first-class concepts**, not the same primitive. MVP = user-declared, exactly one, must-ship-first, declarative. Release cut = decomposer-proposed, 0..N, delivery grouping, advisory. Treating MVP as a cut conflates two different epistemics.
 - Do not replace file-overlap blocking with symbol-overlap as the first step. Same-file parallel edits are still high-risk under worktree merge.
 - Treat `export-manifest.json` as a missing mandatory contract today: S1 validates it when present, but Phase Runner output does not currently require it.
@@ -201,7 +201,7 @@ release_cuts:                          # zero or more, advisory grouping for ext
 
 Semantics:
 
-- `mvp` is a single first-class object, derived from `goal_contract.mvp_scope`. Exactly one per pipeline. Must-ship-first. Decomposer maps declared AC/AX ids to phase membership; it does NOT infer scope.
+- `mvp` is a single first-class derived object from `goal_contract.mvp_scope`. Exactly one per pipeline. Must-ship-first. Post-processing maps declared AC/AX ids to phase membership; it does NOT infer scope.
 - `release_cuts[]` is zero or more decomposer-proposed extension delivery groups. Advisory, optionally user-approved.
 - Every phase listed in `mvp.phases` or in a cut must appear exactly once in `execution_tiers[]`. Membership is single-direction (cut/mvp → phases); phases do NOT cross-reference their cut/mvp to keep SSOT clean.
 - MVP passes only when `release-gate(mvp)` runs scoped Hard 1/2/3 to PASS and `release-finalize(mvp)` then writes manifest and (optionally) creates the user-visible artifact. Failure at either step withholds the MVP cut artifact.
@@ -328,7 +328,7 @@ Sequenced to avoid touching too many subsystems at once.
 ### Stage A — User-Declared MVP, Sequential Execution
 
 1. **Interview captures `mvp_scope`.** New interview question elicits the user-declared MVP as AC/AX ids; stored on `.mpl/goal-contract.yaml`.
-2. **Add `mvp` and `release_cuts[]` to decomposition output.** Decomposer derives `mvp.phases` from `mvp_scope` (no inference) and optionally proposes `release_cuts[]` for extension grouping. `mvp.execution_mode` defaults to `sequential`. Planning-stage HITL confirms cut structure once before execute.
+2. **Derive `mvp` after decomposition output.** Post-processing derives `mvp.phases` from `mvp_scope` (no inference). Optional `release_cuts[]` proposal remains Stage B work. `mvp.execution_mode` defaults to `sequential`. Planning-stage HITL confirms any future cut structure once before execute.
 3. **Add `release-gate(cut_id)` and `release-finalize(cut_id)` as two new states.** Release-gate runs scoped Hard 1/2/3 and writes results to `.mpl/mpl/releases/{cut_id}/gate-results.json` (never to `state.gate_results.hard{1,2,3}_*`). Release-finalize reads the scoped gate results, writes `release-manifest.json` and `evidence-summary.md`, and optionally creates the user-visible artifact. Neither sets `finalize_done=true`.
 4. **Cohort-aware `phase2-sprint` completion.** Sprint evaluates completion against the active cohort (`state.release.current_cut_id`) — MVP phases for MVP cohort, cut's phases for an extension cut — not against all phases. MVP completion routes to `release-gate(mvp)`, not `phase3-gate`. Only after all phases of all cohorts complete does sprint transition to whole-pipeline `phase3-gate`.
 5. **Mandatory manifest for code-bearing phases — block from Stage A.** Phase Runner output schema includes `export_manifest`; missing manifest on a code-bearing phase blocks completion (not warn-only). Enforcement via evidence latch token or a new `mpl-require-export-manifest.mjs` hook.

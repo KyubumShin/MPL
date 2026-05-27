@@ -69,6 +69,11 @@ phases:
 - `hooks/mpl-require-phase-evidence.mjs` consumes each phase's
   `evidence_required` list and blocks phase completion artifacts/state until
   `verification.md` contains a matching Evidence Latch.
+- Phase 5 decomposer diet: top-level Stage A `mvp` can be omitted from new
+  decompositions. `hooks/lib/mpl-decomposition-postprocess.mjs` derives
+  `.mpl/mpl/decomposition-derived.json.mvp` from `goal_contract.mvp_scope` and
+  per-phase `goal_trace`; legacy explicit `mvp` blocks remain valid only when
+  they match the deterministic derivation.
 
 ## Notes
 
