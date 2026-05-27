@@ -444,3 +444,104 @@ describe('v5 → v6 migration backfills release.gate_results + release.max_fix_l
     });
   });
 });
+
+/* ─────── v6 → v7: Exp22 R6 scheduler observability backfill ─────── */
+
+describe('v6 → v7 migration backfills phase_scheduler_history + worktree_pool_history', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-v6v7-')); });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  function writeRawState(body) {
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'state.json'), JSON.stringify(body));
+  }
+
+  it('backfills phase_scheduler_history and worktree_pool_history as empty arrays on a v6 fixture', () => {
+    writeRawState({
+      pipeline_id: 'mpl-v6-fixture',
+      current_phase: 'phase2-sprint',
+      schema_version: 6,
+      release: {
+        current_cut_id: null,
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        gate_results: {
+          hard1_passed: null, hard2_passed: null, hard3_passed: null,
+          hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+        },
+        max_fix_loops: 3,
+      },
+    });
+    const state = readState(tmpDir);
+    assert.equal(state.schema_version, CURRENT_SCHEMA_VERSION);
+    assert.deepStrictEqual(state.phase_scheduler_history, []);
+    assert.deepStrictEqual(state.worktree_pool_history, []);
+  });
+
+  it('preserves a pre-existing phase_scheduler_history array (hand-written or partial-rollout case)', () => {
+    const existing = [
+      { tier: 0, phases: ['phase-1'], selected_mode: 'sequential', parallel_requested: false },
+    ];
+    writeRawState({
+      pipeline_id: 'mpl-v6-partial',
+      current_phase: 'phase2-sprint',
+      schema_version: 6,
+      phase_scheduler_history: existing,
+      release: {
+        current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null,
+        gate_results: {
+          hard1_passed: null, hard2_passed: null, hard3_passed: null,
+          hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+        },
+        max_fix_loops: 3,
+      },
+    });
+    const state = readState(tmpDir);
+    assert.deepStrictEqual(state.phase_scheduler_history, existing);
+    assert.deepStrictEqual(state.worktree_pool_history, []);
+  });
+
+  it('keeps existing worktree_history (HIGH-risk isolation array) untouched while adding worktree_pool_history', () => {
+    // Claude review on PR #213: the two arrays must NOT collide. Verify
+    // v6 worktree_history survives the v6→v7 bump verbatim.
+    const isolationEntries = [
+      { phase_id: 'phase-3', branch: 'mpl-isolated-phase-3', path: '/tmp/wt', risk_level: 'HIGH', result: 'merged', timestamp: '2026-05-01T00:00:00Z' },
+    ];
+    writeRawState({
+      pipeline_id: 'mpl-v6-worktree',
+      current_phase: 'phase2-sprint',
+      schema_version: 6,
+      worktree_history: isolationEntries,
+      release: {
+        current_cut_id: null, completed_cut_ids: [], fix_loop_count: 0,
+        pending_artifact: null,
+        gate_results: {
+          hard1_passed: null, hard2_passed: null, hard3_passed: null,
+          hard1_baseline: null, hard2_coverage: null, hard3_resilience: null,
+        },
+        max_fix_loops: 3,
+      },
+    });
+    const state = readState(tmpDir);
+    assert.deepStrictEqual(state.worktree_history, isolationEntries);
+    assert.deepStrictEqual(state.worktree_pool_history, []);
+  });
+
+  it('chains v5 → v6 → v7 when starting from a v5 state.json', () => {
+    writeRawState({
+      pipeline_id: 'mpl-v5-legacy',
+      current_phase: 'phase2-sprint',
+      schema_version: 5,
+    });
+    const state = readState(tmpDir);
+    assert.equal(state.schema_version, CURRENT_SCHEMA_VERSION);
+    // v5→v6 backfill still applies
+    assert.strictEqual(state.release.max_fix_loops, 3);
+    // v6→v7 backfill on top
+    assert.deepStrictEqual(state.phase_scheduler_history, []);
+    assert.deepStrictEqual(state.worktree_pool_history, []);
+  });
+});

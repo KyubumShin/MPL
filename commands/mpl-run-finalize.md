@@ -715,7 +715,37 @@ Generate full run profile at `.mpl/mpl/profile/run-summary.json`.
 
 > See [`commands/schemas/run-summary.json`](schemas/run-summary.json) for the full schema.
 >
-> **Shape**: `run_id` · `complexity` (grade/score) · `cache` (phase0_hit/saved_tokens) · `phases[]` (per-phase tokens/duration_ms/pass_rate/micro_fixes) · `phase5_gate` · `totals`.
+> **Shape**: `run_id` · `complexity` (grade/score) · `cache` (phase0_hit/saved_tokens) · `phases[]` (per-phase tokens/duration_ms/pass_rate/micro_fixes) · `phase5_gate` · `totals` · `scheduler` (Exp22 R6).
+
+**Scheduler aggregation (Exp22 R6 / #205)**:
+
+```
+events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
+         state.phase_scheduler_history or []
+tiers_total = count of distinct event.tier
+tiers_parallel_requested = count of distinct event.tier where any
+  event for that tier has parallel_requested == true
+tiers_parallel_executed = count of distinct event.tier where any
+  event for that tier has selected_mode == "parallel"
+tiers_parallel_rejected = tiers_parallel_requested - tiers_parallel_executed
+
+scheduler = {
+  tiers_total,
+  tiers_parallel_requested,
+  tiers_parallel_executed,
+  tiers_parallel_rejected,
+  rejection_reasons: union of event.rejection_reasons and the values of
+                     event.rejection_reasons_by_phase across all events
+                     (deduplicated),
+  no_parallel_explanation: <string> when
+    tiers_parallel_requested > 0 AND tiers_parallel_executed == 0, naming
+    the dominant rejection reasons; null otherwise.
+}
+```
+
+The `no_parallel_explanation` field is the enforcement point for the MUST in
+`commands/mpl-run-execute.md`: a run that requested parallelism but never
+reached it cannot finalize with a null/missing explanation.
 
 Profile data enables:
 1. **Learn optimal token budget by complexity**: derive average tokens per grade from past profiles

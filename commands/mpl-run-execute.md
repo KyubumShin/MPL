@@ -47,7 +47,9 @@ if phase_ids.length == 0:
     phases: tier.phases,
     selected_mode: "skipped",
     parallel_requested: tier.parallel == true,
-    rejection_reasons: ["all_phases_already_completed"]
+    rejection_reasons: ["all_phases_already_completed"],
+    worker_cap: max_phase_workers,
+    worktree_slots: []
   })
   continue
 
@@ -57,7 +59,9 @@ if tier.parallel != true or phase_ids.length == 1:
     phases: phase_ids,
     selected_mode: "sequential",
     parallel_requested: tier.parallel == true,
-    rejection_reasons: tier.parallel == true ? ["single_ready_phase"] : ["tier_parallel_false"]
+    rejection_reasons: tier.parallel == true ? ["single_ready_phase"] : ["tier_parallel_false"],
+    worker_cap: max_phase_workers,
+    worktree_slots: []
   })
   for each phase_id in phase_ids:
     execute_single_phase(phase_id)  // normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
@@ -88,8 +92,11 @@ for each wave in waves:
   // Multi-worktree pool. Reuse up to max_phase_workers isolated slots after
   // verifying each worktree has the current base branch commit reachable.
   worktree_pool = ensure_worktree_pool(size: min(max_phase_workers, wave.length))
-  append state.worktree_history entries for every slot creation/reuse:
+  append state.worktree_pool_history entries for every slot creation/reuse:
     { tier, phase_id, slot_id, worktree_path, base_ref, started_at, completed_at }
+  // Distinct from state.worktree_history (HIGH-risk isolation lifecycle in
+  // mpl-run-execute-context.md §5: { phase_id, branch, path, risk_level,
+  // result, timestamp }). Two writers, two consumers, two arrays.
 
   results = parallel_map(wave, fn(phase_id, slot):
     seed = generate_phase_seed(phase_id, all_prior_summaries)
@@ -140,10 +147,15 @@ run_cumulative_tests(phase_ids)
 
 If no tier ever records `selected_mode:"parallel"` in a run with
 `execution_tiers[].parallel:true`, the final run summary MUST explain why phase
-parallelism was not used. Do not add a separate `phase_dependencies` field for
-this purpose; dependency-frontier safety comes from existing phase
-`depends_on`/`interface_contract.requires[].from_phase` plus
-`execution_tiers`.
+parallelism was not used. The enforcement path is `commands/mpl-run-finalize.md`
+Step 5.4 `scheduler` block — it reads `.mpl/mpl/profile/phase-scheduler.jsonl`
+(falling back to `state.phase_scheduler_history`) and emits a `scheduler`
+section in `.mpl/mpl/profile/run-summary.json` per
+`commands/schemas/run-summary.json`.
+
+Do not add a separate `phase_dependencies` field for this purpose;
+dependency-frontier safety comes from existing phase `depends_on` /
+`interface_contract.requires[].from_phase` plus `execution_tiers`.
 
 For each single phase execution:
 
