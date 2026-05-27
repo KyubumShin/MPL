@@ -539,6 +539,48 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }
   });
 
+  it('phase-runner clean completion for a DIFFERENT phase does NOT clear an anomaly block (codex r7)', () => {
+    // Codex r7 on PR #218: self-clear must match the blocked phase id.
+    // A clean phase-runner completion for phase-2 must not clear a
+    // phase-1 anomaly block.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-cross-phase-'));
+    try {
+      seedState(tmp, {
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-gate-recorder',
+        blocked_phase: 'phase-1',
+        blocked_artifact: 'state.subagent_return_anomalies[empty_response]',
+        block_code: 'phase_runner_empty_response',
+        block_reason: 'phase-1 anomaly',
+        resume_instruction: 'rerun phase-1',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { agent_type: 'mpl-phase-runner', phase_id: 'phase-1' },
+      });
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Re-execute phase-2.',
+        },
+        tool_response: 'Phase 2 completed successfully.',
+        usage: { output_tokens: 1500 },
+        metrics: { tools_used: 12, duration_ms: 5 * 60 * 1000 },
+      };
+      execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+      const state = readState(tmp);
+      // Phase-1 anomaly block must STILL be active.
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_phase, 'phase-1');
+      assert.equal(state.block_code, 'phase_runner_empty_response');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('phase-runner anomaly does NOT clobber a pre-existing blocked_hook (codex r4)', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-noclobber-'));
     try {

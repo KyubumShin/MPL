@@ -423,24 +423,33 @@ try {
           }));
         }
       } else {
-        // Codex r6 on PR #218: a clean re-dispatch must self-clear our
-        // own phase_runner_* block, otherwise transient anomalies leave
-        // the run permanently paused. Only clear an envelope this hook
-        // owns and whose block_code starts with phase_runner_ — never
-        // touch another hook's envelope.
+        // Codex r6/r7 on PR #218: a clean re-dispatch must self-clear
+        // our own phase_runner_* block, otherwise transient anomalies
+        // leave the run permanently paused. Only clear when ALL of:
+        //   - the block is owned by mpl-gate-recorder
+        //   - block_code starts with phase_runner_
+        //   - the clean completion is for the SAME phase that was
+        //     blocked (match state.blocked_phase or
+        //     retry_context.phase_id). A different phase's clean
+        //     completion must NOT clear another phase's anomaly block.
         if (state.session_status === 'blocked_hook'
             && state.blocked_by_hook === 'mpl-gate-recorder'
             && typeof state.block_code === 'string'
             && state.block_code.startsWith('phase_runner_')) {
-          patch.session_status = null;
-          patch.blocked_by_hook = null;
-          patch.blocked_phase = null;
-          patch.blocked_artifact = null;
-          patch.block_code = null;
-          patch.block_reason = null;
-          patch.resume_instruction = null;
-          patch.retry_context = null;
-          patch.blocked_at = null;
+          const blockedPhaseId = state.blocked_phase
+            || (state.retry_context && state.retry_context.phase_id)
+            || null;
+          if (phaseIdFromPrompt && blockedPhaseId && phaseIdFromPrompt === blockedPhaseId) {
+            patch.session_status = null;
+            patch.blocked_by_hook = null;
+            patch.blocked_phase = null;
+            patch.blocked_artifact = null;
+            patch.block_code = null;
+            patch.block_reason = null;
+            patch.resume_instruction = null;
+            patch.retry_context = null;
+            patch.blocked_at = null;
+          }
         }
         const diskCount = countCompletedPhases(cwd);
         const prior = state.sprint_status || {};
