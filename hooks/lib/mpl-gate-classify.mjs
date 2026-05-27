@@ -67,6 +67,13 @@ const NON_GATE_HEAD_COMMANDS = new Set([
   'sleep', 'true', 'false',
   'docker', 'kubectl', 'helm',
   'open',
+  // Shell wrappers — codex r3 on PR #219 [data-integrity]. A manual
+  // gate-evidence write like `bash -lc "git commit -m e2e"` would
+  // otherwise classify as hard3_resilience via the embedded `e2e`
+  // keyword. The recorder hook never records shell-wrapped commands
+  // (it sees the actual command executed); manual writes that go
+  // through a wrapper are not credible gate evidence.
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
 ]);
 
 // Tokens commonly used as prefixes that should be peeled before the

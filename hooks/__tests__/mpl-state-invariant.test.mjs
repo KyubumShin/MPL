@@ -303,6 +303,28 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     assert.ok(r.violations.some((v) => v.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH));
   });
 
+  it('shell-wrapped non-gate commands are rejected (codex r3 [data-integrity])', () => {
+    // Codex r3 on PR #219: `bash -lc "git commit -m e2e"` would otherwise
+    // classify as hard3_resilience via the embedded `e2e` keyword. Adding
+    // shell wrappers to the denylist forces the classifier to return null
+    // for any bash/sh/zsh/... -wrapped command.
+    for (const cmd of [
+      'bash -lc "git commit -m e2e"',
+      'bash -lc "echo e2e contract"',
+      'sh -c "git push origin main"',
+      '/bin/zsh -lc "playwright test"',
+      'dash -c "echo skipped"',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `shell-wrapped command must be rejected: ${cmd}`);
+    }
+  });
+
   it('path-qualified git command still blocks (codex r1 [data-integrity])', () => {
     // Codex r1 on PR #219: `/usr/bin/git commit -m "e2e"` would bypass
     // the head denylist if we only matched the literal token. extractCommandHead
