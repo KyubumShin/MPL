@@ -42,9 +42,23 @@ For each tier in ascending `tier` order:
 phase_ids = tier.phases.filter(id => !is_completed(id))
 
 if phase_ids.length == 0:
+  record_scheduler_event({
+    tier: tier.tier,
+    phases: tier.phases,
+    selected_mode: "skipped",
+    parallel_requested: tier.parallel == true,
+    rejection_reasons: ["all_phases_already_completed"]
+  })
   continue
 
 if tier.parallel != true or phase_ids.length == 1:
+  record_scheduler_event({
+    tier: tier.tier,
+    phases: phase_ids,
+    selected_mode: "sequential",
+    parallel_requested: tier.parallel == true,
+    rejection_reasons: tier.parallel == true ? ["single_ready_phase"] : ["tier_parallel_false"]
+  })
   for each phase_id in phase_ids:
     execute_single_phase(phase_id)  // normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
   continue
@@ -60,10 +74,22 @@ for each wave in waves:
 
   ready_but_blocked = phase_ids - wave when blocked by file overlap, resource lock, or dependency frontier
   record ready_but_blocked_reason for each blocked phase in the tier reconciliation artifact
+  record_scheduler_event({
+    tier: tier.tier,
+    phases: phase_ids,
+    wave,
+    selected_mode: wave.length > 1 ? "parallel" : "parallel_rejected",
+    parallel_requested: true,
+    worker_cap: max_phase_workers,
+    rejection_reasons_by_phase: ready_but_blocked_reason,
+    worktree_slots: wave.length > 1 ? planned_slot_ids : []
+  })
 
   // Multi-worktree pool. Reuse up to max_phase_workers isolated slots after
   // verifying each worktree has the current base branch commit reachable.
   worktree_pool = ensure_worktree_pool(size: min(max_phase_workers, wave.length))
+  append state.worktree_history entries for every slot creation/reuse:
+    { tier, phase_id, slot_id, worktree_path, base_ref, started_at, completed_at }
 
   results = parallel_map(wave, fn(phase_id, slot):
     seed = generate_phase_seed(phase_id, all_prior_summaries)
@@ -98,6 +124,26 @@ else:
 
 run_cumulative_tests(phase_ids)
 ```
+
+`record_scheduler_event(...)` is mandatory telemetry. Append one JSON line to
+`.mpl/mpl/profile/phase-scheduler.jsonl` and mirror the latest 50 entries in
+`state.phase_scheduler_history`. Every row must include:
+
+- `timestamp`
+- `tier`
+- `phases`
+- `parallel_requested`
+- `selected_mode`: `skipped | sequential | parallel | parallel_rejected`
+- `rejection_reasons` or `rejection_reasons_by_phase`
+- `worker_cap`
+- `worktree_slots`
+
+If no tier ever records `selected_mode:"parallel"` in a run with
+`execution_tiers[].parallel:true`, the final run summary MUST explain why phase
+parallelism was not used. Do not add a separate `phase_dependencies` field for
+this purpose; dependency-frontier safety comes from existing phase
+`depends_on`/`interface_contract.requires[].from_phase` plus
+`execution_tiers`.
 
 For each single phase execution:
 
