@@ -768,7 +768,13 @@ raw_events = dedupe_by(
 //   - prior reruns of the same pipeline_id drop out via run_started_at
 events = raw_events.filter(e =>
   e.pipeline_id == state.pipeline_id &&
-  e.run_started_at == state.started_at)
+  e.run_started_at == state.started_at &&
+  e.recompose_count == decomposition.recompose_count)
+// recompose_count guards against APPEND-MODE / RECOMPOSE-MODE rewrites
+// (mpl-run-decompose.md Step 3-F): the executor can rebuild execution_tiers
+// mid-run, and a stale pre-recompose parallel event for tier N would
+// otherwise satisfy the post-recompose tier N (different phases). Bind
+// events to the decomposition version they were emitted under.
 
 tiers_total = execution_tiers.length
 tiers_parallel_requested = expected_parallel_tiers.size

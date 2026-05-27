@@ -197,4 +197,89 @@ artifacts:
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /missing_goal_contract_sha256/);
   });
+
+  /* ───────── Exp22 R6 / #205: scheduler observability guard ───────── */
+
+  function writeDecompositionWithParallelTier() {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+  - id: phase-2
+execution_tiers:
+  - tier: 1
+    phases: [phase-1, phase-2]
+    parallel: true
+`);
+  }
+
+  function writeSummaryScheduler(scheduler) {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'profile', 'run-summary.json'),
+      JSON.stringify({ run_id: 'r1', scheduler }));
+  }
+
+  it('blocks finalize when decomposition declares a parallel tier but run-summary.scheduler is missing', () => {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'profile', 'run-summary.json'), JSON.stringify({ run_id: 'r1' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeDecompositionWithParallelTier();
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:block_missing/);
+  });
+
+  it('blocks finalize when parallel-requested tiers were not executed and no_parallel_explanation is null', () => {
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'audit-report.json'), JSON.stringify({ verdict: 'pass' }));
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'RUNBOOK.md'), '# MPL Pipeline RUNBOOK\n\n## Pipeline Complete\n');
+    writeDecompositionWithParallelTier();
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      no_parallel_explanation: null,
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /scheduler:no_parallel_explanation_required_but_missing/);
+  });
+
+  it('allows finalize when parallel-requested tier failed at runtime but no_parallel_explanation is filled', () => {
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 0,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['worker_dispatch_error'],
+      no_parallel_explanation: 'tier 1 attempted parallel execution but worker dispatch failed; fell back to sequential retry',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
+  it('does not enforce the scheduler MUST when decomposition declares no parallel tier', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+execution_tiers:
+  - tier: 1
+    phases: [phase-1]
+    parallel: false
+`);
+    // Even with no scheduler block in run-summary, finalize must pass when
+    // nothing requested parallelism.
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
 });

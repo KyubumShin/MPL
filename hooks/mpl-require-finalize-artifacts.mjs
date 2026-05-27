@@ -164,6 +164,63 @@ function hasCommitSinceBaseline(cwd) {
   }
 }
 
+function readDecompositionTiers(cwd) {
+  // Minimal YAML peek: we only need execution_tiers[].parallel bool flags.
+  // Parsing the whole decomposition.yaml here would couple this hook to
+  // every decomposer field. Use a regex over the execution_tiers block.
+  const path = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
+  if (!existsSync(path)) return null;
+  let text;
+  try { text = readFileSync(path, 'utf-8'); } catch { return null; }
+  const block = text.match(/(^|\n)execution_tiers:\s*\n([\s\S]*?)(\n[a-zA-Z_]+:|\n*$)/);
+  if (!block) return { tiers: [], parallelTierCount: 0 };
+  const tiers = [];
+  for (const line of block[2].split('\n')) {
+    const parallelMatch = line.match(/^\s*parallel:\s*(true|false)/i);
+    if (parallelMatch) tiers.push({ parallel: parallelMatch[1].toLowerCase() === 'true' });
+  }
+  const parallelTierCount = tiers.filter((t) => t.parallel).length;
+  return { tiers, parallelTierCount };
+}
+
+function schedulerExplanationMissing(cwd) {
+  // Exp22 R6 / #205: when decomposition.yaml declares any
+  // execution_tiers[].parallel:true, the run-summary scheduler block must
+  // either show full execution or carry a non-null no_parallel_explanation.
+  // The prompt in commands/mpl-run-finalize.md already documents this MUST;
+  // this guard makes it machine-enforceable so prompt drift cannot ship a
+  // completed run with rejected/missing parallelism and no explanation.
+  const decomp = readDecompositionTiers(cwd);
+  if (!decomp || decomp.parallelTierCount === 0) return null;
+
+  const summary = readJsonIfExists(cwd, '.mpl/mpl/profile/run-summary.json');
+  if (!summary) return 'scheduler:run_summary_missing';
+  const sched = summary.scheduler;
+  if (!sched || typeof sched !== 'object') return 'scheduler:block_missing';
+
+  const requested = Number(sched.tiers_parallel_requested) || 0;
+  const executed = Number(sched.tiers_parallel_executed) || 0;
+  const missingTelemetry = Array.isArray(sched.tiers_with_missing_telemetry)
+    ? sched.tiers_with_missing_telemetry.length : 0;
+  const partial = Array.isArray(sched.tiers_with_partial_rejection)
+    ? sched.tiers_with_partial_rejection.length : 0;
+  const wavesFailed = Number(sched.waves_parallel_failed) || 0;
+  const explanation = sched.no_parallel_explanation;
+  const explanationFilled = typeof explanation === 'string' && explanation.trim().length > 0;
+
+  const explanationRequired = requested > 0 && (
+    executed < requested ||
+    missingTelemetry > 0 ||
+    partial > 0 ||
+    wavesFailed > 0
+  );
+
+  if (explanationRequired && !explanationFilled) {
+    return 'scheduler:no_parallel_explanation_required_but_missing';
+  }
+  return null;
+}
+
 function runbookFinalized(cwd) {
   const path = join(cwd, '.mpl', 'mpl', 'RUNBOOK.md');
   if (!existsSync(path)) return false;
@@ -253,6 +310,13 @@ async function main() {
     const commit = hasCommitSinceBaseline(cwd);
     if (!commit.ok) missing.push(`git:${commit.reason}`);
   }
+
+  // Exp22 R6 / #205: machine-enforce the scheduler observability MUST.
+  // Independent of contract.completion_evidence so even runs without an
+  // explicit completion contract still satisfy the no-parallel
+  // explanation rule when decomposition declared parallel tiers.
+  const schedulerProblem = schedulerExplanationMissing(cwd);
+  if (schedulerProblem) missing.push(schedulerProblem);
 
   if (missing.length > 0) {
     block(

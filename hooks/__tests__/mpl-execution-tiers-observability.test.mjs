@@ -13,7 +13,7 @@ describe('execution_tiers observability contract', () => {
     assert.match(text, /Do not add a separate `phase_dependencies` field/);
   });
 
-  it('every record_scheduler_event block carries pipeline_id + run_started_at + worker_cap + worktree_slots', () => {
+  it('every record_scheduler_event block carries pipeline_id + run_started_at + recompose_count + worker_cap + worktree_slots', () => {
     // Codex r1: worker_cap/worktree_slots missing from skipped+sequential.
     // Codex r3: pipeline_id added because JSONL profile is persistent.
     // Codex r4: pipeline_id alone is not unique (mpl-{date}-{slug} collides
@@ -29,6 +29,8 @@ describe('execution_tiers observability contract', () => {
         `record_scheduler_event block missing pipeline_id:\n${block}`);
       assert.match(block, /run_started_at/,
         `record_scheduler_event block missing run_started_at:\n${block}`);
+      assert.match(block, /recompose_count/,
+        `record_scheduler_event block missing recompose_count:\n${block}`);
       assert.match(block, /worker_cap/,
         `record_scheduler_event block missing worker_cap:\n${block}`);
       assert.match(block, /worktree_slots/,
@@ -147,23 +149,32 @@ describe('execution_tiers observability contract', () => {
     assert.match(finalize, /tiers_with_partial_rejection is non-empty/);
   });
 
-  it('finalize filters scheduler events by both pipeline_id AND run_started_at so stale profile rows cannot satisfy a new run', () => {
+  it('finalize filters scheduler events by pipeline_id + run_started_at + recompose_count so stale profile rows cannot satisfy a new run', () => {
     // Codex r3: `.mpl/mpl/profile/` is persistent — stale rows from prior
-    // pipelines must drop out. Codex r4: pipeline_id is mpl-{date}-{slug},
-    // not unique on same-day same-feature reruns; state.started_at (ISO
-    // timestamp with ms resolution) is the actual per-run key. Filter on
-    // BOTH so rows survive only when they belong to this exact run.
+    // pipelines must drop out. r4: pipeline_id is mpl-{date}-{slug}, not
+    // unique on same-day same-feature reruns; state.started_at is the
+    // actual per-run key. r8: APPEND-MODE/RECOMPOSE-MODE rewrites
+    // execution_tiers mid-run, so the same tier number can mean different
+    // phases pre- vs post-recompose. Filter on all three keys so events
+    // survive only when they belong to this exact run AT this decomposition
+    // version.
     const exec = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
     assert.match(exec, /run_started_at` \(= `state\.started_at` at write time/,
       'execute prompt must require run_started_at on every event with the rationale');
     assert.match(exec, /pipeline_id` alone collides on same-day same-slug/,
       'execute prompt must document why pipeline_id alone is insufficient');
+    assert.match(exec, /recompose_count` \(= `decomposition\.recompose_count` at write time/,
+      'execute prompt must require recompose_count on every event');
+    assert.match(exec, /APPEND-MODE\/RECOMPOSE-MODE rewrites/,
+      'execute prompt must document why recompose_count is required');
 
     const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
     assert.match(finalize, /e\.pipeline_id == state\.pipeline_id/,
       'finalize aggregation must filter events by pipeline_id');
     assert.match(finalize, /e\.run_started_at == state\.started_at/,
       'finalize aggregation must also filter events by run_started_at');
+    assert.match(finalize, /e\.recompose_count == decomposition\.recompose_count/,
+      'finalize aggregation must also filter events by recompose_count');
     assert.match(finalize, /persistent across pipeline starts/,
       'finalize must explain why the filter exists so the contract cannot regress');
   });
