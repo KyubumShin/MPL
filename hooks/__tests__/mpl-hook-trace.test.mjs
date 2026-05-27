@@ -246,6 +246,41 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('emits a synthetic row when the active blocked_by_hook is no longer in hooks.json (registry skew)', () => {
+    // Codex r7 on PR #216: if the hook chain changed (rename, removal,
+    // downgrade) and state.blocked_by_hook points at a hook id that no
+    // longer exists in hooks.json, the iteration-based force-include
+    // never runs. A synthetic row must still surface the active block.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-skew-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'mpl-decompose',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-removed-or-renamed-hook',
+        blocked_phase: 'mpl-decompose',
+        blocked_artifact: '.mpl/mpl/decomposition.yaml',
+        block_code: 'unknown_block',
+        block_reason: 'hook ran but is no longer registered',
+        resume_instruction: 'Reinstall the expected plugin version, then retry.',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { stale_hook: true },
+      }));
+      const trace = traceHookChain({
+        targetPath: '.mpl/mpl/decomposition.yaml',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-removed-or-renamed-hook');
+      assert.ok(row, 'synthetic row for unregistered active blocker must exist');
+      assert.equal(row.status, 'currently_blocking');
+      assert.match(row.purpose, /not registered in current hooks\.json/);
+      assert.match(formatHookTrace(trace), /BLOCKING/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('marks the active blocked_hook as currently_blocking', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-'));
     try {

@@ -243,6 +243,27 @@ export function traceHookChain({
     }
   }
 
+  // Codex r7 on PR #216: if hooks.json was changed (upgrade/downgrade /
+  // rename) and the active blocker hook id is no longer registered, the
+  // force-include path above never fires because it iterates the
+  // registry. Append a synthetic row so the diagnostic still surfaces
+  // the active block instead of looking like the run is healthy.
+  if (
+    activeBlockHookId &&
+    activeBlockMatchesTarget &&
+    !rows.some((r) => r.hook_id === activeBlockHookId)
+  ) {
+    rows.push({
+      event: 'state',
+      matcher: 'blocked_by_hook',
+      hook_id: activeBlockHookId,
+      command: null,
+      timeout: null,
+      purpose: 'active blocker not registered in current hooks.json (registry skew)',
+      status: blockStatusFor(activeBlockHookId, activeState, resolvedTarget),
+    });
+  }
+
   return {
     target_path: resolvedTarget,
     category,
