@@ -361,15 +361,36 @@ try {
     const patch = {};
     const phaseIdFromPrompt = extractPhaseId(toolInput.prompt || toolInput.description || '');
 
-    // Codex r8 on PR #218: background Task dispatches (run_in_background:
-    // true) return a handle stub on the first PostToolUse event, not the
-    // final assistant text. The anomaly detector would classify that
-    // blank as empty_response and freeze the pipeline before the real
-    // completion is joined. Skip both anomaly recording and test-agent
-    // evidence parsing for background handles — the eventual completion
-    // event will fire this hook again with the real response.
-    const isBackgroundDispatch = toolInput?.run_in_background === true
+    // Codex r8/r11 on PR #218: background Task dispatches can deliver a
+    // handle stub on the first PostToolUse event, not the final assistant
+    // text. The anomaly detector would otherwise classify that blank as
+    // empty_response and freeze the pipeline before the real completion
+    // is joined.
+    //
+    // r11 [data-integrity]: skipping on run_in_background ALONE was too
+    // coarse — if the same hook later sees the actual completion through
+    // PostToolUse with substantive content, we still want to record
+    // test-agent evidence. So skip ONLY when run_in_background is true
+    // AND the response looks like a handle stub (object-shaped, no
+    // usable text payload). Real completion content lands in the normal
+    // anomaly + evidence pipeline.
+    const bgFlag = toolInput?.run_in_background === true
       || toolInput?.runInBackground === true;
+    const isHandleStubShape = (
+      bgFlag
+      && toolResponse !== null
+      && typeof toolResponse === 'object'
+      && !Array.isArray(toolResponse)
+      && (toolResponse.handle !== undefined
+          || toolResponse.taskId !== undefined
+          || toolResponse.task_id !== undefined
+          || toolResponse.id !== undefined)
+      && typeof toolResponse.text !== 'string'
+      && typeof toolResponse.response !== 'string'
+      && typeof toolResponse.output !== 'string'
+      && !Array.isArray(toolResponse.content)
+    );
+    const isBackgroundDispatch = isHandleStubShape;
     const anomaly = isBackgroundDispatch ? null : detectSubagentReturnAnomaly({
       data,
       agentType,

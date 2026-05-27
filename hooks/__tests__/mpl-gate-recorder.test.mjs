@@ -539,6 +539,50 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }
   });
 
+  it('background dispatch with substantive content still records test-agent evidence (codex r11 [data-integrity])', () => {
+    // Codex r11 on PR #218: skipping on run_in_background alone was too
+    // coarse — if the hook later sees the actual completion with
+    // substantive content, evidence must still be recorded. Only
+    // handle-stub shapes (object with handle id but no text payload) are
+    // skipped.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-bg-substantive-'));
+    try {
+      seedState(tmp);
+      const fenced = '```json\n' + JSON.stringify({
+        phase_id: 'phase-1',
+        verdict: 'PASS',
+        test_results: { total: 3, passed: 3, failed: 0, skipped: 0, pass_rate: 100 },
+        test_files_created: ['tests/phase-1.test.ts'],
+        commands_run: [{ command: 'npm test', exit_code: 0 }],
+        bugs_found: [],
+        a_item_coverage: [{ id: 'A-1', status: 'PASS' }],
+        s_item_coverage: [{ id: 'S-1', status: 'PASS' }],
+      }) + '\n```';
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-test-agent',
+          prompt: 'Verify phase-1 from the contract.',
+          run_in_background: true,
+        },
+        // Real completion content (not a handle stub) — must be processed.
+        tool_response: fenced,
+      };
+      execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+      const state = readState(tmp);
+      // Evidence must be recorded even though run_in_background=true.
+      assert.ok(state.test_agent_dispatched['phase-1'],
+        'substantive background completion must still record test_agent_dispatched');
+      assert.equal(state.test_agent_dispatched['phase-1'].verdict, 'PASS');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('background phase-runner Task dispatch does NOT record anomaly or install block (codex r8)', () => {
     // Codex r8 on PR #218: a background Task dispatch returns a handle
     // stub, not the final assistant text. Recording it as empty_response

@@ -394,16 +394,36 @@ try {
     process.exit(0);
   }
 
-  // Background Task dispatches return a handle stub on the first
-  // PostToolUse event, not a real phase completion. Skip the gate until
-  // the eventual completion event arrives with the real response — same
-  // reasoning as mpl-gate-recorder's background guard (codex r8/r9 on
-  // PR #218). Treating a handle as a completed phase would otherwise
-  // install a missing_or_invalid_test_agent_evidence block before the
-  // runner has even produced final output.
-  if (toolInput?.run_in_background === true || toolInput?.runInBackground === true) {
-    ok();
-    process.exit(0);
+  // Background Task dispatches can return a handle stub on the first
+  // PostToolUse event, not a real phase completion. Skip the gate ONLY
+  // when both run_in_background is true AND the response looks like a
+  // handle stub (object with id/handle field and no text payload).
+  // Codex r8/r9 on PR #218 caught the original false-block on the stub;
+  // r11 [data-integrity] sharpened it so that an actual background
+  // completion with substantive content still gets gated. Same heuristic
+  // as mpl-gate-recorder.
+  {
+    const bgFlag = toolInput?.run_in_background === true
+      || toolInput?.runInBackground === true;
+    const toolResponse = data.tool_response ?? data.toolResponse ?? null;
+    const isHandleStubShape = (
+      bgFlag
+      && toolResponse !== null
+      && typeof toolResponse === 'object'
+      && !Array.isArray(toolResponse)
+      && (toolResponse.handle !== undefined
+          || toolResponse.taskId !== undefined
+          || toolResponse.task_id !== undefined
+          || toolResponse.id !== undefined)
+      && typeof toolResponse.text !== 'string'
+      && typeof toolResponse.response !== 'string'
+      && typeof toolResponse.output !== 'string'
+      && !Array.isArray(toolResponse.content)
+    );
+    if (isHandleStubShape) {
+      ok();
+      process.exit(0);
+    }
   }
 
   const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
