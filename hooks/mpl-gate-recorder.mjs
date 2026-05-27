@@ -360,15 +360,26 @@ try {
 
     const patch = {};
     const phaseIdFromPrompt = extractPhaseId(toolInput.prompt || toolInput.description || '');
-    const anomaly = detectSubagentReturnAnomaly({
+
+    // Codex r8 on PR #218: background Task dispatches (run_in_background:
+    // true) return a handle stub on the first PostToolUse event, not the
+    // final assistant text. The anomaly detector would classify that
+    // blank as empty_response and freeze the pipeline before the real
+    // completion is joined. Skip both anomaly recording and test-agent
+    // evidence parsing for background handles — the eventual completion
+    // event will fire this hook again with the real response.
+    const isBackgroundDispatch = toolInput?.run_in_background === true
+      || toolInput?.runInBackground === true;
+    const anomaly = isBackgroundDispatch ? null : detectSubagentReturnAnomaly({
       data,
       agentType,
       phaseId: phaseIdFromPrompt,
     });
     if (anomaly) appendSubagentReturnAnomaly(cwd, anomaly);
 
-    // Branch 2: test-agent dispatch record (AD-0004 empirical gap)
-    if (/mpl-test-agent$/.test(agentType)) {
+    // Branch 2: test-agent dispatch record (AD-0004 empirical gap).
+    // Skip background dispatches — same reasoning as the anomaly branch.
+    if (/mpl-test-agent$/.test(agentType) && !isBackgroundDispatch) {
       const phaseId = phaseIdFromPrompt;
       if (phaseId) {
         const dispatched = state.test_agent_dispatched || {};
@@ -402,7 +413,7 @@ try {
     // MUST install a structural block (session_status='blocked_hook')
     // so the orchestrator pauses regardless of PLAN.md / TODO state.
     // The anomaly is also persisted in state.subagent_return_anomalies.
-    if (/mpl-phase-runner$/.test(agentType)) {
+    if (/mpl-phase-runner$/.test(agentType) && !isBackgroundDispatch) {
       if (anomaly) {
         // Only install the block if there isn't already an active one we
         // could clobber. Operators may have a more specific block already

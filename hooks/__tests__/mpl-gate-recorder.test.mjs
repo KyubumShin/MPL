@@ -539,6 +539,65 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }
   });
 
+  it('background phase-runner Task dispatch does NOT record anomaly or install block (codex r8)', () => {
+    // Codex r8 on PR #218: a background Task dispatch returns a handle
+    // stub, not the final assistant text. Recording it as empty_response
+    // would freeze the pipeline before the real completion is joined.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-bg-phase-runner-'));
+    try {
+      seedState(tmp);
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Execute phase-1.',
+          run_in_background: true,
+        },
+        tool_response: { handle: 'task-bg-abc123' },
+        usage: { output_tokens: 0 },
+        metrics: { tools_used: 0, duration_ms: 100 },
+      };
+      execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+      const state = readState(tmp);
+      assert.equal(Array.isArray(state.subagent_return_anomalies) ? state.subagent_return_anomalies.length : 0, 0,
+        'background dispatch must NOT create anomaly entries');
+      assert.notEqual(state.session_status, 'blocked_hook',
+        'background dispatch must NOT install a block');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('background test-agent Task dispatch does NOT record dispatched evidence (codex r8)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-bg-test-agent-'));
+    try {
+      seedState(tmp);
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-test-agent',
+          prompt: 'Verify phase-1 from the contract.',
+          run_in_background: true,
+        },
+        tool_response: { handle: 'task-bg-xyz' },
+      };
+      execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+      const state = readState(tmp);
+      assert.deepEqual(state.test_agent_dispatched, {},
+        'background dispatch must NOT write evidence');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('phase-runner clean completion for a DIFFERENT phase does NOT clear an anomaly block (codex r7)', () => {
     // Codex r7 on PR #218: self-clear must match the blocked phase id.
     // A clean phase-runner completion for phase-2 must not clear a
