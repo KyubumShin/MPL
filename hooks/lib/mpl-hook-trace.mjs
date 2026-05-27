@@ -174,12 +174,34 @@ export function traceHookChain({
   const category = pathCategory(resolvedTarget);
   const rows = [];
 
+  // Codex r4 on PR #216: when there is an active blocked_hook envelope
+  // that matches the queried target, the offending hook MUST appear in
+  // the trace regardless of the category/matcher filter — otherwise a
+  // valid block on e.g. `state.test_agent_dispatched.<phase>` (not a
+  // decomposition path) would have `mpl-require-test-agent` filtered out
+  // and never reach blockStatusFor.
+  const activeBlockHookId = activeState
+    && activeState.session_status === 'blocked_hook'
+    && missingBlockedHookFields(activeState).length === 0
+    ? String(activeState.blocked_by_hook || '').trim()
+    : null;
+  const activeBlockArtifact = activeBlockHookId
+    ? String(activeState.blocked_artifact || '').trim()
+    : null;
+  const resolvedTargetTrim = String(resolvedTarget).trim();
+  const activeBlockMatchesTarget = activeBlockArtifact && resolvedTargetTrim && (
+    activeBlockArtifact === resolvedTargetTrim ||
+    resolvedTargetTrim.endsWith(activeBlockArtifact) ||
+    activeBlockArtifact.endsWith(resolvedTargetTrim)
+  );
+
   for (const [eventName, registrations] of Object.entries(config.hooks || {})) {
     for (const registration of registrations || []) {
       const matcher = registration.matcher || null;
       for (const hook of registration.hooks || []) {
         const hookId = hookIdFromCommand(hook.command);
-        if (!shouldIncludeHook({ eventName, matcher, hookId, category })) continue;
+        const isActiveBlocker = activeBlockMatchesTarget && hookId === activeBlockHookId;
+        if (!isActiveBlocker && !shouldIncludeHook({ eventName, matcher, hookId, category })) continue;
         rows.push({
           event: eventName,
           matcher: matcher || '*',

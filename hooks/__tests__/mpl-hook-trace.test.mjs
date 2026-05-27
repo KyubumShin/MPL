@@ -129,6 +129,42 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('always includes the blocked_by_hook entry for an active block, even when the path category would filter it out', () => {
+    // Codex r4 on PR #216: a valid mpl-require-test-agent block records
+    // blocked_artifact as `state.test_agent_dispatched.<phase>`, which the
+    // path category considers a generic file. shouldIncludeHook then drops
+    // the Task|Agent PostToolUse hook and BLOCKING is never surfaced.
+    // When state has an active block matching the target, the offending
+    // hook MUST appear in the trace regardless of filter.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-active-block-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_phase: 'phase-1',
+        blocked_artifact: 'state.test_agent_dispatched.phase-1',
+        block_code: 'missing_or_invalid_test_agent_evidence',
+        block_reason: 'phase-1 has no valid test-agent dispatch evidence',
+        resume_instruction: 'Dispatch mpl-test-agent for phase-1 and retry.',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { phase_id: 'phase-1' },
+      }));
+      const trace = traceHookChain({
+        targetPath: 'state.test_agent_dispatched.phase-1',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+      assert.ok(row, 'mpl-require-test-agent must be included when it is the active blocker');
+      assert.equal(row.status, 'currently_blocking');
+      assert.match(formatHookTrace(trace), /BLOCKING/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('marks the active blocked_hook as currently_blocking', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-'));
     try {
