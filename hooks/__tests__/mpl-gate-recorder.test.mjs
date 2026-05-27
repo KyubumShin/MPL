@@ -455,6 +455,47 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     }
   });
 
+  it('test-agent PASS does not clear a phase_runner_* block (codex r5 hook-order regression)', () => {
+    // Codex r5 on PR #218: when mpl-gate-recorder installs a
+    // phase_runner_<anomaly> block, a later test-agent PASS in the same
+    // gate-recorder pass must NOT clear the structural anomaly block.
+    // The clear-on-PASS branch only nulls session_status when
+    // blocked_by_hook === 'mpl-require-test-agent'.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-block-survive-'));
+    try {
+      seedState(tmp, {
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-gate-recorder',
+        blocked_phase: 'phase-1',
+        blocked_artifact: 'state.subagent_return_anomalies[empty_response]',
+        block_code: 'phase_runner_empty_response',
+        block_reason: 'phase-runner returned empty after substantial tool work',
+        resume_instruction: 'Verify phase artifacts; re-dispatch the runner.',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { agent_type: 'mpl-phase-runner', anomaly_type: 'empty_response' },
+      });
+      // Now a test-agent PASS arrives.
+      const fenced = '```json\n' + JSON.stringify({
+        phase_id: 'phase-1',
+        verdict: 'PASS',
+        test_results: { total: 3, passed: 3, failed: 0, skipped: 0, pass_rate: 100 },
+        test_files_created: ['tests/phase-1.test.ts'],
+        commands_run: [{ command: 'npm test', exit_code: 0 }],
+        bugs_found: [],
+        a_item_coverage: [{ id: 'A-1', status: 'PASS' }],
+        s_item_coverage: [{ id: 'S-1', status: 'PASS' }],
+      }) + '\n```';
+      runHook(tmp, fenced);
+      const state = readState(tmp);
+      // Phase-runner anomaly block survives.
+      assert.equal(state.session_status, 'blocked_hook');
+      assert.equal(state.blocked_by_hook, 'mpl-gate-recorder');
+      assert.equal(state.block_code, 'phase_runner_empty_response');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('phase-runner anomaly does NOT clobber a pre-existing blocked_hook (codex r4)', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-noclobber-'));
     try {

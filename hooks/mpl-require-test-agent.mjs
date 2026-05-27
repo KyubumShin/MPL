@@ -63,6 +63,21 @@ function block(reason) {
 const HOOK_ID = 'mpl-require-test-agent';
 
 function recordBlockedHook(cwd, phaseId, reason, resumeInstruction) {
+  // Codex r5 on PR #218: do not clobber an existing blocked_hook owned by
+  // a different hook. mpl-gate-recorder runs ahead of this PreToolUse
+  // hook for the same Task completion event and may have already set a
+  // higher-priority phase_runner_<anomaly> block; overwriting it would
+  // hide the structural anomaly signal and let a later test-agent PASS
+  // clear the only visible block while the anomaly remained un-recovered.
+  try {
+    const existing = readState(cwd);
+    if (existing && existing.session_status === 'blocked_hook'
+        && existing.blocked_by_hook && existing.blocked_by_hook !== HOOK_ID) {
+      return;  // defer to the more-specific existing block
+    }
+  } catch {
+    // Fall through to recordBlockedHookEnvelope, which has its own try/catch.
+  }
   recordBlockedHookEnvelope(cwd, {
     hookId: HOOK_ID,
     phaseId,
