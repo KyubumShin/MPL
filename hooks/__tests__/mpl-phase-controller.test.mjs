@@ -468,6 +468,48 @@ describe('I13 phase0 artifacts gate the controller transition (Exp22 R11 / #210)
       'controller MUST NOT advance current_phase when artifacts are missing');
   });
 
+  it('phase2-sprint → phase3-gate (variable nextPhase) is blocked when artifacts missing (codex r2 [data-integrity])', () => {
+    // codex r2 on PR #222: variable nextPhase transitions need the same
+    // guard. Phase 2 with all TODOs done normally advances to phase3-gate
+    // via `const nextPhase = ...; writeState(...)`.
+    // Plant a PLAN.md showing 1/1 completed so the controller takes the
+    // "all TODOs done → next phase" branch.
+    mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
+    writeFileSync(join(tmpDir, '.mpl', 'PLAN.md'), '### [x] phase-1 done\n');
+    const out = runStopHook(tmpDir, { current_phase: 'phase2-sprint' },
+      { skipPhase0Seed: true });
+    assert.match(out.stopReason, /\[MPL I13\] Cannot transition to phase3-gate/);
+    const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.current_phase, 'phase2-sprint',
+      'controller MUST NOT advance to phase3-gate when artifacts are missing');
+  });
+
+  it('small-pipeline completion is EXEMPT from Phase 0 artifact guard (codex r2 [contract-break])', () => {
+    // codex r2 on PR #222: small-plan / small-sprint / small-verify is
+    // a separate lightweight flow that intentionally skips Phase 0.
+    // small-verify → completed must NOT be blocked by I13.
+    const out = runStopHook(tmpDir, {
+      current_phase: 'small-verify',
+      gate_results: { hard2_passed: true },
+    }, { skipPhase0Seed: true });
+    assert.match(out.stopReason, /MPL-Small.*Verification passed/);
+    const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.current_phase, 'completed',
+      'small-pipeline completion must land without Phase 0 artifacts');
+  });
+
+  it('small-pipeline fix-loop completion is also EXEMPT', () => {
+    const out = runStopHook(tmpDir, {
+      current_phase: 'small-verify',
+      gate_results: { hard2_passed: false },
+      fix_loop_count: 3,
+      max_fix_loops: 3,
+    }, { skipPhase0Seed: true });
+    assert.match(out.stopReason, /MPL-Small.*Fix loop limit reached/);
+    const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.equal(state.current_phase, 'completed');
+  });
+
   it('phase1a-research → phase1b-plan transition lands when Phase 0 artifacts are present', () => {
     const out = runStopHook(tmpDir, {
       current_phase: 'phase1a-research',

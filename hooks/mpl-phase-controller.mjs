@@ -554,6 +554,9 @@ async function main() {
 
         const nextPhase = cohort ? 'release-gate' : 'phase3-gate';
         const target = cohort ? `release-gate(${cohort})` : 'Phase 3: Quality Gate';
+        // codex r2 on PR #222: variable nextPhase still needs the
+        // Phase 0 artifact guard — both branches land in protected phases.
+        if (emitPhase0BlockIfNeeded(cwd, nextPhase)) return;
         writeState(cwd, { current_phase: nextPhase });
         console.log(JSON.stringify({
           continue: true,
@@ -905,6 +908,8 @@ async function main() {
       const nextCutId = null;
       const nextPhase = 'phase3-gate';
 
+      // codex r2 on PR #222: protect this composite writeState too.
+      if (emitPhase0BlockIfNeeded(cwd, nextPhase)) return;
       writeState(cwd, {
         release: {
           ...existing,
@@ -1161,9 +1166,13 @@ async function main() {
       const smallGate = state.gate_results || {};
 
       if (smallGate.hard2_passed === true) {
-        // Code review passed → completed
-                if (emitPhase0BlockIfNeeded(cwd, 'completed')) return;
-                writeState(cwd, { current_phase: 'completed' });
+        // Code review passed → completed.
+        // codex r2 on PR #222 [contract-break]: the small pipeline is a
+        // separate lightweight flow (small-plan → small-sprint →
+        // small-verify) that intentionally skips Phase 0 — it does NOT
+        // produce raw-scan.md / design-intent.yaml / contracts. Do NOT
+        // guard the small-pipeline completion against Phase 0 artifacts.
+        writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
           stopReason: '[MPL-Small] Verification passed. Pipeline complete. Extract learnings and commit.'
@@ -1173,9 +1182,9 @@ async function main() {
         const smallMaxFix = state.max_fix_loops || 3;
 
         if (smallFixCount >= smallMaxFix) {
-          // Fix loop limit reached → completed (partial)
-                    if (emitPhase0BlockIfNeeded(cwd, 'completed')) return;
-                    writeState(cwd, { current_phase: 'completed' });
+          // Fix loop limit reached → completed (partial).
+          // codex r2 [contract-break]: small-pipeline exempt (see above).
+          writeState(cwd, { current_phase: 'completed' });
           console.log(JSON.stringify({
             continue: false,
             stopReason: `[MPL-Small] Fix loop limit reached (${smallFixCount}/${smallMaxFix}). Completing with partial results. Extract learnings.`
