@@ -97,6 +97,21 @@ Profiles are advisory prompt data. They do not replace hooks or machine checks.
 - `blocked_or_risky_patterns`: browser-native modal/file APIs that are unavailable or constrained inside the WebView runtime.
 - `hint`: verify runtime-safe dialog/file APIs instead of assuming browser APIs work.
 
+- `id`: `tauri-rust-state-manage`
+- `applies_when`: Rust source under the Tauri project root uses `tauri::State<'_, T>` in a `#[tauri::command]`-annotated function.
+- `blocked_or_risky_patterns`: a Rust command accepts `tauri::State<'_, T>` for some resource type `T` while the Tauri app builder never calls `Builder::manage(T)` to register a `T` instance before `.run(...)`. The runtime fails the command at first invocation with a state-not-managed error.
+- `hint`: every `tauri::State<'_, T>` parameter requires a matching `.manage(<T instance>)` registration on the `Builder` chain. Phase 0 raw-scan grep for `tauri::State<` and `.manage(` and surface a mismatch when state types exist without a manage call.
+
+- `id`: `tauri-v2-capability-coverage`
+- `applies_when`: Tauri v2 project where frontend `invoke('<cmd>')` calls map to Rust functions annotated with `#[tauri::command]`.
+- `blocked_or_risky_patterns`: a `#[tauri::command]` exposed to a frontend `invoke()` call has no covering permission entry in any `src-tauri/capabilities/*.json` file. Tauri v2 rejects the call at the IPC boundary with an unauthorized error.
+- `hint`: every command reachable from `invoke(...)` must appear under `permissions` of an active capability JSON. Phase 0 raw-scan grep for `#[tauri::command]`, `invoke(` call sites, and `src-tauri/capabilities/*.json` and require the union of `permissions` to cover the union of invoked command names. `mpl-require-e2e-authenticity.mjs` is the late finalize safety net; this profile pushes the requirement into the decomposer-facing layer.
+
+- `id`: `tauri-conf-csp-null`
+- `applies_when`: `tauri.conf.json` is present.
+- `blocked_or_risky_patterns`: `app.security.csp` is set to `null` (or the field is absent) at release / Phase 5 finalize time. A null CSP allows arbitrary inline scripts and remote resources from the WebView, which is acceptable during development but is a security regression for a release build.
+- `hint`: flag `csp: null` during decomposer / Phase 0 platform scan as a development-only setting. Require either a non-null CSP value or an explicit release rationale recorded against the goal contract before finalize.
+
 `framework_convention_profiles`
 - `id`: `tauri-rust-serde`
 - `type_policy_rules`: keep frontend/Rust boundary keys explicit; account for Serde naming conversion.

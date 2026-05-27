@@ -299,3 +299,43 @@ describe('framework-specific prompt literals', () => {
     assert.deepEqual(parseContractCategories(registry), ['prompt_guard_literals']);
   });
 });
+
+describe('Tauri platform constraint hardening (Exp22 R14 / #211)', () => {
+  it('declares the three new Tauri platform constraint profiles', () => {
+    const registry = readRepoFile(PROFILE_REGISTRY);
+    // Each profile id is a load-bearing literal the decomposer / Phase 0
+    // raw-scan path will look up. These ids must not regress out.
+    assert.match(registry, /`id`: `tauri-rust-state-manage`/,
+      'Tauri profile must declare tauri-rust-state-manage');
+    assert.match(registry, /`id`: `tauri-v2-capability-coverage`/,
+      'Tauri profile must declare tauri-v2-capability-coverage');
+    assert.match(registry, /`id`: `tauri-conf-csp-null`/,
+      'Tauri profile must declare tauri-conf-csp-null');
+  });
+
+  it('names the Builder::manage(T) rule against tauri::State<\'_, T>', () => {
+    const registry = readRepoFile(PROFILE_REGISTRY);
+    // The decomposer-facing constraint MUST mention both literals so the
+    // Phase 0 raw-scan grep pattern stays anchored on the right tokens.
+    assert.match(registry, /tauri::State<'_, T>/);
+    assert.match(registry, /Builder::manage/);
+    assert.match(registry, /\.manage\(/);
+  });
+
+  it('names the capability coverage requirement for #[tauri::command] / invoke()', () => {
+    const registry = readRepoFile(PROFILE_REGISTRY);
+    assert.match(registry, /#\[tauri::command\]/);
+    assert.match(registry, /invoke\(/);
+    assert.match(registry, /src-tauri\/capabilities\/\*\.json/);
+    // The late finalize safety net (mpl-require-e2e-authenticity.mjs)
+    // must still be referenced so the two layers stay coordinated.
+    assert.match(registry, /mpl-require-e2e-authenticity\.mjs/);
+  });
+
+  it('names csp:null as development-only and requires release rationale', () => {
+    const registry = readRepoFile(PROFILE_REGISTRY);
+    assert.match(registry, /tauri\.conf\.json/);
+    assert.match(registry, /csp[^\n]*null/i);
+    assert.match(registry, /release/i);
+  });
+});
