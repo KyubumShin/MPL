@@ -1,5 +1,40 @@
 import { readState, writeState } from './mpl-state.mjs';
 
+/**
+ * The set of string companion fields a `session_status === 'blocked_hook'`
+ * envelope MUST carry to be considered actionable. Same list mpl-state-invariant
+ * uses for the BLOCKED_HOOK_STALE violation. Exported so diagnostic tools
+ * (e.g. mpl-hook-trace) can validate envelopes without duplicating the rule.
+ */
+export const BLOCKED_HOOK_REQUIRED_STRING_FIELDS = Object.freeze([
+  'blocked_by_hook',
+  'blocked_phase',
+  'blocked_artifact',
+  'block_code',
+  'block_reason',
+  'resume_instruction',
+  'blocked_at',
+]);
+
+/**
+ * Return the list of missing required fields from a `state` object whose
+ * session_status is `blocked_hook`. An empty list means the envelope is
+ * complete enough to be acted on. `retry_context` is required as a plain
+ * object (not null, not an array).
+ */
+export function missingBlockedHookFields(state) {
+  if (!state || state.session_status !== 'blocked_hook') return [];
+  const missing = BLOCKED_HOOK_REQUIRED_STRING_FIELDS.filter((key) => {
+    const v = state[key];
+    return typeof v !== 'string' || v.trim() === '';
+  });
+  const rc = state.retry_context;
+  if (!rc || typeof rc !== 'object' || Array.isArray(rc)) {
+    missing.push('retry_context');
+  }
+  return missing;
+}
+
 export function buildBlockedHookPatch({
   hookId = 'unknown',
   phaseId = 'unknown',
