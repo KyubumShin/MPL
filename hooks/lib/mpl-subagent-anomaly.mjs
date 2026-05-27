@@ -18,6 +18,10 @@ function stringField(value) {
   return typeof value === 'string' ? value : null;
 }
 
+function nonEmptyStringField(value) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 function textFromContentArray(content) {
   if (!Array.isArray(content)) return null;
   const parts = [];
@@ -37,14 +41,19 @@ export function extractFinalResponseText(toolResponse) {
   if (typeof toolResponse === 'string') return toolResponse;
   if (!isPlainObject(toolResponse)) return '';
 
-  const direct = stringField(toolResponse.text)
-    ?? stringField(toolResponse.response)
-    ?? stringField(toolResponse.output)
-    ?? stringField(toolResponse.stdout)
-    ?? stringField(toolResponse.message)
-    ?? stringField(toolResponse.final_response)
-    ?? stringField(toolResponse.finalResponse)
-    ?? stringField(toolResponse.result);
+  // Codex r3 on PR #218: prefer NON-EMPTY direct fields. A response shaped
+  // like { text: '', content: [{type:'text',text:'...'}] } previously
+  // returned '' here, manufacturing a false anomaly for a valid content-
+  // array response. The content array is the canonical Task tool shape,
+  // so check it ahead of any empty direct alias.
+  const direct = nonEmptyStringField(toolResponse.text)
+    ?? nonEmptyStringField(toolResponse.response)
+    ?? nonEmptyStringField(toolResponse.output)
+    ?? nonEmptyStringField(toolResponse.stdout)
+    ?? nonEmptyStringField(toolResponse.message)
+    ?? nonEmptyStringField(toolResponse.final_response)
+    ?? nonEmptyStringField(toolResponse.finalResponse)
+    ?? nonEmptyStringField(toolResponse.result);
   if (direct !== null) return direct;
 
   const contentText = typeof toolResponse.content === 'string'

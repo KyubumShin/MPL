@@ -393,8 +393,14 @@ try {
       }
     }
 
-    // Branch 3: phase-runner completion → sync completed_todos with disk truth
-    if (/mpl-phase-runner$/.test(agentType)) {
+    // Branch 3: phase-runner completion → sync completed_todos with disk
+    // truth. Codex r3 on PR #218: when the phase-runner returned anomalous
+    // output (empty response, zero-token-after-tools, init failure), the
+    // hook MUST NOT advance completed_todos based on a possibly-stale
+    // state-summary.md file. The anomaly is already persisted in
+    // state.subagent_return_anomalies; let the operator verify and either
+    // re-dispatch the runner or fix state by hand before counts advance.
+    if (/mpl-phase-runner$/.test(agentType) && !anomaly) {
       const diskCount = countCompletedPhases(cwd);
       const prior = state.sprint_status || {};
       if (prior.completed_todos !== diskCount) {

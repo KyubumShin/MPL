@@ -392,6 +392,50 @@ describe('mpl-gate-recorder test-agent evidence', () => {
     assert.equal(ev.valid_json, false);
     assert.equal(ev.invalid_reason, 'missing_json_block');
   });
+
+  it('phase-runner anomaly does not advance sprint_status.completed_todos (codex r3)', () => {
+    // Codex r3 on PR #218: when the phase-runner returns anomalous output
+    // (empty / zero tokens after substantial tool work), the hook must not
+    // count a possibly-stale state-summary.md as a completed phase.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-gate-recorder-phase-runner-anomaly-'));
+    try {
+      seedState(tmp, { sprint_status: { completed_todos: 0, in_progress_todos: 0, failed_todos: 0, total_todos: 1 } });
+      // Plant a stale on-disk state-summary.md so countCompletedPhases would
+      // otherwise increment to 1.
+      mkdirSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'state-summary.md'),
+        '# phase-1 state summary\nstatus: COMPLETED\n'
+      );
+      const input = {
+        cwd: tmp,
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'mpl-phase-runner',
+          prompt: 'Execute phase-1.',
+        },
+        tool_response: '',  // empty final response after tool work
+        usage: { output_tokens: 0 },
+        metrics: { tools_used: 40, duration_ms: 28 * 60 * 1000 },
+      };
+      const r = JSON.parse(execFileSync('node', [HOOK_PATH], {
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      }));
+      assert.equal(r.continue, true);
+      assert.match(r.systemMessage, /SUBAGENT RETURN ANOMALY/);
+      const state = readState(tmp);
+      // The anomaly is recorded …
+      assert.equal(state.subagent_return_anomalies.length, 1);
+      assert.equal(state.subagent_return_anomalies[0].agent_type, 'mpl-phase-runner');
+      // … but completed_todos must STAY at 0 — not auto-advance from the
+      // stale state-summary.md.
+      assert.equal(state.sprint_status.completed_todos, 0,
+        'phase-runner anomaly must NOT advance completed_todos');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 /* ─── Stage A Phase 1.6c-i (PR #186 review fix): Bash gate routing ─── */

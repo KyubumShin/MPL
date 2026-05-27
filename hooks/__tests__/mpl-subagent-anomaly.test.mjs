@@ -36,6 +36,19 @@ describe('mpl-subagent-anomaly', () => {
     assert.equal(extractFinalResponseText({ usage: { output_tokens: 0 } }), '');
   });
 
+  it('prefers non-empty content array over an empty direct alias field (codex r3)', () => {
+    // Real shape: { text: '', content: [{type:'text', text:'<actual>'}] }
+    // Empty `text` must NOT shadow the real content array.
+    assert.equal(
+      extractFinalResponseText({ text: '', content: [{ type: 'text', text: 'real' }] }),
+      'real'
+    );
+    assert.equal(
+      extractFinalResponseText({ output: '', content: [{ type: 'text', text: 'real' }] }),
+      'real'
+    );
+  });
+
   it('detects empty response after substantial tool use', () => {
     const anomaly = detectSubagentReturnAnomaly({
       data: taskPayload({ response: '', toolsUsed: 58, outputTokens: 0, durationMs: 55 * 60 * 1000 }),
