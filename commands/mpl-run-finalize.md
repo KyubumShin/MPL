@@ -742,8 +742,23 @@ if not execution_tiers or execution_tiers.length == 0:
 expected_parallel_tiers = set of tier ids where
   execution_tiers[].parallel == true
 
-raw_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or
-             state.phase_scheduler_history or []
+// Union both sources. The JSONL file is persistent and the state
+// mirror is the ring-buffered last-50 snapshot — neither alone is
+// authoritative. If JSONL writes were truncated or the file was hand-
+// edited, the state mirror may carry the latest events; if the state
+// ring evicted older rows, the JSONL may carry them. Union them and
+// de-duplicate so a degraded write on one side cannot manufacture
+// false missing telemetry.
+//
+// Two events are the same when they share
+// (pipeline_id, run_started_at, tier, timestamp, selected_mode).
+jsonl_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or []
+state_events = state.phase_scheduler_history or []
+raw_events = dedupe_by(
+  jsonl_events.concat(state_events),
+  e => `${e.pipeline_id}|${e.run_started_at}|${e.tier}|${e.timestamp}|${e.selected_mode}`
+)
+
 // .mpl/mpl/profile/ is persistent across pipeline starts. pipeline_id
 // alone is NOT a unique run key — initState derives it as
 // mpl-{date}-{slug}, so same-day reruns of the same feature collide.
@@ -796,15 +811,17 @@ scheduler = {
                      (deduplicated),
   no_parallel_explanation: required (non-null) when
     tiers_parallel_requested > 0 AND
-    (tiers_parallel_executed == 0 OR
+    (tiers_parallel_executed < tiers_parallel_requested OR
      tiers_with_missing_telemetry is non-empty OR
      tiers_with_partial_rejection is non-empty OR
      waves_parallel_failed > 0);
-    otherwise null. The string MUST name either the dominant rejection
-    reasons (when telemetry is present), the list of tiers with missing
-    telemetry (when not), the tiers with partial rejection plus their
-    rejection reasons (when some waves rejected and others ran), or the
-    failure reasons (when waves attempted parallel execution and failed).
+    otherwise null. The `tiers_parallel_executed < tiers_parallel_requested`
+    trigger covers BOTH the full-miss case (executed == 0) and the
+    partial-miss case (some requested tiers parallelized, others
+    rejected/skipped). The string MUST name the rejected tier ids, their
+    selected modes, and the dominant rejection reasons (or missing
+    telemetry tiers, partial-rejection tiers, or failure reasons,
+    whichever applies).
 }
 ```
 

@@ -94,6 +94,33 @@ describe('execution_tiers observability contract', () => {
       'no_parallel_explanation must trigger on parallel_failed waves');
   });
 
+  it('no_parallel_explanation triggers on partial parallelism (executed < requested), not only on full miss', () => {
+    // Codex round-7 review on PR #213: requiring tiers_parallel_executed == 0
+    // lets a run with two parallel:true tiers where ONE parallelized and the
+    // OTHER was rejected finalize with no_parallel_explanation = null.
+    // The MUST must compare executed against requested.
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /tiers_parallel_executed < tiers_parallel_requested/,
+      'no_parallel_explanation trigger must compare executed against requested');
+    // The old full-miss-only trigger must NOT be the sole condition anymore.
+    assert.doesNotMatch(finalize, /tiers_parallel_executed == 0 OR\n\s+tiers_with_missing_telemetry/,
+      'no_parallel_explanation must not gate on executed == 0 alone');
+    // The explanation string MUST name the rejected tier ids when partial.
+    assert.match(finalize, /rejected tier ids/);
+  });
+
+  it('finalize unions JSONL events with state.phase_scheduler_history so a degraded JSONL cannot manufacture false missing telemetry', () => {
+    // Codex round-7 review on PR #213: reading jsonl OR state.history means
+    // if JSONL parses (even with stale or truncated rows), the state mirror
+    // is never consulted. Union both sources and de-duplicate so degraded
+    // writes on one side cannot fake missing telemetry.
+    const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
+    assert.match(finalize, /jsonl_events =/);
+    assert.match(finalize, /state_events = state\.phase_scheduler_history/);
+    assert.match(finalize, /dedupe_by/);
+    assert.match(finalize, /jsonl_events\.concat\(state_events\)/);
+  });
+
   it('finalize handles missing/empty execution_tiers with the same legacy fallback as the executor', () => {
     // Codex round-6 review on PR #213: finalize read decomposition.execution_tiers
     // directly, but the executor still documents a synthesized fallback
