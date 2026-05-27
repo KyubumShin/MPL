@@ -29,6 +29,9 @@ const { readGoalContract, readBaselineGoalContractHash, defaultRequiredArtifacts
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { aggregateScheduler, explanationRequiredFromAggregate } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-scheduler-aggregate.mjs')).href
+);
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -164,6 +167,106 @@ function hasCommitSinceBaseline(cwd) {
   }
 }
 
+function schedulerExplanationMissing(cwd, state) {
+  // Exp22 R6 / #205: when decomposition.yaml declares any
+  // execution_tiers[].parallel:true, the run-summary scheduler block must
+  // either show full execution or carry a non-null no_parallel_explanation.
+  // The prompt in commands/mpl-run-finalize.md documents this MUST; the
+  // hook makes it machine-enforceable so prompt drift cannot ship a
+  // completed run with rejected/missing parallelism and no explanation.
+  //
+  // The hook re-derives the aggregation itself from phase-scheduler.jsonl
+  // and state.phase_scheduler_history (see hooks/lib/mpl-scheduler-aggregate.mjs).
+  // A drifted or hand-edited run-summary can self-report a clean state, so
+  // the summary cannot be trusted as the source of truth — only as an
+  // informational mirror that must MATCH the computed evidence.
+  const computed = aggregateScheduler(cwd, state);
+  if (!computed) return null;
+  if (computed.__decomposition_unparseable__) {
+    return 'scheduler:decomposition_execution_tiers_unparseable';
+  }
+  if (computed.tiers_parallel_requested === 0) return null;
+
+  const summary = readJsonIfExists(cwd, '.mpl/mpl/profile/run-summary.json');
+  if (!summary) return 'scheduler:run_summary_missing';
+  const sched = summary.scheduler;
+  if (!sched || typeof sched !== 'object') return 'scheduler:block_missing';
+
+  // The summary's self-report must match what we just recomputed from the
+  // raw event stream. Mismatches indicate prompt drift, hand-edits, or
+  // missing telemetry that the finalizer prompt failed to surface. Compare
+  // every aggregate field, not just a sentinel subset — codex r11 noted a
+  // narrow subset still let drift through (mis-named missing tier ids,
+  // under-reported rejected waves).
+  const scalarKeys = [
+    'tiers_total',
+    'tiers_parallel_requested',
+    'tiers_parallel_executed',
+    'tiers_parallel_rejected',
+    'waves_parallel_rejected',
+    'waves_parallel_failed',
+  ];
+  for (const k of scalarKeys) {
+    const a = Number(computed[k]);
+    const b = Number(sched[k]);
+    if (!Number.isInteger(b) || a !== b) {
+      return `scheduler:${k}_mismatch:computed=${a},summary=${sched[k] ?? 'null'}`;
+    }
+  }
+  for (const k of ['tiers_with_missing_telemetry', 'tiers_with_partial_rejection']) {
+    const computedSorted = Array.isArray(computed[k])
+      ? [...computed[k]].map(Number).sort((x, y) => x - y) : [];
+    const summarySorted = Array.isArray(sched[k])
+      ? [...sched[k]].map(Number).sort((x, y) => x - y) : null;
+    if (summarySorted === null) {
+      return `scheduler:${k}_not_array_in_summary`;
+    }
+    if (computedSorted.length !== summarySorted.length ||
+        computedSorted.some((v, i) => v !== summarySorted[i])) {
+      return `scheduler:${k}_contents_mismatch:computed=[${computedSorted.join(',')}],summary=[${summarySorted.join(',')}]`;
+    }
+  }
+
+  // rejection_reasons set must match what we observed in events.
+  const computedReasons = [...(computed.rejection_reasons || [])].sort();
+  const summaryReasons = Array.isArray(sched.rejection_reasons)
+    ? [...sched.rejection_reasons].filter((r) => typeof r === 'string' && r).sort()
+    : null;
+  if (summaryReasons === null) {
+    return 'scheduler:rejection_reasons_not_array_in_summary';
+  }
+  // Set equality (order-independent, deduplicated).
+  const computedReasonSet = new Set(computedReasons);
+  const summaryReasonSet = new Set(summaryReasons);
+  const reasonsMatch =
+    computedReasonSet.size === summaryReasonSet.size &&
+    [...computedReasonSet].every((r) => summaryReasonSet.has(r));
+  if (!reasonsMatch) {
+    return `scheduler:rejection_reasons_mismatch:computed=[${[...computedReasonSet].sort().join(',')}],summary=[${[...summaryReasonSet].sort().join(',')}]`;
+  }
+
+  const explanation = sched.no_parallel_explanation;
+  const explanationFilled = typeof explanation === 'string' && explanation.trim().length > 0;
+  if (explanationRequiredFromAggregate(computed) && !explanationFilled) {
+    return 'scheduler:no_parallel_explanation_required_but_missing';
+  }
+  // The explanation must reference each affected tier id by number, so an
+  // operator reading the summary can find which tiers lost parallelism.
+  // `n/a`-style placeholders fail this check.
+  if (explanationFilled && Array.isArray(computed.affected_tier_ids) && computed.affected_tier_ids.length > 0) {
+    const missingMentions = computed.affected_tier_ids.filter((tid) => {
+      // Match the tier id as a standalone integer (not embedded in another
+      // number). Accept both "tier 1" and bare "1" anywhere in the text.
+      const re = new RegExp(`(^|[^\\d])${tid}(?=[^\\d]|$)`);
+      return !re.test(explanation);
+    });
+    if (missingMentions.length > 0) {
+      return `scheduler:no_parallel_explanation_missing_tier_refs:[${missingMentions.join(',')}]`;
+    }
+  }
+  return null;
+}
+
 function runbookFinalized(cwd) {
   const path = join(cwd, '.mpl', 'mpl', 'RUNBOOK.md');
   if (!existsSync(path)) return false;
@@ -253,6 +356,13 @@ async function main() {
     const commit = hasCommitSinceBaseline(cwd);
     if (!commit.ok) missing.push(`git:${commit.reason}`);
   }
+
+  // Exp22 R6 / #205: machine-enforce the scheduler observability MUST.
+  // Independent of contract.completion_evidence so even runs without an
+  // explicit completion contract still satisfy the no-parallel
+  // explanation rule when decomposition declared parallel tiers.
+  const schedulerProblem = schedulerExplanationMissing(cwd, state);
+  if (schedulerProblem) missing.push(schedulerProblem);
 
   if (missing.length > 0) {
     block(

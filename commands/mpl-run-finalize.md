@@ -715,7 +715,137 @@ Generate full run profile at `.mpl/mpl/profile/run-summary.json`.
 
 > See [`commands/schemas/run-summary.json`](schemas/run-summary.json) for the full schema.
 >
-> **Shape**: `run_id` · `complexity` (grade/score) · `cache` (phase0_hit/saved_tokens) · `phases[]` (per-phase tokens/duration_ms/pass_rate/micro_fixes) · `phase5_gate` · `totals`.
+> **Shape**: `run_id` · `complexity` (grade/score) · `cache` (phase0_hit/saved_tokens) · `phases[]` (per-phase tokens/duration_ms/pass_rate/micro_fixes) · `phase5_gate` · `totals` · `scheduler` (Exp22 R6).
+
+**Scheduler aggregation (Exp22 R6 / #205)**:
+
+The truth of "did this run request parallelism" lives in
+`.mpl/mpl/decomposition.yaml`, not in the event log. Deriving
+`tiers_parallel_requested` from `phase-scheduler.jsonl` alone would let a run
+with empty/missing telemetry collapse to `tiers_parallel_requested == 0` and
+silently pass the no-parallel MUST.
+
+```
+decomposition = Read(".mpl/mpl/decomposition.yaml")
+// Mirror the executor's legacy fallback (mpl-run-execute.md Step 4.0):
+// when execution_tiers is missing or empty, synthesize one
+// {tier, phases:[phase.id], parallel:false} entry per phase. Without
+// this, a legacy/resumed run with no execution_tiers would crash here
+// (empty set, undefined .length) before run-summary.json is written, and
+// the completion guard would fail closed even though the run executed.
+execution_tiers = decomposition.execution_tiers
+if not execution_tiers or execution_tiers.length == 0:
+  execution_tiers = decomposition.phases.map((p, i) => ({
+    tier: i + 1, phases: [p.id], parallel: false
+  }))
+
+expected_parallel_tiers = set of tier ids where
+  execution_tiers[].parallel == true
+
+// Union both sources. The JSONL file is persistent and the state
+// mirror is the ring-buffered last-50 snapshot — neither alone is
+// authoritative. If JSONL writes were truncated or the file was hand-
+// edited, the state mirror may carry the latest events; if the state
+// ring evicted older rows, the JSONL may carry them. Union them and
+// de-duplicate so a degraded write on one side cannot manufacture
+// false missing telemetry.
+//
+// Two events are the same when they share the full identity tuple. The
+// dedupe key MUST match hooks/lib/mpl-scheduler-aggregate.mjs:eventKey
+// exactly — including recompose_count and wave_index — or a generated
+// summary will be rejected by the finalize-artifacts guard for an
+// aggregate mismatch:
+//   (pipeline_id, run_started_at, recompose_count, tier, wave_index,
+//    timestamp, selected_mode)
+jsonl_events = read_jsonl(".mpl/mpl/profile/phase-scheduler.jsonl") or []
+state_events = state.phase_scheduler_history or []
+raw_events = dedupe_by(
+  jsonl_events.concat(state_events),
+  e => `${e.pipeline_id}|${e.run_started_at}|${e.recompose_count}|${e.tier}|${e.wave_index}|${e.timestamp}|${e.selected_mode}`
+)
+
+// .mpl/mpl/profile/ is persistent across pipeline starts. pipeline_id
+// alone is NOT a unique run key — initState derives it as
+// mpl-{date}-{slug}, so same-day reruns of the same feature collide.
+// state.started_at (set once at initState, ISO timestamp with ms
+// resolution) is the actual per-run key. Filter on BOTH so that:
+//   - prior pipelines (different slug/date) drop out via pipeline_id
+//   - prior reruns of the same pipeline_id drop out via run_started_at
+events = raw_events.filter(e =>
+  e.pipeline_id == state.pipeline_id &&
+  e.run_started_at == state.started_at &&
+  e.recompose_count == decomposition.recompose_count)
+// recompose_count guards against APPEND-MODE / RECOMPOSE-MODE rewrites
+// (mpl-run-decompose.md Step 3-F): the executor can rebuild execution_tiers
+// mid-run, and a stale pre-recompose parallel event for tier N would
+// otherwise satisfy the post-recompose tier N (different phases). Bind
+// events to the decomposition version they were emitted under.
+
+tiers_total = execution_tiers.length
+tiers_parallel_requested = expected_parallel_tiers.size
+// "parallel" is the proof-of-execution mode in the executor — emitted only
+// after parallel_map returns successfully. Pool setup, worker dispatch,
+// and per-phase failures emit selected_mode:"parallel_failed" instead, so
+// they are not counted here.
+tiers_parallel_executed = count of distinct event.tier in
+  expected_parallel_tiers where any event for that tier has
+  selected_mode == "parallel"
+tiers_with_missing_telemetry = expected_parallel_tiers minus
+  the set of event.tier values present in events
+tiers_parallel_rejected = tiers_parallel_requested - tiers_parallel_executed
+// Wave-level visibility. A tier can split into multiple waves and emit
+// both a parallel and a parallel_rejected event; the tier-level rollup
+// above would otherwise hide the partial-rejection signal.
+waves_parallel_rejected = count of events where
+  event.selected_mode == "parallel_rejected"
+// Failed parallel waves (pool setup, dispatch, or per-phase errors that
+// caused the wave to raise). Distinct from parallel_rejected (planning
+// could not parallelize) — these are runtime failures of a wave that was
+// supposed to execute in parallel.
+waves_parallel_failed = count of events where
+  event.selected_mode == "parallel_failed"
+tiers_with_partial_rejection = set of event.tier where the tier has
+  BOTH a selected_mode == "parallel" event AND a selected_mode ==
+  "parallel_rejected" event
+
+scheduler = {
+  tiers_total,
+  tiers_parallel_requested,
+  tiers_parallel_executed,
+  tiers_parallel_rejected,
+  tiers_with_missing_telemetry: <list of tier ids>,
+  waves_parallel_rejected,
+  waves_parallel_failed,
+  tiers_with_partial_rejection: <list of tier ids>,
+  rejection_reasons: union of event.rejection_reasons and the values of
+                     event.rejection_reasons_by_phase across all events
+                     (deduplicated), plus event.failure_reason values for
+                     parallel_failed waves,
+  affected_tier_ids: sorted list of expected_parallel_tiers that did not
+                     reach selected_mode == "parallel", that the
+                     no_parallel_explanation MUST reference by id,
+  no_parallel_explanation: required (non-null) when
+    tiers_parallel_requested > 0 AND
+    (tiers_parallel_executed < tiers_parallel_requested OR
+     tiers_with_missing_telemetry is non-empty OR
+     tiers_with_partial_rejection is non-empty OR
+     waves_parallel_failed > 0);
+    otherwise null. The `tiers_parallel_executed < tiers_parallel_requested`
+    trigger covers BOTH the full-miss case (executed == 0) and the
+    partial-miss case (some requested tiers parallelized, others
+    rejected/skipped). The string MUST name the rejected tier ids, their
+    selected modes, and the dominant rejection reasons (or missing
+    telemetry tiers, partial-rejection tiers, or failure reasons,
+    whichever applies).
+}
+```
+
+The `no_parallel_explanation` field is the enforcement point for the MUST in
+`commands/mpl-run-execute.md`: a run that requested parallelism but never
+reached it — including because the scheduler never recorded an event for a
+parallel-requested tier, or because some waves within a tier rejected
+parallelism even though others ran — cannot finalize with a null/missing
+explanation.
 
 Profile data enables:
 1. **Learn optimal token budget by complexity**: derive average tokens per grade from past profiles

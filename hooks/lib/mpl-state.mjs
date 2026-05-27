@@ -56,7 +56,7 @@ export const MAX_AMBIGUITY_HISTORY = 10;
  * bump this constant, register a new migration entry; see
  * `docs/schemas/migration-policy.md`.
  */
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 /**
  * Legacy execution state file. Pre-P2-6 orchestrator prompts wrote to this
@@ -127,6 +127,16 @@ const DEFAULT_STATE = {
   // command_exit_codes) before Hard 2 / phase evidence latches treat them as
   // satisfying independent verification. A dispatch timestamp alone is not enough.
   test_agent_dispatched: {},
+  // Exp22 R6 (schema v7): prompt-level scheduler telemetry. The executor
+  // records one row per execution_tiers[] decision so runs can prove whether
+  // phase-level parallelism was used or why it was rejected.
+  phase_scheduler_history: [],
+  // Exp22 R6 (schema v7): worktree slot lifecycle for the parallel-tier pool.
+  // Distinct from worktree_history (HIGH-risk isolation: phase_id/branch/
+  // path/risk_level/result/timestamp). Entries here come from the parallel
+  // pool: { tier, phase_id, slot_id, worktree_path, base_ref, started_at,
+  // completed_at }.
+  worktree_pool_history: [],
   // AD-0006: verification contract captured by Phase 0 Enhanced Step 4.
   // "verify_script" | "explicit" | "heuristic" | null (pre-Phase-0 default).
   verification_strategy: null,
@@ -535,6 +545,13 @@ export function writeState(cwd, patch) {
     const dropped = merged.ambiguity_history.length - MAX_AMBIGUITY_HISTORY;
     merged.ambiguity_history = merged.ambiguity_history.slice(-MAX_AMBIGUITY_HISTORY);
     process.stderr.write(`[mpl-state] ambiguity_history ring-buffer truncated ${dropped} oldest entries (cap=${MAX_AMBIGUITY_HISTORY})\n`);
+  }
+
+  if (Array.isArray(merged.phase_scheduler_history) && merged.phase_scheduler_history.length > 50) {
+    merged.phase_scheduler_history = merged.phase_scheduler_history.slice(-50);
+  }
+  if (Array.isArray(merged.worktree_pool_history) && merged.worktree_pool_history.length > 50) {
+    merged.worktree_pool_history = merged.worktree_pool_history.slice(-50);
   }
 
   // G5 (#114): mirror fix_loop_count increments into fix_loop_history.

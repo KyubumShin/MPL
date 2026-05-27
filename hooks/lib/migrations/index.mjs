@@ -22,6 +22,7 @@ import v2ToV3 from './v2-to-v3.mjs';
 import v3ToV4 from './v3-to-v4.mjs';
 import v4ToV5 from './v4-to-v5.mjs';
 import v5ToV6 from './v5-to-v6.mjs';
+import v6ToV7 from './v6-to-v7.mjs';
 
 /**
  * Ordered registry. Add new entries here when bumping
@@ -33,6 +34,7 @@ export const MIGRATIONS = Object.freeze([
   v3ToV4,
   v4ToV5,
   v5ToV6,
+  v6ToV7,
 ]);
 
 /**

@@ -42,9 +42,37 @@ For each tier in ascending `tier` order:
 phase_ids = tier.phases.filter(id => !is_completed(id))
 
 if phase_ids.length == 0:
+  record_scheduler_event({
+    pipeline_id: state.pipeline_id,
+    run_started_at: state.started_at,
+    recompose_count: decomposition.recompose_count,
+    tier: tier.tier,
+    wave_index: 0,
+    timestamp: now_iso(),
+    phases: tier.phases,
+    selected_mode: "skipped",
+    parallel_requested: tier.parallel == true,
+    rejection_reasons: ["all_phases_already_completed"],
+    worker_cap: max_phase_workers,
+    worktree_slots: []
+  })
   continue
 
 if tier.parallel != true or phase_ids.length == 1:
+  record_scheduler_event({
+    pipeline_id: state.pipeline_id,
+    run_started_at: state.started_at,
+    recompose_count: decomposition.recompose_count,
+    tier: tier.tier,
+    wave_index: 0,
+    timestamp: now_iso(),
+    phases: phase_ids,
+    selected_mode: "sequential",
+    parallel_requested: tier.parallel == true,
+    rejection_reasons: tier.parallel == true ? ["single_ready_phase"] : ["tier_parallel_false"],
+    worker_cap: max_phase_workers,
+    worktree_slots: []
+  })
   for each phase_id in phase_ids:
     execute_single_phase(phase_id)  // normal flow: 4.0.5 → 4.1 → 4.2 → 4.3 → 4.8
   continue
@@ -55,21 +83,97 @@ waves = split_into_conflict_free_waves(phase_ids, rules:
   - every interface_contract.requires[].from_phase is already completed or in an earlier tier
 )
 
-for each wave in waves:
+for each (wave, wave_index) in enumerate(waves):
   announce: "[MPL] Tier {tier.tier}: executing {wave.length} phase(s) with max {max_phase_workers} workers"
 
   ready_but_blocked = phase_ids - wave when blocked by file overlap, resource lock, or dependency frontier
   record ready_but_blocked_reason for each blocked phase in the tier reconciliation artifact
 
-  // Multi-worktree pool. Reuse up to max_phase_workers isolated slots after
-  // verifying each worktree has the current base branch commit reachable.
-  worktree_pool = ensure_worktree_pool(size: min(max_phase_workers, wave.length))
+  if wave.length == 1:
+    // Cannot parallelize at all — emit rejection BEFORE the single-phase
+    // execution. The rejection itself is a planning decision, not an
+    // execution outcome, so it is safe to log here.
+    record_scheduler_event({
+      pipeline_id: state.pipeline_id,
+      run_started_at: state.started_at,
+      recompose_count: decomposition.recompose_count,
+      tier: tier.tier,
+      wave_index: wave_index,
+      timestamp: now_iso(),
+      phases: phase_ids,
+      wave,
+      selected_mode: "parallel_rejected",
+      parallel_requested: true,
+      worker_cap: max_phase_workers,
+      rejection_reasons_by_phase: ready_but_blocked_reason,
+      worktree_slots: []
+    })
+    execute_single_phase(wave[0])
+    continue
 
-  results = parallel_map(wave, fn(phase_id, slot):
-    seed = generate_phase_seed(phase_id, all_prior_summaries)
-    context = assemble_context(phase_id, seed)
-    return execute_phase(context, isolation: worktree_pool[slot])
-  , max_concurrent: min(max_phase_workers, wave.length))
+  // wave.length > 1 — attempt actual parallel execution. The "parallel"
+  // event MUST NOT be emitted before the wave finishes successfully; a pool
+  // setup or worker dispatch failure would otherwise leave a row that
+  // satisfies the run-summary even though no parallel work happened. Emit
+  // the outcome event AFTER parallel_map returns, with the actual worktree
+  // slot ids used. On failure, emit a parallel_failed event so the
+  // partial-failure path stays visible.
+  try:
+    // Multi-worktree pool. Reuse up to max_phase_workers isolated slots
+    // after verifying each worktree has the current base branch commit
+    // reachable.
+    worktree_pool = ensure_worktree_pool(size: min(max_phase_workers, wave.length))
+    append state.worktree_pool_history entries for every slot creation/reuse:
+      { tier, phase_id, slot_id, worktree_path, base_ref, started_at, completed_at }
+    // Distinct from state.worktree_history (HIGH-risk isolation lifecycle
+    // in mpl-run-execute-context.md §5: { phase_id, branch, path,
+    // risk_level, result, timestamp }). Two writers, two consumers, two
+    // arrays.
+
+    results = parallel_map(wave, fn(phase_id, slot):
+      seed = generate_phase_seed(phase_id, all_prior_summaries)
+      context = assemble_context(phase_id, seed)
+      return execute_phase(context, isolation: worktree_pool[slot])
+    , max_concurrent: min(max_phase_workers, wave.length))
+
+    // Emit the proof-of-execution event. selected_mode:"parallel" means
+    // the wave actually ran in parallel, not that it was planned to.
+    record_scheduler_event({
+      pipeline_id: state.pipeline_id,
+      run_started_at: state.started_at,
+      recompose_count: decomposition.recompose_count,
+      tier: tier.tier,
+      wave_index: wave_index,
+      timestamp: now_iso(),
+      phases: phase_ids,
+      wave,
+      selected_mode: "parallel",
+      parallel_requested: true,
+      worker_cap: max_phase_workers,
+      rejection_reasons_by_phase: ready_but_blocked_reason,
+      worktree_slots: actual_slot_ids_used
+    })
+  catch err:
+    // Pool setup, worker dispatch, or per-phase execution failed before the
+    // wave completed. Emit a distinct mode so finalize does not count this
+    // as parallel execution.
+    record_scheduler_event({
+      pipeline_id: state.pipeline_id,
+      run_started_at: state.started_at,
+      recompose_count: decomposition.recompose_count,
+      tier: tier.tier,
+      wave_index: wave_index,
+      timestamp: now_iso(),
+      phases: phase_ids,
+      wave,
+      selected_mode: "parallel_failed",
+      parallel_requested: true,
+      worker_cap: max_phase_workers,
+      rejection_reasons_by_phase: ready_but_blocked_reason,
+      worktree_slots: [],
+      failure_reason: err.message
+    })
+    raise
 
   // Merge worktree results sequentially in decomposition order.
   for each result in sort_by_decomposition_order(results):
@@ -98,6 +202,55 @@ else:
 
 run_cumulative_tests(phase_ids)
 ```
+
+`record_scheduler_event(...)` is mandatory telemetry. Append one JSON line to
+`.mpl/mpl/profile/phase-scheduler.jsonl` and mirror the latest 50 entries in
+`state.phase_scheduler_history`. The JSONL file is persistent across pipeline
+starts and `state.pipeline_id` is NOT unique on its own (it is
+`mpl-{date}-{slug}`, so same-day reruns of the same feature share it). The
+unique per-run scope key is `state.started_at` (ISO timestamp set once at
+`initState`). The finalizer filters by both. Every row must include:
+
+- `pipeline_id` (= `state.pipeline_id` at write time)
+- `run_started_at` (= `state.started_at` at write time; the actual
+  per-run unique key. `pipeline_id` alone collides on same-day same-slug
+  reruns, so the finalizer filters by `pipeline_id AND run_started_at`.)
+- `recompose_count` (= `decomposition.recompose_count` at write time;
+  APPEND-MODE/RECOMPOSE-MODE rewrites `execution_tiers` mid-run, and the
+  same tier number can mean different phases before vs. after a
+  recompose. Without this key, a stale parallel event for tier N
+  pre-recompose could satisfy the post-recompose tier N. Finalizer
+  filters on this too.)
+- `tier`
+- `wave_index` (per-tier wave counter, 0 for the skipped/sequential
+  branches and the zero-based wave index inside the `for each wave`
+  loop. Required so two same-tier `parallel_rejected` or
+  `parallel_failed` events do not collapse on the dedupe key.)
+- `timestamp` (ISO event-emission time; distinct from `run_started_at`.
+  Always set via `now_iso()` so two events emitted in the same
+  millisecond still differ when combined with `wave_index`.)
+- `phases`
+- `parallel_requested`
+- `selected_mode`: `skipped | sequential | parallel | parallel_rejected |
+  parallel_failed`. `parallel` is the proof-of-execution mode — emit only
+  AFTER `parallel_map` returns successfully. `parallel_failed` is for pool
+  setup, worker dispatch, or per-phase failures inside the wave. The
+  finalize summary counts ONLY `parallel` toward `tiers_parallel_executed`.
+- `rejection_reasons` or `rejection_reasons_by_phase`
+- `worker_cap`
+- `worktree_slots`
+
+If no tier ever records `selected_mode:"parallel"` in a run with
+`execution_tiers[].parallel:true`, the final run summary MUST explain why phase
+parallelism was not used. The enforcement path is `commands/mpl-run-finalize.md`
+Step 5.4 `scheduler` block — it reads `.mpl/mpl/profile/phase-scheduler.jsonl`
+(falling back to `state.phase_scheduler_history`) and emits a `scheduler`
+section in `.mpl/mpl/profile/run-summary.json` per
+`commands/schemas/run-summary.json`.
+
+Do not add a separate `phase_dependencies` field for this purpose;
+dependency-frontier safety comes from existing phase `depends_on` /
+`interface_contract.requires[].from_phase` plus `execution_tiers`.
 
 For each single phase execution:
 
