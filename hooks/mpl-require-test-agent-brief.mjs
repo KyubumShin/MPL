@@ -105,12 +105,14 @@ async function main() {
   const subagent = String(toolInput.subagent_type || toolInput.subagentType || '');
   if (!/mpl-test-agent$/.test(subagent)) return silent();
 
-  // Background dispatches (handle stubs) bypass — same heuristic as the
-  // require-test-agent hook (#218 r9). The real completion fires this
-  // hook again with a non-handle response.
-  if (toolInput.run_in_background === true || toolInput.runInBackground === true) {
-    return silent();
-  }
+  // No background bypass here — codex r1 on PR #224. This hook is
+  // PreToolUse; if we skipped on `run_in_background`, the background
+  // dispatch would launch without a brief check and no later PreToolUse
+  // event can stop the already-started run. The brief precondition
+  // must be enforced for foreground AND background dispatches.
+  // (The PostToolUse mpl-require-test-agent hook has its own handle-stub
+  // heuristic — that's separate, because it's reasoning about a
+  // tool_response that doesn't exist at this point in the lifecycle.)
 
   const phaseId = extractPhaseId(toolInput.prompt || toolInput.description || '');
   if (!phaseId) return silent(); // non-phase task, conservative allow

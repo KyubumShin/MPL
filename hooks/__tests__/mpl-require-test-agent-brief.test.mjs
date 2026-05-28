@@ -248,7 +248,22 @@ required_test_commands:
     assert.equal(r.continue, true);
   });
 
-  it('background test-agent dispatch (handle stub) passes through', () => {
+  it('background test-agent dispatch is ALSO gated — codex r1 [logic]', () => {
+    // codex r1 on PR #224: PreToolUse must NOT skip on run_in_background.
+    // The brief precondition has to fire BEFORE the background dispatch
+    // launches; no later PreToolUse event can stop an already-started run.
+    const r = runHook({
+      subagent_type: 'mpl-test-agent',
+      prompt: 'Verify phase-1.',
+      run_in_background: true,
+    });
+    assert.equal(r.continue, false);
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /brief artifact missing/);
+  });
+
+  it('background test-agent dispatch passes when brief IS valid', () => {
+    writeValidBrief('phase-1');
     const r = runHook({
       subagent_type: 'mpl-test-agent',
       prompt: 'Verify phase-1.',
