@@ -703,6 +703,92 @@ phases:
     assert.equal(r.continue, true);
   });
 
+  it('#214 codex r5 [logic]: parallel_failed event with ready_but_blocked_reason but no failure_reason is reasonless', () => {
+    // For parallel_failed events, rejection_reasons_by_phase carries
+    // ready_but_blocked_reason (pre-attempt deferred state), NOT the
+    // runtime failure cause. failure_reason is the runtime cause.
+    // Pre-r5 the shared eventHasOwnReason() treated rejection_reasons_by_phase
+    // as a substitute and hid reasonless runtime failures.
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      {
+        tier: 1,
+        selected_mode: 'parallel_failed',
+        // ready_but_blocked_reason data on a parallel_failed event —
+        // NOT the runtime failure cause.
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] },
+        // No failure_reason!
+      },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      // Explanation names only file_overlap (the deferred-phase block reason),
+      // not the runtime failure cause.
+      rejection_reasons: ['file_overlap'],
+      no_parallel_explanation: 'tier 1 lost parallelism due to file_overlap',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /no_parallel_explanation_missing_degraded_cause/);
+    assert.match(r.reason, /parallel_failed_without_reason/);
+  });
+
+  it('#214 codex r5 [contract-break]: substring forms like "file_overlapping" / "xfile_overlapx" do NOT satisfy the token check', () => {
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      // "file_overlapping" used to substring-match file_overlap.
+      no_parallel_explanation: 'tier 1 had file_overlapping issues across phases',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /no_parallel_explanation_missing_reasons/);
+  });
+
+  it('#214 codex r5: legitimate hyphen variant "file-overlap" still passes (word-boundary check is correct)', () => {
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      no_parallel_explanation: 'tier 1 rejected (file-overlap on phase-1 impact files)',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
   it('allows finalize when parallel-requested tier failed at runtime but no_parallel_explanation is filled', () => {
     writeArtifacts();
     writeDecompositionWithParallelTier();

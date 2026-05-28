@@ -282,10 +282,21 @@ function schedulerExplanationMissing(cwd, state) {
   // verbatim rejection_reasons tokens).
   if (!explanationFilled) return null;
   const lowerExplanation = explanation.toLowerCase();
+  // Codex r5 on PR #229 [contract-break]: substring-only matching let
+  // `file_overlapping` or `xfile_overlapx` satisfy `file_overlap`,
+  // weakening the grep-friendly-vocabulary guarantee. Tokens must
+  // appear at word boundaries — adjacent characters must be
+  // non-token (i.e. not [A-Za-z0-9_-]). Hyphen is treated as a
+  // token character because hyphen variants use hyphen mid-token.
   const containsToken = (token) => {
     const t = String(token).toLowerCase();
     const variants = [t, t.replace(/_/g, '-'), t.replace(/_/g, ' ')];
-    return variants.some((v) => lowerExplanation.includes(v));
+    return variants.some((v) => {
+      if (!v) return false;
+      const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(^|[^A-Za-z0-9_-])${escaped}(?=[^A-Za-z0-9_-]|$)`);
+      return re.test(lowerExplanation);
+    });
   };
 
   // Axis 1: when computed.rejection_reasons is populated, at least one

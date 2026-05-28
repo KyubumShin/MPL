@@ -355,7 +355,16 @@ export function aggregateScheduler(cwd, state) {
     }
   }
 
-  function eventHasOwnReason(e) {
+  // Codex r5 on PR #229 [logic]: the reasonless check must be
+  // mode-specific. For parallel_rejected events, rejection_reasons /
+  // rejection_reasons_by_phase carry the planning-time rejection cause.
+  // For parallel_failed events, failure_reason is the runtime cause —
+  // rejection_reasons_by_phase on a parallel_failed event is the
+  // ready_but_blocked_reason for deferred phases (pre-attempt state,
+  // not a substitute for runtime failure cause). Sharing one
+  // eventHasOwnReason helper across both modes was treating
+  // ready_but_blocked_reason as if it explained the failure.
+  function rejectedEventHasReason(e) {
     if (Array.isArray(e?.rejection_reasons) && e.rejection_reasons.some((r) => typeof r === 'string' && r)) return true;
     if (e?.rejection_reasons_by_phase && typeof e.rejection_reasons_by_phase === 'object') {
       for (const v of Object.values(e.rejection_reasons_by_phase)) {
@@ -363,8 +372,10 @@ export function aggregateScheduler(cwd, state) {
         if (Array.isArray(v) && v.some((r) => typeof r === 'string' && r)) return true;
       }
     }
-    if (typeof e?.failure_reason === 'string' && e.failure_reason) return true;
     return false;
+  }
+  function failedEventHasReason(e) {
+    return typeof e?.failure_reason === 'string' && e.failure_reason.length > 0;
   }
   for (const e of events) {
     tiersSeen.add(Number(e.tier));
@@ -372,11 +383,11 @@ export function aggregateScheduler(cwd, state) {
     if (e.selected_mode === 'parallel_rejected') {
       tiersWithRejectedEvent.add(Number(e.tier));
       wavesParallelRejected += 1;
-      if (!eventHasOwnReason(e)) wavesParallelRejectedWithoutReason += 1;
+      if (!rejectedEventHasReason(e)) wavesParallelRejectedWithoutReason += 1;
     }
     if (e.selected_mode === 'parallel_failed') {
       wavesParallelFailed += 1;
-      if (!eventHasOwnReason(e)) wavesParallelFailedWithoutReason += 1;
+      if (!failedEventHasReason(e)) wavesParallelFailedWithoutReason += 1;
     }
     // Collect rejection reasons from EVERY event — the finalize prompt's
     // rejection_reasons rule is "union across all events", including
