@@ -60,6 +60,33 @@ const { parseDecompositionGoalTraceText } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-trace.mjs')).href
 );
 
+// Exp22 R11 / #210 — codex r1 on PR #222. Phase-controller writes phase
+// transitions directly via writeState() which bypasses PreToolUse hooks,
+// so state-invariant I13 alone misses the controller's own transitions.
+// Call blockedPhaseTransitionReason() before any writeState that lands
+// in a phase listed in REQUIRES_PHASE0_ARTIFACTS.
+const { blockedPhaseTransitionReason } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-phase0-artifacts.mjs')).href
+);
+
+/**
+ * Emit a stopReason and return true when the controller's intended
+ * transition to `nextPhase` is blocked by missing Phase 0 artifacts.
+ * Caller should `return` immediately after a truthy result to skip the
+ * writeState. The transition is blocked, not deferred — the user must
+ * run /mpl:mpl-resume or restore Phase 0 before the controller will
+ * advance again.
+ */
+function emitPhase0BlockIfNeeded(cwd, nextPhase) {
+  const reason = blockedPhaseTransitionReason(cwd, nextPhase);
+  if (!reason) return false;
+  console.log(JSON.stringify({
+    continue: true,
+    stopReason: reason,
+  }));
+  return true;
+}
+
 // Stage A Phase 1.6c-iii: snapshot ref + user-visible artifact creation.
 const { createSnapshotRef, attemptArtifactCreation } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-release-artifact.mjs')).href
@@ -398,6 +425,9 @@ async function main() {
 
       // BUG-6 fix: handle research error state to prevent infinite loop
       if (research.error) {
+        // codex r7 on PR #222: phase1b-plan is exempt from the Phase 0
+        // artifact guard (it's the planning phase that produces
+        // decomposition + contracts). Transition unconditionally.
         writeState(cwd, { current_phase: 'phase1b-plan', research: { status: 'skipped' } });
         console.log(JSON.stringify({
           continue: true,
@@ -408,6 +438,7 @@ async function main() {
 
       if (research.status === 'completed' || research.status === 'skipped') {
         // Research done → transition to Phase 1-B: Plan Generation
+        // (phase1b-plan exempt; see comment above)
         writeState(cwd, { current_phase: 'phase1b-plan' });
         const msg = research.status === 'skipped'
           ? '[MPL] Research skipped. Transitioning to Phase 1-B: Plan Generation.'
@@ -524,6 +555,9 @@ async function main() {
 
         const nextPhase = cohort ? 'release-gate' : 'phase3-gate';
         const target = cohort ? `release-gate(${cohort})` : 'Phase 3: Quality Gate';
+        // codex r2 on PR #222: variable nextPhase still needs the
+        // Phase 0 artifact guard — both branches land in protected phases.
+        if (emitPhase0BlockIfNeeded(cwd, nextPhase)) return;
         writeState(cwd, { current_phase: nextPhase });
         console.log(JSON.stringify({
           continue: true,
@@ -567,7 +601,8 @@ async function main() {
       if (!cohort) {
         // Defensive: release-gate without an active cohort is a state
         // corruption. Surface and revert to phase3-gate (whole-pipeline).
-        writeState(cwd, { current_phase: 'phase3-gate' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase3-gate')) return;
+                writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: '[MPL] ⚠ release-gate entered with no active cohort. Reverting to phase3-gate.'
@@ -598,7 +633,8 @@ async function main() {
       const releaseResults = checkGateResults({ gate_results: releaseGates }, { strict: true });
 
       if (releaseResults.allPassed) {
-        writeState(cwd, { current_phase: 'release-finalize' });
+                if (emitPhase0BlockIfNeeded(cwd, 'release-finalize')) return;
+                writeState(cwd, { current_phase: 'release-finalize' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] release-gate(${cohort}): scoped Hard 1/2/3 passed (source=${releaseResults.source}). Transitioning to release-finalize.`
@@ -643,6 +679,8 @@ async function main() {
         // Budget remaining → route back to phase2-sprint. Reset scoped
         // evidence on retry so mpl-gate-recorder writes fresh exits on
         // the next attempt (same pattern as phase3-gate FAIL path).
+        // codex r3 on PR #222: protect this composite writeState too.
+        if (emitPhase0BlockIfNeeded(cwd, 'phase2-sprint')) return;
         writeState(cwd, {
           current_phase: 'phase2-sprint',
           release: {
@@ -701,9 +739,19 @@ async function main() {
       // RFC §5.5 invariants preserved: this handler MUST NOT set
       // `state.finalize_done=true` and MUST NOT transition `current_phase`
       // to `completed`. Both remain exclusive to phase5-finalize.
+      //
+      // Codex r5 on PR #222 [data-integrity]: Phase 0 artifact guard
+      // MUST run at the START of the release-finalize case, BEFORE
+      // createSnapshotRef / attemptArtifactCreation / atomicWriteFile
+      // create artifacts on disk. Otherwise a missing-artifacts state
+      // would leave shipped-looking manifest/ref files while
+      // state.release.completed_cut_ids is not appended — release
+      // immutability drift.
+      if (emitPhase0BlockIfNeeded(cwd, 'release-finalize')) return;
       const cur = state.release?.current_cut_id;
       if (!cur) {
-        writeState(cwd, { current_phase: 'phase3-gate' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase3-gate')) return;
+                writeState(cwd, { current_phase: 'phase3-gate' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: '[MPL] ⚠ release-finalize entered with no active cohort. Routing to phase3-gate.'
@@ -872,6 +920,13 @@ async function main() {
       const nextCutId = null;
       const nextPhase = 'phase3-gate';
 
+      // codex r5/r6 on PR #222: the release-finalize case is guarded at
+      // its TOP (line 740-ish) before any release artifact write. The
+      // r2 post-write guard here was redundant AND harmful — if Phase 0
+      // files were removed between the entry guard and this point, we'd
+      // skip the state update while leaving manifest/snapshot artifacts
+      // on disk (release immutability drift). Drop the post-write guard
+      // and rely on the single entry guard for this case.
       writeState(cwd, {
         release: {
           ...existing,
@@ -917,7 +972,8 @@ async function main() {
       // recompose-driven re-entry could still land here with a live cohort.
       // Surface and revert.
       if (state.release?.current_cut_id) {
-        writeState(cwd, { current_phase: 'phase2-sprint' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase2-sprint')) return;
+                writeState(cwd, { current_phase: 'phase2-sprint' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] ⚠ phase3-gate entered while release cohort "${state.release.current_cut_id}" is still active. ` +
@@ -943,7 +999,8 @@ async function main() {
 
       if (gateResults.allPassed) {
         // All gates passed → Phase 5
-        writeState(cwd, { current_phase: 'phase5-finalize' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+                writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] All Quality Gates passed (source=${gateResults.source}). Transitioning to Phase 5: Finalize.${fallbackWarn}`
@@ -953,6 +1010,12 @@ async function main() {
         // Preserve existing fix_loop_count to prevent infinite loop bypass
         // (only initialize to 0 on first entry, not on re-entry from Phase 3)
         const currentFixCount = state.fix_loop_count || 0;
+        // codex r3 on PR #222: composite writeState into a protected phase
+        // needs the Phase 0 artifact guard too — without it, a gate-failure
+        // transition would not only advance into phase4-fix unprotected
+        // but also nuke the recorded failure evidence (the gate_results
+        // reset below).
+        if (emitPhase0BlockIfNeeded(cwd, 'phase4-fix')) return;
         // Reset both legacy and structured gate evidence on retry to prevent stale data.
         writeState(cwd, {
           current_phase: 'phase4-fix',
@@ -996,7 +1059,8 @@ async function main() {
 
       if (fixCount >= maxFix) {
         // Fix loop limit reached → Phase 5 (partial completion)
-        writeState(cwd, { current_phase: 'phase5-finalize' });
+                if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+                writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
           stopReason: `[MPL] Fix loop limit reached (${fixCount}/${maxFix}). Transitioning to Phase 5: Finalize (partial completion).`
@@ -1005,7 +1069,8 @@ async function main() {
         // H1: Check convergence before continuing
         const convergenceResult = checkConvergence(state);
         if (convergenceResult.status === 'stagnating' || convergenceResult.status === 'regressing') {
-          writeState(cwd, { current_phase: 'phase5-finalize' });
+                    if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+                    writeState(cwd, { current_phase: 'phase5-finalize' });
           console.log(JSON.stringify({
             continue: true,
             stopReason: `[MPL] Convergence ${convergenceResult.status} detected (delta: ${convergenceResult.delta?.toFixed(3)}). Fix loop is not improving. Transitioning to Phase 5: Finalize (partial completion).`
@@ -1027,7 +1092,8 @@ async function main() {
       // and then manually set current_phase to 'completed' via writeState.
       const finalized = state.finalize_done === true;
       if (finalized) {
-        writeState(cwd, { current_phase: 'completed' });
+                if (emitPhase0BlockIfNeeded(cwd, 'completed')) return;
+                writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
           stopReason: '[MPL] Phase 5: Finalize complete. MPL pipeline finished.'
@@ -1123,7 +1189,12 @@ async function main() {
       const smallGate = state.gate_results || {};
 
       if (smallGate.hard2_passed === true) {
-        // Code review passed → completed
+        // Code review passed → completed.
+        // codex r2 on PR #222 [contract-break]: the small pipeline is a
+        // separate lightweight flow (small-plan → small-sprint →
+        // small-verify) that intentionally skips Phase 0 — it does NOT
+        // produce raw-scan.md / design-intent.yaml / contracts. Do NOT
+        // guard the small-pipeline completion against Phase 0 artifacts.
         writeState(cwd, { current_phase: 'completed' });
         console.log(JSON.stringify({
           continue: false,
@@ -1134,7 +1205,8 @@ async function main() {
         const smallMaxFix = state.max_fix_loops || 3;
 
         if (smallFixCount >= smallMaxFix) {
-          // Fix loop limit reached → completed (partial)
+          // Fix loop limit reached → completed (partial).
+          // codex r2 [contract-break]: small-pipeline exempt (see above).
           writeState(cwd, { current_phase: 'completed' });
           console.log(JSON.stringify({
             continue: false,

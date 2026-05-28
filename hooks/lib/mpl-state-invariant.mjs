@@ -21,6 +21,7 @@ import { join } from 'path';
 
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
 import { classifyGateCommand } from './mpl-gate-classify.mjs';
+import { REQUIRES_PHASE0_ARTIFACTS, missingPhase0Artifacts } from './mpl-phase0-artifacts.mjs';
 
 // Re-export so consumers (and the H8 single-source-of-truth test) can
 // confirm both modules agree on the version constant via a single
@@ -62,6 +63,11 @@ export const VIOLATION_IDS = Object.freeze({
   // H1, test for H2, e2e/contract for H3). Manual state.json patches
   // putting `git commit` into hard2_coverage are rejected here.
   GATE_COMMAND_FAMILY_MISMATCH: 'I12',
+  // Exp22 R11 / #210: a transition into phase2-sprint or later must
+  // not happen until the Phase 0 boundary/runtime artifacts exist.
+  // Fast-track (run_mode=auto) makes this especially important because
+  // user review is reduced.
+  FAST_TRACK_PHASE0_ARTIFACTS_MISSING: 'I13',
 });
 
 const ACTIVE_PHASES = new Set([
@@ -398,6 +404,29 @@ function checkGateFamilyForBlock(block, label) {
   return issues;
 }
 
+function checkI13(state, cwd, trigger) {
+  // Exp22 R11 / #210: a fast-track run that skipped user interviews
+  // must not also skip the boundary/runtime artifacts. Fire on
+  // STATE_WRITE so a manual edit into phase1b-plan / phase2-sprint /
+  // phase3-gate / ... cannot land without the required artifacts.
+  // Phase-controller writes also call missingPhase0Artifacts directly
+  // for its writeState path (codex r1 on PR #222).
+  if (trigger !== TRIGGERS.STATE_WRITE) return null;
+  const phase = state?.current_phase;
+  if (!phase || !REQUIRES_PHASE0_ARTIFACTS.has(phase)) return null;
+
+  const missing = missingPhase0Artifacts(cwd);
+  if (missing.length === 0) return null;
+  return v(VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING,
+    `Phase ${phase} cannot start without the Phase 0 boundary/runtime artifacts. ` +
+      `Missing: ${missing.join(', ')}. ` +
+      `Fast-track (run_mode=auto) may shorten user interviews but MUST NOT skip ` +
+      `boundary/runtime evidence. Re-run Phase 0 to produce the missing artifacts, ` +
+      `or write '_no-boundaries.json' under .mpl/contracts/ as the explicit ` +
+      `opt-out for non-boundary tasks.`,
+    { phase, missing });
+}
+
 function checkI12(state, trigger) {
   // Exp22 R13 / #209. Surface on STATE_WRITE so manual patches that try
   // to land malformed evidence are caught at the write boundary.
@@ -448,6 +477,7 @@ export function checkInvariants(state, opts = {}) {
     () => checkI10(state),
     () => checkI11(state),
     () => checkI12(state, trigger),
+    () => checkI13(state, cwd, trigger),
   ];
 
   const violations = [];
