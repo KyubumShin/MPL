@@ -837,6 +837,27 @@ scheduler = {
     selected modes, and the dominant rejection reasons (or missing
     telemetry tiers, partial-rejection tiers, or failure reasons,
     whichever applies).
+
+    **Canonical-vocabulary requirement (#214)**: the explanation MUST
+    include at least one rejection-reason token VERBATIM (snake_case,
+    or its hyphen-/space-separated variant; case-insensitive). The
+    token list IS the `rejection_reasons` value above — paste a value
+    from that array into the prose. Paraphrases like "conflicting
+    files" / "worker dispatch failed" do NOT satisfy the gate; the
+    summary's structured field and the prose must share vocabulary so
+    operators can grep for cause across runs. Examples:
+
+      OK:    "tier 1 lost parallelism due to file_overlap on phase-1"
+      OK:    "tier 1 hit worker-dispatch-error during the second wave"
+      OK:    "tier 2 ran sequentially: single_ready_phase in the wave"
+      BLOCK: "tier 1"                          (no reason named)
+      BLOCK: "tier 1 had conflicting files"    (paraphrase, not canonical)
+
+    For degraded-telemetry runs where `rejection_reasons` is empty but
+    the explanation is still required (missing-telemetry / unrecorded-
+    reason events), use one of these cause tokens instead:
+    `missing_telemetry`, `parallel_rejected_without_reason`,
+    `parallel_failed_without_reason`, or `no_recorded_reason`.
 }
 ```
 

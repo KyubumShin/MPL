@@ -385,6 +385,55 @@ execution_tiers:
     assert.match(r.reason, /no_parallel_explanation_missing_reasons/);
   });
 
+  it('#214 codex r1 [logic]: tier-id-only explanation blocks even when computed.rejection_reasons is empty (missing-telemetry path)', () => {
+    // Degraded path: explanation required but no concrete reason was
+    // recorded. Tier-id mention alone gave zero information about why
+    // parallelism was lost. The hook requires explicit degraded-cause
+    // vocabulary (missing_telemetry / parallel_rejected_without_reason /
+    // parallel_failed_without_reason / no_recorded_reason).
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    // No event for tier 1 → aggregator surfaces tiers_with_missing_telemetry: [1]
+    // and tiers_parallel_rejected: 1 (expected - executed).
+    writeSchedulerEvents([]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [1],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: 'tier 1',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /no_parallel_explanation_missing_degraded_cause/);
+    assert.match(r.reason, /missing_telemetry/);
+  });
+
+  it('#214 codex r1 [logic]: explanation passes when degraded-cause token is named (missing_telemetry)', () => {
+    writeArtifacts();
+    writeDecompositionWithParallelTier();
+    writeSchedulerEvents([]);
+    writeSummaryScheduler({
+      tiers_total: 1,
+      tiers_parallel_requested: 1,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 1,
+      tiers_with_missing_telemetry: [1],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 0,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: 'tier 1 lost parallelism due to missing_telemetry (no scheduler event recorded)',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
   it('allows finalize when parallel-requested tier failed at runtime but no_parallel_explanation is filled', () => {
     writeArtifacts();
     writeDecompositionWithParallelTier();
