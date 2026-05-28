@@ -450,7 +450,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 38 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 39 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -479,6 +479,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-artifact-schema` | PostToolUse: Edit/Write/MultiEdit/mcp__.*__write.* | Validate MPL artifacts against required markdown headings and YAML key schemas. | v0.18.1 |
 | `mpl-decomposition-postprocess` | PostToolUse: Edit/Write/MultiEdit | Regenerate `.mpl/mpl/decomposition-derived.json` immediately after derived source artifacts change. | v0.18 Phase 5 diet |
 | `mpl-require-test-agent` | PostToolUse: Task/Agent | Block phase-runner completion until required test-agent PASS evidence or override exists. | v0.15.1; structured PASS hardening v0.18.3 |
+| `mpl-require-test-agent-brief` | PreToolUse: Task/Agent | Block `mpl-test-agent` dispatch when `test_agent_required: true` phase has no valid `test-agent-brief.yaml` runbook artifact. | #212 |
 | `mpl-quality-gate` | PostToolUse: Task/Agent | Consume adversarial reviewer quality scores and trigger retry/escalation decisions. | v0.18.1 |
 | `mpl-validate-output` | PostToolUse: Task/Agent | Validate required sections of agent output and track token usage. | v0.13.x baseline |
 | `mpl-validate-seed` | PostToolUse: Task/Agent/Write/Edit/MultiEdit | Validate phase and chain seed YAML, contract snippets, TODO dependencies, files, and resource locks. | v0.10.0; registered v0.11.3; scheduling metadata v0.18.6 |
