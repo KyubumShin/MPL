@@ -174,19 +174,45 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
  * pod -- npm test`, `bash -lc "npm test"`) that the strict path denies.
  * Codex r6 on PR #219 caught the recorder regression. Use
  * `classifyRecordedCommand` for that path.
+ *
+ * NOTE on the strict / recorder asymmetry (#220 + codex r5/r6/r7 on
+ * PR #231): strict and recorder are DELIBERATELY different — strict
+ * is for blocking manual masquerade on `state.gate_results`; recorder
+ * accepts execution wrappers (docker / bash -lc / kubectl exec). A
+ * recorder-produced command with a wrapper head will re-classify as
+ * `null` under strict if it ever appears in a STATE_WRITE check, by
+ * design: I12 should not re-validate recorder evidence against the
+ * stricter manual-write rules. Follow-ups tracking the recorder
+ * exit-code-vs-leading-command gap and any I12 / recorder source-of-
+ * truth refactor are NOT in this PR.
  */
 export function classifyGateCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
-  const head = extractCommandHead(command);
+  // #220 on PR #231: canonicalize composite/redirect/comment forms
+  // via `stripNonExecutedSuffix` so the leading simple command (the
+  // one that actually runs) drives both head allowlisting and family
+  // matching. Manual masquerade is blocked because:
+  //   - The trim cuts at the first control / redirect / comment
+  //     boundary, so downstream-keyword payloads never reach the
+  //     family regex.
+  //   - The head allowlist still applies — `node -e "npm test"` /
+  //     `python -c "..."` still null (head not allowlisted), as
+  //     does any wrapper head (`docker`, `bash`, `kubectl`).
+  //   - The leading simple command's family then drives the
+  //     classification; a manual write claiming hard3 with a
+  //     leading `npm test` resolves to hard2 → I12 slot mismatch.
+  const canonical = stripNonExecutedSuffix(command);
+  if (!canonical.trim()) return null;
+  const head = extractCommandHead(canonical);
   if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
-  // Codex r7: even with a non-denied head, the head MUST be in the
-  // explicit allowlist. `node`, `python`, `ruby`, `perl`, etc. are NOT
-  // accepted manual gate evidence because their `-e`/`-c` forms can
-  // contain arbitrary text that the family regex would erroneously
-  // match.
+  // Codex r7 on PR #219: even with a non-denied head, the head MUST be
+  // in the explicit allowlist. `node`, `python`, `ruby`, `perl`, etc.
+  // are NOT accepted manual gate evidence because their `-e`/`-c`
+  // forms can contain arbitrary text that the family regex would
+  // erroneously match.
   if (!STRICT_GATE_HEAD_ALLOWLIST.has(head)) return null;
-  return matchFamilyRegex(command);
+  return matchFamilyRegex(canonical);
 }
 
 /**
@@ -203,10 +229,50 @@ export function classifyGateCommand(command) {
  * an operator running a real test inside a wrapper is legitimate
  * coverage evidence; the strict denylist exists only to stop manual
  * `state.json` patches from masquerading as evidence.
+ *
+ * Codex r3 on PR #231 [data-integrity]: even on the recorder path
+ * the shell never executed the redirect-target / comment text, so
+ * `npm test > playwright` and `npm test # e2e` should classify as
+ * hard2 (or null), NOT hard3. Strip everything from the first
+ * unquoted redirect operator / `#` comment before matching, so the
+ * family regex only sees the part the shell actually executed.
  */
+function stripNonExecutedSuffix(command) {
+  // Cut at the first occurrence of any token whose suffix is either
+  // NOT executed (redirect target, comment) or is a SEPARATE command
+  // (control operator / pipeline). The recorder's exit code applies
+  // to the overall shell pipeline, not to the gate command alone, so
+  // classifying the WHOLE composite as one family lets a downstream
+  // segment's keyword forge gate evidence (codex r4 on PR #231).
+  //
+  // Cutting at the first control operator means we only classify the
+  // leading simple command, which is what the recorder actually
+  // intends to gate.
+  //
+  // The recorder operates on commands the shell already accepted and
+  // ran, so we don't need full parse fidelity — only to stop the
+  // family regex from matching keywords past these boundaries.
+  // Quoting is rare in legitimate gate commands; over-truncating a
+  // quoted argument falls in the safe direction (classifier returns
+  // null → no gate evidence claimed).
+  let cut = command.length;
+  // Redirect targets / shell comments — not executed.
+  // Control operators — separate command boundaries.
+  for (const op of [
+    '#', '>>', '>', '<<', '<', '2>', '&>', '|&',
+    ';', '\n', '\r', '&&', '||', '|', '&',
+  ]) {
+    const idx = command.indexOf(op);
+    if (idx !== -1 && idx < cut) cut = idx;
+  }
+  return command.slice(0, cut);
+}
+
 export function classifyRecordedCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
-  return matchFamilyRegex(command);
+  const trimmed = stripNonExecutedSuffix(command);
+  if (!trimmed.trim()) return null;
+  return matchFamilyRegex(trimmed);
 }
 
 function matchFamilyRegex(command) {

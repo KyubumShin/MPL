@@ -351,6 +351,166 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('#220: composite shell masquerade — claimed family caught by family mismatch on leading command', () => {
+    // Codex r5 on PR #231 [contract-break] forced unification:
+    // strict path now trims at the first separator/redirect/comment
+    // and classifies the leading simple command. A manual write that
+    // claimed hard3 via downstream `git commit -m e2e` now resolves
+    // to whatever the leading command's family is, and the I12 family
+    // mismatch fires when that doesn't match the claimed slot.
+    const cases = [
+      { cmd: 'npm test; git commit -m e2e',           wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test && git commit -m playwright',  wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test; touch e2e.json',              wrongSlot: 'hard3_resilience' },
+      { cmd: 'tsc --noEmit; echo "playwright"',       wrongSlot: 'hard3_resilience' },
+      // Leading head=echo not in allowlist → null classification → mismatch.
+      { cmd: 'echo malicious; npm test',              wrongSlot: 'hard2_coverage' },
+    ];
+    for (const { cmd, wrongSlot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `composite masquerade claiming wrong slot must mismatch: ${cmd} → ${wrongSlot}`);
+    }
+  });
+
+  it('#220: pipes / command substitution masquerade — caught by mismatch', () => {
+    const cases = [
+      { cmd: 'echo "$(npm test)"',           wrongSlot: 'hard2_coverage' },
+      { cmd: 'cat fake-log | grep e2e',      wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test `echo --quiet`',      wrongSlot: 'hard3_resilience' }, // claims hard3 via backtick text
+    ];
+    for (const { cmd, wrongSlot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `pipe/substitution claiming wrong slot must mismatch: ${cmd} → ${wrongSlot}`);
+    }
+  });
+
+  it('#220 codex r5 [contract-break]: recorder-produced pipe/redirect commands round-trip through strict (no I12 false-block)', () => {
+    // Codex r5 on PR #231: the previous strict implementation FAIL-CLOSED
+    // on any shell metachar, so a legitimate recorder write like
+    // `npx playwright test | tee output.log` (recorder classifies as
+    // hard3) failed I12 on the next STATE_WRITE. Strict now uses the
+    // same `stripNonExecutedSuffix` canonicalizer so the stored
+    // command re-classifies identically.
+    const cases = [
+      { cmd: 'npx playwright test | tee output.log', slot: 'hard3_resilience' },
+      { cmd: 'npx playwright test > playwright.log',  slot: 'hard3_resilience' },
+      { cmd: 'npm test | grep PASS',                  slot: 'hard2_coverage' },
+      { cmd: 'npm test > unit.log',                   slot: 'hard2_coverage' },
+      { cmd: 'npm test 2> stderr.log',                slot: 'hard2_coverage' },
+    ];
+    for (const { cmd, slot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [slot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(!v, `legitimate recorder command must round-trip: ${cmd} in ${slot}`);
+    }
+  });
+
+  it('#220 codex r1 [data-integrity]: newline / single & / process substitution — mismatch when slot claim is wrong', () => {
+    // r1 bypass shapes are caught the same way: trim cuts at the
+    // separator, leading command resolves to its real family, slot
+    // mismatch fires.
+    const cases = [
+      { cmd: 'npm test\ngit commit -m e2e',                wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test\rgit commit -m playwright',         wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test & git commit -m e2e',               wrongSlot: 'hard3_resilience' },
+      // Process substitution opens with `(` → trim makes leading empty → null → mismatch.
+      { cmd: 'npm test <(echo e2e)',                       wrongSlot: 'hard3_resilience' },
+      { cmd: '{ npm test; git commit -m e2e; }',           wrongSlot: 'hard3_resilience' },
+    ];
+    for (const { cmd, wrongSlot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `extended bypass claiming wrong slot must mismatch: ${JSON.stringify(cmd)} → ${wrongSlot}`);
+    }
+  });
+
+  it('#220 codex r3/r4 [data-integrity]: recorder classifier strips redirect/comment AND control-operator suffix', async () => {
+    // r3: redirect targets / shell comments (`>`, `2>`, `#`) leave
+    // non-executed text downstream that the family regex could match.
+    // r4: control operators (`;`, `&&`, `||`, `|`, `&`, newline)
+    // separate the recorder's exit-code-bearing command from
+    // downstream segments — codex showed `npm test || echo playwright`
+    // recorded as hard3 even though only `npm test` ran.
+    //
+    // stripNonExecutedSuffix now cuts at the first occurrence of ANY
+    // of those tokens so only the leading simple command reaches the
+    // family regex.
+    const { classifyRecordedCommand } = await import(
+      '../lib/mpl-gate-classify.mjs'
+    );
+    // r3 cases (redirect/comment):
+    assert.equal(classifyRecordedCommand('npm test > playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test 2> e2e.log'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test # e2e'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test >> playwright.log'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('tsc --noEmit > playwright.txt'), 'hard1_baseline');
+    // r4 cases (control operators):
+    assert.equal(classifyRecordedCommand('npm test || echo playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test && echo playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test; echo playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test | grep playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test & touch playwright.json'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test\necho playwright'), 'hard2_coverage');
+    // Legitimate wrappers still classify correctly:
+    assert.equal(classifyRecordedCommand('npx playwright test'), 'hard3_resilience');
+    assert.equal(classifyRecordedCommand('docker compose run app npm test'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('bash -lc "npx playwright test"'), 'hard3_resilience');
+    // Pipe wrapper for hard3 still works (first command is the gate):
+    assert.equal(classifyRecordedCommand('npx playwright test | tee output.log'), 'hard3_resilience');
+  });
+
+  it('#220 codex r2 [data-integrity]: redirect/comment masquerade — leading command resolves to true family, claimed family must match', () => {
+    // After r5 unification, redirect/comment forms get trimmed before
+    // family-matching. `npm test > playwright` resolves to hard2; a
+    // claim of hard3_resilience is now a slot mismatch (caught by I12).
+    // Same command claimed in hard2_coverage correctly passes.
+    const cases = [
+      { cmd: 'npm test > playwright',           wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test 2> e2e.log',             wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test > /tmp/playwright.out',  wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test # e2e',                  wrongSlot: 'hard3_resilience' },
+      { cmd: 'tsc --noEmit > playwright.txt',   wrongSlot: 'hard3_resilience' },
+    ];
+    for (const { cmd, wrongSlot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `redirect/comment claiming wrong slot must mismatch: ${cmd} → ${wrongSlot}`);
+    }
+  });
+
+  it('#220 codex r1 [data-integrity]: bypass shapes claimed in hard3 slot caught by family mismatch', () => {
+    // After r5 unification, bypass shapes resolve to the leading
+    // command's family (hard2 for `npm test`-leading forms, hard1
+    // for `tsc`-leading forms, null for non-allowlisted leading
+    // heads). A hard3_resilience claim is therefore always wrong.
+    for (const cmd of [
+      'npm test\ngit commit -m e2e',
+      'npm test & touch e2e.json',
+      'npm test <(echo playwright)',
+      'npm test; touch playwright.spec',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `bypass placed in hard3 slot must mismatch: ${JSON.stringify(cmd)}`);
+    }
+  });
+
   it('strict classifier still accepts known gate heads on the allowlist', () => {
     // Sanity: pnpm/yarn/npx/cargo/go all in allowlist; family regex
     // narrows them into the right slot.
