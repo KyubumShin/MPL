@@ -169,21 +169,41 @@ describe('validateBrief (#212 MVP)', () => {
 /* ──────────────── hook integration tests ──────────────── */
 
 describe('mpl-require-test-agent-brief hook (#212)', () => {
-  it('SCENARIO 1 (warn default): missing brief for test_agent_required:true → warn systemMessage', () => {
-    // Default mode is `warn` per #224 r2 [contract-break]: ship the
-    // gate without breaking existing dispatches before the producer
-    // lands.
+  it('SCENARIO 1 (block default after #225 cutover): missing brief for test_agent_required:true → block', () => {
+    // #225 cutover: producer (mechanical postprocess) now ships briefs,
+    // so default flips from `warn` to `block`. Operators can still
+    // opt back to `warn` via .mpl/config/test-agent-brief-enforcement.json.
+    //
+    // Codex r1 on PR #226: missing-brief paths attempt lazy generation
+    // first. Minimal fixture decomposition has no verification_plan, so
+    // the lazy-generated brief fails schema validation. Either reason
+    // (missing or invalid) is the correct gate signal.
+    const r = runHook({
+      subagent_type: 'mpl-test-agent',
+      prompt: 'Verify phase-1 from the contract.',
+    });
+    assert.equal(r.continue, false);
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /\[MPL #212\]/);
+    assert.match(r.reason, /phase-1/);
+    assert.match(r.reason, /brief artifact missing|brief failed schema validation/);
+  });
+
+  it('SCENARIO 1b (explicit warn mode): missing or invalid brief → systemMessage only', () => {
+    mkdirSync(join(tmp, '.mpl', 'config'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.mpl', 'config', 'test-agent-brief-enforcement.json'),
+      JSON.stringify({ mode: 'warn' }),
+    );
     const r = runHook({
       subagent_type: 'mpl-test-agent',
       prompt: 'Verify phase-1 from the contract.',
     });
     assert.equal(r.continue, true);
     assert.match(r.systemMessage, /\[MPL #212\]/);
-    assert.match(r.systemMessage, /phase-1/);
-    assert.match(r.systemMessage, /brief artifact missing/);
   });
 
-  it('SCENARIO 1 (block mode): same scenario in block mode → block', () => {
+  it('SCENARIO 1 (block mode, no verification_plan in fixture): falls through to schema validation', () => {
     setBlockMode();
     const r = runHook({
       subagent_type: 'mpl-test-agent',
@@ -191,7 +211,7 @@ describe('mpl-require-test-agent-brief hook (#212)', () => {
     });
     assert.equal(r.continue, false);
     assert.equal(r.decision, 'block');
-    assert.match(r.reason, /brief artifact missing/);
+    assert.match(r.reason, /brief artifact missing|brief failed schema validation/);
     assert.match(r.reason, /test-agent-brief\.yaml/);
   });
 
@@ -285,12 +305,18 @@ required_test_commands:
     assert.equal(r.continue, true);
   });
 
-  it('background test-agent dispatch is ALSO gated — codex r1 [logic]', () => {
+  it('background test-agent dispatch is ALSO gated — codex r1 [logic] (PR #224)', () => {
     // codex r1 on PR #224: PreToolUse must NOT skip on run_in_background.
     // The brief precondition has to fire BEFORE the background dispatch
     // launches; no later PreToolUse event can stop an already-started run.
-    // In block mode it blocks; in default warn mode it surfaces a
-    // systemMessage. Either way the diagnostic fires (not silent).
+    //
+    // After codex r1 on PR #226, missing-brief paths attempt lazy
+    // generation from decomposition first. The minimal fixture
+    // decomposition has only `interface_contract.produces` (no
+    // verification_plan), so lazy generation produces a malformed brief
+    // that the validator catches with schema errors. Either way (artifact
+    // missing OR schema invalid), the gate fires — that's the property
+    // being asserted.
     setBlockMode();
     const r = runHook({
       subagent_type: 'mpl-test-agent',
@@ -299,7 +325,7 @@ required_test_commands:
     });
     assert.equal(r.continue, false);
     assert.equal(r.decision, 'block');
-    assert.match(r.reason, /brief artifact missing/);
+    assert.match(r.reason, /brief artifact missing|brief failed schema validation/);
   });
 
   it('background test-agent dispatch passes when brief IS valid', () => {
@@ -310,6 +336,40 @@ required_test_commands:
       run_in_background: true,
     });
     assert.equal(r.continue, true);
+  });
+
+  it('codex r1 [contract-break]: pre-existing workspace with decomposition but no briefs → lazy-generates and passes', () => {
+    // Replace the minimal decomposition with one that has full verification_plan
+    // so writeTestAgentBriefs can produce a valid brief.
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    phase_domain: api
+    phase_lang: typescript
+    test_agent_required: true
+    impact:
+      modify:
+        - path: src/api/widgets.ts
+    interface_contract:
+      produces:
+        - symbol: createWidget
+          path: src/api/widgets.ts
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "POST /widgets returns 201 with a valid body"
+      s_items:
+        - id: S-1
+          statement: "POST /widgets returns 422 on missing field"
+`);
+    // No brief file yet. Default mode is block.
+    const r = runHook({
+      subagent_type: 'mpl-test-agent',
+      prompt: 'Verify phase-1 from the contract.',
+    });
+    // The lazy-generation path should have written the brief and let dispatch proceed.
+    assert.equal(r.continue, true);
+    assert.equal(r.suppressOutput, true);
   });
 
   it('prompt with no phase id passes through', () => {

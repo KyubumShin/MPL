@@ -35,6 +35,9 @@ const { readStdin } = await import(
 const { validateBrief } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-brief.mjs')).href
 );
+const { writeTestAgentBriefs } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-decomposition-postprocess.mjs')).href
+);
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -49,25 +52,26 @@ function block(reason) {
 }
 
 /**
- * Codex r2 on PR #224 [contract-break]: the MVP ships the schema +
- * validator + gate but defers the brief producer (follow-up). Until
- * the producer lands, blocking every existing required mpl-test-agent
- * dispatch would break the only mandatory independent verification
- * path. Default to WARN mode so existing pipelines surface the
- * missing-brief diagnostic without losing the gate; flip to BLOCK
- * by writing `.mpl/config/test-agent-brief-enforcement.json` with
- * `{ "mode": "block" }` (which the follow-up that adds the producer
- * will do as part of the cutover).
+ * #225 cutover: the producer (mechanical postprocess in
+ * hooks/lib/mpl-decomposition-postprocess.mjs::writeTestAgentBriefs)
+ * now ships briefs whenever decomposition.yaml changes, so the
+ * default flips from `warn` to `block`. Operators can still set
+ * `.mpl/config/test-agent-brief-enforcement.json` to `{ "mode": "warn" }`
+ * or `{ "mode": "off" }` for transitional / debugging needs.
+ *
+ * History: PR #224 (Codex r2 [contract-break]) introduced the config
+ * file with a `warn` default because the brief producer was deferred.
+ * That deferral closes here.
  */
 function resolveEnforcementMode(cwd) {
   const cfgPath = join(cwd, '.mpl', 'config', 'test-agent-brief-enforcement.json');
-  if (!existsSync(cfgPath)) return 'warn';
+  if (!existsSync(cfgPath)) return 'block';
   try {
     const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const mode = String(parsed?.mode || '').toLowerCase();
     if (mode === 'block' || mode === 'warn' || mode === 'off') return mode;
   } catch { /* fall through */ }
-  return 'warn';
+  return 'block';
 }
 
 function surface(mode, reason) {
@@ -160,8 +164,17 @@ async function main() {
 
   const path = briefPath(cwd, phaseId);
   if (!existsSync(path)) {
-    surface(mode, buildReason(phaseId, 'brief artifact missing'));
-    return;
+    // Codex r1 on PR #226 [contract-break]: pre-#225 workspaces can have a
+    // decomposition.yaml without briefs. The producer normally runs as a
+    // PostToolUse on decomposition writes, but a workspace that hasn't
+    // re-saved decomposition.yaml since #225 landed has no triggered
+    // generation yet. Try lazy generation here — if it succeeds for this
+    // phase, the gate proceeds. Failure paths still surface the diagnostic.
+    try { writeTestAgentBriefs(cwd); } catch { /* fall through to missing diagnostic */ }
+    if (!existsSync(path)) {
+      surface(mode, buildReason(phaseId, 'brief artifact missing'));
+      return;
+    }
   }
   let text;
   try { text = readFileSync(path, 'utf-8'); } catch (e) {
