@@ -159,6 +159,64 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('#217: blocked_artifact missing entirely — active blocker still surfaces on an unrelated target', () => {
+    // Codex r8 on PR #216 / #217: prior versions required activeBlockArtifact
+    // to non-empty AND endsWith()-match the target before force-include.
+    // A stale envelope with NO blocked_artifact at all (corrupt state.json
+    // from an aborted hook) plus a target like
+    // `state.test_agent_dispatched.<phase>` would silently filter out
+    // the active blocker via the category check. The diagnostic showed
+    // a clean trace while the run was paused.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-217-noartifact-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        // blocked_artifact intentionally absent
+      }));
+      const trace = traceHookChain({
+        targetPath: 'state.test_agent_dispatched.phase-1',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+      assert.ok(row, 'mpl-require-test-agent must appear even with no blocked_artifact');
+      assert.equal(row.status, 'invalid_blocked_envelope');
+      assert.match(formatHookTrace(trace), /INVALID_BLOCKED_ENVELOPE/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('#217: synthetic row when active blocker not in hooks.json AND envelope missing artifact', () => {
+    // The synthetic-row path also dropped the artifact-match precondition.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-217-synthetic-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-imaginary-hook-not-registered',
+        // blocked_artifact intentionally absent
+      }));
+      const trace = traceHookChain({
+        targetPath: 'state.test_agent_dispatched.phase-1',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-imaginary-hook-not-registered');
+      assert.ok(row, 'synthetic row must surface even with no artifact');
+      assert.equal(row.event, 'state');
+      assert.equal(row.matcher, 'blocked_by_hook');
+      assert.match(row.purpose, /registry skew/);
+      assert.equal(row.status, 'invalid_blocked_envelope');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('always includes the blocked_by_hook entry for an active block, even when the path category would filter it out', () => {
     // Codex r4 on PR #216: a valid mpl-require-test-agent block records
     // blocked_artifact as `state.test_agent_dispatched.<phase>`, which the
