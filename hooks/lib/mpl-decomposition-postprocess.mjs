@@ -493,30 +493,49 @@ function parsePhaseTestAgentRequired(body) {
 
 function parseProducesEntries(body) {
   // Parse `interface_contract.produces:` block within a phase body.
+  // Codex r3 on PR #226 [contract-break]: the canonical decomposer
+  // schema (agents/mpl-decomposer.md:444-447) emits `{type, name, spec}`.
+  // An earlier draft used `{symbol, path}` — accept both shapes for
+  // back-compat with hand-authored fixtures, but the canonical write
+  // path is `name`/`spec`. The brief's `interface_contracts.symbol` is
+  // populated from `name`; `path` is populated from `spec` for the
+  // canonical shape (since the decomposer's `produces` doesn't carry
+  // a path field — files are in `impact.modify` instead).
   const out = [];
   const idx = body.search(/^\s*produces\s*:\s*$/m);
   if (idx === -1) return out;
   const tail = body.slice(idx).split('\n').slice(1);
-  // Walk until indent drops below the produces item level.
   let baseIndent = null;
+  let cur = null;
   for (const line of tail) {
     if (/^\s*$/.test(line)) continue;
     const indent = line.match(/^(\s*)/)[1].length;
     if (baseIndent === null) {
-      // first non-empty line establishes the item indent
       if (!/^\s*-\s/.test(line)) break;
       baseIndent = indent;
     } else if (indent < baseIndent) {
       break;
     }
-    if (/^\s*-\s+symbol\s*:\s*(.+)$/.test(line)) {
-      const sym = line.match(/^\s*-\s+symbol\s*:\s*(.+)$/)[1].trim().replace(/['"]/g, '');
-      out.push({ symbol: sym, path: '' });
-    } else if (out.length && /^\s+path\s*:\s*(.+)$/.test(line)) {
-      out[out.length - 1].path = line.match(/^\s+path\s*:\s*(.+)$/)[1].trim().replace(/['"]/g, '');
+    const itemMatch = line.match(/^\s*-\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i);
+    if (itemMatch) {
+      const [, key, val] = itemMatch;
+      cur = {};
+      cur[key] = val.trim().replace(/['"]/g, '');
+      out.push(cur);
+      continue;
+    }
+    if (cur && /^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i.test(line)) {
+      const [, key, val] = line.match(/^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i);
+      cur[key] = val.trim().replace(/['"]/g, '');
     }
   }
-  return out;
+  // Map each entry to the brief's interface_contracts shape:
+  //   canonical decomposer: {type, name, spec} → {symbol: name, path: spec}
+  //   legacy/test shape:    {symbol, path}     → passes through
+  return out.map((entry) => ({
+    symbol: entry.symbol || entry.name || '',
+    path: entry.path || entry.spec || '',
+  })).filter((e) => e.symbol);
 }
 
 function parseImpactList(body, key) {
@@ -542,6 +561,17 @@ function parseImpactList(body, key) {
 }
 
 function parseAsItemsBlock(body, key) {
+  // Codex r3 on PR #226 [contract-break]: the canonical decomposer schema
+  // (agents/mpl-decomposer.md:467-476) emits `a_items` / `s_items` as
+  //   a_items: [{criterion, type, command}]
+  //   s_items: [{criterion, test_file, test_command, expected_exit}]
+  // — no explicit `id` field. We parse all scalar fields per item and
+  // synthesize an `id` (`A-1`, `A-2`, ...) when absent so downstream
+  // consumers can address each item stably.
+  //
+  // Legacy shape `[{id, statement}]` (used in earlier tests / hand-
+  // authored fixtures) is still accepted: `id` overrides synthesis,
+  // `statement` is treated as an alias for `criterion`.
   const out = [];
   const re = new RegExp(`^\\s*${key}\\s*:\\s*$`, 'm');
   const idx = body.search(re);
@@ -558,14 +588,26 @@ function parseAsItemsBlock(body, key) {
     } else if (indent < baseIndent) {
       break;
     }
-    if (/^\s*-\s+id\s*:\s*(.+)$/.test(line)) {
-      cur = { id: line.match(/^\s*-\s+id\s*:\s*(.+)$/)[1].trim().replace(/['"]/g, '') };
+    const itemMatch = line.match(/^\s*-\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i);
+    if (itemMatch) {
+      const [, k, v] = itemMatch;
+      cur = {};
+      cur[k] = v.trim().replace(/['"]/g, '');
       out.push(cur);
-    } else if (cur && /^\s+statement\s*:\s*(.+)$/.test(line)) {
-      cur.statement = line.match(/^\s+statement\s*:\s*(.+)$/)[1].trim().replace(/['"]/g, '');
+      continue;
+    }
+    if (cur && /^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i.test(line)) {
+      const [, k, v] = line.match(/^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i);
+      cur[k] = v.trim().replace(/['"]/g, '');
     }
   }
-  return out;
+  const prefix = key === 's_items' ? 'S' : 'A';
+  return out.map((entry, i) => ({
+    id: entry.id || `${prefix}-${i + 1}`,
+    statement: entry.statement || entry.criterion || '',
+    command: entry.command || entry.test_command || '',
+    test_file: entry.test_file || '',
+  }));
 }
 
 function parseProbingHints(body) {
@@ -685,6 +727,26 @@ function buildBriefFromPhaseBlock(phase, body) {
   const sItems = parseAsItemsBlock(body, 's_items');
   const probingHints = parseProbingHints(body);
 
+  // Codex r3 on PR #226 [contract-break]: the canonical decomposer
+  // emits per-s_item `test_command` strings (e.g., `pytest path/to/x.py
+  // -k case`). Prefer those over the language-derived default — if at
+  // least one S-item has a concrete `test_command`, use the de-duplicated
+  // set; otherwise fall back to `deriveTestCommandsForPhase`.
+  const sItemCommands = sItems
+    .map((it) => it.command)
+    .filter((c) => typeof c === 'string' && c.trim().length >= 5)
+    .map((c) => c.trim());
+  const dedupedSItemCommands = [...new Set(sItemCommands)];
+  const aItemCommands = aItems
+    .map((it) => it.command)
+    .filter((c) => typeof c === 'string' && c.trim().length >= 5)
+    .map((c) => c.trim());
+  const dedupedAItemCommands = [...new Set(aItemCommands)];
+  const decomposerCommands = [...dedupedSItemCommands, ...dedupedAItemCommands];
+  const requiredTestCommands = decomposerCommands.length > 0
+    ? decomposerCommands
+    : deriveTestCommandsForPhase(phase.phase_lang, targetFiles);
+
   return {
     phase_id: phaseId,
     phase_domain: phase.phase_domain || '',
@@ -699,7 +761,7 @@ function buildBriefFromPhaseBlock(phase, body) {
       id: it.id,
       test_target: it.statement || `Verify ${it.id} via ${targetFiles[0] || 'the implementation files'}`,
     })),
-    required_test_commands: deriveTestCommandsForPhase(phase.phase_lang, targetFiles),
+    required_test_commands: requiredTestCommands,
     probing_targets: probingHints,
     forbidden_conditions: [
       'Mock or stub the implementation under test',

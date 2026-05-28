@@ -525,6 +525,58 @@ phases:
     assert.ok(existsSync(join(dir, '.mpl', 'mpl', 'phases', 'phase-implicit', 'test-agent-brief.yaml')));
   }));
 
+  it('codex r3 [contract-break]: parses the canonical decomposer schema (name/spec + criterion/test_command)', () => withTmp((dir) => {
+    // Schema mirrors agents/mpl-decomposer.md:439-476 — the actual
+    // shape the decomposer emits in production. Pre-codex-r3 the
+    // producer only knew the test-only {symbol/path, id/statement}
+    // shape, so a real phase would produce an empty brief.
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-canonical
+    phase_lang: python
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: app/widgets.py
+    interface_contract:
+      produces:
+        - type: function
+          name: create_widget
+          spec: "(body: dict) -> Widget"
+    verification_plan:
+      a_items:
+        - criterion: "POST /widgets returns 201 with valid body"
+          type: command
+          command: "pytest tests/test_widgets.py -k test_create_ok"
+      s_items:
+        - criterion: "POST /widgets returns 422 on missing field"
+          test_file: tests/test_widgets.py
+          test_command: "pytest tests/test_widgets.py -k test_missing_field"
+          expected_exit: 0
+`);
+    writeTestAgentBriefs(dir);
+    const text = readFileSync(
+      join(dir, '.mpl', 'mpl', 'phases', 'phase-canonical', 'test-agent-brief.yaml'),
+      'utf-8',
+    );
+    // Round-trip through the #224 validator.
+    const { valid, errors } = validateBrief(text, { phaseId: 'phase-canonical' });
+    assert.equal(valid, true, `brief should be valid, errors: ${errors.join(', ')}`);
+    // interface_contracts derived from name/spec
+    assert.match(text, /interface_contracts:[\s\S]*symbol: "create_widget"/);
+    // A/S coverage: id synthesized, statement comes from criterion
+    assert.match(text, /a_item_coverage:[\s\S]*A-1[\s\S]*POST \/widgets returns 201/);
+    assert.match(text, /s_item_coverage:[\s\S]*S-1[\s\S]*POST \/widgets returns 422/);
+    // required_test_commands sourced from the decomposer's test_command,
+    // not the language default (pytest with -k filter would not be emitted
+    // by the language-default path)
+    assert.match(text, /required_test_commands:[\s\S]*pytest tests\/test_widgets\.py -k test_missing_field/);
+    assert.match(text, /required_test_commands:[\s\S]*pytest tests\/test_widgets\.py -k test_create_ok/);
+  }));
+
   it('codex r1 [security]: a path with shell metacharacters is dropped from the command, not interpolated', () => withTmp((dir) => {
     writeActiveState(dir);
     writeDesignIntent(dir);
