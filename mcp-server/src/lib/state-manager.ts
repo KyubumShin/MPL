@@ -3,7 +3,7 @@
  * Provides deterministic state read/write with atomic file operations.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 
@@ -209,9 +209,73 @@ export function readState(cwd: string): MplState | null {
   }
 }
 
-export function writeState(cwd: string, patch: Record<string, unknown>): { success: boolean; updated_keys: string[] } {
+// #223: Phase 0 artifact invariant enforcement (mirrors I13 in
+// hooks/lib/mpl-state-invariant.mjs + phase-controller's pre-transition
+// check). The hooks-side enforcement is intercepted by Claude Code's
+// PreToolUse pipeline; MCP `mpl_state_write` writes through the
+// state-manager directly, bypassing PreToolUse. Keep the lists in sync
+// with hooks/lib/mpl-phase0-artifacts.mjs.
+const REQUIRES_PHASE0_ARTIFACTS = new Set<string>([
+  'phase2-sprint',
+  'phase3-gate',
+  'phase4-fix',
+  'phase5-finalize',
+  'release-gate',
+  'release-finalize',
+  'completed',
+]);
+
+function missingPhase0Artifacts(cwd: string): string[] {
+  const missing: string[] = [];
+  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'))) {
+    missing.push('.mpl/mpl/phase0/raw-scan.md');
+  }
+  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'))) {
+    missing.push('.mpl/mpl/phase0/design-intent.yaml');
+  }
+  const contractsDir = join(cwd, '.mpl', 'contracts');
+  let hasContract = false;
+  try {
+    if (existsSync(contractsDir)) {
+      hasContract = readdirSync(contractsDir).some((n) => n.endsWith('.json'));
+    }
+  } catch {
+    hasContract = false;
+  }
+  if (!hasContract) {
+    missing.push('.mpl/contracts/*.json (or _no-boundaries.json)');
+  }
+  return missing;
+}
+
+function blockedPhaseTransitionReason(cwd: string, nextPhase: string): string | null {
+  if (!REQUIRES_PHASE0_ARTIFACTS.has(nextPhase)) return null;
+  const missing = missingPhase0Artifacts(cwd);
+  if (missing.length === 0) return null;
+  return (
+    `[MPL I13] Cannot transition to ${nextPhase} — Phase 0 boundary/runtime ` +
+    `artifacts missing: ${missing.join(', ')}. Fast-track (run_mode=auto) ` +
+    `may shorten user interviews but MUST NOT skip these artifacts. Re-run ` +
+    `Phase 0 to produce them, or write .mpl/contracts/_no-boundaries.json ` +
+    `as the explicit opt-out for non-boundary tasks.`
+  );
+}
+
+export function writeState(cwd: string, patch: Record<string, unknown>): { success: boolean; updated_keys: string[]; reason?: string } {
   const filePath = join(cwd, STATE_PATH);
   const dir = dirname(filePath);
+
+  // #223: enforce I13 BEFORE any disk write. A patch that proposes a
+  // protected phase without Phase 0 artifacts is rejected up-front;
+  // partial application (write succeeds, invariant violated) would
+  // leak state through the MCP layer that no other write path allows.
+  if (typeof patch?.current_phase === 'string') {
+    const blockedReason = blockedPhaseTransitionReason(cwd, patch.current_phase);
+    if (blockedReason) {
+      return { success: false, updated_keys: [], reason: blockedReason };
+    }
+  }
+
   mkdirSync(dir, { recursive: true });
 
   const current = readState(cwd) ?? { ...DEFAULT_STATE };
