@@ -30,7 +30,7 @@ const { isMplActive, readState } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
-const { checkInvariants, formatViolations, TRIGGERS } = await import(
+const { checkInvariants, formatViolations, TRIGGERS, VIOLATION_IDS } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state-invariant.mjs')).href
 );
 const { resolveRuleAction } = await import(
@@ -159,11 +159,19 @@ async function main() {
   const result = checkInvariants(state, { cwd, trigger });
   if (result.ok) return silent();
 
+  // Codex r4 on PR #222 [data-integrity]: I13 (Phase 0 artifacts) MUST
+  // be a non-configurable block. The default `state_invariant_violation`
+  // policy is `warn`, which would let a manual Write to state.json land
+  // a protected phase without artifacts and only emit a systemMessage.
+  // The fast-track invariant exists precisely to stop that path.
+  const hasFastTrackViolation = result.violations.some(
+    (v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING
+  );
   const action = resolveRuleAction(cwd, state, 'state_invariant_violation');
-  if (action === 'off') return silent();
+  if (action === 'off' && !hasFastTrackViolation) return silent();
 
   const reason = formatViolations(result);
-  if (action === 'block') {
+  if (action === 'block' || hasFastTrackViolation) {
     console.log(JSON.stringify({
       decision: 'block',
       reason,

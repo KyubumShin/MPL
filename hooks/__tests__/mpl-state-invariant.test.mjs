@@ -942,4 +942,33 @@ describe('mpl-state-invariant hook integration', () => {
     assert.strictEqual(r.continue, true);
     assert.strictEqual(r.suppressOutput, true);
   });
+
+  it('I13 under default (warn) policy still blocks manual protected-phase writes (codex r4)', () => {
+    // Codex r4 on PR #222 [data-integrity]: default state_invariant_violation
+    // is `warn`, which would let a manual Write to state.json land a
+    // protected phase without Phase 0 artifacts. I13 must override that
+    // and always emit `decision: 'block'`.
+    const stateJsonPath = join(tmp, '.mpl', 'state.json');
+    writeFileSync(stateJsonPath, JSON.stringify({
+      schema_version: SCHEMA_V,
+      current_phase: 'phase2-sprint',
+    }));
+    // Note: no .mpl/mpl/phase0/* / .mpl/contracts/ artifacts seeded.
+    const proposed = {
+      schema_version: SCHEMA_V,
+      current_phase: 'phase3-gate',
+    };
+    const stdin = JSON.stringify({
+      cwd: tmp,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: stateJsonPath, content: JSON.stringify(proposed) },
+    });
+    const out = execFileSync('node', [HOOK_PATH], { input: stdin, encoding: 'utf-8' });
+    const r = JSON.parse(out);
+    assert.equal(r.decision, 'block',
+      'I13 must produce decision:block even under default warn policy');
+    assert.match(r.reason || '', /I13/);
+    assert.match(r.reason || '', /raw-scan\.md|design-intent\.yaml|\.mpl\/contracts/);
+  });
 });
