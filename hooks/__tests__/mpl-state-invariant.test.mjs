@@ -351,6 +351,45 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('#220: composite shell forms (semicolon / && / ||) are rejected at the strict level', () => {
+    // Empirical bypass: `npm test; git commit -m e2e` has head `npm`
+    // (allowlisted) but the family regex sees `e2e` downstream and
+    // classifies as hard3. Manual gate evidence is a single command;
+    // composite/pipe/subshell shells fail closed.
+    for (const cmd of [
+      'npm test; git commit -m e2e',
+      'npm test && git commit -m playwright',
+      'npm run build || echo failed',
+      'npm test; touch e2e.json',
+      'tsc --noEmit; echo "playwright"',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard2_coverage: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `composite shell form must be rejected at strict level: ${cmd}`);
+    }
+  });
+
+  it('#220: pipes and command substitution are rejected at the strict level', () => {
+    for (const cmd of [
+      'npm test | tee output.log',
+      'echo "$(npm test)"',
+      'cat fake-log | grep e2e',
+      'npm test `echo --quiet`',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard2_coverage: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `pipe / command substitution must be rejected: ${cmd}`);
+    }
+  });
+
   it('strict classifier still accepts known gate heads on the allowlist', () => {
     // Sanity: pnpm/yarn/npx/cargo/go all in allowlist; family regex
     // narrows them into the right slot.
