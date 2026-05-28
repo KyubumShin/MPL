@@ -390,6 +390,51 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('#220 codex r1 [data-integrity]: newline / single & / process substitution rejected at strict level', () => {
+    // Codex r1 on PR #231 expanded the bypass list beyond `;` / `&&` /
+    // `||` / `|` / backticks / `$(` to:
+    //  - newline (also a statement separator in bash)
+    //  - single `&` (background — splits the command line)
+    //  - process substitution `<(...)` / `>(...)`
+    //  - brace grouping `{...}`
+    for (const cmd of [
+      'npm test\ngit commit -m e2e',
+      'npm test\rgit commit -m playwright',
+      'npm test & git commit -m e2e',
+      'npm test <(echo e2e)',
+      'npm test >(touch e2e.out)',
+      '{ npm test; git commit -m e2e; }',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard2_coverage: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `extended bypass shape must be rejected: ${JSON.stringify(cmd)}`);
+    }
+  });
+
+  it('#220 codex r1 [data-integrity]: bypass shapes also rejected when placed directly in hard3_resilience slot', () => {
+    // Codex recommended: previous tests only put bypass commands in
+    // hard2_coverage (a slot mismatch). Verify the strict gate also
+    // rejects them when matched against their would-be claimed slot.
+    for (const cmd of [
+      'npm test\ngit commit -m e2e',
+      'npm test & touch e2e.json',
+      'npm test <(echo playwright)',
+      'npm test; touch playwright.spec',
+    ]) {
+      const r = checkInvariants({
+        gate_results: {
+          hard3_resilience: gateEntry(cmd),
+        },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `bypass placed in hard3 slot must still be rejected: ${JSON.stringify(cmd)}`);
+    }
+  });
+
   it('strict classifier still accepts known gate heads on the allowlist', () => {
     // Sanity: pnpm/yarn/npx/cargo/go all in allowlist; family regex
     // narrows them into the right slot.

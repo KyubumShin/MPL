@@ -177,19 +177,28 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
  */
 export function classifyGateCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
-  // #220: composite / pipe / subshell forms must fail closed at the
+  // #220 + codex r1 [data-integrity]: composite / pipe / subshell /
+  // background / process-substitution forms must fail closed at the
   // strict level. Empirically `npm test; git commit -m e2e` had its
   // head extracted as `npm` (in the allowlist), then the family
   // regex matched `e2e` from the downstream commit message and
-  // classified as hard3 — a real masquerade. Manual gate evidence
-  // is a single command; recorder events accept composites via the
+  // classified as hard3 — a real masquerade. Manual gate evidence is
+  // a single command; recorder events accept composites via the
   // loose path.
   //
-  // Reject any of: `;` (statement separator), `&&` / `||` (boolean
-  // chains), backticks / `$(` (command substitution), `|` (pipe).
-  // Each is a shell construct that lets a second command's text reach
-  // the family regex through the first command's wrapper.
-  if (/;|&&|\|\||`|\$\(|\|/.test(command)) return null;
+  // Reject any of:
+  //   `;` (statement separator)
+  //   newline / CR (also statement separator in shell)
+  //   `&&` / `||` (boolean chains)
+  //   single `&` (background — splits the command line)
+  //   backticks / `$(` (command substitution)
+  //   `<(` / `>(` (process substitution)
+  //   `|` (pipe)
+  //   `{` / `}` (brace grouping)
+  // The presence of `(` covers `$(...)`, `<(...)`, `>(...)`, plain
+  // subshell `(...)` — fail closed for any unquoted shell grouping
+  // or substitution syntax.
+  if (/[\n\r;|&`(){}]/.test(command)) return null;
   const head = extractCommandHead(command);
   if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
