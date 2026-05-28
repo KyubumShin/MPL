@@ -12,7 +12,10 @@ import {
   deriveRiskPatternChecks,
   parseDecompositionPostprocessText,
   parseDesignIntentText,
+  writeTestAgentBriefs,
 } from '../lib/mpl-decomposition-postprocess.mjs';
+import { validateBrief } from '../lib/mpl-test-agent-brief.mjs';
+import { existsSync } from 'node:fs';
 import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -398,5 +401,159 @@ mvp_scope:
     const hookResult = runHook(dir, '.mpl/mpl/phase0/design-intent.yaml');
 
     assert.equal(hookResult.continue, true);
+  }));
+
+  /* ────────────────── #225: test-agent-brief producer ────────────────── */
+
+  it('writes a brief for every required phase after decomposition.yaml write', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: abc
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: src/api/widgets.ts
+    interface_contract:
+      produces:
+        - symbol: createWidget
+          path: src/api/widgets.ts
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "POST /widgets returns 201 with a valid body"
+      s_items:
+        - id: S-1
+          statement: "POST /widgets returns 422 on missing field"
+    probing_hints:
+      - "retry on transient 5xx returns failure"
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: []
+      ontology_entities: [api]
+  - id: phase-2
+    phase_lang: typescript
+    phase_domain: docs
+    test_agent_required: false
+    impact:
+      modify:
+        - path: docs/widgets.md
+    goal_trace:
+      acceptance_criteria: [AC-2]
+      variation_axes: []
+      ontology_entities: [docs]
+`);
+
+    const hookResult = runHook(dir, '.mpl/mpl/decomposition.yaml');
+    assert.equal(hookResult.continue, true);
+
+    const briefP1 = join(dir, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml');
+    const briefP2 = join(dir, '.mpl', 'mpl', 'phases', 'phase-2', 'test-agent-brief.yaml');
+    assert.ok(existsSync(briefP1), 'phase-1 brief should be written (test_agent_required: true)');
+    assert.ok(!existsSync(briefP2), 'phase-2 brief should NOT be written (test_agent_required: false)');
+
+    // The produced brief must pass the #224 validator (round-trip).
+    const text = readFileSync(briefP1, 'utf-8');
+    const { valid, errors } = validateBrief(text, { phaseId: 'phase-1' });
+    assert.equal(valid, true, `brief should be valid, errors: ${errors.join(', ')}`);
+    assert.match(text, /target_implementation_files:\s*\n\s*-\s+"src\/api\/widgets\.ts"/);
+    assert.match(text, /a_item_coverage:[\s\S]*A-1[\s\S]*POST \/widgets/);
+    assert.match(text, /s_item_coverage:[\s\S]*S-1[\s\S]*422/);
+    assert.match(text, /probing_targets:[\s\S]*retry on transient 5xx/);
+  }));
+
+  it('writeTestAgentBriefs is idempotent — re-running rewrites the same brief', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: src/x.ts
+    interface_contract:
+      produces:
+        - symbol: f
+          path: src/x.ts
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "f returns 1"
+      s_items:
+        - id: S-1
+          statement: "f handles 0"
+`);
+    const ids1 = writeTestAgentBriefs(dir);
+    const ids2 = writeTestAgentBriefs(dir);
+    assert.deepEqual(ids1, ['phase-1']);
+    assert.deepEqual(ids2, ['phase-1']);
+    const briefPath = join(dir, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml');
+    assert.ok(existsSync(briefPath));
+  }));
+
+  it('phase with implicit test_agent_required (omitted field) defaults to required', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-implicit
+    phase_lang: typescript
+    phase_domain: api
+    impact:
+      modify:
+        - path: src/y.ts
+    interface_contract:
+      produces:
+        - symbol: g
+          path: src/y.ts
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "g returns 2"
+      s_items:
+        - id: S-1
+          statement: "g handles null"
+`);
+    writeTestAgentBriefs(dir);
+    assert.ok(existsSync(join(dir, '.mpl', 'mpl', 'phases', 'phase-implicit', 'test-agent-brief.yaml')));
+  }));
+
+  it('non-typescript phase derives an appropriate test command (python → pytest)', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-py
+    phase_lang: python
+    phase_domain: data
+    test_agent_required: true
+    impact:
+      modify:
+        - path: app/transform.py
+    interface_contract:
+      produces:
+        - symbol: transform
+          path: app/transform.py
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "transform handles empty input"
+      s_items:
+        - id: S-1
+          statement: "transform raises on malformed input"
+`);
+    writeTestAgentBriefs(dir);
+    const text = readFileSync(
+      join(dir, '.mpl', 'mpl', 'phases', 'phase-py', 'test-agent-brief.yaml'),
+      'utf-8',
+    );
+    assert.match(text, /required_test_commands:\s*\n\s*-\s+"pytest app\/transform\.py"/);
   }));
 });

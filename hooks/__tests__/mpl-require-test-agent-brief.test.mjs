@@ -169,18 +169,33 @@ describe('validateBrief (#212 MVP)', () => {
 /* ──────────────── hook integration tests ──────────────── */
 
 describe('mpl-require-test-agent-brief hook (#212)', () => {
-  it('SCENARIO 1 (warn default): missing brief for test_agent_required:true → warn systemMessage', () => {
-    // Default mode is `warn` per #224 r2 [contract-break]: ship the
-    // gate without breaking existing dispatches before the producer
-    // lands.
+  it('SCENARIO 1 (block default after #225 cutover): missing brief for test_agent_required:true → block', () => {
+    // #225 cutover: producer (mechanical postprocess) now ships briefs,
+    // so default flips from `warn` to `block`. Operators can still
+    // opt back to `warn` via .mpl/config/test-agent-brief-enforcement.json.
+    const r = runHook({
+      subagent_type: 'mpl-test-agent',
+      prompt: 'Verify phase-1 from the contract.',
+    });
+    assert.equal(r.continue, false);
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /\[MPL #212\]/);
+    assert.match(r.reason, /phase-1/);
+    assert.match(r.reason, /brief artifact missing/);
+  });
+
+  it('SCENARIO 1b (explicit warn mode): missing brief → systemMessage only', () => {
+    mkdirSync(join(tmp, '.mpl', 'config'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.mpl', 'config', 'test-agent-brief-enforcement.json'),
+      JSON.stringify({ mode: 'warn' }),
+    );
     const r = runHook({
       subagent_type: 'mpl-test-agent',
       prompt: 'Verify phase-1 from the contract.',
     });
     assert.equal(r.continue, true);
     assert.match(r.systemMessage, /\[MPL #212\]/);
-    assert.match(r.systemMessage, /phase-1/);
-    assert.match(r.systemMessage, /brief artifact missing/);
   });
 
   it('SCENARIO 1 (block mode): same scenario in block mode → block', () => {

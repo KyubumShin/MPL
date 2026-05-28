@@ -49,25 +49,26 @@ function block(reason) {
 }
 
 /**
- * Codex r2 on PR #224 [contract-break]: the MVP ships the schema +
- * validator + gate but defers the brief producer (follow-up). Until
- * the producer lands, blocking every existing required mpl-test-agent
- * dispatch would break the only mandatory independent verification
- * path. Default to WARN mode so existing pipelines surface the
- * missing-brief diagnostic without losing the gate; flip to BLOCK
- * by writing `.mpl/config/test-agent-brief-enforcement.json` with
- * `{ "mode": "block" }` (which the follow-up that adds the producer
- * will do as part of the cutover).
+ * #225 cutover: the producer (mechanical postprocess in
+ * hooks/lib/mpl-decomposition-postprocess.mjs::writeTestAgentBriefs)
+ * now ships briefs whenever decomposition.yaml changes, so the
+ * default flips from `warn` to `block`. Operators can still set
+ * `.mpl/config/test-agent-brief-enforcement.json` to `{ "mode": "warn" }`
+ * or `{ "mode": "off" }` for transitional / debugging needs.
+ *
+ * History: PR #224 (Codex r2 [contract-break]) introduced the config
+ * file with a `warn` default because the brief producer was deferred.
+ * That deferral closes here.
  */
 function resolveEnforcementMode(cwd) {
   const cfgPath = join(cwd, '.mpl', 'config', 'test-agent-brief-enforcement.json');
-  if (!existsSync(cfgPath)) return 'warn';
+  if (!existsSync(cfgPath)) return 'block';
   try {
     const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     const mode = String(parsed?.mode || '').toLowerCase();
     if (mode === 'block' || mode === 'warn' || mode === 'off') return mode;
   } catch { /* fall through */ }
-  return 'warn';
+  return 'block';
 }
 
 function surface(mode, reason) {

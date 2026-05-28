@@ -23,7 +23,7 @@ const { readStdin } = await import(
 const { collectTargetPaths, isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
-const { writeDerivedDecompositionFields } = await import(
+const { writeDerivedDecompositionFields, writeTestAgentBriefs } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-decomposition-postprocess.mjs')).href
 );
 const { recordBlockedHook, clearBlockedHook } = await import(
@@ -99,6 +99,13 @@ async function main() {
 
   try {
     writeDerivedDecompositionFields(cwd);
+    // #225: also derive per-phase test-agent briefs from decomposition.
+    // Best-effort — brief-writing errors should not block decomposition
+    // derivation. If decomposition shape is malformed, the existing
+    // require-test-agent-brief gate surfaces it on dispatch.
+    if (targets.some((t) => t.kind === 'decomposition')) {
+      try { writeTestAgentBriefs(cwd); } catch { /* swallow */ }
+    }
     clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
     return ok();
   } catch (error) {
