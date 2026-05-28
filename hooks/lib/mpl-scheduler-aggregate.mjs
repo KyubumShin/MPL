@@ -332,6 +332,12 @@ export function aggregateScheduler(cwd, state) {
   const rejectionReasonSet = new Set();
   let wavesParallelRejected = 0;
   let wavesParallelFailed = 0;
+  // Codex r4 on PR #229 [logic]: per-event reasonless counters so the
+  // finalize gate can detect "one tier has concrete reason + another
+  // has reasonless failed/rejected wave" — not derivable from the
+  // global rejection_reasons union alone.
+  let wavesParallelRejectedWithoutReason = 0;
+  let wavesParallelFailedWithoutReason = 0;
 
   function collectRejectionReasons(e) {
     if (Array.isArray(e?.rejection_reasons)) {
@@ -349,15 +355,28 @@ export function aggregateScheduler(cwd, state) {
     }
   }
 
+  function eventHasOwnReason(e) {
+    if (Array.isArray(e?.rejection_reasons) && e.rejection_reasons.some((r) => typeof r === 'string' && r)) return true;
+    if (e?.rejection_reasons_by_phase && typeof e.rejection_reasons_by_phase === 'object') {
+      for (const v of Object.values(e.rejection_reasons_by_phase)) {
+        if (typeof v === 'string' && v) return true;
+        if (Array.isArray(v) && v.some((r) => typeof r === 'string' && r)) return true;
+      }
+    }
+    if (typeof e?.failure_reason === 'string' && e.failure_reason) return true;
+    return false;
+  }
   for (const e of events) {
     tiersSeen.add(Number(e.tier));
     if (e.selected_mode === 'parallel') tiersWithParallelEvent.add(Number(e.tier));
     if (e.selected_mode === 'parallel_rejected') {
       tiersWithRejectedEvent.add(Number(e.tier));
       wavesParallelRejected += 1;
+      if (!eventHasOwnReason(e)) wavesParallelRejectedWithoutReason += 1;
     }
     if (e.selected_mode === 'parallel_failed') {
       wavesParallelFailed += 1;
+      if (!eventHasOwnReason(e)) wavesParallelFailedWithoutReason += 1;
     }
     // Collect rejection reasons from EVERY event — the finalize prompt's
     // rejection_reasons rule is "union across all events", including
@@ -397,6 +416,8 @@ export function aggregateScheduler(cwd, state) {
     tiers_with_missing_telemetry: tiersWithMissingTelemetry,
     waves_parallel_rejected: wavesParallelRejected,
     waves_parallel_failed: wavesParallelFailed,
+    waves_parallel_rejected_without_reason: wavesParallelRejectedWithoutReason,
+    waves_parallel_failed_without_reason: wavesParallelFailedWithoutReason,
     tiers_with_partial_rejection: tiersWithPartialRejection,
     rejection_reasons: [...rejectionReasonSet].sort(),
     affected_tier_ids,

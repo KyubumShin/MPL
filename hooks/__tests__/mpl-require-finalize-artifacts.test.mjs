@@ -626,6 +626,83 @@ phases:
     assert.match(r.reason, /parallel_failed_without_reason/);
   });
 
+  it('#214 codex r4 [logic]: concrete reason on one tier + reasonless parallel_failed on another — BOTH must be named', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: c
+execution_tiers:
+  - tier: 1
+    parallel: true
+    phases: [phase-1]
+  - tier: 2
+    parallel: true
+    phases: [phase-2]
+phases:
+  - id: phase-1
+  - id: phase-2
+`);
+    writeSchedulerEvents([
+      // tier 1: parallel_rejected with concrete file_overlap
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+      // tier 2: parallel_failed with NO failure_reason → reasonless failure
+      { tier: 2, selected_mode: 'parallel_failed' },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 2,
+      tiers_parallel_requested: 2,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 2,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      // Names only the concrete reason — tier 2's reasonless failure is hidden.
+      no_parallel_explanation: 'tier 1 and tier 2 lost parallelism due to file_overlap',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /no_parallel_explanation_missing_degraded_cause/);
+    assert.match(r.reason, /parallel_failed_without_reason/);
+  });
+
+  it('#214 codex r4 [logic]: same mixed case passes when explanation names BOTH file_overlap AND parallel_failed_without_reason', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: c
+execution_tiers:
+  - tier: 1
+    parallel: true
+    phases: [phase-1]
+  - tier: 2
+    parallel: true
+    phases: [phase-2]
+phases:
+  - id: phase-1
+  - id: phase-2
+`);
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected',
+        rejection_reasons_by_phase: { 'phase-1': ['file_overlap'] } },
+      { tier: 2, selected_mode: 'parallel_failed' },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 2,
+      tiers_parallel_requested: 2,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 2,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: ['file_overlap'],
+      no_parallel_explanation: 'tier 1 rejected due to file_overlap; tier 2 hit parallel_failed_without_reason',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
   it('allows finalize when parallel-requested tier failed at runtime but no_parallel_explanation is filled', () => {
     writeArtifacts();
     writeDecompositionWithParallelTier();

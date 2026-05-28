@@ -305,31 +305,32 @@ function schedulerExplanationMissing(cwd, state) {
   // EACH required token must appear in the explanation — concrete
   // reasons and degraded causes are complementary requirements, not
   // alternatives.
-  // Codex r3 [logic]: accumulate every applicable degraded token
-  // INDEPENDENTLY. The earlier priority chain (`else if`) let a
-  // missing_telemetry tier + a reasonless parallel_failed wave finalize
-  // with only one of the two named, hiding the runtime failure cause.
+  // Codex r3/r4 [logic]: accumulate every applicable degraded token
+  // INDEPENDENTLY. The r3 fix used a global `reasonless` flag
+  // (computedReasons.length === 0) which codex r4 showed misses
+  // cross-tier mixed cases — one tier with a concrete reason + another
+  // tier with a reasonless parallel_failed wave never set reasonless,
+  // so parallel_failed_without_reason was never required.
+  //
+  // Per-event reasonless counters now come from the aggregator
+  // (waves_parallel_rejected_without_reason /
+  // waves_parallel_failed_without_reason) so each axis is checked
+  // independently regardless of whether other waves had reasons.
   const requiredDegraded = [];
   if (explanationRequiredFromAggregate(computed)) {
     if (Array.isArray(computed.tiers_with_missing_telemetry) && computed.tiers_with_missing_telemetry.length > 0) {
       requiredDegraded.push('missing_telemetry');
     }
-    // For reasonless rejected/failed waves: when computedReasons is
-    // empty AND the wave counter is non-zero, at least one wave of
-    // that shape had no recorded cause. (We can't distinguish per-
-    // event "had reason vs didn't" from the aggregate, so the
-    // conservative trigger is `computedReasons.length === 0` —
-    // mirrors how missing_telemetry is detected at the tier level.)
-    const reasonless = computedReasons.length === 0;
-    if (reasonless && (computed.waves_parallel_rejected || 0) > 0) {
+    if ((computed.waves_parallel_rejected_without_reason || 0) > 0) {
       requiredDegraded.push('parallel_rejected_without_reason');
     }
-    if (reasonless && (computed.waves_parallel_failed || 0) > 0) {
+    if ((computed.waves_parallel_failed_without_reason || 0) > 0) {
       requiredDegraded.push('parallel_failed_without_reason');
     }
     // Catch-all: aggregate still requires an explanation but no
-    // specific degraded shape was identified.
-    if (requiredDegraded.length === 0 && reasonless) {
+    // specific degraded shape was identified (and no concrete reasons
+    // were recorded).
+    if (requiredDegraded.length === 0 && computedReasons.length === 0) {
       requiredDegraded.push('no_recorded_reason');
     }
   }
