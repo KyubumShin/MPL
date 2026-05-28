@@ -106,9 +106,32 @@ PreToolUse on `Task|Agent`. When `tool_input.subagent_type` matches
 1. Read `.mpl/mpl/decomposition.yaml` to confirm the phase has
    `test_agent_required: true`. If `false`, no brief required — pass.
 2. Read `.mpl/mpl/phases/{phase_id}/test-agent-brief.yaml`. Missing →
-   block with a recovery hint pointing at the brief artifact path.
-3. Run the validator. Any violations → block with the structured list.
+   surface diagnostic (per enforcement mode below).
+3. Run the validator. Any violations → surface diagnostic with the
+   structured list.
 4. Otherwise pass.
+
+### Enforcement mode (`.mpl/config/test-agent-brief-enforcement.json`)
+
+Codex r2 on PR #224 [contract-break]: until the brief producer
+(follow-up issue) lands, blocking every existing required
+mpl-test-agent dispatch would break the only mandatory independent
+verification path. The MVP defaults to `warn` mode.
+
+```json
+{ "mode": "warn" }
+```
+
+Recognized values:
+
+- `"warn"` (default) — emit the diagnostic as a `systemMessage` so
+  operators see the missing-brief gap, but allow the dispatch to
+  proceed.
+- `"block"` — emit `decision: block`. Flip to this once the producer
+  ships (follow-up issue) so every required phase MUST have a brief.
+- `"off"` — silent skip; use only for transitional debugging.
+
+The config file is optional; absence means `warn`.
 
 ## Non-goal (deferred to follow-up)
 

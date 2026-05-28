@@ -40,8 +40,40 @@ function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
+function warn(reason) {
+  console.log(JSON.stringify({ continue: true, systemMessage: reason }));
+}
+
 function block(reason) {
   console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
+}
+
+/**
+ * Codex r2 on PR #224 [contract-break]: the MVP ships the schema +
+ * validator + gate but defers the brief producer (follow-up). Until
+ * the producer lands, blocking every existing required mpl-test-agent
+ * dispatch would break the only mandatory independent verification
+ * path. Default to WARN mode so existing pipelines surface the
+ * missing-brief diagnostic without losing the gate; flip to BLOCK
+ * by writing `.mpl/config/test-agent-brief-enforcement.json` with
+ * `{ "mode": "block" }` (which the follow-up that adds the producer
+ * will do as part of the cutover).
+ */
+function resolveEnforcementMode(cwd) {
+  const cfgPath = join(cwd, '.mpl', 'config', 'test-agent-brief-enforcement.json');
+  if (!existsSync(cfgPath)) return 'warn';
+  try {
+    const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+    const mode = String(parsed?.mode || '').toLowerCase();
+    if (mode === 'block' || mode === 'warn' || mode === 'off') return mode;
+  } catch { /* fall through */ }
+  return 'warn';
+}
+
+function surface(mode, reason) {
+  if (mode === 'off') return silent();
+  if (mode === 'block') return block(reason);
+  warn(reason);
 }
 
 function extractPhaseId(text) {
@@ -123,19 +155,22 @@ async function main() {
   // existing require-test-agent hook to handle that case.
   if (required === null) return silent();
 
+  const mode = resolveEnforcementMode(cwd);
+  if (mode === 'off') return silent();
+
   const path = briefPath(cwd, phaseId);
   if (!existsSync(path)) {
-    block(buildReason(phaseId, 'brief artifact missing'));
+    surface(mode, buildReason(phaseId, 'brief artifact missing'));
     return;
   }
   let text;
   try { text = readFileSync(path, 'utf-8'); } catch (e) {
-    block(buildReason(phaseId, `brief artifact unreadable: ${e?.message || 'unknown'}`));
+    surface(mode, buildReason(phaseId, `brief artifact unreadable: ${e?.message || 'unknown'}`));
     return;
   }
   const { valid, errors } = validateBrief(text, { phaseId });
   if (!valid) {
-    block(buildReason(phaseId, 'brief failed schema validation', errors));
+    surface(mode, buildReason(phaseId, 'brief failed schema validation', errors));
     return;
   }
   silent();

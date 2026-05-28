@@ -51,6 +51,14 @@ function runHook(toolInput) {
   }));
 }
 
+function setBlockMode() {
+  mkdirSync(join(tmp, '.mpl', 'config'), { recursive: true });
+  writeFileSync(
+    join(tmp, '.mpl', 'config', 'test-agent-brief-enforcement.json'),
+    JSON.stringify({ mode: 'block' }),
+  );
+}
+
 function writeValidBrief(phaseId) {
   mkdirSync(join(tmp, '.mpl', 'mpl', 'phases', phaseId), { recursive: true });
   writeFileSync(join(tmp, '.mpl', 'mpl', 'phases', phaseId, 'test-agent-brief.yaml'), `
@@ -161,20 +169,34 @@ describe('validateBrief (#212 MVP)', () => {
 /* ──────────────── hook integration tests ──────────────── */
 
 describe('mpl-require-test-agent-brief hook (#212)', () => {
-  it('SCENARIO 1: missing brief for test_agent_required:true → block', () => {
+  it('SCENARIO 1 (warn default): missing brief for test_agent_required:true → warn systemMessage', () => {
+    // Default mode is `warn` per #224 r2 [contract-break]: ship the
+    // gate without breaking existing dispatches before the producer
+    // lands.
+    const r = runHook({
+      subagent_type: 'mpl-test-agent',
+      prompt: 'Verify phase-1 from the contract.',
+    });
+    assert.equal(r.continue, true);
+    assert.match(r.systemMessage, /\[MPL #212\]/);
+    assert.match(r.systemMessage, /phase-1/);
+    assert.match(r.systemMessage, /brief artifact missing/);
+  });
+
+  it('SCENARIO 1 (block mode): same scenario in block mode → block', () => {
+    setBlockMode();
     const r = runHook({
       subagent_type: 'mpl-test-agent',
       prompt: 'Verify phase-1 from the contract.',
     });
     assert.equal(r.continue, false);
     assert.equal(r.decision, 'block');
-    assert.match(r.reason, /\[MPL #212\]/);
-    assert.match(r.reason, /phase-1/);
     assert.match(r.reason, /brief artifact missing/);
     assert.match(r.reason, /test-agent-brief\.yaml/);
   });
 
-  it('SCENARIO 2: invalid brief missing A/S coverage → block with errors', () => {
+  it('SCENARIO 2: invalid brief missing A/S coverage → block with errors (block mode)', () => {
+    setBlockMode();
     mkdirSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1'), { recursive: true });
     writeFileSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml'), `
 phase_id: phase-1
@@ -194,7 +216,8 @@ required_test_commands:
     assert.match(r.reason, /missing_s_item_coverage/);
   });
 
-  it('SCENARIO 3: invalid brief with placeholder command → block', () => {
+  it('SCENARIO 3: invalid brief with placeholder command → block (block mode)', () => {
+    setBlockMode();
     mkdirSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1'), { recursive: true });
     writeFileSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml'), `
 phase_id: phase-1
@@ -217,6 +240,20 @@ required_test_commands:
     });
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /required_test_commands.*placeholder/);
+  });
+
+  it('enforcement mode off → silent even with missing brief (transitional debug)', () => {
+    mkdirSync(join(tmp, '.mpl', 'config'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.mpl', 'config', 'test-agent-brief-enforcement.json'),
+      JSON.stringify({ mode: 'off' }),
+    );
+    const r = runHook({
+      subagent_type: 'mpl-test-agent',
+      prompt: 'Verify phase-1 from the contract.',
+    });
+    assert.equal(r.continue, true);
+    assert.equal(r.suppressOutput, true);
   });
 
   it('SCENARIO 4: valid brief → pass', () => {
@@ -252,6 +289,9 @@ required_test_commands:
     // codex r1 on PR #224: PreToolUse must NOT skip on run_in_background.
     // The brief precondition has to fire BEFORE the background dispatch
     // launches; no later PreToolUse event can stop an already-started run.
+    // In block mode it blocks; in default warn mode it surfaces a
+    // systemMessage. Either way the diagnostic fires (not silent).
+    setBlockMode();
     const r = runHook({
       subagent_type: 'mpl-test-agent',
       prompt: 'Verify phase-1.',
