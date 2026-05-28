@@ -174,26 +174,33 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
  * pod -- npm test`, `bash -lc "npm test"`) that the strict path denies.
  * Codex r6 on PR #219 caught the recorder regression. Use
  * `classifyRecordedCommand` for that path.
+ *
+ * NOTE on the strict / recorder asymmetry (#220 + codex r5/r6/r7 on
+ * PR #231): strict and recorder are DELIBERATELY different — strict
+ * is for blocking manual masquerade on `state.gate_results`; recorder
+ * accepts execution wrappers (docker / bash -lc / kubectl exec). A
+ * recorder-produced command with a wrapper head will re-classify as
+ * `null` under strict if it ever appears in a STATE_WRITE check, by
+ * design: I12 should not re-validate recorder evidence against the
+ * stricter manual-write rules. Follow-ups tracking the recorder
+ * exit-code-vs-leading-command gap and any I12 / recorder source-of-
+ * truth refactor are NOT in this PR.
  */
 export function classifyGateCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
-  // #220 + codex r5 on PR #231 [contract-break]: strict and recorder
-  // paths share the same canonicalization (`stripNonExecutedSuffix`)
-  // so legitimate recorder-produced evidence like
-  // `npx playwright test | tee output.log` round-trips: the recorder
-  // classifies it as hard3, and a later I12 STATE_WRITE check
-  // re-classifies the SAME stored string as hard3 too (instead of
-  // null from a fail-closed reject).
-  //
-  // Manual masquerade is still blocked because:
+  // #220 on PR #231: canonicalize composite/redirect/comment forms
+  // via `stripNonExecutedSuffix` so the leading simple command (the
+  // one that actually runs) drives both head allowlisting and family
+  // matching. Manual masquerade is blocked because:
   //   - The trim cuts at the first control / redirect / comment
   //     boundary, so downstream-keyword payloads never reach the
   //     family regex.
   //   - The head allowlist still applies — `node -e "npm test"` /
-  //     `python -c "..."` still null (head not allowlisted).
+  //     `python -c "..."` still null (head not allowlisted), as
+  //     does any wrapper head (`docker`, `bash`, `kubectl`).
   //   - The leading simple command's family then drives the
   //     classification; a manual write claiming hard3 with a
-  //     leading `npm test` resolves to hard2 → I12 mismatch.
+  //     leading `npm test` resolves to hard2 → I12 slot mismatch.
   const canonical = stripNonExecutedSuffix(command);
   if (!canonical.trim()) return null;
   const head = extractCommandHead(canonical);
