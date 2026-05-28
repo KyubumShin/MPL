@@ -209,26 +209,26 @@ export function traceHookChain({
   // (stale/corrupt envelope); both diagnoses are useful and either is
   // better than silently filtering out the hook that is actually keeping
   // the run blocked.
+  //
+  // Codex r8 / #217: drop the artifact-match precondition entirely. If
+  // the envelope is STALE and missing blocked_artifact, the prior
+  // version silently filtered the active blocker out via category check
+  // — so tracing any non-matching target while paused returned a row
+  // set that looked healthy. Force-include is now triggered by
+  // session_status === 'blocked_hook' + non-empty blocked_by_hook
+  // alone; the missing artifact case shows up as
+  // invalid_blocked_envelope per blockStatusFor.
   const activeBlockHookId = activeState
     && activeState.session_status === 'blocked_hook'
     ? String(activeState.blocked_by_hook || '').trim()
     : null;
-  const activeBlockArtifact = activeBlockHookId
-    ? String(activeState.blocked_artifact || '').trim()
-    : null;
-  const resolvedTargetTrim = String(resolvedTarget).trim();
-  const activeBlockMatchesTarget = activeBlockArtifact && resolvedTargetTrim && (
-    activeBlockArtifact === resolvedTargetTrim ||
-    resolvedTargetTrim.endsWith(activeBlockArtifact) ||
-    activeBlockArtifact.endsWith(resolvedTargetTrim)
-  );
 
   for (const [eventName, registrations] of Object.entries(config.hooks || {})) {
     for (const registration of registrations || []) {
       const matcher = registration.matcher || null;
       for (const hook of registration.hooks || []) {
         const hookId = hookIdFromCommand(hook.command);
-        const isActiveBlocker = activeBlockMatchesTarget && hookId === activeBlockHookId;
+        const isActiveBlocker = activeBlockHookId && hookId === activeBlockHookId;
         if (!isActiveBlocker && !shouldIncludeHook({ eventName, matcher, hookId, category })) continue;
         rows.push({
           event: eventName,
@@ -243,14 +243,12 @@ export function traceHookChain({
     }
   }
 
-  // Codex r7 on PR #216: if hooks.json was changed (upgrade/downgrade /
-  // rename) and the active blocker hook id is no longer registered, the
-  // force-include path above never fires because it iterates the
-  // registry. Append a synthetic row so the diagnostic still surfaces
-  // the active block instead of looking like the run is healthy.
+  // Codex r7 on PR #216 + #217: synthetic row when the active blocker
+  // hook id is no longer registered (hooks.json rename / upgrade).
+  // Same artifact-match relaxation: if there is an active blocker, we
+  // surface it even when the envelope is stale.
   if (
     activeBlockHookId &&
-    activeBlockMatchesTarget &&
     !rows.some((r) => r.hook_id === activeBlockHookId)
   ) {
     rows.push({
