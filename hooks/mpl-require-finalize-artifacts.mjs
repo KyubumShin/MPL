@@ -264,6 +264,31 @@ function schedulerExplanationMissing(cwd, state) {
       return `scheduler:no_parallel_explanation_missing_tier_refs:[${missingMentions.join(',')}]`;
     }
   }
+  // #214: tier-id-only explanations (e.g. "tier 1") used to pass even
+  // when computed.rejection_reasons named concrete reasons like
+  // "file_overlap" or "depends_on_predecessor_failure". The summary
+  // must actually name at least one such reason — otherwise an operator
+  // reading it has zero information about WHY parallelism was lost.
+  //
+  // Each computed reason has a canonical lowercase snake_case form
+  // (e.g. "file_overlap"). The explanation matches a reason when it
+  // either includes the exact token, OR includes any of its hyphen-/
+  // space-separated variants (e.g. "file-overlap", "file overlap"),
+  // case-insensitively. Free text containing the same words in
+  // different order or stem (e.g. "overlapping files") does NOT match
+  // — operators MUST use the canonical vocabulary so the gate signal
+  // is unambiguous.
+  if (explanationFilled && computedReasons.length > 0) {
+    const lowerExplanation = explanation.toLowerCase();
+    const reasonMatched = computedReasons.some((reason) => {
+      const r = String(reason).toLowerCase();
+      const variants = [r, r.replace(/_/g, '-'), r.replace(/_/g, ' ')];
+      return variants.some((v) => lowerExplanation.includes(v));
+    });
+    if (!reasonMatched) {
+      return `scheduler:no_parallel_explanation_missing_reasons:expected_one_of=[${computedReasons.join(',')}]`;
+    }
+  }
   return null;
 }
 
