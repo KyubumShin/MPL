@@ -415,26 +415,39 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
-  it('#220 codex r3 [data-integrity]: recorder classifier also strips redirect/comment suffix before family match', async () => {
-    // The recorder path (classifyRecordedCommand) is intentionally
-    // looser than the strict path — it accepts wrapper invocations like
-    // `bash -lc "npm test"`. But it was still classifying
-    // `npm test > playwright` as hard3 because the family regex saw
-    // `playwright` in the redirect target. Cut at the first redirect /
-    // comment operator BEFORE classifying so the regex only sees what
-    // the shell actually executed.
+  it('#220 codex r3/r4 [data-integrity]: recorder classifier strips redirect/comment AND control-operator suffix', async () => {
+    // r3: redirect targets / shell comments (`>`, `2>`, `#`) leave
+    // non-executed text downstream that the family regex could match.
+    // r4: control operators (`;`, `&&`, `||`, `|`, `&`, newline)
+    // separate the recorder's exit-code-bearing command from
+    // downstream segments — codex showed `npm test || echo playwright`
+    // recorded as hard3 even though only `npm test` ran.
+    //
+    // stripNonExecutedSuffix now cuts at the first occurrence of ANY
+    // of those tokens so only the leading simple command reaches the
+    // family regex.
     const { classifyRecordedCommand } = await import(
       '../lib/mpl-gate-classify.mjs'
     );
+    // r3 cases (redirect/comment):
     assert.equal(classifyRecordedCommand('npm test > playwright'), 'hard2_coverage');
     assert.equal(classifyRecordedCommand('npm test 2> e2e.log'), 'hard2_coverage');
     assert.equal(classifyRecordedCommand('npm test # e2e'), 'hard2_coverage');
     assert.equal(classifyRecordedCommand('npm test >> playwright.log'), 'hard2_coverage');
     assert.equal(classifyRecordedCommand('tsc --noEmit > playwright.txt'), 'hard1_baseline');
+    // r4 cases (control operators):
+    assert.equal(classifyRecordedCommand('npm test || echo playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test && echo playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test; echo playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test | grep playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test & touch playwright.json'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test\necho playwright'), 'hard2_coverage');
     // Legitimate wrappers still classify correctly:
     assert.equal(classifyRecordedCommand('npx playwright test'), 'hard3_resilience');
     assert.equal(classifyRecordedCommand('docker compose run app npm test'), 'hard2_coverage');
     assert.equal(classifyRecordedCommand('bash -lc "npx playwright test"'), 'hard3_resilience');
+    // Pipe wrapper for hard3 still works (first command is the gate):
+    assert.equal(classifyRecordedCommand('npx playwright test | tee output.log'), 'hard3_resilience');
   });
 
   it('#220 codex r2 [data-integrity]: redirection and comment text rejected at strict level', () => {

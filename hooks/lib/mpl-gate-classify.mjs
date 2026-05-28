@@ -243,17 +243,30 @@ export function classifyGateCommand(command) {
  * family regex only sees the part the shell actually executed.
  */
 function stripNonExecutedSuffix(command) {
-  // Naive but safe: cut at the first occurrence of any of these
-  // tokens. The recorder operates on commands the shell already
-  // accepted and ran, so we don't need full parse fidelity — only to
-  // stop the family regex from matching keywords past redirect /
-  // comment boundaries. Quoting is rare in test commands; if a
-  // legitimate command contains `>` inside a quoted argument and we
-  // truncate it, the worst-case outcome is "classifier returns null"
-  // (recorder records the command but doesn't claim a gate match),
-  // which is safe-direction.
+  // Cut at the first occurrence of any token whose suffix is either
+  // NOT executed (redirect target, comment) or is a SEPARATE command
+  // (control operator / pipeline). The recorder's exit code applies
+  // to the overall shell pipeline, not to the gate command alone, so
+  // classifying the WHOLE composite as one family lets a downstream
+  // segment's keyword forge gate evidence (codex r4 on PR #231).
+  //
+  // Cutting at the first control operator means we only classify the
+  // leading simple command, which is what the recorder actually
+  // intends to gate.
+  //
+  // The recorder operates on commands the shell already accepted and
+  // ran, so we don't need full parse fidelity — only to stop the
+  // family regex from matching keywords past these boundaries.
+  // Quoting is rare in legitimate gate commands; over-truncating a
+  // quoted argument falls in the safe direction (classifier returns
+  // null → no gate evidence claimed).
   let cut = command.length;
-  for (const op of ['#', '>>', '>', '<<', '<', '2>', '&>', '|&']) {
+  // Redirect targets / shell comments — not executed.
+  // Control operators — separate command boundaries.
+  for (const op of [
+    '#', '>>', '>', '<<', '<', '2>', '&>', '|&',
+    ';', '\n', '\r', '&&', '||', '|', '&',
+  ]) {
     const idx = command.indexOf(op);
     if (idx !== -1 && idx < cut) cut = idx;
   }
