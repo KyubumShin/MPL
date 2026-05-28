@@ -234,10 +234,37 @@ export function classifyGateCommand(command) {
  * an operator running a real test inside a wrapper is legitimate
  * coverage evidence; the strict denylist exists only to stop manual
  * `state.json` patches from masquerading as evidence.
+ *
+ * Codex r3 on PR #231 [data-integrity]: even on the recorder path
+ * the shell never executed the redirect-target / comment text, so
+ * `npm test > playwright` and `npm test # e2e` should classify as
+ * hard2 (or null), NOT hard3. Strip everything from the first
+ * unquoted redirect operator / `#` comment before matching, so the
+ * family regex only sees the part the shell actually executed.
  */
+function stripNonExecutedSuffix(command) {
+  // Naive but safe: cut at the first occurrence of any of these
+  // tokens. The recorder operates on commands the shell already
+  // accepted and ran, so we don't need full parse fidelity — only to
+  // stop the family regex from matching keywords past redirect /
+  // comment boundaries. Quoting is rare in test commands; if a
+  // legitimate command contains `>` inside a quoted argument and we
+  // truncate it, the worst-case outcome is "classifier returns null"
+  // (recorder records the command but doesn't claim a gate match),
+  // which is safe-direction.
+  let cut = command.length;
+  for (const op of ['#', '>>', '>', '<<', '<', '2>', '&>', '|&']) {
+    const idx = command.indexOf(op);
+    if (idx !== -1 && idx < cut) cut = idx;
+  }
+  return command.slice(0, cut);
+}
+
 export function classifyRecordedCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
-  return matchFamilyRegex(command);
+  const trimmed = stripNonExecutedSuffix(command);
+  if (!trimmed.trim()) return null;
+  return matchFamilyRegex(trimmed);
 }
 
 function matchFamilyRegex(command) {

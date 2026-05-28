@@ -415,6 +415,28 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('#220 codex r3 [data-integrity]: recorder classifier also strips redirect/comment suffix before family match', async () => {
+    // The recorder path (classifyRecordedCommand) is intentionally
+    // looser than the strict path — it accepts wrapper invocations like
+    // `bash -lc "npm test"`. But it was still classifying
+    // `npm test > playwright` as hard3 because the family regex saw
+    // `playwright` in the redirect target. Cut at the first redirect /
+    // comment operator BEFORE classifying so the regex only sees what
+    // the shell actually executed.
+    const { classifyRecordedCommand } = await import(
+      '../lib/mpl-gate-classify.mjs'
+    );
+    assert.equal(classifyRecordedCommand('npm test > playwright'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test 2> e2e.log'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test # e2e'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('npm test >> playwright.log'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('tsc --noEmit > playwright.txt'), 'hard1_baseline');
+    // Legitimate wrappers still classify correctly:
+    assert.equal(classifyRecordedCommand('npx playwright test'), 'hard3_resilience');
+    assert.equal(classifyRecordedCommand('docker compose run app npm test'), 'hard2_coverage');
+    assert.equal(classifyRecordedCommand('bash -lc "npx playwright test"'), 'hard3_resilience');
+  });
+
   it('#220 codex r2 [data-integrity]: redirection and comment text rejected at strict level', () => {
     // Codex r2 on PR #231: `npm test > playwright`, `npm test 2> e2e`,
     // `npm test # e2e` — the shell never executes the trailing text,
