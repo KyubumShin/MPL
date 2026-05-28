@@ -280,48 +280,55 @@ function schedulerExplanationMissing(cwd, state) {
   // is unambiguous (see commands/mpl-run-finalize.md for the
   // producer-side contract; finalize agents are instructed to use
   // verbatim rejection_reasons tokens).
-  if (explanationFilled && computedReasons.length > 0) {
-    const lowerExplanation = explanation.toLowerCase();
-    const reasonMatched = computedReasons.some((reason) => {
-      const r = String(reason).toLowerCase();
-      const variants = [r, r.replace(/_/g, '-'), r.replace(/_/g, ' ')];
-      return variants.some((v) => lowerExplanation.includes(v));
-    });
-    if (!reasonMatched) {
+  if (!explanationFilled) return null;
+  const lowerExplanation = explanation.toLowerCase();
+  const containsToken = (token) => {
+    const t = String(token).toLowerCase();
+    const variants = [t, t.replace(/_/g, '-'), t.replace(/_/g, ' ')];
+    return variants.some((v) => lowerExplanation.includes(v));
+  };
+
+  // Axis 1: when computed.rejection_reasons is populated, at least one
+  // canonical token MUST appear verbatim (snake_case / hyphen / space).
+  if (computedReasons.length > 0) {
+    const matched = computedReasons.some(containsToken);
+    if (!matched) {
       return `scheduler:no_parallel_explanation_missing_reasons:expected_one_of=[${computedReasons.join(',')}]`;
     }
   }
-  // #214 + codex r1 [logic]: degraded-telemetry path. When the
-  // aggregate says an explanation is required but computed.rejection_reasons
-  // is empty (e.g. tiers_with_missing_telemetry non-empty, or events that
-  // omitted rejection_reasons/failure_reason), the tier-id-mention check
-  // alone lets "tier 1" through with no cause named — the same
-  // observability failure the canonical-token check closes for the
-  // populated case. Require explicit cause vocabulary derived from
-  // the aggregate shape itself.
-  if (explanationFilled && computedReasons.length === 0 && explanationRequiredFromAggregate(computed)) {
-    const lowerExplanation = explanation.toLowerCase();
-    const degradedReasonVocab = [];
+
+  // #214 + codex r1/r2 [logic]: degraded-telemetry axis is INDEPENDENT
+  // of the rejection-reasons axis. Codex r2 showed a mixed run (one
+  // missing-telemetry tier + one tier with file_overlap) bypassed the
+  // degraded-cause check because computedReasons.length > 0. Now the
+  // required token list is built from the aggregate shape itself, and
+  // EACH required token must appear in the explanation — concrete
+  // reasons and degraded causes are complementary requirements, not
+  // alternatives.
+  const requiredDegraded = [];
+  if (explanationRequiredFromAggregate(computed)) {
     if (Array.isArray(computed.tiers_with_missing_telemetry) && computed.tiers_with_missing_telemetry.length > 0) {
-      degradedReasonVocab.push('missing_telemetry');
+      requiredDegraded.push('missing_telemetry');
     }
-    if ((computed.waves_parallel_rejected || 0) > 0) {
-      degradedReasonVocab.push('parallel_rejected_without_reason');
+    if (computedReasons.length === 0) {
+      // No concrete reasons recorded at all — require ONE generic
+      // degraded cause. (Telemetry-present axis above already handles
+      // its own token; here we only fall through if telemetry is also
+      // empty but the aggregate still requires an explanation.)
+      if (!requiredDegraded.includes('missing_telemetry')) {
+        if ((computed.waves_parallel_rejected || 0) > 0) {
+          requiredDegraded.push('parallel_rejected_without_reason');
+        } else if ((computed.waves_parallel_failed || 0) > 0) {
+          requiredDegraded.push('parallel_failed_without_reason');
+        } else {
+          requiredDegraded.push('no_recorded_reason');
+        }
+      }
     }
-    if ((computed.waves_parallel_failed || 0) > 0) {
-      degradedReasonVocab.push('parallel_failed_without_reason');
-    }
-    // Default if none of the above shaped the aggregate but explanation
-    // is still required — preserve the gate signal with a generic token.
-    if (degradedReasonVocab.length === 0) {
-      degradedReasonVocab.push('no_recorded_reason');
-    }
-    const matched = degradedReasonVocab.some((token) => {
-      const variants = [token, token.replace(/_/g, '-'), token.replace(/_/g, ' ')];
-      return variants.some((v) => lowerExplanation.includes(v));
-    });
-    if (!matched) {
-      return `scheduler:no_parallel_explanation_missing_degraded_cause:expected_one_of=[${degradedReasonVocab.join(',')}]`;
+  }
+  for (const token of requiredDegraded) {
+    if (!containsToken(token)) {
+      return `scheduler:no_parallel_explanation_missing_degraded_cause:expected=${token}`;
     }
   }
   return null;
