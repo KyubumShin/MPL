@@ -753,30 +753,23 @@ function buildBriefFromPhaseBlock(phase, body) {
   // least one S-item has a concrete `test_command`, use the de-duplicated
   // set; otherwise fall back to `deriveTestCommandsForPhase`.
   //
-  // Codex r4 on PR #226 [security]: even with proper YAML scalar parsing,
-  // command strings are still ultimately consumed by the test-agent as
-  // shell commands. Reject decomposer commands that contain shell
-  // metacharacters consistent with multi-statement injection patterns
-  // (`;` followed by another command, backticks, `$(...)`, `&&`/`||`
-  // at top level). Borderline metacharacters (`|`, `>`, `<`) are
-  // common in legitimate testing pipelines so they're allowed.
+  // Codex r4/r5 on PR #226 [security]: even with proper YAML scalar
+  // parsing, command strings are still ultimately consumed by the
+  // test-agent as shell commands. The earlier (r4) quote-aware scanner
+  // could be bypassed with escaped quotes (codex r5: `\'` outside any
+  // quoted region opens an `inSingle` state in our scanner but is just
+  // a literal quote to the shell, so a trailing `;` outside the
+  // pseudo-quoted region executes).
+  //
+  // Fail-closed policy: reject any command containing shell
+  // separators or substitutions ANYWHERE (no quote-state tracking).
+  // Legitimate test commands (`pytest path -k filter`,
+  // `npm test -- path`, etc.) don't need these characters, and any
+  // decomposer-emitted command that does is structurally suspicious.
+  // Rejected commands fall back to the language default, which is
+  // never a shell-compound command.
   function isLikelyInjection(cmd) {
-    // Detect statement separators not inside a single-quoted segment.
-    // Simplified: if `;` appears outside any quote, treat as suspicious.
-    let inSingle = false;
-    let inDouble = false;
-    for (let i = 0; i < cmd.length; i++) {
-      const ch = cmd[i];
-      if (ch === "'" && !inDouble) inSingle = !inSingle;
-      else if (ch === '"' && !inSingle) inDouble = !inDouble;
-      else if (!inSingle && !inDouble) {
-        if (ch === ';') return true;
-        if (ch === '`') return true;
-        if (ch === '$' && cmd[i + 1] === '(') return true;
-        if ((ch === '&' && cmd[i + 1] === '&') || (ch === '|' && cmd[i + 1] === '|')) return true;
-      }
-    }
-    return false;
+    return /;|&&|\|\||`|\$\(/.test(cmd);
   }
   const sItemCommands = sItems
     .map((it) => it.command)

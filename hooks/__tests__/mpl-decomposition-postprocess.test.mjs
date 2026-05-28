@@ -577,12 +577,16 @@ phases:
     assert.match(text, /required_test_commands:[\s\S]*pytest tests\/test_widgets\.py -k test_create_ok/);
   }));
 
-  it('codex r4 [security]: shell-quoted commands round-trip without losing inner quotes (no quote-strip injection)', () => withTmp((dir) => {
-    // The safe shape `pytest -k 'login; touch /tmp/pwn'` is one shell
-    // argument at the source. Pre-r4 the parser stripped ALL quotes,
-    // producing `pytest -k login; touch /tmp/pwn` (compound command).
-    // Post-r4 the inner quotes survive AND the injection guard catches
-    // the leftover `;` separator if the source was already unquoted.
+  it('codex r4 [security]: shell-quoted commands DO NOT round-trip — fail-closed under r5 policy', () => withTmp((dir) => {
+    // Pre-r4: `.replace(/['"]/g, '')` destroyed inner quotes, turning
+    // `pytest -k 'login; touch /tmp/pwn'` into an executable compound
+    // command. Initial r4 fix preserved inner quotes via stripScalar
+    // AND used a quote-aware scanner.
+    //
+    // Codex r5 showed the quote-aware scanner could be bypassed with
+    // escaped quotes (\\'), so the policy escalated to: reject any
+    // command containing `;`, `&&`, `||`, backticks, or `$(`
+    // ANYWHERE. The test command falls back to the language default.
     writeActiveState(dir);
     writeDesignIntent(dir);
     writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
@@ -614,13 +618,56 @@ phases:
       join(dir, '.mpl', 'mpl', 'phases', 'phase-quoted', 'test-agent-brief.yaml'),
       'utf-8',
     );
-    // The brief MUST preserve the single-quoted shell argument verbatim —
-    // inner `;` is INSIDE the quotes so it's not a statement separator,
-    // and the injection guard treats the whole command as safe.
     const cmdSection = text.match(/required_test_commands:\s*\n((?:\s+-.*\n)+)/);
     assert.ok(cmdSection, 'required_test_commands section must exist');
-    // The exact command must appear with quotes preserved.
-    assert.match(cmdSection[1], /pytest -k 'login; touch \/tmp\/pwn'/);
+    // Both inner-`;`-bearing commands are rejected, regardless of quoting.
+    assert.doesNotMatch(cmdSection[1], /touch \/tmp\/pwn/);
+    // Falls back to language default — exact: pytest with the safe path.
+    assert.match(cmdSection[1], /^\s+-\s+"pytest app\/widgets\.py"/m);
+  }));
+
+  it('codex r5 [security]: escaped-quote bypass is caught (no quote-state tracking)', () => withTmp((dir) => {
+    // The r4 quote-aware scanner toggled inSingle on every `'`, including
+    // escaped `\\'`. The shell treats `\\'` outside any quoted region as
+    // a literal `'`, NOT as the opening of a quoted segment — so the
+    // trailing `;` is a real statement separator. The r5 policy drops
+    // quote tracking entirely: any `;` anywhere → reject.
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-escbypass
+    phase_lang: python
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: app/widgets.py
+    interface_contract:
+      produces:
+        - type: function
+          name: f
+          spec: "() -> int"
+    verification_plan:
+      a_items:
+        - criterion: "valid"
+          type: command
+          command: "pytest -k \\\\'; printf PWNED"
+      s_items:
+        - criterion: "invalid"
+          test_file: tests/x.py
+          test_command: "pytest -k \\\\'; printf PWNED"
+`);
+    writeTestAgentBriefs(dir);
+    const text = readFileSync(
+      join(dir, '.mpl', 'mpl', 'phases', 'phase-escbypass', 'test-agent-brief.yaml'),
+      'utf-8',
+    );
+    const cmdSection = text.match(/required_test_commands:\s*\n((?:\s+-.*\n)+)/);
+    assert.ok(cmdSection);
+    assert.doesNotMatch(cmdSection[1], /PWNED/);
+    assert.doesNotMatch(cmdSection[1], /printf/);
+    assert.match(cmdSection[1], /^\s+-\s+"pytest app\/widgets\.py"/m);
   }));
 
   it('codex r4 [security]: a decomposer command with bare `;` injection is dropped, not emitted', () => withTmp((dir) => {
