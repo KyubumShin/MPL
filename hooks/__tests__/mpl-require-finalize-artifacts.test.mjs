@@ -514,6 +514,118 @@ phases:
     assert.equal(r.continue, true);
   });
 
+  it('#214 codex r3 [logic]: missing_telemetry + reasonless parallel_failed wave — BOTH tokens required', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: c
+execution_tiers:
+  - tier: 1
+    parallel: true
+    phases: [phase-1]
+  - tier: 2
+    parallel: true
+    phases: [phase-2]
+phases:
+  - id: phase-1
+  - id: phase-2
+`);
+    writeSchedulerEvents([
+      // tier 1: no event → missing_telemetry
+      // tier 2: parallel_failed with NO failure_reason → reasonless failure
+      { tier: 2, selected_mode: 'parallel_failed' },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 2,
+      tiers_parallel_requested: 2,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 2,
+      tiers_with_missing_telemetry: [1],
+      waves_parallel_rejected: 0,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      // Names only one of the two required degraded causes.
+      no_parallel_explanation: 'tier 1 and tier 2 lost parallelism due to missing_telemetry',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /no_parallel_explanation_missing_degraded_cause/);
+    assert.match(r.reason, /parallel_failed_without_reason/);
+  });
+
+  it('#214 codex r3 [logic]: reasonless rejected + reasonless failed — both tokens required, both must be named', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: c
+execution_tiers:
+  - tier: 1
+    parallel: true
+    phases: [phase-1]
+  - tier: 2
+    parallel: true
+    phases: [phase-2]
+phases:
+  - id: phase-1
+  - id: phase-2
+`);
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected' },
+      { tier: 2, selected_mode: 'parallel_failed' },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 2,
+      tiers_parallel_requested: 2,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 2,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      no_parallel_explanation: 'tier 1 hit parallel_rejected_without_reason; tier 2 hit parallel_failed_without_reason',
+    });
+    const r = runHook();
+    assert.equal(r.continue, true);
+  });
+
+  it('#214 codex r3 [logic]: same case but only one of the two tokens named → block', () => {
+    writeArtifacts();
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: c
+execution_tiers:
+  - tier: 1
+    parallel: true
+    phases: [phase-1]
+  - tier: 2
+    parallel: true
+    phases: [phase-2]
+phases:
+  - id: phase-1
+  - id: phase-2
+`);
+    writeSchedulerEvents([
+      { tier: 1, selected_mode: 'parallel_rejected' },
+      { tier: 2, selected_mode: 'parallel_failed' },
+    ]);
+    writeSummaryScheduler({
+      tiers_total: 2,
+      tiers_parallel_requested: 2,
+      tiers_parallel_executed: 0,
+      tiers_parallel_rejected: 2,
+      tiers_with_missing_telemetry: [],
+      waves_parallel_rejected: 1,
+      waves_parallel_failed: 1,
+      tiers_with_partial_rejection: [],
+      rejection_reasons: [],
+      // Names only the rejected_without_reason side; the parallel_failed_without_reason cause stays hidden.
+      no_parallel_explanation: 'tier 1 and tier 2 lost parallelism due to parallel_rejected_without_reason',
+    });
+    const r = runHook();
+    assert.equal(r.decision, 'block');
+    assert.match(r.reason, /no_parallel_explanation_missing_degraded_cause/);
+    assert.match(r.reason, /parallel_failed_without_reason/);
+  });
+
   it('allows finalize when parallel-requested tier failed at runtime but no_parallel_explanation is filled', () => {
     writeArtifacts();
     writeDecompositionWithParallelTier();
