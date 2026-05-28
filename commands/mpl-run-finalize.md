@@ -837,6 +837,48 @@ scheduler = {
     selected modes, and the dominant rejection reasons (or missing
     telemetry tiers, partial-rejection tiers, or failure reasons,
     whichever applies).
+
+    **Canonical-vocabulary requirement (#214)**: the explanation MUST
+    include at least one rejection-reason token VERBATIM (snake_case,
+    or its hyphen-/space-separated variant; case-insensitive). The
+    token list IS the `rejection_reasons` value above — paste a value
+    from that array into the prose. Paraphrases like "conflicting
+    files" / "worker dispatch failed" do NOT satisfy the gate; the
+    summary's structured field and the prose must share vocabulary so
+    operators can grep for cause across runs. Examples:
+
+      OK:    "tier 1 lost parallelism due to file_overlap on phase-1"
+      OK:    "tier 1 hit worker-dispatch-error during the second wave"
+      OK:    "tier 2 ran sequentially: single_ready_phase in the wave"
+      BLOCK: "tier 1"                          (no reason named)
+      BLOCK: "tier 1 had conflicting files"    (paraphrase, not canonical)
+
+    **Degraded-cause tokens — required per-axis regardless of
+    rejection_reasons (#214 / codex r6):** the finalize hook checks
+    each degraded condition INDEPENDENTLY from the concrete-reason
+    axis. A mixed run (e.g. tier 1 has missing telemetry, tier 2
+    has file_overlap) MUST name BOTH the concrete reason AND the
+    degraded-axis token. The degraded tokens are:
+
+    - `missing_telemetry` — required whenever any expected-parallel
+      tier had NO scheduler event recorded.
+    - `parallel_rejected_without_reason` — required whenever at least
+      one `parallel_rejected` wave had no `rejection_reasons` /
+      `rejection_reasons_by_phase`.
+    - `parallel_failed_without_reason` — required whenever at least
+      one `parallel_failed` wave had no `failure_reason` (note:
+      `rejection_reasons_by_phase` on a parallel_failed event is the
+      pre-attempt deferred-phase block reason, NOT a substitute for
+      the runtime failure cause).
+    - `no_recorded_reason` — fallback when an explanation is required
+      but no specific degraded shape applies and `rejection_reasons`
+      is empty.
+
+    The finalizer must inspect the aggregate's
+    `tiers_with_missing_telemetry`,
+    `waves_parallel_rejected_without_reason`, and
+    `waves_parallel_failed_without_reason` counters to decide which
+    degraded tokens to include.
 }
 ```
 

@@ -264,6 +264,92 @@ function schedulerExplanationMissing(cwd, state) {
       return `scheduler:no_parallel_explanation_missing_tier_refs:[${missingMentions.join(',')}]`;
     }
   }
+  // #214: tier-id-only explanations (e.g. "tier 1") used to pass even
+  // when computed.rejection_reasons named concrete reasons like
+  // "file_overlap" or "depends_on_predecessor_failure". The summary
+  // must actually name at least one such reason — otherwise an operator
+  // reading it has zero information about WHY parallelism was lost.
+  //
+  // Each computed reason has a canonical lowercase snake_case form
+  // (e.g. "file_overlap"). The explanation matches a reason when it
+  // either includes the exact token, OR includes any of its hyphen-/
+  // space-separated variants (e.g. "file-overlap", "file overlap"),
+  // case-insensitively. Free text containing the same words in
+  // different order or stem (e.g. "overlapping files") does NOT match
+  // — operators MUST use the canonical vocabulary so the gate signal
+  // is unambiguous (see commands/mpl-run-finalize.md for the
+  // producer-side contract; finalize agents are instructed to use
+  // verbatim rejection_reasons tokens).
+  if (!explanationFilled) return null;
+  const lowerExplanation = explanation.toLowerCase();
+  // Codex r5 on PR #229 [contract-break]: substring-only matching let
+  // `file_overlapping` or `xfile_overlapx` satisfy `file_overlap`,
+  // weakening the grep-friendly-vocabulary guarantee. Tokens must
+  // appear at word boundaries — adjacent characters must be
+  // non-token (i.e. not [A-Za-z0-9_-]). Hyphen is treated as a
+  // token character because hyphen variants use hyphen mid-token.
+  const containsToken = (token) => {
+    const t = String(token).toLowerCase();
+    const variants = [t, t.replace(/_/g, '-'), t.replace(/_/g, ' ')];
+    return variants.some((v) => {
+      if (!v) return false;
+      const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(^|[^A-Za-z0-9_-])${escaped}(?=[^A-Za-z0-9_-]|$)`);
+      return re.test(lowerExplanation);
+    });
+  };
+
+  // Axis 1: when computed.rejection_reasons is populated, at least one
+  // canonical token MUST appear verbatim (snake_case / hyphen / space).
+  if (computedReasons.length > 0) {
+    const matched = computedReasons.some(containsToken);
+    if (!matched) {
+      return `scheduler:no_parallel_explanation_missing_reasons:expected_one_of=[${computedReasons.join(',')}]`;
+    }
+  }
+
+  // #214 + codex r1/r2 [logic]: degraded-telemetry axis is INDEPENDENT
+  // of the rejection-reasons axis. Codex r2 showed a mixed run (one
+  // missing-telemetry tier + one tier with file_overlap) bypassed the
+  // degraded-cause check because computedReasons.length > 0. Now the
+  // required token list is built from the aggregate shape itself, and
+  // EACH required token must appear in the explanation — concrete
+  // reasons and degraded causes are complementary requirements, not
+  // alternatives.
+  // Codex r3/r4 [logic]: accumulate every applicable degraded token
+  // INDEPENDENTLY. The r3 fix used a global `reasonless` flag
+  // (computedReasons.length === 0) which codex r4 showed misses
+  // cross-tier mixed cases — one tier with a concrete reason + another
+  // tier with a reasonless parallel_failed wave never set reasonless,
+  // so parallel_failed_without_reason was never required.
+  //
+  // Per-event reasonless counters now come from the aggregator
+  // (waves_parallel_rejected_without_reason /
+  // waves_parallel_failed_without_reason) so each axis is checked
+  // independently regardless of whether other waves had reasons.
+  const requiredDegraded = [];
+  if (explanationRequiredFromAggregate(computed)) {
+    if (Array.isArray(computed.tiers_with_missing_telemetry) && computed.tiers_with_missing_telemetry.length > 0) {
+      requiredDegraded.push('missing_telemetry');
+    }
+    if ((computed.waves_parallel_rejected_without_reason || 0) > 0) {
+      requiredDegraded.push('parallel_rejected_without_reason');
+    }
+    if ((computed.waves_parallel_failed_without_reason || 0) > 0) {
+      requiredDegraded.push('parallel_failed_without_reason');
+    }
+    // Catch-all: aggregate still requires an explanation but no
+    // specific degraded shape was identified (and no concrete reasons
+    // were recorded).
+    if (requiredDegraded.length === 0 && computedReasons.length === 0) {
+      requiredDegraded.push('no_recorded_reason');
+    }
+  }
+  for (const token of requiredDegraded) {
+    if (!containsToken(token)) {
+      return `scheduler:no_parallel_explanation_missing_degraded_cause:expected=${token}`;
+    }
+  }
   return null;
 }
 
