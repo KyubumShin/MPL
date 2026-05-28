@@ -738,6 +738,15 @@ async function main() {
       // RFC §5.5 invariants preserved: this handler MUST NOT set
       // `state.finalize_done=true` and MUST NOT transition `current_phase`
       // to `completed`. Both remain exclusive to phase5-finalize.
+      //
+      // Codex r5 on PR #222 [data-integrity]: Phase 0 artifact guard
+      // MUST run at the START of the release-finalize case, BEFORE
+      // createSnapshotRef / attemptArtifactCreation / atomicWriteFile
+      // create artifacts on disk. Otherwise a missing-artifacts state
+      // would leave shipped-looking manifest/ref files while
+      // state.release.completed_cut_ids is not appended — release
+      // immutability drift.
+      if (emitPhase0BlockIfNeeded(cwd, 'release-finalize')) return;
       const cur = state.release?.current_cut_id;
       if (!cur) {
                 if (emitPhase0BlockIfNeeded(cwd, 'phase3-gate')) return;

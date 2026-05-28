@@ -531,6 +531,37 @@ describe('I13 phase0 artifacts gate the controller transition (Exp22 R11 / #210)
       'recorded failure evidence MUST be preserved when transition is blocked');
   });
 
+  it('release-finalize blocks BEFORE creating any release artifacts when Phase 0 missing (codex r5 [data-integrity])', () => {
+    // codex r5 on PR #222: the release-finalize case writes
+    // release-manifest.json + evidence-summary.md + gate-results.json
+    // + snapshot ref BEFORE the final state writeState. Without the
+    // guard at the top, missing Phase 0 artifacts would leave a
+    // shipped-looking manifest + ref on disk while state.release stays
+    // un-appended (drift).
+    const out = runStopHook(tmpDir, {
+      current_phase: 'release-finalize',
+      release: {
+        current_cut_id: 'mvp',
+        completed_cut_ids: [],
+        fix_loop_count: 0,
+        pending_artifact: null,
+        gate_results: {
+          hard1_passed: true, hard2_passed: true, hard3_passed: true,
+          hard1_baseline: { command: 'npm run build', exit_code: 0 },
+          hard2_coverage: { command: 'npm test', exit_code: 0 },
+          hard3_resilience: { command: 'npx playwright test', exit_code: 0 },
+        },
+        max_fix_loops: 3,
+      },
+    }, { skipPhase0Seed: true });
+    assert.match(out.stopReason, /\[MPL I13\] Cannot transition to release-finalize/);
+    // No release artifact directory should exist — guard fired before
+    // any disk writes in this case.
+    const releasesDir = join(tmpDir, '.mpl', 'mpl', 'releases');
+    assert.equal(existsSync(releasesDir), false,
+      'release artifact directory MUST NOT be created when guard blocks');
+  });
+
   it('phase1a-research → phase1b-plan transition lands when Phase 0 artifacts are present', () => {
     const out = runStopHook(tmpDir, {
       current_phase: 'phase1a-research',
