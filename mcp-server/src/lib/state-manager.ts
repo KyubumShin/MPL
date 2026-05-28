@@ -265,21 +265,23 @@ export function writeState(cwd: string, patch: Record<string, unknown>): { succe
   const filePath = join(cwd, STATE_PATH);
   const dir = dirname(filePath);
 
-  // #223: enforce I13 BEFORE any disk write. A patch that proposes a
-  // protected phase without Phase 0 artifacts is rejected up-front;
-  // partial application (write succeeds, invariant violated) would
-  // leak state through the MCP layer that no other write path allows.
-  if (typeof patch?.current_phase === 'string') {
-    const blockedReason = blockedPhaseTransitionReason(cwd, patch.current_phase);
+  // #223 + codex r1 [data-integrity]: enforce I13 against the
+  // POST-MERGE current_phase, not the patch alone. Hook-side I13
+  // validates the full proposed state on every STATE_WRITE; mirror
+  // that here so non-`current_phase` patches against an already-
+  // protected-phase state with missing artifacts cannot persist
+  // execution/gate metadata while leaving the invariant violated.
+  const current = readState(cwd) ?? { ...DEFAULT_STATE };
+  const merged = deepMerge(current as unknown as Record<string, unknown>, patch);
+  const mergedPhase = typeof merged.current_phase === 'string' ? merged.current_phase : '';
+  if (mergedPhase) {
+    const blockedReason = blockedPhaseTransitionReason(cwd, mergedPhase);
     if (blockedReason) {
       return { success: false, updated_keys: [], reason: blockedReason };
     }
   }
 
   mkdirSync(dir, { recursive: true });
-
-  const current = readState(cwd) ?? { ...DEFAULT_STATE };
-  const merged = deepMerge(current as unknown as Record<string, unknown>, patch);
 
   // Ring-buffer cap for ambiguity_history (mirrors hooks/lib/mpl-state.mjs).
   // deepMerge replaces arrays wholesale, so the patch either set or preserved

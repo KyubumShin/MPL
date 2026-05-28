@@ -132,11 +132,33 @@ describe('writeState Phase 0 artifact invariant (#223)', () => {
     assert.match(result.reason, /contracts/);
   });
 
-  it('non-current_phase patches pass through without Phase 0 check', async () => {
+  it('non-current_phase patches pass through when existing current_phase is not protected', async () => {
     const mod = await loadModule();
-    // No Phase 0 artifacts. Patch is unrelated to current_phase.
+    // No Phase 0 artifacts, no existing state — current_phase defaults
+    // to phase1-plan (not protected). The patch updates an unrelated key.
     const result = mod.writeState(tmpDir, { run_mode: 'auto' });
     assert.strictEqual(result.success, true);
     assert.deepEqual(result.updated_keys, ['run_mode']);
+  });
+
+  it('codex r1 [data-integrity]: non-current_phase patch BLOCKED when merged current_phase is protected and artifacts missing', async () => {
+    const mod = await loadModule();
+    // Step 1: set up the chicken (Phase 0 artifacts present), transition to protected, then remove the artifacts.
+    setupPhase0(tmpDir);
+    const ok = mod.writeState(tmpDir, { current_phase: 'phase2-sprint' });
+    assert.strictEqual(ok.success, true);
+    rmSync(join(tmpDir, '.mpl', 'mpl', 'phase0'), { recursive: true, force: true });
+    rmSync(join(tmpDir, '.mpl', 'contracts'), { recursive: true, force: true });
+    // Step 2: a non-current_phase patch must NOT succeed while the merged
+    // state is in a protected phase without artifacts. Hook-side I13
+    // validates the full proposed state on every STATE_WRITE; this
+    // mirrors that behavior on the MCP path.
+    const result = mod.writeState(tmpDir, { run_mode: 'auto' });
+    assert.strictEqual(result.success, false);
+    assert.match(result.reason, /\[MPL I13\]/);
+    assert.match(result.reason, /phase2-sprint/);
+    // run_mode was NOT written.
+    const raw = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
+    assert.notStrictEqual(raw.run_mode, 'auto');
   });
 });
