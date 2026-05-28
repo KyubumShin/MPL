@@ -35,6 +35,9 @@ const { readStdin } = await import(
 const { validateBrief } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-test-agent-brief.mjs')).href
 );
+const { writeTestAgentBriefs } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-decomposition-postprocess.mjs')).href
+);
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -161,8 +164,17 @@ async function main() {
 
   const path = briefPath(cwd, phaseId);
   if (!existsSync(path)) {
-    surface(mode, buildReason(phaseId, 'brief artifact missing'));
-    return;
+    // Codex r1 on PR #226 [contract-break]: pre-#225 workspaces can have a
+    // decomposition.yaml without briefs. The producer normally runs as a
+    // PostToolUse on decomposition writes, but a workspace that hasn't
+    // re-saved decomposition.yaml since #225 landed has no triggered
+    // generation yet. Try lazy generation here — if it succeeds for this
+    // phase, the gate proceeds. Failure paths still surface the diagnostic.
+    try { writeTestAgentBriefs(cwd); } catch { /* fall through to missing diagnostic */ }
+    if (!existsSync(path)) {
+      surface(mode, buildReason(phaseId, 'brief artifact missing'));
+      return;
+    }
   }
   let text;
   try { text = readFileSync(path, 'utf-8'); } catch (e) {

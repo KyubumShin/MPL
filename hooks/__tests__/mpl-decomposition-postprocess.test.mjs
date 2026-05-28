@@ -525,6 +525,47 @@ phases:
     assert.ok(existsSync(join(dir, '.mpl', 'mpl', 'phases', 'phase-implicit', 'test-agent-brief.yaml')));
   }));
 
+  it('codex r1 [security]: a path with shell metacharacters is dropped from the command, not interpolated', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-evil
+    phase_lang: typescript
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: "src/x.ts; touch /tmp/pwn"
+    interface_contract:
+      produces:
+        - symbol: f
+          path: "src/x.ts; touch /tmp/pwn"
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "f returns 1"
+      s_items:
+        - id: S-1
+          statement: "f handles 0"
+`);
+    writeTestAgentBriefs(dir);
+    const text = readFileSync(
+      join(dir, '.mpl', 'mpl', 'phases', 'phase-evil', 'test-agent-brief.yaml'),
+      'utf-8',
+    );
+    // The injected metacharacters MUST NOT be interpolated into
+    // required_test_commands. Fall-back to plain `npm test` (no path
+    // interpolation) is the correct shape. Path may still appear in
+    // YAML data fields (target_implementation_files, interface_contracts)
+    // — those are data, not commands.
+    const cmdSection = text.match(/required_test_commands:\s*\n((?:\s+-.*\n)+)/);
+    assert.ok(cmdSection, 'required_test_commands section must exist');
+    assert.match(cmdSection[1], /^\s+-\s+"npm test"\s*$/m);
+    assert.doesNotMatch(cmdSection[1], /touch \/tmp\/pwn/);
+    assert.doesNotMatch(cmdSection[1], /;/);
+  }));
+
   it('non-typescript phase derives an appropriate test command (python → pytest)', () => withTmp((dir) => {
     writeActiveState(dir);
     writeDesignIntent(dir);

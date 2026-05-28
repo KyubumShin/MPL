@@ -589,21 +589,38 @@ function parseProbingHints(body) {
   return out;
 }
 
+// Codex r1 on PR #226 [security]: `decomposition.yaml` is project-internal,
+// but a malicious or buggy impact path like `src/x.ts; rm -rf /` would be
+// interpolated straight into the command string the test-agent later runs.
+// Treat impact paths as untrusted. A safe path is a repo-relative filename
+// with no shell metacharacters, no whitespace, no NUL, no `..` segments.
+// Anything outside that shape falls back to a path-less command so the
+// command is still non-placeholder (validator-friendly) but un-injectable.
+function isSafeRelativePath(p) {
+  if (typeof p !== 'string') return false;
+  if (p.length === 0 || p.length > 256) return false;
+  if (/[\s;&|`$<>(){}\[\]\\'"*?!#~\x00]/.test(p)) return false;
+  if (p.startsWith('/') || p.startsWith('-')) return false;
+  if (p.split('/').some((seg) => seg === '..' || seg === '')) return false;
+  return /^[A-Za-z0-9._/-]+$/.test(p);
+}
+
 function deriveTestCommandsForPhase(phaseLang, targetFiles) {
   // Map phase_lang to a sensible default test command. Operators can
   // override by hand-editing the brief; this just gives the mechanical
   // generator a non-placeholder starting point so #224's strict
   // validator (placeholder/echo rejection) doesn't trip immediately.
   const lang = String(phaseLang || '').toLowerCase();
-  const targets = targetFiles.length > 0 ? targetFiles[0] : '';
+  const raw = targetFiles.length > 0 ? targetFiles[0] : '';
+  const safe = isSafeRelativePath(raw) ? raw : '';
   if (/ts|typescript|tsx|js|javascript/.test(lang)) {
-    return [`npm test -- ${targets}`.trim()];
+    return [safe ? `npm test -- ${safe}` : 'npm test'];
   }
   if (/rust|cargo/.test(lang)) {
     return [`cargo test --package-affected`];
   }
   if (/py|python/.test(lang)) {
-    return [`pytest ${targets}`.trim()];
+    return [safe ? `pytest ${safe}` : 'pytest'];
   }
   if (/go|golang/.test(lang)) {
     return [`go test ./...`];
