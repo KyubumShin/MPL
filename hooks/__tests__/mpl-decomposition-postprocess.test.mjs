@@ -566,6 +566,61 @@ phases:
     assert.doesNotMatch(cmdSection[1], /;/);
   }));
 
+  it('codex r2 [logic]: brief-write I/O failure surfaces as a distinct blocked_hook (not silently swallowed)', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: src/api/widgets.ts
+    interface_contract:
+      produces:
+        - symbol: createWidget
+          path: src/api/widgets.ts
+    verification_plan:
+      a_items:
+        - id: A-1
+          statement: "POST /widgets returns 201"
+      s_items:
+        - id: S-1
+          statement: "POST /widgets returns 422"
+`);
+    // Make the briefs directory unwritable to force a write failure.
+    mkdirSync(join(dir, '.mpl', 'mpl', 'phases'), { recursive: true });
+    spawnSync('chmod', ['-w', join(dir, '.mpl', 'mpl', 'phases')], { encoding: 'utf-8' });
+    let result;
+    try {
+      const input = {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Write',
+        cwd: dir,
+        tool_input: { file_path: '.mpl/mpl/decomposition.yaml' },
+      };
+      result = spawnSync(process.execPath, [join(ROOT, 'hooks', 'mpl-decomposition-postprocess.mjs')], {
+        cwd: dir,
+        input: JSON.stringify(input),
+        encoding: 'utf-8',
+      });
+    } finally {
+      spawnSync('chmod', ['+w', join(dir, '.mpl', 'mpl', 'phases')], { encoding: 'utf-8' });
+    }
+    assert.equal(result.status, 0, result.stderr);
+    const out = JSON.parse(result.stdout);
+    assert.equal(out.continue, false);
+    assert.equal(out.decision, 'block');
+    assert.match(out.reason, /per-phase test-agent briefs/);
+    // decomposition-derived.json should still have been written
+    // before the briefs step ran — derivation succeeds; only the
+    // briefs step fails.
+    const derivedExists = existsSync(join(dir, '.mpl', 'mpl', 'decomposition-derived.json'));
+    assert.equal(derivedExists, true, 'decomposition-derived.json should still be written');
+  }));
+
   it('non-typescript phase derives an appropriate test command (python → pytest)', () => withTmp((dir) => {
     writeActiveState(dir);
     writeDesignIntent(dir);

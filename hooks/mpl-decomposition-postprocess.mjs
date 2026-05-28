@@ -32,6 +32,7 @@ const { recordBlockedHook, clearBlockedHook } = await import(
 
 const HOOK_ID = 'mpl-decomposition-postprocess';
 const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition-derived.json';
+const BRIEFS_ARTIFACT = '.mpl/mpl/phases/test-agent-briefs';
 const DECOMPOSITION_PATH = '.mpl/mpl/decomposition.yaml';
 const DERIVED_SOURCE_KINDS = new Map([
   [DECOMPOSITION_PATH, 'decomposition'],
@@ -54,6 +55,23 @@ function block(cwd, reason, retryContext = {}) {
     retryContext: {
       target: DECOMPOSITION_PATH,
       derived_path: BLOCKED_ARTIFACT,
+      ...retryContext,
+    },
+  });
+  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
+}
+
+function blockBriefs(cwd, reason, retryContext = {}) {
+  recordBlockedHook(cwd, {
+    hookId: HOOK_ID,
+    artifact: BRIEFS_ARTIFACT,
+    code: 'test_agent_briefs_write_failed',
+    reason,
+    resumeInstruction:
+      'Resolve the I/O failure (permissions, disk space, malformed decomposition fields) and re-save .mpl/mpl/decomposition.yaml to retrigger brief generation, or inspect the recorded error context.',
+    retryContext: {
+      target: DECOMPOSITION_PATH,
+      derived_path: BRIEFS_ARTIFACT,
       ...retryContext,
     },
   });
@@ -99,15 +117,7 @@ async function main() {
 
   try {
     writeDerivedDecompositionFields(cwd);
-    // #225: also derive per-phase test-agent briefs from decomposition.
-    // Best-effort — brief-writing errors should not block decomposition
-    // derivation. If decomposition shape is malformed, the existing
-    // require-test-agent-brief gate surfaces it on dispatch.
-    if (targets.some((t) => t.kind === 'decomposition')) {
-      try { writeTestAgentBriefs(cwd); } catch { /* swallow */ }
-    }
     clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
-    return ok();
   } catch (error) {
     return block(
       cwd,
@@ -115,6 +125,24 @@ async function main() {
       { error: error?.message || 'unknown error', targets }
     );
   }
+  // #225 + codex r2 on PR #226 [logic]: also derive per-phase
+  // test-agent briefs from decomposition. Errors here are surfaced
+  // as a distinct blocked_hook entry (separate artifact key) so the
+  // failure cause is preserved at the write boundary — don't swallow
+  // and let the missing-brief gate fire later with no context.
+  if (targets.some((t) => t.kind === 'decomposition')) {
+    try {
+      writeTestAgentBriefs(cwd);
+      clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BRIEFS_ARTIFACT });
+    } catch (error) {
+      return blockBriefs(
+        cwd,
+        `[MPL Decomposition Postprocess] Failed to regenerate per-phase test-agent briefs: ${error?.message || 'unknown error'}.`,
+        { error: error?.message || 'unknown error', targets }
+      );
+    }
+  }
+  return ok();
 }
 
 await main().catch((error) => {
