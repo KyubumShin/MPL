@@ -577,6 +577,93 @@ phases:
     assert.match(text, /required_test_commands:[\s\S]*pytest tests\/test_widgets\.py -k test_create_ok/);
   }));
 
+  it('codex r4 [security]: shell-quoted commands round-trip without losing inner quotes (no quote-strip injection)', () => withTmp((dir) => {
+    // The safe shape `pytest -k 'login; touch /tmp/pwn'` is one shell
+    // argument at the source. Pre-r4 the parser stripped ALL quotes,
+    // producing `pytest -k login; touch /tmp/pwn` (compound command).
+    // Post-r4 the inner quotes survive AND the injection guard catches
+    // the leftover `;` separator if the source was already unquoted.
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-quoted
+    phase_lang: python
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: app/widgets.py
+    interface_contract:
+      produces:
+        - type: function
+          name: f
+          spec: "() -> int"
+    verification_plan:
+      a_items:
+        - criterion: "valid input"
+          type: command
+          command: "pytest -k 'login; touch /tmp/pwn'"
+      s_items:
+        - criterion: "invalid input"
+          test_file: tests/test_widgets.py
+          test_command: "pytest -k 'login; touch /tmp/pwn'"
+`);
+    writeTestAgentBriefs(dir);
+    const text = readFileSync(
+      join(dir, '.mpl', 'mpl', 'phases', 'phase-quoted', 'test-agent-brief.yaml'),
+      'utf-8',
+    );
+    // The brief MUST preserve the single-quoted shell argument verbatim —
+    // inner `;` is INSIDE the quotes so it's not a statement separator,
+    // and the injection guard treats the whole command as safe.
+    const cmdSection = text.match(/required_test_commands:\s*\n((?:\s+-.*\n)+)/);
+    assert.ok(cmdSection, 'required_test_commands section must exist');
+    // The exact command must appear with quotes preserved.
+    assert.match(cmdSection[1], /pytest -k 'login; touch \/tmp\/pwn'/);
+  }));
+
+  it('codex r4 [security]: a decomposer command with bare `;` injection is dropped, not emitted', () => withTmp((dir) => {
+    writeActiveState(dir);
+    writeDesignIntent(dir);
+    writeFileSync(join(dir, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-bare-inject
+    phase_lang: python
+    phase_domain: api
+    test_agent_required: true
+    impact:
+      modify:
+        - path: app/widgets.py
+    interface_contract:
+      produces:
+        - type: function
+          name: f
+          spec: "() -> int"
+    verification_plan:
+      a_items:
+        - criterion: "valid input"
+          type: command
+          command: "pytest tests/x.py; touch /tmp/pwn"
+      s_items:
+        - criterion: "invalid"
+          test_file: tests/x.py
+          test_command: "pytest tests/x.py && rm -rf /"
+`);
+    writeTestAgentBriefs(dir);
+    const text = readFileSync(
+      join(dir, '.mpl', 'mpl', 'phases', 'phase-bare-inject', 'test-agent-brief.yaml'),
+      'utf-8',
+    );
+    const cmdSection = text.match(/required_test_commands:\s*\n((?:\s+-.*\n)+)/);
+    assert.ok(cmdSection);
+    // Both decomposer commands are rejected (bare ; and bare &&).
+    // Fall-back to language default (`pytest`) since no usable command survived.
+    assert.doesNotMatch(cmdSection[1], /touch \/tmp\/pwn/);
+    assert.doesNotMatch(cmdSection[1], /rm -rf/);
+    assert.match(cmdSection[1], /^\s+-\s+"pytest/m);
+  }));
+
   it('codex r1 [security]: a path with shell metacharacters is dropped from the command, not interpolated', () => withTmp((dir) => {
     writeActiveState(dir);
     writeDesignIntent(dir);

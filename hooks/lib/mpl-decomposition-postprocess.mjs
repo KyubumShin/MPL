@@ -491,6 +491,26 @@ function parsePhaseTestAgentRequired(body) {
   return m[1].toLowerCase() === 'true';
 }
 
+// Codex r4 on PR #226 [security]: the earlier `.replace(/['"]/g, '')`
+// stripped ALL quote characters, which silently destroyed inner shell
+// quoting. A safe `pytest -k 'login; touch /tmp/pwn'` (one shell argument)
+// became `pytest -k login; touch /tmp/pwn` (compound command) once written
+// into the brief — and the validator only rejects placeholders, so a
+// downstream consumer would execute the injected payload.
+//
+// Replacement parses YAML scalars conservatively: at most strip one
+// matching wrapping pair of `"..."` or `'...'`. Inner quotes survive.
+function stripScalar(v) {
+  const t = String(v || '').trim();
+  if (t.length >= 2 && (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  )) {
+    return t.slice(1, -1);
+  }
+  return t;
+}
+
 function parseProducesEntries(body) {
   // Parse `interface_contract.produces:` block within a phase body.
   // Codex r3 on PR #226 [contract-break]: the canonical decomposer
@@ -520,13 +540,13 @@ function parseProducesEntries(body) {
     if (itemMatch) {
       const [, key, val] = itemMatch;
       cur = {};
-      cur[key] = val.trim().replace(/['"]/g, '');
+      cur[key] = stripScalar(val);
       out.push(cur);
       continue;
     }
     if (cur && /^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i.test(line)) {
       const [, key, val] = line.match(/^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i);
-      cur[key] = val.trim().replace(/['"]/g, '');
+      cur[key] = stripScalar(val);
     }
   }
   // Map each entry to the brief's interface_contracts shape:
@@ -555,7 +575,7 @@ function parseImpactList(body, key) {
       break;
     }
     const m = line.match(/^\s*-\s+(.+)$/);
-    if (m) out.push(m[1].trim().replace(/['"]/g, ''));
+    if (m) out.push(stripScalar(m[1]));
   }
   return out;
 }
@@ -592,13 +612,13 @@ function parseAsItemsBlock(body, key) {
     if (itemMatch) {
       const [, k, v] = itemMatch;
       cur = {};
-      cur[k] = v.trim().replace(/['"]/g, '');
+      cur[k] = stripScalar(v);
       out.push(cur);
       continue;
     }
     if (cur && /^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i.test(line)) {
       const [, k, v] = line.match(/^\s+([a-z_][a-z0-9_]*)\s*:\s*(.+)$/i);
-      cur[k] = v.trim().replace(/['"]/g, '');
+      cur[k] = stripScalar(v);
     }
   }
   const prefix = key === 's_items' ? 'S' : 'A';
@@ -626,7 +646,7 @@ function parseProbingHints(body) {
       break;
     }
     const m = line.match(/^\s*-\s+(.+)$/);
-    if (m) out.push(m[1].trim().replace(/['"]/g, ''));
+    if (m) out.push(stripScalar(m[1]));
   }
   return out;
 }
@@ -732,15 +752,43 @@ function buildBriefFromPhaseBlock(phase, body) {
   // -k case`). Prefer those over the language-derived default — if at
   // least one S-item has a concrete `test_command`, use the de-duplicated
   // set; otherwise fall back to `deriveTestCommandsForPhase`.
+  //
+  // Codex r4 on PR #226 [security]: even with proper YAML scalar parsing,
+  // command strings are still ultimately consumed by the test-agent as
+  // shell commands. Reject decomposer commands that contain shell
+  // metacharacters consistent with multi-statement injection patterns
+  // (`;` followed by another command, backticks, `$(...)`, `&&`/`||`
+  // at top level). Borderline metacharacters (`|`, `>`, `<`) are
+  // common in legitimate testing pipelines so they're allowed.
+  function isLikelyInjection(cmd) {
+    // Detect statement separators not inside a single-quoted segment.
+    // Simplified: if `;` appears outside any quote, treat as suspicious.
+    let inSingle = false;
+    let inDouble = false;
+    for (let i = 0; i < cmd.length; i++) {
+      const ch = cmd[i];
+      if (ch === "'" && !inDouble) inSingle = !inSingle;
+      else if (ch === '"' && !inSingle) inDouble = !inDouble;
+      else if (!inSingle && !inDouble) {
+        if (ch === ';') return true;
+        if (ch === '`') return true;
+        if (ch === '$' && cmd[i + 1] === '(') return true;
+        if ((ch === '&' && cmd[i + 1] === '&') || (ch === '|' && cmd[i + 1] === '|')) return true;
+      }
+    }
+    return false;
+  }
   const sItemCommands = sItems
     .map((it) => it.command)
     .filter((c) => typeof c === 'string' && c.trim().length >= 5)
-    .map((c) => c.trim());
+    .map((c) => c.trim())
+    .filter((c) => !isLikelyInjection(c));
   const dedupedSItemCommands = [...new Set(sItemCommands)];
   const aItemCommands = aItems
     .map((it) => it.command)
     .filter((c) => typeof c === 'string' && c.trim().length >= 5)
-    .map((c) => c.trim());
+    .map((c) => c.trim())
+    .filter((c) => !isLikelyInjection(c));
   const dedupedAItemCommands = [...new Set(aItemCommands)];
   const decomposerCommands = [...dedupedSItemCommands, ...dedupedAItemCommands];
   const requiredTestCommands = decomposerCommands.length > 0
