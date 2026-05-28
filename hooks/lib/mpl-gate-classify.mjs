@@ -177,47 +177,35 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
  */
 export function classifyGateCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
-  // #220 + codex r1 [data-integrity]: composite / pipe / subshell /
-  // background / process-substitution forms must fail closed at the
-  // strict level. Empirically `npm test; git commit -m e2e` had its
-  // head extracted as `npm` (in the allowlist), then the family
-  // regex matched `e2e` from the downstream commit message and
-  // classified as hard3 — a real masquerade. Manual gate evidence is
-  // a single command; recorder events accept composites via the
-  // loose path.
+  // #220 + codex r5 on PR #231 [contract-break]: strict and recorder
+  // paths share the same canonicalization (`stripNonExecutedSuffix`)
+  // so legitimate recorder-produced evidence like
+  // `npx playwright test | tee output.log` round-trips: the recorder
+  // classifies it as hard3, and a later I12 STATE_WRITE check
+  // re-classifies the SAME stored string as hard3 too (instead of
+  // null from a fail-closed reject).
   //
-  // Reject any of:
-  //   `;` (statement separator)
-  //   newline / CR (also statement separator in shell)
-  //   `&&` / `||` (boolean chains)
-  //   single `&` (background — splits the command line)
-  //   backticks / `$(` (command substitution)
-  //   `<(` / `>(` (process substitution)
-  //   `|` (pipe)
-  //   `{` / `}` (brace grouping)
-  // The presence of `(` covers `$(...)`, `<(...)`, `>(...)`, plain
-  // subshell `(...)` — fail closed for any unquoted shell grouping
-  // or substitution syntax.
-  //
-  // Codex r2 on PR #231 [data-integrity]: redirection (`>`, `<`, `2>`)
-  // and shell comments (`#`) leave the family regex scanning text that
-  // the shell never executes — `npm test > playwright` and
-  // `npm test # e2e` masquerade as hard3 even though `playwright` /
-  // `e2e` is in a redirect target / comment, not a command. Reject
-  // those too. Manual gate evidence is a single command with no
-  // redirection or comment; legitimate redirection (test output to
-  // log) belongs in the recorder path.
-  if (/[\n\r;|&`(){}<>#]/.test(command)) return null;
-  const head = extractCommandHead(command);
+  // Manual masquerade is still blocked because:
+  //   - The trim cuts at the first control / redirect / comment
+  //     boundary, so downstream-keyword payloads never reach the
+  //     family regex.
+  //   - The head allowlist still applies — `node -e "npm test"` /
+  //     `python -c "..."` still null (head not allowlisted).
+  //   - The leading simple command's family then drives the
+  //     classification; a manual write claiming hard3 with a
+  //     leading `npm test` resolves to hard2 → I12 mismatch.
+  const canonical = stripNonExecutedSuffix(command);
+  if (!canonical.trim()) return null;
+  const head = extractCommandHead(canonical);
   if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
-  // Codex r7: even with a non-denied head, the head MUST be in the
-  // explicit allowlist. `node`, `python`, `ruby`, `perl`, etc. are NOT
-  // accepted manual gate evidence because their `-e`/`-c` forms can
-  // contain arbitrary text that the family regex would erroneously
-  // match.
+  // Codex r7 on PR #219: even with a non-denied head, the head MUST be
+  // in the explicit allowlist. `node`, `python`, `ruby`, `perl`, etc.
+  // are NOT accepted manual gate evidence because their `-e`/`-c`
+  // forms can contain arbitrary text that the family regex would
+  // erroneously match.
   if (!STRICT_GATE_HEAD_ALLOWLIST.has(head)) return null;
-  return matchFamilyRegex(command);
+  return matchFamilyRegex(canonical);
 }
 
 /**

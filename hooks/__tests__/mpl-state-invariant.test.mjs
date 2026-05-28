@@ -351,67 +351,86 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
-  it('#220: composite shell forms (semicolon / && / ||) are rejected at the strict level', () => {
-    // Empirical bypass: `npm test; git commit -m e2e` has head `npm`
-    // (allowlisted) but the family regex sees `e2e` downstream and
-    // classifies as hard3. Manual gate evidence is a single command;
-    // composite/pipe/subshell shells fail closed.
-    for (const cmd of [
-      'npm test; git commit -m e2e',
-      'npm test && git commit -m playwright',
-      'npm run build || echo failed',
-      'npm test; touch e2e.json',
-      'tsc --noEmit; echo "playwright"',
-    ]) {
+  it('#220: composite shell masquerade — claimed family caught by family mismatch on leading command', () => {
+    // Codex r5 on PR #231 [contract-break] forced unification:
+    // strict path now trims at the first separator/redirect/comment
+    // and classifies the leading simple command. A manual write that
+    // claimed hard3 via downstream `git commit -m e2e` now resolves
+    // to whatever the leading command's family is, and the I12 family
+    // mismatch fires when that doesn't match the claimed slot.
+    const cases = [
+      { cmd: 'npm test; git commit -m e2e',           wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test && git commit -m playwright',  wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test; touch e2e.json',              wrongSlot: 'hard3_resilience' },
+      { cmd: 'tsc --noEmit; echo "playwright"',       wrongSlot: 'hard3_resilience' },
+      // Leading head=echo not in allowlist → null classification → mismatch.
+      { cmd: 'echo malicious; npm test',              wrongSlot: 'hard2_coverage' },
+    ];
+    for (const { cmd, wrongSlot } of cases) {
       const r = checkInvariants({
-        gate_results: {
-          hard2_coverage: gateEntry(cmd),
-        },
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
       }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
       const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
-      assert.ok(v, `composite shell form must be rejected at strict level: ${cmd}`);
+      assert.ok(v, `composite masquerade claiming wrong slot must mismatch: ${cmd} → ${wrongSlot}`);
     }
   });
 
-  it('#220: pipes and command substitution are rejected at the strict level', () => {
-    for (const cmd of [
-      'npm test | tee output.log',
-      'echo "$(npm test)"',
-      'cat fake-log | grep e2e',
-      'npm test `echo --quiet`',
-    ]) {
+  it('#220: pipes / command substitution masquerade — caught by mismatch', () => {
+    const cases = [
+      { cmd: 'echo "$(npm test)"',           wrongSlot: 'hard2_coverage' },
+      { cmd: 'cat fake-log | grep e2e',      wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test `echo --quiet`',      wrongSlot: 'hard3_resilience' }, // claims hard3 via backtick text
+    ];
+    for (const { cmd, wrongSlot } of cases) {
       const r = checkInvariants({
-        gate_results: {
-          hard2_coverage: gateEntry(cmd),
-        },
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
       }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
       const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
-      assert.ok(v, `pipe / command substitution must be rejected: ${cmd}`);
+      assert.ok(v, `pipe/substitution claiming wrong slot must mismatch: ${cmd} → ${wrongSlot}`);
     }
   });
 
-  it('#220 codex r1 [data-integrity]: newline / single & / process substitution rejected at strict level', () => {
-    // Codex r1 on PR #231 expanded the bypass list beyond `;` / `&&` /
-    // `||` / `|` / backticks / `$(` to:
-    //  - newline (also a statement separator in bash)
-    //  - single `&` (background — splits the command line)
-    //  - process substitution `<(...)` / `>(...)`
-    //  - brace grouping `{...}`
-    for (const cmd of [
-      'npm test\ngit commit -m e2e',
-      'npm test\rgit commit -m playwright',
-      'npm test & git commit -m e2e',
-      'npm test <(echo e2e)',
-      'npm test >(touch e2e.out)',
-      '{ npm test; git commit -m e2e; }',
-    ]) {
+  it('#220 codex r5 [contract-break]: recorder-produced pipe/redirect commands round-trip through strict (no I12 false-block)', () => {
+    // Codex r5 on PR #231: the previous strict implementation FAIL-CLOSED
+    // on any shell metachar, so a legitimate recorder write like
+    // `npx playwright test | tee output.log` (recorder classifies as
+    // hard3) failed I12 on the next STATE_WRITE. Strict now uses the
+    // same `stripNonExecutedSuffix` canonicalizer so the stored
+    // command re-classifies identically.
+    const cases = [
+      { cmd: 'npx playwright test | tee output.log', slot: 'hard3_resilience' },
+      { cmd: 'npx playwright test > playwright.log',  slot: 'hard3_resilience' },
+      { cmd: 'npm test | grep PASS',                  slot: 'hard2_coverage' },
+      { cmd: 'npm test > unit.log',                   slot: 'hard2_coverage' },
+      { cmd: 'npm test 2> stderr.log',                slot: 'hard2_coverage' },
+    ];
+    for (const { cmd, slot } of cases) {
       const r = checkInvariants({
-        gate_results: {
-          hard2_coverage: gateEntry(cmd),
-        },
+        gate_results: { [slot]: gateEntry(cmd) },
       }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
       const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
-      assert.ok(v, `extended bypass shape must be rejected: ${JSON.stringify(cmd)}`);
+      assert.ok(!v, `legitimate recorder command must round-trip: ${cmd} in ${slot}`);
+    }
+  });
+
+  it('#220 codex r1 [data-integrity]: newline / single & / process substitution — mismatch when slot claim is wrong', () => {
+    // r1 bypass shapes are caught the same way: trim cuts at the
+    // separator, leading command resolves to its real family, slot
+    // mismatch fires.
+    const cases = [
+      { cmd: 'npm test\ngit commit -m e2e',                wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test\rgit commit -m playwright',         wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test & git commit -m e2e',               wrongSlot: 'hard3_resilience' },
+      // Process substitution opens with `(` → trim makes leading empty → null → mismatch.
+      { cmd: 'npm test <(echo e2e)',                       wrongSlot: 'hard3_resilience' },
+      { cmd: '{ npm test; git commit -m e2e; }',           wrongSlot: 'hard3_resilience' },
+    ];
+    for (const { cmd, wrongSlot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `extended bypass claiming wrong slot must mismatch: ${JSON.stringify(cmd)} → ${wrongSlot}`);
     }
   });
 
@@ -450,33 +469,32 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     assert.equal(classifyRecordedCommand('npx playwright test | tee output.log'), 'hard3_resilience');
   });
 
-  it('#220 codex r2 [data-integrity]: redirection and comment text rejected at strict level', () => {
-    // Codex r2 on PR #231: `npm test > playwright`, `npm test 2> e2e`,
-    // `npm test # e2e` — the shell never executes the trailing text,
-    // but the family regex saw the keyword and classified as hard3.
-    // Redirection / comments are not legitimate manual gate evidence.
-    for (const slot of ['hard2_coverage', 'hard3_resilience']) {
-      for (const cmd of [
-        'npm test > playwright',
-        'npm test 2> e2e.log',
-        'npm test > /tmp/playwright.out',
-        'npm test # e2e',
-        'npm test < input.txt',
-        'tsc --noEmit > playwright.txt',
-      ]) {
-        const r = checkInvariants({
-          gate_results: { [slot]: gateEntry(cmd) },
-        }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
-        const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
-        assert.ok(v, `redirection/comment masquerade must reject in ${slot}: ${cmd}`);
-      }
+  it('#220 codex r2 [data-integrity]: redirect/comment masquerade — leading command resolves to true family, claimed family must match', () => {
+    // After r5 unification, redirect/comment forms get trimmed before
+    // family-matching. `npm test > playwright` resolves to hard2; a
+    // claim of hard3_resilience is now a slot mismatch (caught by I12).
+    // Same command claimed in hard2_coverage correctly passes.
+    const cases = [
+      { cmd: 'npm test > playwright',           wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test 2> e2e.log',             wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test > /tmp/playwright.out',  wrongSlot: 'hard3_resilience' },
+      { cmd: 'npm test # e2e',                  wrongSlot: 'hard3_resilience' },
+      { cmd: 'tsc --noEmit > playwright.txt',   wrongSlot: 'hard3_resilience' },
+    ];
+    for (const { cmd, wrongSlot } of cases) {
+      const r = checkInvariants({
+        gate_results: { [wrongSlot]: gateEntry(cmd) },
+      }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+      const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+      assert.ok(v, `redirect/comment claiming wrong slot must mismatch: ${cmd} → ${wrongSlot}`);
     }
   });
 
-  it('#220 codex r1 [data-integrity]: bypass shapes also rejected when placed directly in hard3_resilience slot', () => {
-    // Codex recommended: previous tests only put bypass commands in
-    // hard2_coverage (a slot mismatch). Verify the strict gate also
-    // rejects them when matched against their would-be claimed slot.
+  it('#220 codex r1 [data-integrity]: bypass shapes claimed in hard3 slot caught by family mismatch', () => {
+    // After r5 unification, bypass shapes resolve to the leading
+    // command's family (hard2 for `npm test`-leading forms, hard1
+    // for `tsc`-leading forms, null for non-allowlisted leading
+    // heads). A hard3_resilience claim is therefore always wrong.
     for (const cmd of [
       'npm test\ngit commit -m e2e',
       'npm test & touch e2e.json',
@@ -489,7 +507,7 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
         },
       }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
       const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
-      assert.ok(v, `bypass placed in hard3 slot must still be rejected: ${JSON.stringify(cmd)}`);
+      assert.ok(v, `bypass placed in hard3 slot must mismatch: ${JSON.stringify(cmd)}`);
     }
   });
 
