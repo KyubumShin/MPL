@@ -49,5 +49,9 @@ export const stateWriteTool = {
 
 export async function handleStateWrite(args: { cwd: string; patch: Record<string, unknown> }) {
   const result = writeState(args.cwd, args.patch);
+  // #223: when writeState rejects on I13 (Phase 0 artifacts missing for
+  // a protected current_phase), surface the reason verbatim. Existing
+  // success/failure shape is preserved; only the optional `reason`
+  // field is new.
   return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
 }
