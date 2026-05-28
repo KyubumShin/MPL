@@ -415,6 +415,29 @@ describe('I12 gate command-family mismatch (Exp22 R13 / #209)', () => {
     }
   });
 
+  it('#220 codex r2 [data-integrity]: redirection and comment text rejected at strict level', () => {
+    // Codex r2 on PR #231: `npm test > playwright`, `npm test 2> e2e`,
+    // `npm test # e2e` — the shell never executes the trailing text,
+    // but the family regex saw the keyword and classified as hard3.
+    // Redirection / comments are not legitimate manual gate evidence.
+    for (const slot of ['hard2_coverage', 'hard3_resilience']) {
+      for (const cmd of [
+        'npm test > playwright',
+        'npm test 2> e2e.log',
+        'npm test > /tmp/playwright.out',
+        'npm test # e2e',
+        'npm test < input.txt',
+        'tsc --noEmit > playwright.txt',
+      ]) {
+        const r = checkInvariants({
+          gate_results: { [slot]: gateEntry(cmd) },
+        }, { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
+        const v = r.violations.find((x) => x.id === VIOLATION_IDS.GATE_COMMAND_FAMILY_MISMATCH);
+        assert.ok(v, `redirection/comment masquerade must reject in ${slot}: ${cmd}`);
+      }
+    }
+  });
+
   it('#220 codex r1 [data-integrity]: bypass shapes also rejected when placed directly in hard3_resilience slot', () => {
     // Codex recommended: previous tests only put bypass commands in
     // hard2_coverage (a slot mismatch). Verify the strict gate also

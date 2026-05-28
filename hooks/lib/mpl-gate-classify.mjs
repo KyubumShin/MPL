@@ -198,7 +198,16 @@ export function classifyGateCommand(command) {
   // The presence of `(` covers `$(...)`, `<(...)`, `>(...)`, plain
   // subshell `(...)` — fail closed for any unquoted shell grouping
   // or substitution syntax.
-  if (/[\n\r;|&`(){}]/.test(command)) return null;
+  //
+  // Codex r2 on PR #231 [data-integrity]: redirection (`>`, `<`, `2>`)
+  // and shell comments (`#`) leave the family regex scanning text that
+  // the shell never executes — `npm test > playwright` and
+  // `npm test # e2e` masquerade as hard3 even though `playwright` /
+  // `e2e` is in a redirect target / comment, not a command. Reject
+  // those too. Manual gate evidence is a single command with no
+  // redirection or comment; legitimate redirection (test output to
+  // log) belongs in the recorder path.
+  if (/[\n\r;|&`(){}<>#]/.test(command)) return null;
   const head = extractCommandHead(command);
   if (!head) return null;
   if (NON_GATE_HEAD_COMMANDS.has(head)) return null;
