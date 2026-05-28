@@ -27,8 +27,14 @@
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
+// Codex r7 on PR #222 [contract-break]: phase1b-plan is the
+// planning-preparation phase where decomposition produces the contracts
+// — gating phase1b-plan on contracts being already present made the
+// guard a chicken-and-egg block. The watershed is `phase2-sprint`
+// onward: by sprint time, decomposition has run and contracts exist.
+// phase1b-plan stays exempt (along with phase1-plan / phase1a-research /
+// mpl-decompose) so the planning path can produce the artifacts.
 export const REQUIRES_PHASE0_ARTIFACTS = Object.freeze(new Set([
-  'phase1b-plan',
   'phase2-sprint',
   'phase3-gate',
   'phase4-fix',

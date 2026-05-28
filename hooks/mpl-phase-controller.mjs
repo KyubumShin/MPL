@@ -425,7 +425,9 @@ async function main() {
 
       // BUG-6 fix: handle research error state to prevent infinite loop
       if (research.error) {
-        if (emitPhase0BlockIfNeeded(cwd, 'phase1b-plan')) return;
+        // codex r7 on PR #222: phase1b-plan is exempt from the Phase 0
+        // artifact guard (it's the planning phase that produces
+        // decomposition + contracts). Transition unconditionally.
         writeState(cwd, { current_phase: 'phase1b-plan', research: { status: 'skipped' } });
         console.log(JSON.stringify({
           continue: true,
@@ -436,9 +438,8 @@ async function main() {
 
       if (research.status === 'completed' || research.status === 'skipped') {
         // Research done → transition to Phase 1-B: Plan Generation
-        if (emitPhase0BlockIfNeeded(cwd, 'phase1b-plan')) return;
-                if (emitPhase0BlockIfNeeded(cwd, 'phase1b-plan')) return;
-                writeState(cwd, { current_phase: 'phase1b-plan' });
+        // (phase1b-plan exempt; see comment above)
+        writeState(cwd, { current_phase: 'phase1b-plan' });
         const msg = research.status === 'skipped'
           ? '[MPL] Research skipped. Transitioning to Phase 1-B: Plan Generation.'
           : `[MPL] Research completed (${research.stages_completed?.length || 0} stages, ${research.findings_count || 0} findings, ${research.sources_count || 0} sources). Transitioning to Phase 1-B: Plan Generation.`;

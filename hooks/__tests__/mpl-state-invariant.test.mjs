@@ -546,9 +546,14 @@ describe('I13 fast-track Phase 0 artifacts (Exp22 R11 / #210)', () => {
     }
   });
 
-  it('Phase 0 itself and pre-Phase-0 lifecycle markers are exempt', () => {
+  it('Phase 0, planning phases, and pre-sprint lifecycle markers are exempt', () => {
+    // codex r7 on PR #222: phase1b-plan is the phase that PRODUCES
+    // contracts via decomposition, so it cannot be gated on contracts
+    // already being present (chicken-and-egg). It's exempt along with
+    // mpl-init / mpl-ambiguity-resolve / mpl-decompose / phase1-plan /
+    // phase1a-research.
     for (const phase of ['mpl-init', 'mpl-ambiguity-resolve', 'mpl-decompose',
-                         'phase1-plan', 'phase1a-research']) {
+                         'phase1-plan', 'phase1a-research', 'phase1b-plan']) {
       const r = checkInvariants({ current_phase: phase },
         { cwd: tmp, trigger: TRIGGERS.STATE_WRITE });
       assert.ok(

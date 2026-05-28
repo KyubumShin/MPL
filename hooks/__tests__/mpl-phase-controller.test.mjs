@@ -450,22 +450,21 @@ describe('I13 phase0 artifacts gate the controller transition (Exp22 R11 / #210)
   beforeEach(() => { tmpDir = mkdtempSync(join(tmpdir(), 'mpl-i13-ctrl-')); });
   afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
-  it('phase1a-research → phase1b-plan transition is blocked when Phase 0 artifacts are missing', () => {
-    // codex r1 on PR #222: phase-controller writeState bypasses
-    // PreToolUse; the in-controller guard must catch the transition.
+  it('phase1a-research → phase1b-plan transition is EXEMPT from the Phase 0 guard (codex r7)', () => {
+    // codex r7 on PR #222 [contract-break]: phase1b-plan is the
+    // planning preparation phase that PRODUCES contracts via the
+    // decomposer. Gating phase1b-plan on contracts being already
+    // present is a chicken-and-egg block — removed from
+    // REQUIRES_PHASE0_ARTIFACTS. The transition lands even when
+    // artifacts haven't yet been produced.
     const out = runStopHook(tmpDir, {
       current_phase: 'phase1a-research',
       research: { status: 'skipped' },
     }, { skipPhase0Seed: true });
-    assert.match(out.stopReason, /\[MPL I13\] Cannot transition to phase1b-plan/);
-    assert.match(out.stopReason, /raw-scan\.md/);
-    assert.match(out.stopReason, /design-intent\.yaml/);
-    assert.match(out.stopReason, /\.mpl\/contracts/);
-    // The state.json on disk must still be at phase1a-research — the
-    // controller skipped the writeState() because the guard short-circuited.
+    assert.doesNotMatch(out.stopReason, /\[MPL I13\]/,
+      'phase1b-plan transition must not invoke the Phase 0 guard');
     const state = JSON.parse(readFileSync(join(tmpDir, '.mpl', 'state.json'), 'utf-8'));
-    assert.equal(state.current_phase, 'phase1a-research',
-      'controller MUST NOT advance current_phase when artifacts are missing');
+    assert.equal(state.current_phase, 'phase1b-plan');
   });
 
   it('phase2-sprint → phase3-gate (variable nextPhase) is blocked when artifacts missing (codex r2 [data-integrity])', () => {
