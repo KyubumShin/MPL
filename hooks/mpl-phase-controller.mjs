@@ -919,8 +919,13 @@ async function main() {
       const nextCutId = null;
       const nextPhase = 'phase3-gate';
 
-      // codex r2 on PR #222: protect this composite writeState too.
-      if (emitPhase0BlockIfNeeded(cwd, nextPhase)) return;
+      // codex r5/r6 on PR #222: the release-finalize case is guarded at
+      // its TOP (line 740-ish) before any release artifact write. The
+      // r2 post-write guard here was redundant AND harmful — if Phase 0
+      // files were removed between the entry guard and this point, we'd
+      // skip the state update while leaving manifest/snapshot artifacts
+      // on disk (release immutability drift). Drop the post-write guard
+      // and rely on the single entry guard for this case.
       writeState(cwd, {
         release: {
           ...existing,
