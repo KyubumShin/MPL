@@ -452,13 +452,84 @@ phases:
     assert.equal(readState().session_status, 'blocked_hook');
   });
 
-  it('#234: auto-regenerate handler exhausts retry budget on persistent failures', () => {
-    // No decomposition.yaml on disk → writeDerivedDecompositionFields throws.
-    // After AUTO_FIX_RETRY_BUDGET (3) attempts the handler should return failed.
+  it('#234 [data-integrity] codex r2: stale retry_context.recovery from a prior block does NOT poison a fresh auto-regenerate envelope', () => {
+    // Codex r2 on PR #242: writeState uses deepMerge, so a prior
+    // unresolved block's retry_context.recovery.attempts can survive
+    // into a new block's envelope. Without scope-tagging, the budget
+    // check would falsely refuse a fresh recoverable block.
+    writeMinimalDecompositionForDerive();
     writeState(blocked({
       blocked_by_hook: 'mpl-decomposition-postprocess',
       block_code: 'decomposition_derived_stale',
-      retry_context: { recovery: { attempts: 3 } },
+      // Fresh envelope blocked_at:
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        // Stale recovery survived from a different prior block. Note
+        // its block_code / blocked_at do NOT match the current envelope.
+        recovery: {
+          block_code: 'goal_contract_baseline_corrupt',
+          blocked_at: '2026-05-01T00:00:00Z',
+          attempts: 3,
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    // Should NOT report budget exhausted — the stored attempts belong
+    // to a different block. The fresh block must run the auto-fix.
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'recoverable');
+    assert.equal(plan.handler, 'auto_regenerate');
+    assert.equal(plan.attempts, 0);
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+    assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'decomposition-derived.json')), true);
+  });
+
+  it('#234 [data-integrity] codex r2: scope-matched retry_context.recovery is honored', () => {
+    // Sanity check: when the stored recovery DOES match the current
+    // block (same code + blocked_at), the budget enforcement still
+    // works.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          block_code: 'decomposition_derived_stale',
+          blocked_at: '2026-06-01T12:00:00Z',
+          attempts: 3,
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'unsupported');
+    assert.equal(plan.attempts, 3);
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+  });
+
+  it('#234: auto-regenerate handler exhausts retry budget on persistent failures', () => {
+    // No decomposition.yaml on disk → writeDerivedDecompositionFields throws.
+    // After AUTO_FIX_RETRY_BUDGET (3) attempts the handler should return failed.
+    // Recovery state is scope-tagged to the active block (codex r2 fix).
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          block_code: 'decomposition_derived_stale',
+          blocked_at: '2026-06-01T12:00:00Z',
+          attempts: 3,
+        },
+      },
     }));
 
     const result = recoverBlockedHook(tmp);

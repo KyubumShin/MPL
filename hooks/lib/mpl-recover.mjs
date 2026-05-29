@@ -99,13 +99,22 @@ function buildResult(state, patch) {
   };
 }
 
+// Codex r2 on PR #242 [data-integrity]: writeState uses deepMerge,
+// which recursively merges nested plain objects. That means a stale
+// `retry_context.recovery` from a prior, unrelated block survives
+// into a new block's envelope. If that stale `recovery.attempts`
+// happens to be 3, `recoverAutoRegenerate` reports budget-exhausted
+// before ever running the deterministic postprocess on a fresh,
+// recoverable block.
+//
+// Scope recovery state to the active block by tagging it with the
+// block_code + blocked_at. Readers (see `activeRecoveryState`) only
+// trust the stored attempts when the tag matches the current envelope.
 function recoveryPatch(state, { status, reason, instruction, details = {} }) {
   const context = state?.retry_context && typeof state.retry_context === 'object'
     ? jsonClone(state.retry_context)
     : {};
-  const prev = context.recovery && typeof context.recovery === 'object'
-    ? context.recovery
-    : {};
+  const prev = activeRecoveryState(state);
 
   return {
     session_status: 'blocked_hook',
@@ -118,6 +127,9 @@ function recoveryPatch(state, { status, reason, instruction, details = {} }) {
     retry_context: {
       ...context,
       recovery: {
+        // Scope tag — readers compare to current state before trusting.
+        block_code: state.block_code || null,
+        blocked_at: state.blocked_at || null,
         attempts: (Number.isFinite(prev.attempts) ? prev.attempts : 0) + 1,
         last_status: status,
         last_attempt_at: nowIso(),
@@ -126,6 +138,30 @@ function recoveryPatch(state, { status, reason, instruction, details = {} }) {
     },
     blocked_at: state.blocked_at || nowIso(),
   };
+}
+
+// Read the recovery sub-object only when its scope tag matches the
+// current block. Returns `{ attempts: 0 }` (i.e. a fresh slate) when
+// the stored recovery belongs to a different block.
+function activeRecoveryState(state) {
+  const rec = state?.retry_context?.recovery;
+  if (!rec || typeof rec !== 'object') return {};
+  const currentCode = state?.block_code || null;
+  const currentBlockedAt = state?.blocked_at || null;
+  const stampedCode = rec.block_code ?? null;
+  const stampedAt = rec.blocked_at ?? null;
+  // Untagged recovery (pre-codex-r2 patches) is trusted ONLY when the
+  // current block has neither code nor blocked_at — i.e., genuinely
+  // ambiguous. Once either is set, a missing/mismatched tag means the
+  // stored recovery belongs to a different block.
+  if (stampedCode === null && stampedAt === null) {
+    if (currentCode === null && currentBlockedAt === null) return rec;
+    return {};
+  }
+  if (stampedCode === currentCode && stampedAt === currentBlockedAt) {
+    return rec;
+  }
+  return {};
 }
 
 function keepBlocked(cwd, state, opts) {
@@ -567,7 +603,10 @@ function recoverArtifactSchema(cwd, state, { approveUnsafe = false } = {}) {
 // so a permission / disk error doesn't loop forever.
 function recoverAutoRegenerate(cwd, state) {
   const code = state.block_code;
-  const attempts = Number(state?.retry_context?.recovery?.attempts || 0);
+  // Codex r2 [data-integrity]: read attempts only from the
+  // scope-tagged recovery state so stale attempts from a previous
+  // block can't poison a fresh, recoverable envelope.
+  const attempts = Number(activeRecoveryState(state).attempts || 0);
   if (attempts >= AUTO_FIX_RETRY_BUDGET) {
     const reason = `[MPL Recover] Auto-fix budget exhausted for ${code} after ${attempts} attempts; inspect the underlying I/O failure manually.`;
     keepBlocked(cwd, state, {
@@ -861,7 +900,7 @@ export function inspectRecovery(cwd = process.cwd()) {
 
   // #234 new routes:
   if (AUTO_FIX_REGENERATE_CODES.has(code)) {
-    const attempts = Number(state?.retry_context?.recovery?.attempts || 0);
+    const attempts = Number(activeRecoveryState(state).attempts || 0);
     const exhausted = attempts >= AUTO_FIX_RETRY_BUDGET;
     return buildResult(state, {
       status: exhausted ? 'unsupported' : 'recoverable',
