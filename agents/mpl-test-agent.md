@@ -58,18 +58,20 @@ disallowedTools: Task
       - If S-item lacks test_file/test_command: report as INVALID and create test anyway
     - Contract-derived test floor (#239 C1): the number of required
       tests is derived from the phase's `interface_contract`, not a
-      fixed per-domain count. Two schema paths feed it:
-      - **Base floor** — one assertion per
+      fixed per-domain count. **Both** floors below apply — the
+      effective minimum is the larger of the two when both yield a
+      positive count, and meeting one does not waive the other.
+      - **Per-symbol floor** — one assertion per
         `interface_contract.produces[*]` entry (per produced symbol).
         A phase with 2 `produces` entries requires ≥2 assertions.
-      - **Refined floor** — when
-        `interface_contract.contract_files[*]` is non-empty, replace
-        the base count by **one assertion per `(params_key,
-        returns_key)` tuple**, summed across all contract_files. A
-        single contract_file with 1 `params` key × 2 `returns` keys
-        contributes 2 assertions. (The decomposer Output_Schema
-        defines `params` / `returns` only under `contract_files[]` —
-        do NOT look for them on `produces[*]`.)
+      - **Per-boundary-tuple floor** — when
+        `interface_contract.contract_files[*]` is non-empty, every
+        `(params_key, returns_key)` tuple summed across all
+        contract_files must also be covered by an assertion. A single
+        contract_file with 1 `params` key × 2 `returns` keys
+        contributes 2 tuples. (The decomposer Output_Schema defines
+        `params` / `returns` only under `contract_files[]` — do NOT
+        look for them on `produces[*]`.)
       - **Property-based / generator-based tests** count as N
         assertions where N = `cases_generated` in the evidence shape.
       - The per-domain rows below are **guidance**, not minimums —

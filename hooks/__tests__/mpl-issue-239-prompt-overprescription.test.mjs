@@ -84,7 +84,7 @@ test('#239 C1 codex r2 [contract-break]: floor references real decomposer schema
   // (per codex r2 recommendation): params/returns do NOT live on
   // produces[*].
   assert.ok(
-    /do NOT look for them on `produces|not on `produces|not under `produces/i.test(testAgentText),
+    /do\s+NOT\s+look\s+for\s+them\s+on\s+`produces|not\s+on\s+`produces|not\s+under\s+`produces/is.test(testAgentText),
     'test-agent rule must warn that params/returns do NOT live on produces[*]',
   );
 
