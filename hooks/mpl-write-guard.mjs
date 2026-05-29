@@ -577,6 +577,41 @@ async function main() {
   // --- Bash dangerous command check (T-01, v3.8) + #236 A3 ---
   if (isBashTool) {
     const command = toolInput.command || '';
+    // Claude r11 on PR #249 [security]: Claude r9's
+    // decomposer_dispatch forgery guard only covered Write/Edit.
+    // A Bash command like
+    //   `echo '{"decomposer_dispatch":…}' > .mpl/state.json`
+    //   `tee .mpl/state.json <<EOF …`
+    //   `dd of=.mpl/state.json …`
+    //   `node -e 'fs.writeFileSync(".mpl/state.json", …)'`
+    // can still plant the flag through the Bash tool surface.
+    // Refuse any Bash command that mentions BOTH `.mpl/state.json`
+    // AND `decomposer_dispatch`. The MPL hook is the only legitimate
+    // writer of that key — no shell command should ever co-mention
+    // them.
+    if (/\.mpl\/state\.json/.test(command) && /decomposer_dispatch/.test(command)) {
+      const reason =
+        `[MPL #236 A1] Refused Bash that mentions both .mpl/state.json AND ` +
+        `decomposer_dispatch — only mpl-write-guard itself may plant that flag. ` +
+        `Allowing this would let the orchestrator forge the decomposition.yaml ` +
+        `writer-identity check.`;
+      recordBlockedHook(cwd, {
+        hookId: HOOK_ID,
+        phaseId: (readState(cwd) || {}).current_phase,
+        artifact: '.mpl/state.json',
+        code: 'decomposer_dispatch_forgery',
+        reason,
+        resumeInstruction:
+          `Remove the decomposer_dispatch reference from the Bash command. The hook will populate it on Agent(subagent_type='mpl-decomposer') dispatch.`,
+        retryContext: { command },
+      });
+      console.log(JSON.stringify({
+        continue: false,
+        decision: 'block',
+        reason,
+      }));
+      return;
+    }
     // #236 A3: protected-path delete — hard-block regardless of safe-cleanup
     // allowlist. Override via env MPL_FORCE_PURGE=1 set by the operator.
     const protectedTarget = matchesProtectedDelete(command, cwd);

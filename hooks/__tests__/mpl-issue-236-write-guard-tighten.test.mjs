@@ -400,6 +400,49 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A1 claude r11 [security]: Bash that mentions both .mpl/state.json AND decomposer_dispatch is blocked', () => {
+  // Claude r11 [security]: the r9 Write/Edit guard only covered the
+  // Write/Edit tool surface. The orchestrator could still forge the
+  // decomposer_dispatch flag via Bash:
+  //   echo '{"decomposer_dispatch":…}' > .mpl/state.json
+  //   tee .mpl/state.json
+  //   dd of=.mpl/state.json
+  //   node -e 'fs.writeFileSync(".mpl/state.json", …)'
+  // Fix: any Bash command that mentions BOTH `.mpl/state.json` and
+  // `decomposer_dispatch` is rejected. Benign Bash writes to state.json
+  // that don't carry the dispatch key pass through.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'echo decomposer_dispatch > .mpl/state.json',
+      'tee .mpl/state.json <<< decomposer_dispatch',
+      'dd of=.mpl/state.json if=/tmp/decomposer_dispatch.json',
+      'node -e fs.writeFileSync(".mpl/state.json", JSON.stringify({decomposer_dispatch:1}))',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected dispatch-forgery-via-Bash block for: ${command}`,
+      );
+      assert.match(decision.reason, /decomposer_dispatch/);
+    }
+    // Sanity: Bash that touches state.json WITHOUT decomposer_dispatch passes.
+    const benign = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'echo hello > .mpl/state.json' },
+    });
+    assert.notEqual(benign.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r11 [data-integrity]: tar --remove-files and rsync --remove-source-files are blocked', () => {
   // Codex r11: tar with --remove-files deletes the source file after
   // archiving; rsync with --remove-source-files does the same. Plain
