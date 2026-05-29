@@ -609,6 +609,45 @@ async function main() {
     // current_phase). This guards the deactivation chain even when
     // current_phase has been flipped to completed/cancelled.
     const isMplDir = existsSync(join(cwd, '.mpl'));
+
+    // Claude r14 on PR #249 [security]: also move the decomposition.yaml
+    // writer-identity check BEFORE the isMplActive short-circuit. The
+    // r13 state.json guard alone is insufficient because an attacker
+    // can deactivate MPL via Bash (command-substitution + cd + bare
+    // filename redirect bypasses the static normalize) and then
+    // direct-Write decomposition.yaml — the post-isMplActive
+    // writer-identity check never runs. Apply the same pre-active
+    // guard shape used by the state.json early-return.
+    if (earlyFilePath && DECOMPOSITION_FILE_REGEX.test(earlyFilePath) && isMplDir) {
+      const earlyState = readState(cwd) || {};
+      const earlyCallerTranscript = typeof data.transcript_path === 'string'
+        ? data.transcript_path
+        : (typeof data.transcriptPath === 'string' ? data.transcriptPath : null);
+      if (!isDecomposerDispatchActive(earlyState, earlyCallerTranscript)) {
+        const reason =
+          `[MPL #236 A1] Refused direct ${toolName} of decomposition.yaml: ` +
+          `only the mpl-decomposer subagent may emit this file. ` +
+          `Dispatch via Agent(subagent_type='mpl-decomposer', prompt='...') ` +
+          `and let it write.`;
+        recordBlockedHook(cwd, {
+          hookId: HOOK_ID,
+          phaseId: earlyState?.current_phase,
+          artifact: earlyFilePath,
+          code: 'decomposition_writer_violation',
+          reason,
+          resumeInstruction:
+            `Dispatch Agent(subagent_type='mpl-decomposer') and let it produce decomposition.yaml; do not Edit/Write it directly.`,
+          retryContext: { file_path: earlyFilePath, tool: toolName },
+        });
+        console.log(JSON.stringify({
+          continue: false,
+          decision: 'block',
+          reason,
+        }));
+        return;
+      }
+    }
+
     if (earlyFilePath && STATE_FILE_REGEX.test(earlyFilePath) && isMplDir) {
       const reason =
         `[MPL #236 A1] Refused direct ${toolName} of .mpl/state.json: only ` +
@@ -720,11 +759,16 @@ async function main() {
     // `printf X | base64 -d > .mpl/state.json` (head safe but redirect
     // target is state.json) AND novel writer utilities (install / pax /
     // cpio / touch / mktemp / etc., head not safe-read).
+    // Codex r15 on PR #249 [security]: removed `find` from the
+    // safe-read set. `find .mpl/state.json -exec sh -c 'echo forged
+    // > "$1"' _ {} \;` would otherwise pass — `find` head is safe-
+    // read but `-exec` invokes arbitrary shell that writes via a
+    // runtime-substituted `{}` operand which the static regex check
+    // can't see.
     const SAFE_READ_HEADS = new Set([
       'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
       'grep', 'rg', 'ag', 'ack',
       'jq', 'yq',
-      'find', // -delete is already rejected upstream as destructive
       'less', 'more',
       'sort', 'uniq', 'tac', 'nl',
       'diff', 'comm', 'sdiff',

@@ -448,6 +448,60 @@ test('#236 A1 claude r13 [security]: 2-step deactivation chain via Write/Edit is
   }
 });
 
+test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check runs BEFORE isMplActive short-circuit', () => {
+  // Claude r14: if Bash deactivation succeeds (claude r14 found a
+  // cmd-substitution bypass), step 2 — direct Write decomposition.yaml —
+  // must still block. The decomposition writer-identity check is now
+  // mirrored before the isMplActive short-circuit, the same shape as
+  // the r13 state.json guard.
+  const cwd = freshWorkspace();
+  try {
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify({ current_phase: 'completed' }),
+    );
+    const decision = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: '/tmp/orch.jsonl',
+      tool_input: {
+        file_path: '.mpl/mpl/decomposition.yaml',
+        content: 'forged',
+      },
+    });
+    assert.equal(decision.decision, 'block');
+    assert.match(decision.reason, /#236 A1/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 codex r15 [security]: find -exec writing state.json is blocked (find removed from safe-read)', () => {
+  // Codex r15: `find` was in SAFE_READ_HEADS but `-exec sh -c '… > $1'`
+  // bypassed the static regex check (target was a runtime-substituted
+  // `{}` placeholder). Fix: remove find from SAFE_READ_HEADS so any
+  // find mentioning state.json blocks.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'find .mpl/state.json -exec sh -c \'echo forged\' _ {} ;',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected find block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r14 [security]: structural safe-read-allowlist closes unbounded writer-verb gap', () => {
   // Codex r14: the verb allowlist (rm/mv/tee/dd/install/...) is
   // unbounded — every round another writer utility surfaces. The
