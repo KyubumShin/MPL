@@ -52,9 +52,53 @@ test('#239 C1: mpl-test-agent prescribes the contract-derived assertion floor', 
   );
   // The AC rule: one assertion per (params, returns) tuple.
   assert.ok(
-    /params.*returns|\(params,\s*returns\)/i.test(text),
+    /params.*returns|\(params_key,\s*returns_key\)|\(params,\s*returns\)/i.test(text),
     'agents/mpl-test-agent.md should describe the per-(params, returns) rule',
   );
+});
+
+test('#239 C1 codex r2 [contract-break]: floor references real decomposer schema paths', () => {
+  // Codex r2: the C1 rule originally pointed at
+  // `interface_contract.produces[*].params/returns`. The decomposer
+  // Output_Schema declares `produces[*]` as `{type, name, spec}` —
+  // params/returns live under `contract_files[*]`. Pointing at a
+  // non-existent path leaves the floor uncomputable, silently
+  // permitting 0-test phases for any non-empty contract.
+  const testAgentText = readPrompt('agents/mpl-test-agent.md');
+  const decomposerText = readPrompt('agents/mpl-decomposer.md');
+
+  // The rule must explicitly name BOTH schema sources:
+  // - produces[*] for the base per-symbol floor
+  // - contract_files[*] for the refined per-tuple floor
+  assert.ok(
+    /interface_contract\.produces\[\*\]/.test(testAgentText) ||
+      /produces\[\*\]\s+entry/i.test(testAgentText),
+    'test-agent rule must name `interface_contract.produces[*]`',
+  );
+  assert.ok(
+    /interface_contract\.contract_files\[\*\]/.test(testAgentText) ||
+      /contract_files\[\*\]/.test(testAgentText),
+    'test-agent rule must name `contract_files[*]` for params/returns derivation',
+  );
+  // It must also explicitly warn against the original mis-pointing
+  // (per codex r2 recommendation): params/returns do NOT live on
+  // produces[*].
+  assert.ok(
+    /do NOT look for them on `produces|not on `produces|not under `produces/i.test(testAgentText),
+    'test-agent rule must warn that params/returns do NOT live on produces[*]',
+  );
+
+  // Decomposer schema sanity — verify the assumption the rule rests
+  // on actually matches the decomposer Output_Schema. If a future
+  // edit moves params/returns up to produces[*], this test will
+  // catch the rule going stale.
+  const producesBlock = decomposerText.match(/produces:\s*\n(?:\s+-\s+\w+:\s+\w+\s*\n){2,}/);
+  if (producesBlock) {
+    assert.ok(
+      !/params:|returns:/i.test(producesBlock[0]),
+      'decomposer Output_Schema produces[*] should not have params/returns (verifies the C1 assumption)',
+    );
+  }
 });
 
 test('#239 C1: mandatory-domain failure mode no longer mandates a fixed count', () => {

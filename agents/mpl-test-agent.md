@@ -58,12 +58,20 @@ disallowedTools: Task
       - If S-item lacks test_file/test_command: report as INVALID and create test anyway
     - Contract-derived test floor (#239 C1): the number of required
       tests is derived from the phase's `interface_contract`, not a
-      fixed per-domain count. Concretely:
-      - For each `produces[*]` entry, emit **one assertion per
-        (params, returns) tuple key**. A contract with 1 produces
-        entry × 2 returns shape requires 2 assertions.
-      - For property-based / generator-based tests, count the test as
-        N assertions where N = `cases_generated` in the evidence shape.
+      fixed per-domain count. Two schema paths feed it:
+      - **Base floor** — one assertion per
+        `interface_contract.produces[*]` entry (per produced symbol).
+        A phase with 2 `produces` entries requires ≥2 assertions.
+      - **Refined floor** — when
+        `interface_contract.contract_files[*]` is non-empty, replace
+        the base count by **one assertion per `(params_key,
+        returns_key)` tuple**, summed across all contract_files. A
+        single contract_file with 1 `params` key × 2 `returns` keys
+        contributes 2 assertions. (The decomposer Output_Schema
+        defines `params` / `returns` only under `contract_files[]` —
+        do NOT look for them on `produces[*]`.)
+      - **Property-based / generator-based tests** count as N
+        assertions where N = `cases_generated` in the evidence shape.
       - The per-domain rows below are **guidance**, not minimums —
         use them as starting templates when the contract is sparse:
       | phase_domain | Guidance starting set (override with contract derivation) |
@@ -200,9 +208,11 @@ disallowedTools: Task
     - Missing edge cases: only testing the happy path from the interface contract.
     - Returning 0 tests for a phase whose `interface_contract.produces`
       lists ANY callable surface: every produces entry MUST have at
-      least one assertion (one per (params, returns) tuple key). A
-      domain label alone no longer mandates a minimum count — the
-      contract does (#239 C1).
+      least one assertion. When `contract_files[*]` is also non-empty,
+      every `(params_key, returns_key)` tuple summed across
+      contract_files must be covered by an assertion too. A domain
+      label alone no longer mandates a minimum count — the contract
+      does (#239 C1).
     - Skipping S-items: every S-item MUST have a corresponding test. "Where feasible" is NOT an acceptable escape — if a scenario cannot be tested, explain WHY and reclassify as H-item.
     - Self-rationalization (AP-VERIFY-01): praising the implementation instead of testing it rigorously. See the AP-VERIFY-01 block above for the evidence-replacement protocol.
   </Failure_Modes_To_Avoid>
