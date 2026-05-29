@@ -1,3 +1,5 @@
+import { loadConfig } from './mpl-config.mjs';
+
 /**
  * Shared Bash command → gate-family classifier.
  *
@@ -147,7 +149,14 @@ function extractCommandHead(command) {
 // a denylist; it explicitly enumerates the only heads we accept as
 // manual gate evidence. The recorder path (`classifyRecordedCommand`)
 // still uses regex-only matching to keep wrapper invocations working.
-const STRICT_GATE_HEAD_ALLOWLIST = new Set([
+//
+// #240 A4: the BUILTIN set covers JS/TS/Python/Rust/Go ecosystems.
+// Projects on Bun/Deno/PHP/Swift/.NET/Elixir/etc. extend the set via
+// `.mpl/config.json` `gate_classify.allowed_heads: [...]`. Use
+// `allowedGateHeads(cwd)` to read the merged set for a given workspace
+// (built-in ∪ config extension). The bare `STRICT_GATE_HEAD_ALLOWLIST`
+// export remains the built-in canonical reference.
+export const STRICT_GATE_HEAD_ALLOWLIST = Object.freeze(new Set([
   // Hard 1 — lint / typecheck / build / compile
   'tsc', 'eslint', 'ruff', 'mypy',
   // Hard 2 — unit / integration test runners
@@ -160,7 +169,43 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
   'npm', 'pnpm', 'yarn', 'npx', 'pnpx',
   // Compiled / system languages
   'cargo', 'go',
-]);
+]));
+
+// #240 A4: read .mpl/config.json `gate_classify.allowed_heads` and
+// union it with the built-in set. Returns a Set of lowercase string
+// heads. Non-string / non-array config values are ignored.
+export function allowedGateHeads(cwd) {
+  const merged = new Set(STRICT_GATE_HEAD_ALLOWLIST);
+  if (!cwd) return merged;
+  try {
+    // Lazy import to avoid a circular dependency at module load time.
+    // mpl-config.mjs is small and pure, so the cost is fine.
+    const { loadConfigSync } = readConfigShim(cwd);
+    const cfg = loadConfigSync(cwd);
+    const extra = cfg?.gate_classify?.allowed_heads;
+    if (Array.isArray(extra)) {
+      for (const v of extra) {
+        if (typeof v === 'string' && v.trim()) {
+          merged.add(v.trim().toLowerCase());
+        }
+      }
+    }
+  } catch { /* fall back to built-in set on any read error */ }
+  return merged;
+}
+
+// Lazy-loaded shim for the config reader. Avoids a top-level
+// circular dependency between mpl-gate-classify.mjs and mpl-config.mjs.
+let _loadConfigSync = null;
+function readConfigShim() {
+  if (_loadConfigSync) return { loadConfigSync: _loadConfigSync };
+  // Use a sync import path via require-like read since loadConfig in
+  // mpl-config.mjs is already synchronous.
+  // We import statically at top of file by adding the import; the lazy
+  // wrapper just preserves the previous external API.
+  _loadConfigSync = loadConfig;
+  return { loadConfigSync: _loadConfigSync };
+}
 
 /**
  * Strict classifier — used by the I12 state-invariant on manual
@@ -186,7 +231,7 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
  * exit-code-vs-leading-command gap and any I12 / recorder source-of-
  * truth refactor are NOT in this PR.
  */
-export function classifyGateCommand(command) {
+export function classifyGateCommand(command, { cwd } = {}) {
   if (typeof command !== 'string' || !command.trim()) return null;
   // #220 on PR #231: canonicalize composite/redirect/comment forms
   // via `stripNonExecutedSuffix` so the leading simple command (the
@@ -211,7 +256,9 @@ export function classifyGateCommand(command) {
   // are NOT accepted manual gate evidence because their `-e`/`-c`
   // forms can contain arbitrary text that the family regex would
   // erroneously match.
-  if (!STRICT_GATE_HEAD_ALLOWLIST.has(head)) return null;
+  // #240 A4: union built-in allowlist with config extension when cwd is known.
+  const allowed = cwd ? allowedGateHeads(cwd) : STRICT_GATE_HEAD_ALLOWLIST;
+  if (!allowed.has(head)) return null;
   return matchFamilyRegex(canonical);
 }
 
@@ -290,7 +337,7 @@ function matchFamilyRegex(command) {
  * evidence. Manual writers MUST use a recognized command family or
  * record evidence through the recorder hook itself.
  */
-export function commandMatchesGate(gateKey, command) {
-  const family = classifyGateCommand(command);
+export function commandMatchesGate(gateKey, command, { cwd } = {}) {
+  const family = classifyGateCommand(command, { cwd });
   return family !== null && family === gateKey;
 }

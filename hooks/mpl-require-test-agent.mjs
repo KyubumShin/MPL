@@ -51,6 +51,9 @@ const {
 } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
 );
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -451,7 +454,20 @@ try {
   // Default safety: if the field is missing, TREAT AS REQUIRED. AD-0007 intent is
   // that Decomposer must actively mark `test_agent_required: false` with a
   // rationale to opt out; absence is not permission.
-  const required = phase.test_agent_required !== false;
+  //
+  // #240 A2: `test_agent.default_required` config knob overrides the
+  // "absence is not permission" rule. When false, hand-written /
+  // legacy decompositions without the field are treated as NOT
+  // required (the decomposer can still emit `test_agent_required: true`
+  // explicitly for individual phases).
+  const cfg = loadConfig(cwd);
+  const defaultRequired = cfg?.test_agent?.default_required !== false;
+  let required;
+  if (typeof phase.test_agent_required === 'boolean') {
+    required = phase.test_agent_required;
+  } else {
+    required = defaultRequired;
+  }
   if (!required) {
     ok();
     process.exit(0);

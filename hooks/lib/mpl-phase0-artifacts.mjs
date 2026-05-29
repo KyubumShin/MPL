@@ -27,6 +27,8 @@
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
+import { loadConfig } from './mpl-config.mjs';
+
 // Codex r7 on PR #222 [contract-break]: phase1b-plan is the
 // planning-preparation phase where decomposition produces the contracts
 // — gating phase1b-plan on contracts being already present made the
@@ -83,6 +85,12 @@ export function missingPhase0Artifacts(cwd) {
  */
 export function blockedPhaseTransitionReason(cwd, nextPhase) {
   if (!REQUIRES_PHASE0_ARTIFACTS.has(nextPhase)) return null;
+  // #240 A1: when phase0_artifacts_required is false in
+  // .mpl/config.json, operators have explicitly opted out of Phase 0
+  // artifact gating (small / experimental projects where a typo fix
+  // shouldn't force raw-scan.md + design-intent.yaml + contracts).
+  const cfg = loadConfig(cwd);
+  if (cfg.phase0_artifacts_required === false) return null;
   const missing = missingPhase0Artifacts(cwd);
   if (missing.length === 0) return null;
   return (

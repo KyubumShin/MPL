@@ -69,6 +69,30 @@ const { blockedPhaseTransitionReason } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-phase0-artifacts.mjs')).href
 );
 
+// #240 A3: ambiguity threshold + force-proceed config knobs.
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
+
+// #240 A3: resolve the ambiguity threshold from .mpl/config.json with
+// the literal 0.2 as the default. Operators on exploration-mode
+// projects (research spikes, prototypes) can raise the threshold or
+// set `ambiguity.force_proceed_after_rounds: N` to allow
+// state.ambiguity_force_proceed = true to override after N rounds.
+function ambiguityConfig(cwd) {
+  const cfg = loadConfig(cwd);
+  const raw = cfg?.ambiguity?.threshold;
+  const threshold = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0.2;
+  const fpRaw = cfg?.ambiguity?.force_proceed_after_rounds;
+  const forceProceedAfterRounds = Number.isInteger(fpRaw) && fpRaw > 0 ? fpRaw : null;
+  return { threshold, forceProceedAfterRounds };
+}
+
+function ambiguityRoundCount(state) {
+  const h = state?.ambiguity_history;
+  return Array.isArray(h) ? h.length : 0;
+}
+
 /**
  * Emit a stopReason and return true when the controller's intended
  * transition to `nextPhase` is blocked by missing Phase 0 artifacts.
@@ -354,9 +378,10 @@ async function main() {
     case 'mpl-decompose': {
       // GATE: ambiguity_score MUST exist AND meet threshold before decomposition proceeds.
       // Stage 2 (Ambiguity Resolution) writes ambiguity_score to state via the mpl_score_ambiguity MCP tool.
+      // #240 A3: threshold + force-proceed are config-driven.
       const ambiguityScore = state.ambiguity_score;
       const hasScore = ambiguityScore !== null && ambiguityScore !== undefined;
-      const threshold = 0.2;
+      const { threshold, forceProceedAfterRounds } = ambiguityConfig(cwd);
 
       if (!hasScore) {
         // Block decomposition — ambiguity resolution was skipped
@@ -368,14 +393,29 @@ async function main() {
             'Call mpl_score_ambiguity MCP tool with pivot_points + user_responses, then persist the result via mpl_state_write.'
         }));
       } else if (ambiguityScore > threshold) {
-        // Block decomposition — score exceeds threshold, re-run ambiguity resolution
-        writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
-        console.log(JSON.stringify({
-          continue: true,
-          stopReason: `[MPL] ⛔ Decomposition BLOCKED: ambiguity_score=${ambiguityScore} exceeds threshold ${threshold}. ` +
-            'Reverting to Stage 2 Ambiguity Resolution for additional Socratic resolution. ' +
-            'Re-call mpl_score_ambiguity MCP tool with updated user_responses targeting the weakest dimension.'
-        }));
+        // #240 A3: force-proceed override — operator on exploration-mode
+        // projects can set ambiguity.force_proceed_after_rounds: N in
+        // config + state.ambiguity_force_proceed: true after N rounds
+        // to bypass threshold loop. Defaults to null (no override path).
+        const rounds = ambiguityRoundCount(state);
+        const forceProceed = state?.ambiguity_force_proceed === true &&
+          forceProceedAfterRounds !== null &&
+          rounds >= forceProceedAfterRounds;
+        if (forceProceed) {
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `[MPL] Decomposition: ambiguity_score=${ambiguityScore} exceeds threshold ${threshold}, but force-proceed override active (rounds=${rounds} >= ${forceProceedAfterRounds}). Proceeding with elevated ambiguity.`
+          }));
+        } else {
+          // Block decomposition — score exceeds threshold, re-run ambiguity resolution
+          writeState(cwd, { current_phase: 'mpl-ambiguity-resolve' });
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `[MPL] ⛔ Decomposition BLOCKED: ambiguity_score=${ambiguityScore} exceeds threshold ${threshold}. ` +
+              'Reverting to Stage 2 Ambiguity Resolution for additional Socratic resolution. ' +
+              'Re-call mpl_score_ambiguity MCP tool with updated user_responses targeting the weakest dimension.'
+          }));
+        }
       } else {
         // Score exists and meets threshold — proceed
         console.log(JSON.stringify({
@@ -390,7 +430,22 @@ async function main() {
       // Stage 2: Ambiguity Resolution in progress
       const currentScore = state.ambiguity_score;
       const hasCurrentScore = currentScore !== null && currentScore !== undefined;
-      const ambThreshold = 0.2;
+      // #240 A3: same config-driven threshold as the decompose case.
+      const { threshold: ambThreshold, forceProceedAfterRounds: ambForceProceedAfterRounds } = ambiguityConfig(cwd);
+
+      // #240 A3: same force-proceed override.
+      const ambRounds = ambiguityRoundCount(state);
+      const ambForceProceed = state?.ambiguity_force_proceed === true &&
+        ambForceProceedAfterRounds !== null &&
+        ambRounds >= ambForceProceedAfterRounds;
+      if (ambForceProceed && hasCurrentScore && currentScore > ambThreshold) {
+        writeState(cwd, { current_phase: 'mpl-decompose' });
+        console.log(JSON.stringify({
+          continue: true,
+          stopReason: `[MPL] Ambiguity force-proceed (score=${currentScore}, rounds=${ambRounds} >= ${ambForceProceedAfterRounds}). Transitioning to Decomposition.`
+        }));
+        break;
+      }
 
       if (hasCurrentScore && currentScore <= ambThreshold) {
         // Threshold met — transition to decompose

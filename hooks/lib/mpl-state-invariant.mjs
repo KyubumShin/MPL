@@ -360,7 +360,7 @@ function checkI11(state) {
     { missing });
 }
 
-function checkGateFamilyForBlock(block, label) {
+function checkGateFamilyForBlock(block, label, cwd) {
   // A "structured gate entry" carries { command, exit_code, ... }. Check
   // that the recorded `command` belongs to the family this slot expects.
   // mpl-gate-recorder produces commands the classifier recognizes; manual
@@ -391,7 +391,7 @@ function checkGateFamilyForBlock(block, label) {
       });
       continue;
     }
-    const family = classifyGateCommand(command);
+    const family = classifyGateCommand(command, { cwd });
     if (family !== expectedFamily) {
       issues.push({
         gate: `${label}.${slot}`,
@@ -427,13 +427,13 @@ function checkI13(state, cwd, trigger) {
     { phase, missing });
 }
 
-function checkI12(state, trigger) {
+function checkI12(state, trigger, cwd) {
   // Exp22 R13 / #209. Surface on STATE_WRITE so manual patches that try
   // to land malformed evidence are caught at the write boundary.
   if (trigger !== TRIGGERS.STATE_WRITE) return null;
   const issues = [
-    ...checkGateFamilyForBlock(state?.gate_results, 'state.gate_results'),
-    ...checkGateFamilyForBlock(state?.release?.gate_results, 'state.release.gate_results'),
+    ...checkGateFamilyForBlock(state?.gate_results, 'state.gate_results', cwd),
+    ...checkGateFamilyForBlock(state?.release?.gate_results, 'state.release.gate_results', cwd),
   ];
   if (issues.length === 0) return null;
   const messages = issues
@@ -476,7 +476,7 @@ export function checkInvariants(state, opts = {}) {
     () => checkI9(state),
     () => checkI10(state),
     () => checkI11(state),
-    () => checkI12(state, trigger),
+    () => checkI12(state, trigger, cwd),
     () => checkI13(state, cwd, trigger),
   ];
 
