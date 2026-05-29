@@ -400,6 +400,106 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r10 [data-integrity]: interpreter one-liners that mention protected paths are blocked', () => {
+  // Codex r10: `node -e "require('fs').rmSync('.mpl/mpl')"`,
+  // `python -c "shutil.rmtree('.mpl/mpl')"` can destroy protected
+  // paths without invoking any shell-level destructive verb. Fix:
+  // add common interpreter heads to the entry gate; the substring +
+  // token check then catches the protected target literal inside
+  // the eval body. Pure read-only interpreter use is NOT blocked.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      `node -e require('fs').rmSync('.mpl/mpl')`,
+      `python -c shutil.rmtree('.mpl/mpl')`,
+      `perl -e unlink('.mpl/contracts/foo')`,
+      `ruby -e File.delete('.mpl/memory/state')`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected interpreter-eval block for: ${command}`,
+      );
+    }
+    // Sanity: read-only interpreter use (no protected mention) passes.
+    for (const command of ['node script.js', 'python -m pytest', 'ruby --version']) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.notEqual(
+        decision.decision,
+        'block',
+        `read-only interpreter use should not block: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 claude r9 [security]: planting decomposer_dispatch via Write/Edit of .mpl/state.json is blocked', () => {
+  // Concrete repro: the orchestrator has Write access to .mpl/state.json
+  // (it sits in the /\.mpl\// allowlist), so it could forge the
+  // decomposer_dispatch flag to satisfy isDecomposerDispatchActive
+  // and Write decomposition.yaml from its own transcript. Fix: any
+  // Write/Edit to .mpl/state.json whose payload mentions the
+  // `decomposer_dispatch` key is rejected — only this hook is
+  // allowed to set the flag.
+  const cwd = freshWorkspace();
+  try {
+    // Write payload mentioning decomposer_dispatch.
+    const writeDecision = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        content: JSON.stringify({
+          current_phase: 'phase-1',
+          decomposer_dispatch: {
+            dispatched_at: new Date().toISOString(),
+            parent_transcript_path: '/tmp/fake.jsonl',
+          },
+        }),
+      },
+    });
+    assert.equal(writeDecision.continue, false);
+    assert.equal(writeDecision.decision, 'block');
+    assert.match(writeDecision.reason, /decomposer_dispatch/);
+
+    // Edit form too.
+    const editDecision = runHook(cwd, {
+      cwd,
+      tool_name: 'Edit',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        old_string: '"current_phase":"phase-1"',
+        new_string: '"current_phase":"phase-1","decomposer_dispatch":{"dispatched_at":"x","parent_transcript_path":"y"}',
+      },
+    });
+    assert.equal(editDecision.decision, 'block');
+
+    // Sanity: writing OTHER state fields still works.
+    const plainState = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        content: JSON.stringify({ current_phase: 'phase-2' }),
+      },
+    });
+    assert.notEqual(plainState.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r9 [data-integrity]: writer utilities (tee, dd of=) are blocked on protected paths', () => {
   // Codex r9: `tee FILE` opens FILE for write and overwrites it;
   // `dd of=FILE` does the same. Pre-fix entry gate didn't include

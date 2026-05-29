@@ -62,6 +62,17 @@ const HOOK_ID = 'mpl-write-guard';
 // via a state-based dispatch flag set when the orchestrator dispatches
 // Agent(subagent_type='mpl-decomposer') and cleared on Stop.
 const DECOMPOSITION_FILE_REGEX = /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/;
+
+// Claude r9 on PR #249 [security]: the orchestrator can Write
+// `.mpl/state.json` (it sits inside the `/\.mpl\//` allowlist), and
+// the writer-identity check at A1 trusted whatever
+// `state.decomposer_dispatch.parent_transcript_path` value it found
+// — so the orchestrator could plant a `parent_transcript_path !=
+// its own transcript`, then write decomposition.yaml. Reject any
+// Write/Edit to .mpl/state.json whose payload introduces or mutates
+// `decomposer_dispatch.*` — only the hook itself may set those keys.
+const STATE_FILE_REGEX = /(^|\/)\.mpl\/state\.json$/;
+const DECOMPOSER_DISPATCH_FIELD_REGEX = /"decomposer_dispatch"\s*:/;
 const DECOMPOSER_SUBAGENT_TYPES = new Set([
   'mpl-decomposer',
   'mpl:mpl-decomposer',
@@ -258,6 +269,16 @@ function matchesProtectedDelete(command, cwd) {
     // `tee FILE` opens FILE for write and overwrites it.
     /\btee\b/.test(normalized) ||
     /\bdd\b.*\bof=/.test(normalized) ||
+    // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
+    // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
+    // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths
+    // without invoking any shell-level destructive verb. Treat any
+    // common interpreter as a possible-destructive entry; the
+    // substring/token checks then catch the protected target literal
+    // inside the eval body. Pure read-only interpreter use (`node
+    // script.js` without mentioning a protected path) is not blocked
+    // because neither the substring nor the token check would match.
+    /\b(node|deno|bun|python\d?|ruby|perl|php|lua|tclsh|osascript|awk|sed)\b/.test(normalized) ||
     // Codex r8 on PR #249 [data-integrity]: POSIX shell redirection
     // does not require whitespace after `>`/`>>`/`&>`. `echo x
     // >.mpl/mpl/foo` truncates the protected file. Allow optional
@@ -611,6 +632,52 @@ ensure you have the correct target path. The command will proceed, but please ve
 
   const state = readState(cwd) || {};
   const dogfood = isDogfoodMode(cwd);
+
+  // Claude r9 on PR #249 [security]: reject any Write/Edit to
+  // .mpl/state.json whose payload introduces or mutates the
+  // `decomposer_dispatch.*` key. Only this hook is allowed to set
+  // the dispatch flag; an orchestrator that plants a forged flag
+  // could otherwise unlock the A1 writer-identity check and Write
+  // decomposition.yaml from its own transcript.
+  if (STATE_FILE_REGEX.test(filePath)) {
+    const payload = (() => {
+      const t = data.tool_input || data.toolInput || {};
+      const parts = [];
+      if (typeof t.content === 'string') parts.push(t.content);
+      if (typeof t.new_string === 'string') parts.push(t.new_string);
+      if (typeof t.newString === 'string') parts.push(t.newString);
+      if (Array.isArray(t.edits)) {
+        for (const e of t.edits) {
+          if (e?.new_string) parts.push(String(e.new_string));
+          if (e?.newString) parts.push(String(e.newString));
+        }
+      }
+      return parts.join('\n');
+    })();
+    if (DECOMPOSER_DISPATCH_FIELD_REGEX.test(payload)) {
+      const reason =
+        `[MPL #236 A1] Refused to Write/Edit decomposer_dispatch into ` +
+        `.mpl/state.json: only mpl-write-guard itself may set that key. ` +
+        `Planting it from outside would let the orchestrator forge the ` +
+        `decomposition.yaml writer-identity flag.`;
+      recordBlockedHook(cwd, {
+        hookId: HOOK_ID,
+        phaseId: state?.current_phase,
+        artifact: filePath,
+        code: 'decomposer_dispatch_forgery',
+        reason,
+        resumeInstruction:
+          `Remove the decomposer_dispatch field from the .mpl/state.json patch; the hook will populate it on Agent(subagent_type='mpl-decomposer') dispatch.`,
+        retryContext: { file_path: filePath },
+      });
+      console.log(JSON.stringify({
+        continue: false,
+        decision: 'block',
+        reason,
+      }));
+      return;
+    }
+  }
 
   // #236 A1: decomposition.yaml may ONLY be Written/Edited by the
   // mpl-decomposer subagent. The hook detects this via a dispatch
