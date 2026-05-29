@@ -187,23 +187,22 @@ function endsWithSegment(path, segment) {
   return path.endsWith('/' + segment);
 }
 
-// Conservative Windows-shape detection. Returns the input normalized
-// to forward slashes ONLY when the input is structurally Windows
-// (drive letter, UNC, or pure-backslash). Mixed `/\` paths and
-// POSIX paths with literal backslash in filenames are left alone.
+// Codex r5 on PR #243: narrow Windows-shape detection to ONLY
+// unambiguous Windows path forms — drive letter (`C:\...`) and UNC
+// (`\\server\share`). Pure-backslash relative strings like
+// `foo\state.json` are NOT classified as Windows: on POSIX,
+// backslash is a legal filename character and the input is a single
+// basename, not a separated path. Mixed `/\` paths already preserve
+// POSIX semantics. Drop the pure-backslash branch because the
+// runtime cannot disambiguate "Windows path" from "POSIX literal
+// filename" without an explicit context flag.
 function normalizeWindowsPath(p) {
   if (typeof p !== 'string' || !p) return p;
-  const hasBackslash = p.includes('\\');
-  if (!hasBackslash) return p;
-  const hasForward = p.includes('/');
+  if (!p.includes('\\')) return p;
   // Drive letter prefix (e.g. `C:\`, `c:\`, or `c:/`).
   if (/^[A-Za-z]:[/\\]/.test(p)) return p.replace(/\\/g, '/');
   // UNC prefix (`\\server\share`).
   if (p.startsWith('\\\\')) return p.replace(/\\/g, '/');
-  // Pure-backslash separators (no `/` anywhere).
-  if (!hasForward) return p.replace(/\\/g, '/');
-  // Mixed `/\` — treat backslash as a literal filename character
-  // (POSIX-correct behavior).
   return p;
 }
 

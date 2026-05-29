@@ -483,6 +483,53 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('#237 codex r5 [logic]: pure-backslash POSIX filename does NOT fabricate path boundary', () => {
+    // Codex r5: previous r4 narrowing treated pure-backslash + no
+    // forward slash as Windows. But on POSIX, `foo\state.json` is a
+    // single literal basename. Falsely classifying as Windows
+    // normalized to `foo/state.json` and matched `state.json` artifact.
+    const trace = traceHookChain({
+      targetPath: 'foo\\state.json',
+      state: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_artifact: 'state.json',
+        blocked_phase: 'phase-1',
+        block_code: 'x',
+        block_reason: 'x',
+        resume_instruction: 'x',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: {},
+      },
+    });
+    const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+    assert.notEqual(row?.status, 'currently_blocking',
+      'pure-backslash POSIX basename must not match a state.json artifact');
+  });
+
+  it('#237 codex r5 [logic]: pure-backslash `.mpl\\state.json` target classifies as file (not state)', () => {
+    // The pathCategory side of the same issue: `.mpl\state.json`
+    // on POSIX is a single basename `.mpl\state.json`, NOT the
+    // canonical state path. Must classify as file so the
+    // file-category hook chain (not state focus) appears.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-r5-pure-bs-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+      }));
+      const trace = traceHookChain({
+        targetPath: '.mpl\\state.json',
+        cwd: tmp,
+      });
+      assert.equal(trace.category, 'file');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('#237 codex r4 [logic]: POSIX literal-backslash filename does NOT fabricate a path boundary', () => {
     // codex r4 on PR #243: r3 unconditional `\` → `/` normalization
     // broke a POSIX edge case. `src/foo\state.json` on POSIX is a
@@ -542,10 +589,13 @@ describe('mpl-hook-trace', () => {
       'backslash target must normalize and match forward-slash artifact');
   });
 
-  it('#237 codex r3 [logic]: blockStatusFor handles backslash on the artifact side too', () => {
-    // Mirror case: artifact stored with backslashes (unlikely but
-    // possible if a hook on Windows wrote it). Trace target uses
-    // forward slashes.
+  it('#237 codex r5 [logic]: POSIX pure-backslash artifact does NOT fabricate boundary against forward-slash target', () => {
+    // Codex r5 on PR #243: previously pure-backslash (no `/`) was
+    // treated as Windows-shaped and normalized. That broke the
+    // POSIX semantics where backslash is a legal filename
+    // character. New rule: only drive-letter / UNC paths are
+    // normalized; pure-backslash relative strings are treated as
+    // POSIX literal filenames.
     const trace = traceHookChain({
       targetPath: '/repo/.mpl/state.json',
       state: {
@@ -553,6 +603,30 @@ describe('mpl-hook-trace', () => {
         session_status: 'blocked_hook',
         blocked_by_hook: 'mpl-require-test-agent',
         blocked_artifact: '.mpl\\state.json',
+        blocked_phase: 'phase-1',
+        block_code: 'x',
+        block_reason: 'x',
+        resume_instruction: 'x',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: {},
+      },
+    });
+    const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+    // The artifact `.mpl\state.json` is a literal POSIX filename
+    // with a backslash, not the canonical `.mpl/state.json`. Match
+    // must fail.
+    assert.notEqual(row?.status, 'currently_blocking');
+  });
+
+  it('#237 codex r5 [logic]: UNC-style artifact normalizes and matches a forward-slash target', () => {
+    // UNC path remains unambiguously Windows-shaped — normalize.
+    const trace = traceHookChain({
+      targetPath: '//server/share/.mpl/state.json',
+      state: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_artifact: '\\\\server\\share\\.mpl\\state.json',
         blocked_phase: 'phase-1',
         block_code: 'x',
         block_reason: 'x',
