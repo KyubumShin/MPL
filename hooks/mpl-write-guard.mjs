@@ -190,6 +190,10 @@ function matchesProtectedDelete(command, cwd) {
   }
 
   // Pre-normalize:
+  //   - Codex r4 on PR #249 [data-integrity]: POSIX shells remove
+  //     backslash escapes before exec — `rm -rf .mpl\/mpl` deletes
+  //     `.mpl/mpl`. Strip every `\X` → `X` first so backslash-escape
+  //     forgery collapses to the same literal a real shell would see.
   //   - Codex r3 on PR #249 [data-integrity]: POSIX shells concatenate
   //     adjacent quote fragments. `.mpl/""mpl` and `.mpl"/"mpl` both
   //     resolve to `.mpl/mpl` at execution time. Strip every `"`, `'`,
@@ -198,9 +202,12 @@ function matchesProtectedDelete(command, cwd) {
   //   - Codex r2 on PR #249 [logic]: a real shell normalizes runs of
   //     `/` after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl`).
   //     Collapse repeated slashes to one.
-  // Both transforms preserve token-boundary whitespace, so downstream
-  // tokenization still works.
-  normalized = normalized.replace(/["'`]/g, '').replace(/\/+/g, '/');
+  // All three transforms preserve token-boundary whitespace, so
+  // downstream tokenization still works.
+  normalized = normalized
+    .replace(/\\([\s\S])/g, '$1')
+    .replace(/["'`]/g, '')
+    .replace(/\/+/g, '/');
 
   // Claude r1 on PR #249 [logic] (concrete repros): shell-expansion
   // forms (`$PWD`, `$(pwd)`), parenthesized subshells, variable

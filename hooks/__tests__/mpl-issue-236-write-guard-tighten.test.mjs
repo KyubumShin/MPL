@@ -400,6 +400,37 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r4 [data-integrity]: backslash-escaped path separators are blocked', () => {
+  // Codex r4: POSIX shells remove `\X` escapes before exec, so
+  // `rm -rf .mpl\/mpl` and `rm -rf docs\/learnings` actually delete
+  // the protected paths. The fix strips every `\X` → `X` before the
+  // substring + token checks so backslash forgery collapses to the
+  // literal a real shell sees.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      String.raw`rm -rf .mpl\/mpl`,
+      String.raw`rm -rf .mpl\/contracts`,
+      String.raw`rm -rf docs\/learnings`,
+      String.raw`rm -rf \.mpl/mpl`,
+      String.raw`rm -rf .\m\p\l/\m\p\l`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected backslash-escape block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r3 [data-integrity]: quote-concatenation forgery is blocked', () => {
   // Codex r3: POSIX shells concatenate adjacent quoted fragments,
   // so `.mpl/""mpl`, `.mpl"/"mpl`, `.mpl''/''mpl` all resolve to
