@@ -22,6 +22,21 @@
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
+// The decomposer Output_Schema (`agents/mpl-decomposer.md`) defines
+// these as REQUIRED per-phase fields. Each is contractually
+// load-bearing for a downstream hook:
+//   change_policy   — recompose semantics
+//   resource_locks  — executor parallel-wave conflict avoidance
+//   goal_trace      — acceptance_criteria / variation_axes /
+//                     ontology_entities AC/AX traceability ledger
+//                     consumed by mpl-require-goal-trace and
+//                     whole-goal-closure
+//   verification_plan — a_items / s_items / h_items read by
+//                     mpl-require-test-agent to build the brief
+// (Claude r1 on PR #247 caught these as missing from the original
+// allowlist — silent mutation on a completed phase would otherwise
+// pass.) The flat `acceptance_criteria` / `variation_axes` entries
+// remain so legacy / hand-emitted top-level forms are still gated.
 const LOAD_BEARING_FIELDS = new Set([
   'id',
   'interface_contract',
@@ -36,7 +51,11 @@ const LOAD_BEARING_FIELDS = new Set([
   'test_agent_required',
   'evidence_required',
   'test_command',
-  'verification_strategy',
+  // r1: added per the decomposer Output_Schema
+  'change_policy',
+  'resource_locks',
+  'goal_trace',
+  'verification_plan',
 ]);
 
 function phaseBlocks(text) {
@@ -121,10 +140,7 @@ export function normalizePhaseBlock(text) {
   const raw = String(text || '');
   if (!raw.trim()) return '';
 
-  const lines = raw
-    .split('\n')
-    .map((l) => l.replace(/\r$/, ''))
-    .map((l) => stripInlineYamlComment(l));
+  const lines = raw.split('\n').map((l) => l.replace(/\r$/, ''));
 
   // Establish phase-field indent: the indent of the first non-blank,
   // non-comment line that comes after the `- id:` line.
@@ -142,37 +158,67 @@ export function normalizePhaseBlock(text) {
   // Block with no fields → just keep the id line.
   if (fieldIndent < 0) {
     const idLine = lines.find((l) => /^\s*-\s+id\s*:/.test(l));
-    return idLine ? idLine.replace(/[ \t]+$/, '').trim() : '';
+    return idLine ? stripInlineYamlComment(idLine).replace(/[ \t]+$/, '').trim() : '';
   }
 
   const out = [];
   let currentField = null;
+  // Codex r2 on PR #247: track block-scalar (`|` / `>`) mode so we do
+  // NOT strip `#` inside literal payload. A field that opens a block
+  // scalar with `field: |` or `field: >` keeps lines deeper than
+  // `fieldIndent` as verbatim payload until a line at fieldIndent or
+  // shallower reappears.
+  let inBlockScalar = false;
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/[ \t]+$/g, '');
     // Drop pure comment lines (`# …`).
-    if (/^\s*#/.test(line)) continue;
+    if (/^\s*#/.test(rawLine)) continue;
     // Drop empty lines.
-    if (!line.trim()) continue;
+    if (!rawLine.trim()) continue;
 
-    // `- id:` line is always emitted; it's the contract anchor.
-    if (/^\s*-\s+id\s*:/.test(line)) {
-      out.push(line);
+    const lineIndent = (rawLine.match(/^(\s*)/) || ['', ''])[1].length;
+
+    // `- id:` line — always emitted; resets currentField, exits scalar.
+    if (/^\s*-\s+id\s*:/.test(rawLine)) {
+      out.push(stripInlineYamlComment(rawLine).replace(/[ \t]+$/g, ''));
       currentField = 'id';
+      inBlockScalar = false;
       continue;
     }
 
-    const fieldMatch = line.match(/^(\s+)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
+    // Inside a block scalar — until indent backs up to fieldIndent.
+    if (inBlockScalar && lineIndent > fieldIndent) {
+      // Block-scalar payload: emit verbatim (NO inline comment strip)
+      // when the parent field is load-bearing.
+      if (currentField && LOAD_BEARING_FIELDS.has(currentField)) {
+        out.push(rawLine.replace(/[ \t]+$/g, ''));
+      }
+      continue;
+    }
+    inBlockScalar = false;
+
+    // Field-level line (at fieldIndent).
+    const fieldMatch = rawLine.match(/^(\s+)([a-zA-Z_][a-zA-Z0-9_]*)\s*:(.*)$/);
     if (fieldMatch && fieldMatch[1].length === fieldIndent) {
       const fieldName = fieldMatch[2];
+      const remainder = fieldMatch[3];
       currentField = fieldName;
-      if (LOAD_BEARING_FIELDS.has(fieldName)) out.push(line);
+      // Detect block-scalar opener: `|`, `>`, with optional `+`/`-`
+      // chomping indicator, and an optional explicit indentation
+      // digit. Anything after that on the same line is illegal YAML
+      // but we don't try to validate.
+      inBlockScalar = /^\s*[|>][+-]?\d?\s*$/.test(remainder);
+      if (LOAD_BEARING_FIELDS.has(fieldName)) {
+        out.push(stripInlineYamlComment(rawLine).replace(/[ \t]+$/g, ''));
+      }
       continue;
     }
 
-    // Continuation line — emit only when in a load-bearing field.
+    // Continuation line (flow-style, list item, nested mapping) —
+    // emit when in load-bearing field. Inline comments are
+    // syntactically allowed here, so strip them quote-aware.
     if (currentField && LOAD_BEARING_FIELDS.has(currentField)) {
-      out.push(line);
+      out.push(stripInlineYamlComment(rawLine).replace(/[ \t]+$/g, ''));
     }
   }
 

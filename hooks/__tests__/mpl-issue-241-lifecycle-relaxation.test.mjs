@@ -66,6 +66,15 @@ test('#241 B1: load-bearing fields set is the closed, exported allowlist', () =>
       `Expected ${f} in load-bearing set`,
     );
   }
+  // Claude r1 on PR #247 [contract-break]: decomposer Output_Schema
+  // (`agents/mpl-decomposer.md`) declares these REQUIRED per-phase
+  // fields. They must all be load-bearing.
+  for (const f of ['change_policy', 'resource_locks', 'goal_trace', 'verification_plan']) {
+    assert.ok(
+      COMPLETED_PHASE_LOAD_BEARING_FIELDS.has(f),
+      `Expected ${f} in load-bearing set (decomposer Output_Schema REQUIRED)`,
+    );
+  }
   // Presentation-only fields must NOT be load-bearing.
   for (const f of ['name', 'notes', 'description', 'rationale', 'test_agent_rationale']) {
     assert.ok(
@@ -73,6 +82,104 @@ test('#241 B1: load-bearing fields set is the closed, exported allowlist', () =>
       `Did NOT expect ${f} in load-bearing set`,
     );
   }
+});
+
+test('#241 B1 claude r1: mutation on change_policy / resource_locks / goal_trace / verification_plan must block', () => {
+  // Concrete repros from claude r1 [contract-break].
+  const baseOld = (extra) => `
+phases:
+  - id: phase-1
+    impact: high
+    ${extra}
+`;
+  for (const [field, oldVal, newVal] of [
+    ['change_policy', 'append_delta_only', 'full_rewrite'],
+    ['resource_locks', '[]', '[dev_server]'],
+  ]) {
+    const verdict = validateCompletedPhaseImmutability({
+      oldText: baseOld(`${field}: ${oldVal}`),
+      newText: baseOld(`${field}: ${newVal}`),
+      completedIds: ['phase-1'],
+    });
+    assert.equal(verdict.valid, false, `Expected ${field} change to be blocking`);
+    assert.ok(verdict.issues.includes('phase-1:contract:modified'));
+  }
+
+  // Nested goal_trace.acceptance_criteria mutation.
+  const gtOld = `
+phases:
+  - id: phase-1
+    impact: high
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: [AX-1]
+`;
+  const gtNew = `
+phases:
+  - id: phase-1
+    impact: high
+    goal_trace:
+      acceptance_criteria: [AC-99]
+      variation_axes: [AX-1]
+`;
+  const gtVerdict = validateCompletedPhaseImmutability({
+    oldText: gtOld,
+    newText: gtNew,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(gtVerdict.valid, false, 'Expected goal_trace.acceptance_criteria change to block');
+  assert.ok(gtVerdict.issues.includes('phase-1:contract:modified'));
+
+  // Nested verification_plan.a_items mutation.
+  const vpOld = `
+phases:
+  - id: phase-1
+    impact: high
+    verification_plan:
+      a_items:
+        - criterion: original
+`;
+  const vpNew = `
+phases:
+  - id: phase-1
+    impact: high
+    verification_plan:
+      a_items:
+        - criterion: rewritten
+`;
+  const vpVerdict = validateCompletedPhaseImmutability({
+    oldText: vpOld,
+    newText: vpNew,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(vpVerdict.valid, false, 'Expected verification_plan.a_items change to block');
+  assert.ok(vpVerdict.issues.includes('phase-1:contract:modified'));
+});
+
+test('#241 B1 codex r2: block-scalar payload changes after `#` MUST block (no inline-comment strip in scalar body)', () => {
+  // Concrete repro from codex r2 [contract-break].
+  const oldText = `
+phases:
+  - id: phase-1
+    impact: high
+    scope: |
+      rollout target # prod-a
+`;
+  const newText = `
+phases:
+  - id: phase-1
+    impact: high
+    scope: |
+      rollout target # prod-b
+`;
+  const verdict = validateCompletedPhaseImmutability({
+    oldText,
+    newText,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(verdict.valid, false,
+    'Expected `#`-text change inside `scope: |` block scalar to block');
+  assert.ok(verdict.issues.includes('phase-1:contract:modified'));
 });
 
 test('#241 B1: comment edit in a completed phase is allowed', () => {
