@@ -144,6 +144,92 @@ test('#251 C2 e2e: hook lets a valid rationale through', () => {
   }
 });
 
+test('#251 C2 claude r1 [logic]: whitespace-only rationale is treated as missing', () => {
+  // Claude r1 advisory promoted to a [logic] regression: a phase
+  // with `reviewer_rationale: "   "` (whitespace-only) had no real
+  // author intent but slipped through the length-only check. Fix:
+  // trim before length check in findReviewerRationaleGaps.
+  const yaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: "   "
+  - id: phase-2
+    reviewer_required: false
+    reviewer_rationale: "\\t\\n  "
+  - id: phase-3
+    reviewer_required: false
+    reviewer_rationale: "Pure docs, no code change"
+`;
+  const { offenders } = findReviewerRationaleGaps(yaml);
+  assert.ok(offenders.includes('phase-1'), 'spaces-only rationale must be flagged');
+  // phase-3 has real content → not flagged.
+  assert.ok(!offenders.includes('phase-3'), 'real content rationale must pass');
+});
+
+test('#251 C2 codex r2: executor skip path checks rationale presence (defense-in-depth)', () => {
+  // Codex r2: the executor must not blindly trust the PostToolUse
+  // hook's precondition — pre-existing decompositions, hook IO
+  // failures, restored-from-disk states can all arrive at dispatch
+  // time with reviewer_required:false AND empty rationale. The
+  // executor MUST verify at runtime and either reject the skip or
+  // force the reviewer dispatch.
+  const text = readPrompt('commands/mpl-run-execute.md');
+  // The skip block must include a rationale-blank check before
+  // emitting the telemetry and skipping.
+  // Anchor on the section heading and read forward until the trailing
+  // ``` fence that closes the skip-path code block.
+  const skipBlock = text.match(
+    /Skip path[^\n]*#239 C2[\s\S]*?\n```\n/,
+  );
+  assert.ok(skipBlock, 'Skip path block must exist');
+  // Must explicitly trim + zero-length check.
+  assert.match(
+    skipBlock[0],
+    /rationale\.length\s*==\s*0|trim\(\)\.length\s*==\s*0|blank/i,
+  );
+  // Must explicitly fall through to reviewer dispatch when blank.
+  assert.match(
+    skipBlock[0],
+    /Forcing reviewer dispatch|fall through to the default dispatch|reject.*skip/i,
+  );
+  // The codex r2 attribution must be in the comment so a future
+  // revert can be traced.
+  assert.match(skipBlock[0], /codex r2|defense-in-depth/i);
+});
+
+test('#251 C6 codex r2 [logic]: Hard 1 aggregates across ALL completed phases', () => {
+  // Codex r2: Hard 1 runs ONCE for the whole pipeline. The skip
+  // logic must check that EVERY completed phase has non-tooling-only
+  // evidence, not just the most recent / one-off phase. A mixed
+  // run (docs phase + code phase) must NOT let the docs phase
+  // suppress the tooling demand for the code phase.
+  const text = readPrompt('commands/mpl-run-execute-gates.md');
+
+  // Must use a per-completed-phase aggregation, not single-phase keying.
+  assert.match(
+    text,
+    /completed_phases|\.every\(|every completed phase|every phase in scope/i,
+    'Hard 1 skip must aggregate over completed phases, not a single phase',
+  );
+  // The skip path must surface which phase ids justified the skip
+  // so an operator can audit.
+  assert.match(
+    text,
+    /skip_justifying_phases|skip-justifying phases|which phase ids|phase ids that/i,
+    'Hard 1 skip must record which phase ids justified the skip',
+  );
+  // Stale single-phase classifier (top-level read of `phase.evidence_required`
+  // without aggregation) must be gone. The current shape reads it INSIDE
+  // `.every()`, which is fine.
+  const preAggregationShape = text.match(
+    /^phase_evidence\s*=\s*phase\.evidence_required[^\n]*\n[^\n]*\nrequests_tooling\s*=/m,
+  );
+  assert.ok(
+    !preAggregationShape,
+    'single-phase phase_evidence assignment followed by direct requests_tooling must be gone (codex r2 [logic])',
+  );
+});
+
 test('#251 C2 codex r1 [contract-break]: hook reads post-write disk state, not pre-write content', () => {
   // Codex r1: original hook was registered as PreToolUse but read
   // disk — the disk file is the PRE-write version, so a write that

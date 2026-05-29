@@ -145,7 +145,12 @@ export function findReviewerRationaleGaps(text) {
   for (const phase of parsePhases(text)) {
     if (phase.reviewer_required === false) {
       const rationale = phase.reviewer_rationale;
-      if (rationale == null || rationale.length === 0) {
+      // Claude r1 advisory: whitespace-only rationale ("   ") is
+      // semantically missing — author intent is absent even though
+      // the string is technically non-empty. Trim before length check.
+      const trimmed =
+        rationale == null ? '' : String(rationale).trim();
+      if (trimmed.length === 0) {
         offenders.push(phase.id);
       }
     }

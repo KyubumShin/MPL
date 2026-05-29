@@ -879,21 +879,31 @@ keeping actual additions at ~80-100K.
     `reviewer-skipped` telemetry signal so over-use is measurable:
     ```
     if phase_definition.reviewer_required == false:
-      # Pre-condition: hooks/mpl-require-reviewer.mjs already enforced
-      # that reviewer_rationale is a non-empty string. The dispatch is
-      # legitimately optional for pure-docs / mechanical-migration phases.
-      recordQualitySignal({
-        rule: "reviewer-skipped",
-        severity: "warn",
-        evidence: {
-          phase_id: phase.id,
-          phase_domain: phase_definition.phase_domain,
-          reviewer_rationale: phase_definition.reviewer_rationale
-        }
-      }, cwd)
-      // Treat the phase's adversarial step as PASS with no score
-      // contribution. mpl-quality-gate.mjs handles the absent JSON.
-      proceed to step 13
+      # codex r2 defense-in-depth: hooks/mpl-require-reviewer.mjs is
+      # the authoring-time guard, but a pre-existing decomposition,
+      # a hook IO failure (fail-soft), or a decomposition restored
+      # from disk with hooks disabled can still arrive here with
+      # reviewer_required:false AND empty/missing rationale. The
+      # executor MUST verify the invariant at dispatch time, not
+      # trust the hook precondition. Whitespace-only rationale is
+      # treated as missing (claude r1 advisory).
+      rationale = (phase_definition.reviewer_rationale or "").trim()
+      if rationale.length == 0:
+        announce: "[MPL #239 C2 / #251] Reviewer skip rejected for {phase.id}: reviewer_required:false but reviewer_rationale missing/blank. Forcing reviewer dispatch."
+        // fall through to the default dispatch path below
+      else:
+        recordQualitySignal({
+          rule: "reviewer-skipped",
+          severity: "warn",
+          evidence: {
+            phase_id: phase.id,
+            phase_domain: phase_definition.phase_domain,
+            reviewer_rationale: rationale
+          }
+        }, cwd)
+        // Treat the phase's adversarial step as PASS with no score
+        // contribution. mpl-quality-gate.mjs handles the absent JSON.
+        proceed to step 13
     ```
 
     Default path (`reviewer_required: true` or absent):

@@ -138,14 +138,14 @@ for each { cmd, name } in build_commands:
 // Defensive check: if NO verification ran at all, fail rather than auto-pass.
 // Same principle as AD-02 for Hard 3 — missing precondition ≠ free pass.
 //
-// #239 C6 / #251: when the phase's `evidence_required` list contains
-// ONLY non-tooling evidence types (`goal_trace`, `manual`, etc.),
-// Hard 1 skips the tooling demand and reports PASS via those evidence
-// types instead. This unblocks docs-only / prompt-only / pure-evidence
-// phases that legitimately have no lint/type/build surface.
+// #239 C6 / #251: when EVERY completed phase's `evidence_required`
+// list contains ONLY non-tooling evidence types (`goal_trace`,
+// `manual`, etc.), Hard 1 skips the tooling demand and reports PASS
+// via those evidence types instead. This unblocks docs-only /
+// prompt-only / pure-evidence runs that legitimately have no
+// lint/type/build surface anywhere.
 //
-// CLOSED LIST of non-tooling evidence types (Hard 1 skips when the
-// `evidence_required` list contains ONLY these):
+// CLOSED LIST of non-tooling evidence types:
 //   `goal_trace`, `manual`, `external_audit`, `documentation`.
 //
 // EVERYTHING ELSE counts as tooling — including `command` (Bash with
@@ -156,12 +156,31 @@ for each { cmd, name } in build_commands:
 // machine-backed evidence token does not silently slip through Hard 1
 // just because the executor prompt forgot to list it.
 //
-// An empty `evidence_required` array is treated as "tooling requested"
-// — the default decomposer mode demands lint/type/build.
-phase_evidence = phase.evidence_required or []
+// **Aggregation rule (codex r2 fix)**: Hard 1 runs ONCE for the whole
+// pipeline after every phase completes. A single docs phase declaring
+// `evidence_required: [goal_trace]` MUST NOT suppress the tooling
+// demand when other completed phases changed code. So the skip path
+// requires that **every** completed phase whose impact actually
+// touched code (i.e., not the pure-Phase 0 readme phases) is
+// non-tooling-only. If ANY code-bearing completed phase requests
+// tooling (or has an empty/absent `evidence_required`, which defaults
+// to tooling-requested), Hard 1 demands tools.
+//
+// An empty `evidence_required` on a phase is treated as
+// "tooling requested" — the default decomposer mode demands
+// lint/type/build.
 NON_TOOLING_EVIDENCE = ["goal_trace", "manual", "external_audit", "documentation"]
-requests_tooling = phase_evidence.length == 0 or
-                   phase_evidence.some(e => not NON_TOOLING_EVIDENCE.includes(e))
+completed_phases = state.execution.phase_details
+  .filter(p => p.status == "completed")
+all_non_tooling = completed_phases.every(phase => {
+  phase_evidence = phase.evidence_required or []
+  return phase_evidence.length > 0 and
+         phase_evidence.every(e => NON_TOOLING_EVIDENCE.includes(e))
+})
+requests_tooling = not all_non_tooling
+skip_justifying_phases = completed_phases
+  .filter(phase => (phase.evidence_required or []).every(e => NON_TOOLING_EVIDENCE.includes(e)) and (phase.evidence_required or []).length > 0)
+  .map(phase => phase.id)
 
 total_checks = lint_commands.length + build_commands.length + (diagnostics ? 1 : 0)
 if total_checks == 0:
