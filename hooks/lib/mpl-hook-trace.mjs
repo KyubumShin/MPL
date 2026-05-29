@@ -175,12 +175,22 @@ function matcherIncludes(matcher, tools) {
   });
 }
 
+// Codex r2 on PR #243 [logic]: pathCategory must require a slash
+// boundary on the suffix match. Without it, `src/foo.mpl/state.json`
+// — a regular file in a directory called `foo.mpl` — would be
+// miscategorized as the canonical state path, and the same applies
+// to `foo.mpl/mpl/decomposition.yaml` vs the canonical decomposition
+// path. The state/decomposition focus filters then hide the legitimate
+// file hooks for these targets.
+function endsWithSegment(path, segment) {
+  if (path === segment) return true;
+  return path.endsWith('/' + segment);
+}
+
 function pathCategory(targetPath) {
   const normalized = String(targetPath || '').replace(/\\/g, '/');
-  if (normalized.endsWith(DECOMPOSITION_PATH) || normalized === DECOMPOSITION_PATH) {
-    return 'decomposition';
-  }
-  if (normalized.endsWith('.mpl/state.json')) return 'state';
+  if (endsWithSegment(normalized, DECOMPOSITION_PATH)) return 'decomposition';
+  if (endsWithSegment(normalized, '.mpl/state.json')) return 'state';
   return 'file';
 }
 

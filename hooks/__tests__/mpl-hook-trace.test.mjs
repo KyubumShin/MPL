@@ -483,6 +483,51 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('#237 codex r2 [logic]: pathCategory requires slash-boundary — `src/foo.mpl/state.json` is `file`, not `state`', () => {
+    // Codex r2 on PR #243: pathCategory used bare `endsWith('.mpl/state.json')`
+    // which matched `src/foo.mpl/state.json` (a regular file in a
+    // directory called `foo.mpl`). The state-focus filter then
+    // narrowed the hook chain, hiding the legitimate file hooks the
+    // operator needed to debug a real file artifact.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-r2-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+      }));
+      const trace = traceHookChain({
+        targetPath: 'src/foo.mpl/state.json',
+        cwd: tmp,
+      });
+      assert.equal(trace.category, 'file', 'non-canonical .mpl directory must classify as file');
+      const ids = trace.hooks.map((h) => h.hook_id);
+      // The legitimate file hooks must appear for this file target.
+      assert.equal(ids.includes('mpl-write-guard'), true,
+        'mpl-write-guard must appear for a file-category trace');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('#237 codex r2 [logic]: pathCategory requires slash-boundary for decomposition too', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-r2-decomp-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+      }));
+      const trace = traceHookChain({
+        targetPath: 'foo.mpl/mpl/decomposition.yaml',
+        cwd: tmp,
+      });
+      assert.equal(trace.category, 'file');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('#237 D3: non-state category trace still includes the broader set', () => {
     // Sanity check: tracing a code file path returns the full hook
     // chain (not the narrow state focus).
