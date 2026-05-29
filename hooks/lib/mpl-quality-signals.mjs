@@ -252,7 +252,23 @@ function hasNonEmptyAmbiguityNotes(yamlText) {
       // the gap signal with a placeholder — the exact inversion this
       // telemetry is meant to surface.
       const INLINE_EMPTY_RE = /^(?:null|~|\[\s*\]|\{\s*\}|"\s*"|'\s*')$/i;
-      if (noComment.length > 0 && !INLINE_EMPTY_RE.test(noComment)) return true;
+      // Codex r6 [logic]: a block-scalar opener (`|`, `>`, with
+      // optional chomping `+`/`-` and indentation digit) is NOT
+      // inline content — the actual payload lives on the deeper
+      // child lines. Fall through to Form 2 so the child scan can
+      // verify that at least one deeper non-comment line is present.
+      // Without this, both `ambiguity_notes: |` (truly empty) AND
+      // `ambiguity_notes: |\n  Boundary unclear` (populated) were
+      // hitting the inline path — the empty case incorrectly
+      // suppressed the signal.
+      const BLOCK_SCALAR_RE = /^[|>][+-]?\d?$/;
+      if (
+        noComment.length > 0 &&
+        !INLINE_EMPTY_RE.test(noComment) &&
+        !BLOCK_SCALAR_RE.test(noComment)
+      ) {
+        return true;
+      }
     }
     // Form 2: block opener — scan forward for the first non-blank,
     // non-comment line. If its indent > headerIndent AND it begins

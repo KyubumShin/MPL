@@ -207,6 +207,52 @@ test('#238 [seed-ambiguity-notes]: presence of ambiguity_notes suppresses the si
   assert.equal(detectSeedAmbiguityNotesGap(yaml), null);
 });
 
+test('#238 codex r6 [logic]: block-scalar openers (|, >, |-, >+, |2 ...) require deeper child content', () => {
+  // Codex r6: `ambiguity_notes: |` is NOT inline content — the
+  // block-scalar opener says "payload follows on deeper lines". An
+  // empty block scalar (`|` followed by a sibling key at same indent)
+  // was being treated as populated, suppressing the signal. Even
+  // worse, a populated block scalar (`|\n    real text`) was ALSO
+  // being silenced because the Form-1 inline branch returned true
+  // before Form 2 could verify the deeper child content.
+  //
+  // After the fix: block scalar opener falls through to Form 2, which
+  // requires a strictly-deeper non-comment line.
+  const cwd = freshWorkspace(); // also doubles as syntax sanity for the test
+  try {
+    // Empty block scalars must fire.
+    for (const opener of ['|', '|-', '|+', '>', '>-', '>+', '|2', '>4']) {
+      const yaml = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: ${opener}
+  acceptance_criteria:
+    - x
+`;
+      const result = detectSeedAmbiguityNotesGap(yaml);
+      assert.ok(result, `expected signal for empty block scalar opener: ${opener}`);
+      assert.equal(result.matched, 'TBD');
+    }
+
+    // Populated block scalars must NOT fire (deeper content present).
+    for (const opener of ['|', '|-', '>', '>-']) {
+      const yaml = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: ${opener}
+    Boundary unclear; needs operator confirmation.
+  acceptance_criteria:
+    - x
+`;
+      assert.equal(
+        detectSeedAmbiguityNotesGap(yaml),
+        null,
+        `expected NO signal for populated block scalar: ${opener}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#238 claude r6 [logic]: YAML-canonical Null/NULL + whitespace variants do NOT suppress signal', () => {
   // Claude r6 (generalizes Codex r5): YAML 1.2 canonical nulls are
   // `null|Null|NULL|~`; empty flow forms accept whitespace inside
