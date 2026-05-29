@@ -393,9 +393,24 @@ function classifyRunnerHead(head, canonical) {
     if (NPM_EXEC_SUBCOMMANDS.has(sub)) {
       i++;
     } else if (NPM_GATE_SUBCOMMANDS_REGEX.has(sub)) {
-      // `npm test` / `npm run lint` etc. — the anchored HARD1/HARD2
-      // regex can classify safely. Fall through.
-      return undefined;
+      // #245 (1) [data-integrity]: previously fell through to
+      // `matchFamilyRegex(safeCanonical)`, which scans HARD3
+      // keywords across the whole canonical first. That let a
+      // trailing positional arg containing an e2e keyword
+      // (`npm test playwright`, `pnpm test cypress`) promote the
+      // entry to hard3 even though the npm-subcommand `test` was
+      // the actual gate shape. Fix: re-classify against a
+      // synthesized canonical of just `head subcommand
+      // [run-script]`, dropping every trailing positional arg
+      // before the family regex sees it. `npm run e2e` still
+      // resolves to hard3 because the run-script IS the family
+      // signal in that form; `npm test playwright` resolves to
+      // hard2 because `playwright` is a positional test arg.
+      let synthesized = `${head} ${sub}`;
+      if (sub === 'run' && tokens[i + 1]) {
+        synthesized += ` ${String(tokens[i + 1]).toLowerCase()}`;
+      }
+      return matchFamilyRegex(synthesized);
     } else {
       // Anything else (install/add/version/audit/publish/init/an
       // arbitrary binary name placed where the subcommand goes …) is
@@ -412,13 +427,21 @@ function classifyRunnerHead(head, canonical) {
     i = skipFlagsAt(tokens, i, new Set());
     if (i >= tokens.length) return null;
     const sub = tokens[i].toLowerCase();
-    if (CARGO_GATE_SUBCOMMANDS.has(sub)) return undefined; // fall through to anchored regex
+    if (CARGO_GATE_SUBCOMMANDS.has(sub)) {
+      // #245 (1) [data-integrity]: same trailing-keyword fix as npm.
+      // `cargo test playwright` resolves to hard2, not hard3.
+      return matchFamilyRegex(`${head} ${sub}`);
+    }
     return null; // cargo install/doc/run/etc. → not gate evidence
   } else if (head === 'go') {
     i = skipFlagsAt(tokens, i, new Set());
     if (i >= tokens.length) return null;
     const sub = tokens[i].toLowerCase();
-    if (GO_GATE_SUBCOMMANDS.has(sub)) return undefined;
+    if (GO_GATE_SUBCOMMANDS.has(sub)) {
+      // #245 (1) [data-integrity]: same trailing-keyword fix as npm.
+      // `go build e2e` resolves to hard1, not hard3.
+      return matchFamilyRegex(`${head} ${sub}`);
+    }
     return null;
   } else if (head !== 'npx' && head !== 'pnpx') {
     return undefined;
@@ -674,9 +697,20 @@ function stripNonExecutedSuffix(command) {
   let cut = command.length;
   // Redirect targets / shell comments — not executed.
   // Control operators — separate command boundaries.
+  // #245 (2) [data-integrity]: subshell openers — `$( … )`, backticks,
+  // process substitution `<( … )` / `>( … )` — embed a SEPARATE
+  // command whose output becomes a positional arg of the gate
+  // command. `npm test $(echo playwright)` previously survived the
+  // strip and the family regex matched `\bplaywright\b` against the
+  // unexpanded canonical, forging hard3. Cut at the opener so the
+  // family regex only sees `npm test` and resolves to hard2.
+  // (We don't try to match closing `)` / `` ` `` — once the opener
+  // is in the canonical, everything to its right is non-executed
+  // gate content for our purposes.)
   for (const op of [
     '#', '>>', '>', '<<', '<', '2>', '&>', '|&',
     ';', '\n', '\r', '&&', '||', '|', '&',
+    '$(', '<(', '>(', '`',
   ]) {
     const idx = command.indexOf(op);
     if (idx !== -1 && idx < cut) cut = idx;
