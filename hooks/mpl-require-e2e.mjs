@@ -45,13 +45,27 @@ const { readGoalContract } = await import(
 const { readStdin } = isMain
   ? await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href)
   : { readStdin: async () => '' };
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-e2e';
+const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
+function blockE2E(cwd, state, { code, reason, resumeInstruction, retryContext = {} }) {
+  emitBlockedHook(cwd, state, {
+    hookId: HOOK_ID,
+    ruleId: 'missing_e2e_evidence',
+    code,
+    artifact: BLOCKED_ARTIFACT,
+    reason,
+    resumeInstruction,
+    retryContext,
+  });
 }
 
 /**
@@ -364,10 +378,16 @@ async function runHook() {
   const declaredRequired = scenarios.filter((s) => s.required !== false);
   const missingCommand = declaredRequired.filter((s) => !s.test_command).map((s) => s.id);
   if (missingCommand.length > 0) {
-    block(
-      `[MPL AD-0008] Cannot set finalize_done=true — required E2E scenario(s) missing executable test_command: ${missingCommand.join(', ')}. ` +
-        `Re-run decomposition Step 3-H and emit executable commands, or mark the scenario required:false with a rationale.`
-    );
+    const state = readState(cwd) || {};
+    blockE2E(cwd, state, {
+      code: 'e2e_test_command_missing',
+      reason:
+        `[MPL AD-0008] Cannot set finalize_done=true — required E2E scenario(s) missing executable test_command: ${missingCommand.join(', ')}. ` +
+        `Re-run decomposition Step 3-H and emit executable commands, or mark the scenario required:false with a rationale.`,
+      resumeInstruction:
+        'Re-run decomposition Step 3-H to emit executable test_command for every required E2E scenario, then retry finalize.',
+      retryContext: { missing_command: missingCommand },
+    });
     return;
   }
 
@@ -388,7 +408,14 @@ async function runHook() {
         `[MPL AD-0008] Cannot set finalize_done=true — ${reasons.join('; ')}. ` +
         `Emit .mpl/mpl/e2e-scenarios.yaml with at least one required scenario and executable test_command, run it, and let gate-recorder populate state.e2e_results.`;
       if (realRuntimeE2ERequired(cwd) || isE2EContractStrict(cwd)) {
-        block(message);
+        const state = readState(cwd) || {};
+        blockE2E(cwd, state, {
+          code: 'e2e_required_scenarios_absent',
+          reason: message,
+          resumeInstruction:
+            'Emit at least one required E2E scenario with executable test_command in .mpl/mpl/e2e-scenarios.yaml, execute it, then retry finalize.',
+          retryContext: { reasons },
+        });
         return;
       }
       console.log(JSON.stringify({
@@ -399,7 +426,7 @@ async function runHook() {
       return;
     }
 
-    ok();
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
     return;
   }
 
@@ -438,12 +465,17 @@ async function runHook() {
   }
 
   if (unresolved.length > 0) {
-    block(
-      `[MPL AD-0008] Cannot set finalize_done=true — ${unresolved.length} required E2E scenario(s) missing or failing: ${unresolved.join(', ')}. ` +
+    blockE2E(cwd, state, {
+      code: 'e2e_scenarios_unresolved',
+      reason:
+        `[MPL AD-0008] Cannot set finalize_done=true — ${unresolved.length} required E2E scenario(s) missing or failing: ${unresolved.join(', ')}. ` +
         `Each required scenario's test_command must be executed (gate-recorder writes state.e2e_results automatically) AND exit 0, ` +
         `OR explicitly overridden via .mpl/config/e2e-scenario-override.json with a user reason. ` +
-        `Re-run the scenarios or use /mpl:mpl-finalize Step 5.0 HITL to record overrides before retrying finalize.`
-    );
+        `Re-run the scenarios or use /mpl:mpl-finalize Step 5.0 HITL to record overrides before retrying finalize.`,
+      resumeInstruction:
+        'Re-execute each unresolved E2E scenario (or record an override in .mpl/config/e2e-scenario-override.json), then retry finalize.',
+      retryContext: { unresolved },
+    });
     return;
   }
 
@@ -452,11 +484,16 @@ async function runHook() {
     const uncovered = computeUncoveredUcs(contract.included_uc_ids, contract.scenarios);
     if (uncovered.length > 0) {
       if (isE2EContractStrict(cwd)) {
-        block(
-          `[MPL 0.16 Tier C] Cannot set finalize_done=true — ${uncovered.length} included UC(s) have no E2E scenario coverage: ${uncovered.join(', ')}. ` +
+        blockE2E(cwd, state, {
+          code: 'e2e_uc_coverage_missing',
+          reason:
+            `[MPL 0.16 Tier C] Cannot set finalize_done=true — ${uncovered.length} included UC(s) have no E2E scenario coverage: ${uncovered.join(', ')}. ` +
             `Add scenarios to .mpl/requirements/user-contract.md (each scenario's covers[] must list the UC) ` +
-            `or opt out of strict mode via .mpl/config.json { "e2e_contract_strict": false }.`
-        );
+            `or opt out of strict mode via .mpl/config.json { "e2e_contract_strict": false }.`,
+          resumeInstruction:
+            "Add E2E scenarios that cover each uncovered UC (each scenario's covers[] must list the UC), or opt out of strict mode, then retry finalize.",
+          retryContext: { uncovered_ucs: uncovered },
+        });
         return;
       }
       console.log(

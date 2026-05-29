@@ -57,6 +57,24 @@ const ENFORCEMENT_DEFAULTS = {
   state_invariant_violation: 'warn',
   bash_timeout_violation: 'warn',
   audit_residual: 'warn',
+  // #235 / B-category: rules added so the hand-rolled `block(reason)`
+  // hooks can be wired through `surfaceBlockedHook`. Per the
+  // relaxation plan (docs/findings/2026-05-28-enforcement-relaxation-plan.md),
+  // these guard state-corruption / unrecoverable-evidence cases — the
+  // default stays at 'block' to preserve current behavior. Workspaces
+  // can opt to 'off' via `.mpl/config.json`; setting 'warn' surfaces
+  // the violation without blocking.
+  missing_phase_evidence: 'block',
+  missing_finalize_artifacts: 'block',
+  missing_completed_phase_immutability: 'block',
+  missing_decomposition_delta: 'block',
+  missing_chain_assignment: 'block',
+  missing_e2e_evidence: 'block',
+  e2e_authenticity_invalid: 'block',
+  missing_whole_goal_closure: 'block',
+  pp_schema_invalid: 'block',
+  small_plan_scope_conflict: 'block',
+  fast_track_phase0_artifacts_missing: 'block',
 };
 
 const PARALLELISM_DEFAULTS = {

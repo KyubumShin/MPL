@@ -36,6 +36,14 @@ const { checkInvariants, formatViolations, TRIGGERS, VIOLATION_IDS } = await imp
 const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
+// #235: record envelope on the I13 fast-track block so mpl-recover
+// can dispatch and BLOCKED_HOOK_STALE doesn't fire on the next
+// state-write trigger.
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+
+const HOOK_ID = 'mpl-state-invariant';
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -157,7 +165,10 @@ async function main() {
   if (!state) return silent();
 
   const result = checkInvariants(state, { cwd, trigger });
-  if (result.ok) return silent();
+  if (result.ok) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: 'state-invariant' });
+    return silent();
+  }
 
   // Codex r4 on PR #222 [data-integrity]: I13 (Phase 0 artifacts) MUST
   // be a non-configurable block. The default `state_invariant_violation`
@@ -168,10 +179,36 @@ async function main() {
     (v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING
   );
   const action = resolveRuleAction(cwd, state, 'state_invariant_violation');
-  if (action === 'off' && !hasFastTrackViolation) return silent();
+  if (action === 'off' && !hasFastTrackViolation) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: 'state-invariant' });
+    return silent();
+  }
 
   const reason = formatViolations(result);
   if (action === 'block' || hasFastTrackViolation) {
+    // #235: record envelope so mpl-recover sees the block code.
+    // I13 fast-track uses its own non-configurable code; other
+    // invariant violations use the generic state_invariant_violation
+    // bucket from ENFORCEMENT_DEFAULTS.
+    recordBlockedHook(cwd, {
+      hookId: HOOK_ID,
+      phaseId: state?.current_phase,
+      artifact: 'state-invariant',
+      code: hasFastTrackViolation
+        ? 'fast_track_phase0_artifacts_missing'
+        : 'state_invariant_violation',
+      reason,
+      resumeInstruction: hasFastTrackViolation
+        ? 'Materialize the required Phase 0 artifacts (raw-scan.md / design-intent.yaml / contracts) and rewrite the state transition, or opt out via .mpl/config.json `phase0_artifacts_required: false`.'
+        : 'Resolve the state-invariant violation(s) in state.json (see reason for the specific check IDs), then retry the write.',
+      retryContext: {
+        violations: result.violations.slice(0, 12).map((v) => ({
+          id: v.id,
+          message: v.message,
+        })),
+        trigger,
+      },
+    });
     console.log(JSON.stringify({
       decision: 'block',
       reason,
@@ -179,6 +216,7 @@ async function main() {
     return;
   }
   // warn
+  clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: 'state-invariant' });
   console.log(JSON.stringify({
     continue: true,
     systemMessage: reason,

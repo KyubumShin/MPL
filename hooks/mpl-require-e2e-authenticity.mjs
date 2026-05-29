@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
 
-const { isMplActive } = await import(
+const { isMplActive, readState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 const { loadConfig } = await import(
@@ -41,12 +41,15 @@ const MOCK_PATTERN = /\b(mock|stub|fake|msw|mockIPC|VITE_E2E_MOCK|__mocks__)\b/i
 const PLACEHOLDER_PATTERN = /\b(expect\s*\(\s*true\s*\)|assert\s*\(\s*true\s*\)|\.toBe\s*\(\s*true\s*\)|test\.skip\s*\(|it\.skip\s*\(|describe\.skip\s*\()/;
 const FAKE_RUNTIME_E2E_PATTERN = /\bWITHOUT\s+a\s+running\s+Tauri\s+runtime\b|\bwithout\s+a\s+running\s+Tauri\s+runtime\b|\brepo\/db layer directly\b|\brepo layer directly\b|\bbypass(?:es|ing)?\s+Tauri\s+runtime\b/i;
 
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-e2e-authenticity';
+const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
+
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-}
-
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 function normalizeScalar(value) {
@@ -330,14 +333,23 @@ async function main() {
   const scenarios = loadScenarios(cwd);
   const issues = evaluateScenarioAuthenticity(cwd, scenarios, policy);
   if (issues.length > 0) {
-    block(
-      `[MPL E2E Authenticity] Cannot set finalize_done=true — required E2E evidence is not authentic: ${issues.join(', ')}. ` +
-        'Use real runtime scenarios, remove mock/placeholder substitutes, or record a user-approved override in .mpl/config/e2e-authenticity-override.json.'
-    );
+    const state = readState(cwd) || {};
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'e2e_authenticity_invalid',
+      code: 'e2e_authenticity_invalid',
+      artifact: BLOCKED_ARTIFACT,
+      reason:
+        `[MPL E2E Authenticity] Cannot set finalize_done=true — required E2E evidence is not authentic: ${issues.join(', ')}. ` +
+        'Use real runtime scenarios, remove mock/placeholder substitutes, or record a user-approved override in .mpl/config/e2e-authenticity-override.json.',
+      resumeInstruction:
+        'Replace mock/placeholder E2E substitutes with authentic real-runtime scenarios (or record a user-approved override), then retry finalize.',
+      retryContext: { issues: issues.slice(0, 50) },
+    });
     return;
   }
 
-  ok();
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {

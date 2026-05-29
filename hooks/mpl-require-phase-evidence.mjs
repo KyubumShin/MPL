@@ -35,13 +35,15 @@ const { collectFileWrites, isFileWriteTool } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-phase-evidence';
+const BLOCKED_ARTIFACT = 'phase-evidence-latch';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-}
-
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 function isStatePath(filePath, cwd) {
@@ -157,14 +159,23 @@ async function main() {
   if (issues.length > 0) {
     const shown = issues.slice(0, 12).join(', ');
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
-    block(
+    const reason =
       `[MPL Phase Evidence] Phase completion requires verification.md Evidence Latch ` +
-        `for every phase evidence_required token: ${shown}${more}.`
-    );
+        `for every phase evidence_required token: ${shown}${more}.`;
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'missing_phase_evidence',
+      code: 'phase_evidence_latch_missing',
+      artifact: BLOCKED_ARTIFACT,
+      reason,
+      resumeInstruction:
+        'Latch every required evidence token in the phase verification.md (Evidence Latch section), then retry the blocked write.',
+      retryContext: { issues: issues.slice(0, 50) },
+    });
     return;
   }
 
-  ok();
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {

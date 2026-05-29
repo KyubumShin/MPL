@@ -32,13 +32,27 @@ const { readStdin } = await import(
 const { aggregateScheduler, explanationRequiredFromAggregate } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-scheduler-aggregate.mjs')).href
 );
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-finalize-artifacts';
+const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
+function blockWithEnvelope(cwd, state, { code, reason, resumeInstruction, retryContext = {} }) {
+  emitBlockedHook(cwd, state, {
+    hookId: HOOK_ID,
+    ruleId: 'missing_finalize_artifacts',
+    code,
+    artifact: BLOCKED_ARTIFACT,
+    reason,
+    resumeInstruction,
+    retryContext,
+  });
 }
 
 function targetPaths(toolInput) {
@@ -389,7 +403,13 @@ async function main() {
   const text = incomingText(toolInput);
   const goal = readGoalContract(cwd);
   if (cfg.goal_contract_required !== false && (!goal.exists || !goal.valid)) {
-    block(`[MPL Goal Contract] Cannot set finalize_done=true — goal contract missing or invalid: ${goal.missing.join(', ')}.`);
+    blockWithEnvelope(cwd, state, {
+      code: 'goal_contract_invalid',
+      reason: `[MPL Goal Contract] Cannot set finalize_done=true — goal contract missing or invalid: ${goal.missing.join(', ')}.`,
+      resumeInstruction:
+        'Restore a valid .mpl/goal-contract.yaml (Phase 0 renewal) and re-attempt finalize.',
+      retryContext: { missing: goal.missing },
+    });
     return;
   }
 
@@ -397,22 +417,32 @@ async function main() {
   if (cfg.goal_contract_required !== false && contract?.content_sha256) {
     const baseline = readBaselineGoalContractHash(cwd);
     if (baseline.error) {
-      block(
-        `[MPL Finalize Guard] Cannot set finalize_done=true — corrupt baseline.yaml goal_contract sha256 ` +
+      blockWithEnvelope(cwd, state, {
+        code: 'goal_contract_baseline_corrupt',
+        reason:
+          `[MPL Finalize Guard] Cannot set finalize_done=true — corrupt baseline.yaml goal_contract sha256 ` +
           `(${baseline.error}${baseline.rawHash ? `: ${baseline.rawHash}` : ''}). ` +
           `Expected the 64-character lowercase normalized SHA-256 for .mpl/goal-contract.yaml. ` +
           `Raw shasum may differ because MPL normalizes CRLF to LF and trims surrounding whitespace before hashing. ` +
-          `Re-run Phase 0 renewal before finalizing.`
-      );
+          `Re-run Phase 0 renewal before finalizing.`,
+        resumeInstruction:
+          'Re-run Phase 0 renewal so baseline.yaml records a valid goal_contract sha256, then retry finalize.',
+        retryContext: { baseline_error: baseline.error, raw_hash: baseline.rawHash || null },
+      });
       return;
     }
     if (baseline.hash && baseline.hash !== contract.content_sha256) {
-      block(
-        `[MPL Finalize Guard] Cannot set finalize_done=true — goal contract drifted from baseline.yaml ` +
+      blockWithEnvelope(cwd, state, {
+        code: 'goal_contract_drift',
+        reason:
+          `[MPL Finalize Guard] Cannot set finalize_done=true — goal contract drifted from baseline.yaml ` +
           `(baseline=${baseline.hash}, current=${contract.content_sha256}). ` +
           `These are MPL normalized hashes; raw shasum may differ because MPL normalizes CRLF to LF and trims surrounding whitespace. ` +
-          `Re-run Phase 0 renewal before finalizing.`
-      );
+          `Re-run Phase 0 renewal before finalizing.`,
+        resumeInstruction:
+          'Resolve the Goal Contract drift via Phase 0 renewal before retrying finalize.',
+        retryContext: { baseline_hash: baseline.hash, current_hash: contract.content_sha256 },
+      });
       return;
     }
   }
@@ -451,14 +481,19 @@ async function main() {
   if (schedulerProblem) missing.push(schedulerProblem);
 
   if (missing.length > 0) {
-    block(
-      `[MPL Finalize Guard] Cannot set finalize_done=true — missing completion evidence: ${missing.join(', ')}. ` +
-        'Create the declared artifacts/evidence or record a user-approved override in .mpl/config/finalize-artifact-override.json.'
-    );
+    blockWithEnvelope(cwd, state, {
+      code: 'finalize_artifacts_missing',
+      reason:
+        `[MPL Finalize Guard] Cannot set finalize_done=true — missing completion evidence: ${missing.join(', ')}. ` +
+        'Create the declared artifacts/evidence or record a user-approved override in .mpl/config/finalize-artifact-override.json.',
+      resumeInstruction:
+        'Create the missing completion artifacts/evidence (or record a user-approved override), then retry finalize.',
+      retryContext: { missing },
+    });
     return;
   }
 
-  ok();
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {
