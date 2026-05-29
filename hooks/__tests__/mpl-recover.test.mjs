@@ -520,6 +520,81 @@ phases:
     assert.match(result.message, /budget exhausted/);
   });
 
+  it('#234 [data-integrity] codex r4: mixed-precision ISO timestamps compare chronologically (not lexicographically)', () => {
+    // codex r4 on PR #242: `2026-06-01T12:00:00.500Z` is chronologically
+    // AFTER `2026-06-01T12:00:00Z` but is lexicographically SMALLER
+    // because `.` (0x2E) < `Z` (0x5A). String comparison falsely
+    // treats the post-blocked_at recovery as stale → resets attempts
+    // and reopens the budget. Numeric Date.parse comparison fixes it.
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:00:00.500Z', // chronologically AFTER blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    // String comparison would say "0.500Z" < "Z" → discard → attempts=0.
+    // Numeric comparison says 12:00:00.500 > 12:00:00 → adopt → attempts=3.
+    assert.equal(plan.attempts, 3, 'sub-second precision must compare chronologically');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+  });
+
+  it('#234 [data-integrity] codex r4: inverse precision case — string comparison would falsely adopt stale state', () => {
+    // The mirror case: untagged recovery `last_attempt_at:
+    // 2026-06-01T12:00:00Z` and current blocked_at:
+    // 2026-06-01T12:00:00.500Z. Recovery is chronologically OLDER
+    // than the current block (stale → discard). But string comparison
+    // says "Z" > ".500Z" → adopt. Numeric comparison correctly
+    // discards.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00.500Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:00:00Z', // chronologically BEFORE blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0, 'stale pre-block recovery must be discarded regardless of string lex order');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+  });
+
+  it('#234 [data-integrity] codex r4: malformed ISO timestamps fall closed (discarded)', () => {
+    // If either timestamp fails Date.parse, the safe direction is to
+    // discard the untagged recovery rather than admit garbage.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: 'not-a-real-date',
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0);
+  });
+
   it('#234 [contract-break] codex r3: pre-r2 untagged recovery from an OLDER block is treated as stale', () => {
     // The other half of the migration rule: untagged recovery written
     // BEFORE the current block's blocked_at must still be discarded,

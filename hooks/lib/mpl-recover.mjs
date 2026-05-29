@@ -174,10 +174,18 @@ function activeRecoveryState(state) {
   // When the current state has neither code nor blocked_at, fall back
   // to the original pre-tag behavior (genuinely ambiguous → trust).
   if (currentCode === null && currentBlockedAt === null) return rec;
+  // Codex r4 on PR #242 [data-integrity]: ISO 8601 strings with mixed
+  // millisecond precision (`2026-06-01T12:00:00Z` vs
+  // `2026-06-01T12:00:00.500Z`) sort lexicographically against the
+  // chronological intent (`.` < `Z` in ASCII). Compare via Date.parse
+  // numeric milliseconds; fall closed (discard untagged recovery) if
+  // either timestamp fails to parse.
   const stampedLastAt = typeof rec.last_attempt_at === 'string' ? rec.last_attempt_at : null;
-  if (stampedLastAt && currentBlockedAt && stampedLastAt >= currentBlockedAt) {
-    return rec;
-  }
+  if (!stampedLastAt || !currentBlockedAt) return {};
+  const stampedMs = Date.parse(stampedLastAt);
+  const currentMs = Date.parse(currentBlockedAt);
+  if (!Number.isFinite(stampedMs) || !Number.isFinite(currentMs)) return {};
+  if (stampedMs >= currentMs) return rec;
   return {};
 }
 
