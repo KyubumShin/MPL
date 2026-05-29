@@ -1069,7 +1069,24 @@ async function main() {
         : '';
 
       if (gateResults.allPassed) {
-        // All gates passed → Phase 5
+        // #241 B2 (#248) codex r1 fix: a genuinely active release cohort
+        // (current_cut_id set) with all-PASS top-level gates MUST NOT
+        // bypass release-gate / release-finalize. The whole-pipeline
+        // finalize path would skip completed_cut_ids accounting, the
+        // release manifest, and the cohort-scoped evidence files. Route
+        // to release-gate instead — the cohort's release path validates
+        // and finalizes the cut; if the marker is stale, the operator
+        // clears it via mpl-recover (per the advisory) and re-enters
+        // phase3-gate. Both paths converge cleanly.
+        if (state.release?.current_cut_id) {
+          if (emitPhase0BlockIfNeeded(cwd, 'release-gate')) return;
+          writeState(cwd, { current_phase: 'release-gate' });
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `${cohortAdvisory}[MPL] All Quality Gates passed (source=${gateResults.source}). Active cohort "${state.release.current_cut_id}" detected — routing to release-gate (not whole-pipeline phase5-finalize) to complete the cohort's release path. Run \`mpl-recover\` first if the cohort marker is stale.${fallbackWarn}`
+          }));
+          break;
+        }
                 if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
                 writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({

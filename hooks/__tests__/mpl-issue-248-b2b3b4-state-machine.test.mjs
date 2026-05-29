@@ -20,6 +20,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  existsSync,
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -48,16 +49,31 @@ function freshWorkspace(stateOverrides = {}) {
 }
 
 function runPhaseController(cwd) {
-  // Stop hook runs with no stdin payload; the controller reads state directly.
+  // Mirror the pattern used by hooks/__tests__/mpl-phase-controller.test.mjs:
+  // (1) ensure the boundary-contracts placeholder exists so contract-graph
+  //     checks don't trip, (2) pass `{cwd}` on stdin.
+  // Phase 0 artifact seeding — phase-controller's transition writes
+  // pass through `emitPhase0BlockIfNeeded`; without these files the
+  // controller short-circuits before transitioning.
+  mkdirSync(join(cwd, '.mpl', 'mpl', 'phase0'), { recursive: true });
+  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'))) {
+    writeFileSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'), '# raw scan');
+  }
+  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'))) {
+    writeFileSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'), 'goal: test\n');
+  }
+  mkdirSync(join(cwd, '.mpl', 'contracts'), { recursive: true });
+  const noBoundaries = join(cwd, '.mpl', 'contracts', '_no-boundaries.json');
+  if (!existsSync(noBoundaries)) {
+    writeFileSync(noBoundaries, JSON.stringify({ boundary_id: '_no-boundaries' }));
+  }
   const script = join(HOOKS_DIR, 'mpl-phase-controller.mjs');
   const out = execSync(`node "${script}"`, {
-    input: '',
+    input: JSON.stringify({ cwd }),
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 5000,
-    env: { ...process.env, MPL_CWD: cwd },
   }).toString();
-  // The hook can emit multiple lines (writeState + JSON). Last JSON line wins.
   const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
@@ -82,20 +98,13 @@ test('#248 B2: phase3-gate with active current_cut_id no longer auto-reverts to 
     current_phase: 'phase3-gate',
     release: { current_cut_id: 'cut-1' },
     gate_results: {
-      hard1_passed: true,
-      hard2_passed: true,
-      hard3_passed: true,
-      hard1_baseline: { source: 'structured' },
-      hard2_coverage: { source: 'structured' },
-      hard3_resilience: { source: 'structured' },
+      hard1_baseline: { exit_code: 0 },
+      hard2_coverage: { exit_code: 0 },
+      hard3_resilience: { exit_code: 0 },
     },
   });
   try {
     const decision = runPhaseController(cwd);
-    // The decision is the LAST emitted line — when gates all pass that's
-    // the phase5-finalize transition stopReason. The B2 advisory was
-    // emitted earlier in the stream; the controller did NOT revert
-    // current_phase back to phase2-sprint.
     const newState = readStateFromDisk(cwd);
     assert.notEqual(
       newState.current_phase,
@@ -103,6 +112,59 @@ test('#248 B2: phase3-gate with active current_cut_id no longer auto-reverts to 
       'B2: must NOT auto-revert to phase2-sprint',
     );
     assert.ok(decision.continue, 'must keep the pipeline running');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#248 B2 codex r1 [contract-break]: active cohort + PASS gates routes to release-gate, NOT phase5-finalize', () => {
+  // Codex r1: removing the forced revert created a new bypass —
+  // a GENUINELY active release cohort + all-PASS gate evidence would
+  // route to phase5-finalize, skipping release-gate / release-finalize.
+  // That bypasses completed_cut_ids accounting + release manifest.
+  // Fix: when current_cut_id is set AND gates pass, route to release-gate
+  // so the cohort's release path runs cleanly. If the marker is stale,
+  // operator clears it via mpl-recover and re-enters phase3-gate.
+  const cwd = freshWorkspace({
+    current_phase: 'phase3-gate',
+    release: { current_cut_id: 'mvp', completed_cut_ids: [] },
+    gate_results: {
+      hard1_baseline: { exit_code: 0 },
+      hard2_coverage: { exit_code: 0 },
+      hard3_resilience: { exit_code: 0 },
+    },
+  });
+  try {
+    runPhaseController(cwd);
+    const newState = readStateFromDisk(cwd);
+    assert.equal(
+      newState.current_phase,
+      'release-gate',
+      'active cohort + PASS gates must route to release-gate, not phase5-finalize',
+    );
+    // current_cut_id is preserved across the routing.
+    assert.equal(newState.release.current_cut_id, 'mvp');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#248 B2: NO active cohort + PASS gates still routes to phase5-finalize (default behavior unchanged)', () => {
+  // Sanity: the codex r1 fix must not regress the normal case where
+  // no cohort is active.
+  const cwd = freshWorkspace({
+    current_phase: 'phase3-gate',
+    release: { current_cut_id: null, completed_cut_ids: [] },
+    gate_results: {
+      hard1_baseline: { exit_code: 0 },
+      hard2_coverage: { exit_code: 0 },
+      hard3_resilience: { exit_code: 0 },
+    },
+  });
+  try {
+    runPhaseController(cwd);
+    const newState = readStateFromDisk(cwd);
+    assert.equal(newState.current_phase, 'phase5-finalize');
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -324,6 +386,56 @@ test('#248 B4 [logic]: validateWholeGoalClosure scopes to cohort phases when opt
     assert.ok(wholeVerdict.issues.includes('phase-3:not_completed'));
     assert.ok(
       wholeVerdict.issues.some((i) => i === 'acceptance_criteria:not_completed:AC-3'),
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#248 B4 codex r1 [logic]: partially stale cohort (some ids missing from decomposition) fails closed', () => {
+  // Codex r1: a cohort.phases mix of valid + stale ids was being
+  // silently filtered. scopedPhases.length > 0 → previous stale-check
+  // didn't fire → the missing id was dropped from the required AC/AX
+  // universe, allowing a corrupted cohort definition to finalize.
+  // Fix: detect ANY missing cohort id, not only fully-missing cohorts.
+  const cwd = freshWorkspace({
+    release: {
+      cohort: {
+        complete_pipeline_optional: true,
+        phases: ['phase-1', 'phase-stale'],
+      },
+    },
+  });
+  try {
+    writeFileSync(
+      join(cwd, '.mpl', 'mpl', 'decomposition.yaml'),
+      `phases:
+  - id: phase-1
+    goal_trace:
+      acceptance_criteria: ['AC-1']
+`,
+    );
+    const verdict = validateWholeGoalClosure({
+      cwd,
+      state: {
+        release: {
+          cohort: {
+            complete_pipeline_optional: true,
+            phases: ['phase-1', 'phase-stale'],
+          },
+        },
+      },
+      contract: { acceptance_criteria: ['AC-1'] },
+    });
+    assert.equal(verdict.valid, false);
+    assert.match(
+      verdict.issues[0] || '',
+      /cohort:phases_not_in_decomposition:phase-stale/,
+    );
+    // The valid id (phase-1) should NOT appear in the missing list.
+    assert.ok(
+      !verdict.issues[0]?.includes('phase-1'),
+      'valid cohort ids must not appear in the missing list',
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

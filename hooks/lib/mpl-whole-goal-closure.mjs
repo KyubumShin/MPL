@@ -71,20 +71,29 @@ export function validateWholeGoalClosure({ cwd, state = {}, contract = null }) {
   }
 
   const cohortPhaseIds = resolveCohortScope({ cwd, state });
+  const decompPhaseIdSet = new Set(decomposition.phases.map((p) => p.id));
   const scopedPhases = cohortPhaseIds
     ? decomposition.phases.filter((p) => cohortPhaseIds.includes(p.id))
     : decomposition.phases;
 
-  // Surface an issue when complete_pipeline_optional is set but the
-  // cohort's declared phase ids don't match any decomposition entry —
-  // that's a stale-cohort condition and the operator should clear it.
-  if (cohortPhaseIds && scopedPhases.length === 0) {
-    return {
-      valid: false,
-      issues: [
-        `cohort:phases_not_in_decomposition:${cohortPhaseIds.join(',')}`,
-      ],
-    };
+  // Codex r1 [logic] fix: fail closed when ANY cohort phase id is
+  // absent from decomposition, not only when the entire cohort is
+  // missing. A partially-stale cohort descriptor (1 of N ids has been
+  // recomposed away) would otherwise have its missing id silently
+  // dropped, narrowing the required universe and letting the closure
+  // pass on a corrupted cohort definition.
+  if (cohortPhaseIds) {
+    const missingCohortIds = cohortPhaseIds.filter((id) => !decompPhaseIdSet.has(id));
+    if (missingCohortIds.length > 0) {
+      return {
+        valid: false,
+        issues: [
+          `cohort:phases_not_in_decomposition:${missingCohortIds.join(',')}`,
+        ],
+        cohort_scoped: true,
+        scoped_phase_ids: scopedPhases.map((p) => p.id),
+      };
+    }
   }
 
   const completed = new Set(completedPhaseIds(cwd, state));

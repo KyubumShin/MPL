@@ -977,10 +977,15 @@ mvp_scope:
     );
     // current_cut_id is preserved (not cleared by the controller).
     assert.strictEqual(state.release.current_cut_id, 'mvp');
-    // All-PASS evidence → controller routed forward to phase5-finalize.
-    assert.strictEqual(state.current_phase, 'phase5-finalize');
-    // The terminal stopReason describes the PASS transition.
-    assert.match(out.stopReason, /Quality Gates passed|Transitioning to Phase 5/);
+    // All-PASS evidence + active cohort → route to release-gate
+    // (codex r1 fix on PR #254: whole-pipeline finalize would bypass
+    // release-gate/release-finalize for a real cohort; routing to
+    // release-gate covers both stale-marker and genuinely-active cases).
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(
+      out.stopReason,
+      /Quality Gates passed|Active cohort .* detected — routing to release-gate/,
+    );
   });
 
   it('1.6b: release-finalize is idempotent — re-entering with cohort already in completed_cut_ids does not double-append', () => {
