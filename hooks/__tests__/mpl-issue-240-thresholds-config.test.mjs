@@ -308,6 +308,30 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
   });
 
+  it('codex r6 [contract-break]: stripAtEvalFlag must also handle shell-quoted attached/standalone eval flags', () => {
+    // r5 only handled bare attached forms (`--call=value`). Shell-
+    // quoted tokens like `"--call=echo playwright"` (one token after
+    // split: `"--call=echo`) or `"--call"` still bypassed the cut
+    // because the leading/trailing quote prevented `===` and
+    // `startsWith` matches. Concrete pre-fix repro reproduced empirically:
+    //   classifyGateCommand('npx "--call=echo playwright"') === 'hard3_resilience'
+    // Fix: strip leading + trailing `"` / `'` / backtick chars from
+    // each token before the eval-flag check.
+    // No writeConfig — default workspace.
+    assert.equal(classifyGateCommand('npx "--call=echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand("npx '--call=echo playwright'", { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx "-c=echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx "--eval=playwright test"', { cwd: tmp }), null);
+    // Quoted standalone-form (same class — `"--call" "echo playwright"`).
+    assert.equal(classifyGateCommand('npx "--call" "echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand("npx '--call' 'echo playwright'", { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx "-c" "echo playwright"', { cwd: tmp }), null);
+    // No-cwd path too.
+    assert.equal(classifyGateCommand('npx "--call=echo playwright"'), null);
+    // Legitimate `npx playwright test` still classifies.
+    assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
+  });
+
   it('codex r5 + claude r5 [contract-break]: stripAtEvalFlag must also cut on the --flag=value attached form', () => {
     // r4 only handled space-separated forms (`--call value`). npm/npx
     // option parsing also accepts attached value forms (`--call=value`,

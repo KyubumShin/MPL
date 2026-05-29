@@ -411,11 +411,22 @@ export function classifyGateCommand(command, { cwd } = {}) {
 // `=` form let `npx --call="echo playwright"` still classify as
 // hard3 via the string-literal keyword. Match `token === flag` OR
 // `token.toLowerCase().startsWith(flag + '=')`.
+//
+// Codex r6 [contract-break] on PR #244: also handle shell-quoted
+// attached flags. `npx "--call=echo playwright"` tokenizes as
+// `["npx", "\"--call=echo", "playwright\""]` after whitespace split;
+// the actual argv (after shell strips quotes) is the same attached
+// form. Same class covers the quoted standalone flag form
+// (`npx "--call" "echo playwright"` → token `"--call"`). Strip BOTH
+// leading and trailing shell quote characters (`"`, `'`, backtick)
+// from each token before the eval-flag comparison so the cut catches
+// all single-token quoting patterns: `"--call=v`, `--call="`,
+// `"--call"`, `'--call'`.
 function stripAtEvalFlag(canonical) {
   const tokens = String(canonical || '').split(/\s+/);
   const evalFlags = ['-c', '--call', '-e', '--eval', '-x', '--exec', '--run-script'];
   const cutAt = tokens.findIndex((t) => {
-    const low = t.toLowerCase();
+    const low = t.toLowerCase().replace(/^["'`]+/, '').replace(/["'`]+$/, '');
     for (const flag of evalFlags) {
       if (low === flag) return true;
       if (low.startsWith(flag + '=')) return true;
