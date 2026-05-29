@@ -150,21 +150,27 @@ function checkPlanStatus(cwd) {
     if (!existsSync(planPath)) continue;
 
     const content = readFileSync(planPath, 'utf-8');
-    // Tolerant regex: accepts whitespace variations, case-insensitive x/X, FAILED/failed
-    const todoPattern = /###\s*\[\s*(x|X|FAILED|failed| )\s*\]/g;
+    // Tolerant regex: accepts whitespace variations, case-insensitive
+    // x/X, FAILED/failed. `~` marks a TODO as "deferred by decision"
+    // (#241 B6) — counts toward "no remaining work" for routing
+    // purposes so the operator does not have to forge `[x]` on a
+    // deliberately-deferred task.
+    const todoPattern = /###\s*\[\s*(x|X|FAILED|failed|~| )\s*\]/g;
     const matches = [...content.matchAll(todoPattern)];
 
-    if (matches.length === 0) return { total: 0, completed: 0, failed: 0 };
+    if (matches.length === 0) return { total: 0, completed: 0, failed: 0, deferred: 0 };
 
     let completed = 0;
     let failed = 0;
+    let deferred = 0;
     for (const m of matches) {
       const val = m[1].trim();
       if (val.toLowerCase() === 'x') completed++;
       else if (val.toLowerCase() === 'failed') failed++;
+      else if (val === '~') deferred++;
     }
 
-    return { total: matches.length, completed, failed };
+    return { total: matches.length, completed, failed, deferred };
   }
 
   return null;
@@ -569,8 +575,13 @@ async function main() {
         break;
       }
 
-      const { total, completed, failed } = planStatus;
-      const remaining = total - completed - failed;
+      const { total, completed, failed, deferred = 0 } = planStatus;
+      // #241 B6: `[~]` (deferred by decision) counts toward "no remaining
+      // work" for routing so the operator does not have to forge `[x]`
+      // on a deliberately-deferred task. deferred is surfaced in the
+      // stopReason so the operator still sees it.
+      const remaining = total - completed - failed - deferred;
+      const deferredTail = deferred > 0 ? `, ${deferred} deferred` : '';
 
       if (remaining === 0) {
         // Stage A Phase 1.6b: route based on `state.release.current_cut_id`.
@@ -616,12 +627,12 @@ async function main() {
         writeState(cwd, { current_phase: nextPhase });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed). Transitioning to ${target}.`
+          stopReason: `[MPL] All TODOs resolved (${completed} completed, ${failed} failed${deferredTail}). Transitioning to ${target}.`
         }));
       } else {
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Phase 2: Sprint in progress. ${completed}/${total} TODOs completed, ${failed} failed, ${remaining} remaining.`
+          stopReason: `[MPL] Phase 2: Sprint in progress. ${completed}/${total} TODOs completed, ${failed} failed${deferredTail}, ${remaining} remaining.`
         }));
       }
       break;
@@ -1220,20 +1231,23 @@ async function main() {
         break;
       }
 
-      const { total: sTotal, completed: sCompleted, failed: sFailed } = smallPlanStatus;
-      const sRemaining = sTotal - sCompleted - sFailed;
+      const { total: sTotal, completed: sCompleted, failed: sFailed, deferred: sDeferred = 0 } = smallPlanStatus;
+      // #241 B6: `[~]` deferred counts toward "no remaining" for the
+      // small-sprint path too.
+      const sRemaining = sTotal - sCompleted - sFailed - sDeferred;
+      const sDeferredTail = sDeferred > 0 ? `, ${sDeferred} deferred` : '';
 
       if (sRemaining === 0) {
         // All TODOs resolved → small-verify
         writeState(cwd, { current_phase: 'small-verify' });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL-Small] All TODOs resolved (${sCompleted} completed, ${sFailed} failed). Transitioning to Phase 3: Verify.`
+          stopReason: `[MPL-Small] All TODOs resolved (${sCompleted} completed, ${sFailed} failed${sDeferredTail}). Transitioning to Phase 3: Verify.`
         }));
       } else {
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL-Small] Phase 2: Sprint in progress. ${sCompleted}/${sTotal} TODOs completed, ${sFailed} failed, ${sRemaining} remaining.`
+          stopReason: `[MPL-Small] Phase 2: Sprint in progress. ${sCompleted}/${sTotal} TODOs completed, ${sFailed} failed${sDeferredTail}, ${sRemaining} remaining.`
         }));
       }
       break;
