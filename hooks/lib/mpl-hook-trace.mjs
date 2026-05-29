@@ -235,8 +235,15 @@ function blockStatusFor(hookId, state, targetPath) {
   if (missing.length > 0) {
     return 'invalid_blocked_envelope';
   }
-  const artifact = String(state.blocked_artifact || '').trim();
-  const target = String(targetPath || '').trim();
+  // Codex r3 on PR #243: pathCategory normalizes backslash to forward
+  // slash but blockStatusFor compared raw strings, so a Windows-style
+  // target (`C:\repo\.mpl\state.json`) with a normalized blocked_artifact
+  // (`.mpl/state.json`) would be classified as state but reported as
+  // `registered_blocking_other_artifact` — the active blocker hidden
+  // from the trace. Apply the same `\` → `/` normalization before
+  // comparison so the boundary check is path-shape-agnostic.
+  const artifact = String(state.blocked_artifact || '').trim().replace(/\\/g, '/');
+  const target = String(targetPath || '').trim().replace(/\\/g, '/');
   if (!target) {
     return 'invalid_blocked_envelope';
   }

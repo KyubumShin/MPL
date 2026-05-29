@@ -483,6 +483,58 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('#237 codex r3 [logic]: blockStatusFor normalizes backslash paths for active-blocker match', () => {
+    // codex r3 on PR #243: pathCategory normalized backslash to
+    // forward slash but blockStatusFor compared raw strings. A
+    // Windows-style target `C:\repo\.mpl\state.json` with a normalized
+    // blocked_artifact `.mpl/state.json` got `currently_blocking` lost
+    // and reported as `registered_blocking_other_artifact` — active
+    // blocker hidden from the trace despite the target being correctly
+    // recognized as state category.
+    const trace = traceHookChain({
+      targetPath: 'C:\\repo\\.mpl\\state.json',
+      state: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_artifact: '.mpl/state.json',
+        blocked_phase: 'phase-1',
+        block_code: 'missing_or_invalid_test_agent_evidence',
+        block_reason: 'block',
+        resume_instruction: 'dispatch test-agent',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { phase_id: 'phase-1' },
+      },
+    });
+    const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+    assert.ok(row, 'active blocker must appear in trace');
+    assert.equal(row.status, 'currently_blocking',
+      'backslash target must normalize and match forward-slash artifact');
+  });
+
+  it('#237 codex r3 [logic]: blockStatusFor handles backslash on the artifact side too', () => {
+    // Mirror case: artifact stored with backslashes (unlikely but
+    // possible if a hook on Windows wrote it). Trace target uses
+    // forward slashes.
+    const trace = traceHookChain({
+      targetPath: '/repo/.mpl/state.json',
+      state: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_artifact: '.mpl\\state.json',
+        blocked_phase: 'phase-1',
+        block_code: 'x',
+        block_reason: 'x',
+        resume_instruction: 'x',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: {},
+      },
+    });
+    const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+    assert.equal(row?.status, 'currently_blocking');
+  });
+
   it('#237 codex r2 [logic]: pathCategory requires slash-boundary — `src/foo.mpl/state.json` is `file`, not `state`', () => {
     // Codex r2 on PR #243: pathCategory used bare `endsWith('.mpl/state.json')`
     // which matched `src/foo.mpl/state.json` (a regular file in a
