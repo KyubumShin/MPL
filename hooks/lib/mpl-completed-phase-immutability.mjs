@@ -206,10 +206,14 @@ export function normalizePhaseBlock(text) {
       const remainder = fieldMatch[3];
       currentField = fieldName;
       // Detect block-scalar opener: `|`, `>`, with optional `+`/`-`
-      // chomping indicator, and an optional explicit indentation
-      // digit. Anything after that on the same line is illegal YAML
-      // but we don't try to validate.
-      inBlockScalar = /^\s*[|>][+-]?\d?\s*$/.test(remainder);
+      // chomping indicator and optional explicit indentation digit.
+      // Codex r3 on PR #247 [contract-break]: valid YAML allows an
+      // inline comment after the indicator (`field: | # operator note`).
+      // Strip the inline comment from the remainder via the same
+      // quote-aware helper before testing the regex, so the scalar is
+      // correctly entered.
+      const remainderNoComment = stripInlineYamlComment(remainder);
+      inBlockScalar = /^\s*[|>][+-]?\d?\s*$/.test(remainderNoComment);
       if (LOAD_BEARING_FIELDS.has(fieldName)) {
         out.push(stripInlineYamlComment(rawLine).replace(/[ \t]+$/g, ''));
       }

@@ -156,6 +156,41 @@ phases:
   assert.ok(vpVerdict.issues.includes('phase-1:contract:modified'));
 });
 
+test('#241 B1 codex r3: block-scalar opener with trailing `#` comment (`field: | # note`) still enters scalar mode', () => {
+  // Codex r3 [contract-break]: valid YAML allows a comment after the
+  // `|` / `>` indicator. The pre-r3 regex required `^\s*[|>][+-]?\d?\s*$`
+  // and rejected `| # operator note`, so scalar mode was never
+  // entered and the payload had its inline `#` stripped + full-line
+  // `# …` dropped, silently allowing load-bearing scope changes.
+  // Fix: strip inline comments from the field remainder before testing.
+  for (const opener of ['|', '|-', '|+', '>', '>-', '>+']) {
+    const oldText = `
+phases:
+  - id: phase-1
+    impact: high
+    scope: ${opener} # operator note
+      rollout target # prod-a
+      # Must validate X
+`;
+    const newText = `
+phases:
+  - id: phase-1
+    impact: high
+    scope: ${opener} # operator note
+      rollout target # prod-b
+      # Optional
+`;
+    const verdict = validateCompletedPhaseImmutability({
+      oldText,
+      newText,
+      completedIds: ['phase-1'],
+    });
+    assert.equal(verdict.valid, false,
+      `Expected payload change under \`scope: ${opener} # …\` block scalar to block`);
+    assert.ok(verdict.issues.includes('phase-1:contract:modified'));
+  }
+});
+
 test('#241 B1 claude r2: full-line `#`-prefixed lines INSIDE block scalars must block on change (still literal payload)', () => {
   const oldText = `
 phases:
