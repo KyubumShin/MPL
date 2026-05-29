@@ -54,9 +54,14 @@ const AUTO_FIX_REGENERATE_CODES = new Set([
 // validator's structured error list". The recover skill cannot
 // dispatch agents directly — it returns a dispatch instruction
 // pointing at the right agent + the error context.
+//
+// Note (codex r1 [logic]): `goal_contract_invalid` is NOT in this set.
+// Its emission site (hooks/mpl-require-goal-trace.mjs) is "missing or
+// invalid .mpl/goal-contract.yaml" — re-dispatching the decomposer
+// cannot repair a missing/invalid goal contract. That code is routed
+// to user_action below, echoing the recorded resume_instruction.
 const REDISPATCH_DECOMPOSER_CODES = new Set([
   'covers_schema_violation',
-  'goal_contract_invalid',
   'phase_contract_graph_invalid',
 ]);
 
@@ -576,11 +581,17 @@ function recoverAutoRegenerate(cwd, state) {
     return buildResult(state, { status: 'failed', message: reason, attempts });
   }
 
+  let written = null;
   try {
     if (code === 'decomposition_derived_stale') {
       writeDerivedDecompositionFields(cwd);
     } else if (code === 'test_agent_briefs_write_failed') {
-      writeTestAgentBriefs(cwd);
+      // Codex r1 on PR #242 [data-integrity]: writeTestAgentBriefs
+      // does NOT throw when decomposition.yaml is absent — it returns
+      // an empty list. Blindly treating that as success would clear
+      // the block while no brief was actually regenerated. Verify the
+      // produced phase ids before declaring recovery.
+      written = writeTestAgentBriefs(cwd);
     } else {
       const reason = `[MPL Recover] No regeneration handler for ${code}.`;
       keepBlocked(cwd, state, {
@@ -603,29 +614,87 @@ function recoverAutoRegenerate(cwd, state) {
     return buildResult(state, { status: 'failed', message: reason });
   }
 
+  // Post-condition check: silent no-op (empty produced list) when the
+  // source artifact is missing must NOT clear the block.
+  if (code === 'test_agent_briefs_write_failed') {
+    const decompositionPresent = existsSync(join(cwd, DECOMPOSITION_REL_PATH));
+    const producedCount = Array.isArray(written) ? written.length : 0;
+    if (!decompositionPresent || producedCount === 0) {
+      const reason = decompositionPresent
+        ? '[MPL Recover] writeTestAgentBriefs produced zero briefs (no phases declared test_agent_required); keeping the block.'
+        : '[MPL Recover] Cannot regenerate test-agent briefs because .mpl/mpl/decomposition.yaml is missing.';
+      keepBlocked(cwd, state, {
+        status: 'failed',
+        reason,
+        instruction: decompositionPresent
+          ? 'Verify the blocked phase has test_agent_required: true in decomposition.yaml, then retry.'
+          : 'Re-run decomposition to recreate decomposition.yaml, then retry.',
+        details: {
+          handler: 'auto_regenerate',
+          code,
+          decomposition_present: decompositionPresent,
+          produced_count: producedCount,
+        },
+      });
+      return buildResult(state, {
+        status: 'failed',
+        message: reason,
+        decomposition_present: decompositionPresent,
+        produced_count: producedCount,
+      });
+    }
+  }
+
   clearCurrentBlock(cwd, state);
   appendRecoverySignal(cwd, {
     ...summarizeState(state),
     result: 'recovered',
     handler: 'auto_regenerate',
     code,
+    produced: written,
   });
   return buildResult(state, {
     status: 'recovered',
     message: `Regenerated derived artifact for ${code} and cleared blocked_hook.`,
+    produced: written,
   });
+}
+
+// Codex r1 on PR #242 [contract-break]: real hooks record validator
+// diagnostics under different retry_context field names. Normalize
+// across all known shapes so the dispatch instruction echoes the
+// actual findings instead of dropping them.
+//
+//   covers_schema_violation        → retry_context.issues
+//   phase_contract_graph_invalid   → retry_context.issues
+//   (legacy test fixtures used `failures` — preserved for back-compat)
+function collectValidatorDiagnostics(state) {
+  const ctx = state?.retry_context || {};
+  const items = [];
+  for (const key of ['failures', 'issues', 'missing']) {
+    const v = ctx[key];
+    if (Array.isArray(v)) {
+      for (const entry of v) items.push(entry);
+    }
+  }
+  return items
+    .filter((x) => x !== null && x !== undefined)
+    .map((x) => {
+      if (typeof x === 'string') return x;
+      try { return JSON.stringify(x); } catch { return String(x); }
+    });
 }
 
 // #234: producer-agent re-dispatch. Recover skill returns a dispatch
 // instruction (no actual agent spawn — that's the orchestrator's
-// responsibility). retry_context.failures (if recorded by the hook)
-// is echoed back in the instruction so the producer can fix the exact
-// validator findings.
+// responsibility). Validator diagnostics from retry_context.failures
+// / .issues / .missing are normalized and echoed back so the producer
+// can fix the exact findings.
 function recoverRedispatchDecomposer(cwd, state) {
   const code = state.block_code;
-  const failures = state?.retry_context?.failures;
-  const failureSummary = Array.isArray(failures) && failures.length > 0
-    ? `Validator findings to address: ${failures.slice(0, 8).join('; ')}.`
+  const diagnostics = collectValidatorDiagnostics(state);
+  const failureSummary = diagnostics.length > 0
+    ? `Validator findings to address: ${diagnostics.slice(0, 8).join('; ')}.`
     : '';
   const instruction =
     `Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt=...) to fix ${code}. ${failureSummary}`.trim();
@@ -635,13 +704,41 @@ function recoverRedispatchDecomposer(cwd, state) {
     status: 'awaiting_decomposer',
     reason,
     instruction,
-    details: { handler: 'redispatch_decomposer', code, failures: failures || [] },
+    details: { handler: 'redispatch_decomposer', code, findings: diagnostics },
   });
   return buildResult(state, {
     status: 'awaiting_decomposer',
     message: reason,
     dispatch_instruction: instruction,
-    failures: failures || [],
+    findings: diagnostics,
+  });
+}
+
+// Codex r1 on PR #242 [logic]: `goal_contract_invalid` recovery is a
+// user-action route. The recorded resume_instruction is "Restore a
+// valid .mpl/goal-contract.yaml" — a decomposer re-dispatch cannot
+// repair a missing source file. Echo the recorded instruction (with a
+// generic fallback) so the operator sees the actionable step.
+function recoverGoalContractInvalid(cwd, state) {
+  const diagnostics = collectValidatorDiagnostics(state);
+  const missingSummary = diagnostics.length > 0
+    ? ` Missing fields: ${diagnostics.slice(0, 8).join(', ')}.`
+    : '';
+  const reason = '[MPL Recover] goal_contract_invalid requires restoring .mpl/goal-contract.yaml.';
+  const instruction =
+    state.resume_instruction ||
+    'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.';
+  keepBlocked(cwd, state, {
+    status: 'requires_user_action',
+    reason,
+    instruction: `${instruction}${missingSummary}`.trim(),
+    details: { handler: 'goal_contract_invalid', findings: diagnostics },
+  });
+  return buildResult(state, {
+    status: 'requires_user_action',
+    message: reason,
+    user_instruction: `${instruction}${missingSummary}`.trim(),
+    findings: diagnostics,
   });
 }
 
@@ -784,6 +881,14 @@ export function inspectRecovery(cwd = process.cwd()) {
       message: 'Recover returns a mpl-decomposer dispatch instruction with the validator findings; orchestrator must execute the Task call.',
     });
   }
+  if (code === 'goal_contract_invalid') {
+    return buildResult(state, {
+      status: 'requires_user_action',
+      handler: 'goal_contract_invalid',
+      safe: false,
+      message: 'goal_contract_invalid requires restoring .mpl/goal-contract.yaml; recover echoes the recorded user instruction.',
+    });
+  }
   if (code && code.startsWith('phase_runner_')) {
     const anomalyType = code.slice('phase_runner_'.length);
     return buildResult(state, {
@@ -840,6 +945,9 @@ export function recoverBlockedHook(cwd = process.cwd(), { approveUnsafe = false 
   }
   if (REDISPATCH_DECOMPOSER_CODES.has(code)) {
     return recoverRedispatchDecomposer(cwd, state);
+  }
+  if (code === 'goal_contract_invalid') {
+    return recoverGoalContractInvalid(cwd, state);
   }
   if (code && code.startsWith('phase_runner_')) {
     return recoverPhaseRunnerAnomaly(cwd, state);

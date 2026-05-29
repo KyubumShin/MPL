@@ -407,7 +407,49 @@ phases:
     const result = recoverBlockedHook(tmp);
     assert.equal(result.status, 'recovered');
     assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml')), true);
+    assert.equal(Array.isArray(result.produced) && result.produced.includes('phase-1'), true);
     assert.equal(readState().session_status, null);
+  });
+
+  it('#234 [data-integrity] codex r1: test_agent_briefs_write_failed does NOT clear block when decomposition.yaml is missing', () => {
+    // codex r1 on PR #242: writeTestAgentBriefs returns an empty list
+    // when decomposition.yaml is absent (no throw). The handler must
+    // verify the post-condition and keep the block instead of
+    // marking it recovered with no briefs produced.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'test_agent_briefs_write_failed',
+      retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.decomposition_present, false);
+    assert.equal(result.produced_count, 0);
+    assert.match(result.message, /decomposition\.yaml is missing/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234 [data-integrity] codex r1: test_agent_briefs_write_failed keeps block when decomposition has zero required phases', () => {
+    // Decomposition exists but no phase has test_agent_required:true —
+    // writeTestAgentBriefs returns [] → handler must keep the block.
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-x
+    test_agent_required: false
+`);
+    writeState(blocked({
+      block_code: 'test_agent_briefs_write_failed',
+      retry_context: {},
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.decomposition_present, true);
+    assert.equal(result.produced_count, 0);
+    assert.match(result.message, /zero briefs/);
+    assert.equal(readState().session_status, 'blocked_hook');
   });
 
   it('#234: auto-regenerate handler exhausts retry budget on persistent failures', () => {
@@ -425,11 +467,19 @@ phases:
     assert.equal(readState().session_status, 'blocked_hook');
   });
 
-  it('#234: redispatch_decomposer handler returns dispatch instruction with validator findings', () => {
+  it('#234: redispatch_decomposer handler reads diagnostics from retry_context.issues (real envelope shape) — codex r1', () => {
+    // codex r1 on PR #242: covers_schema_violation hook records
+    // validator findings under `retry_context.issues`, NOT `failures`.
+    // The handler must normalize so the dispatch instruction echoes
+    // the real diagnostics.
     writeState(blocked({
       blocked_by_hook: 'mpl-require-covers',
       block_code: 'covers_schema_violation',
-      retry_context: { failures: ['phase-1.covers[0]:UC-99 not in goal_contract'] },
+      retry_context: {
+        target: '.mpl/mpl/decomposition.yaml',
+        issue_count: 1,
+        issues: ['phase-1.covers[0]:UC-99 not in goal_contract'],
+      },
     }));
 
     const plan = inspectRecovery(tmp);
@@ -440,20 +490,63 @@ phases:
     assert.equal(result.status, 'awaiting_decomposer');
     assert.match(result.dispatch_instruction, /mpl-decomposer/);
     assert.match(result.dispatch_instruction, /UC-99/);
+    assert.deepEqual(result.findings, ['phase-1.covers[0]:UC-99 not in goal_contract']);
 
     const state = readState();
     assert.equal(state.session_status, 'blocked_hook');
     assert.equal(state.retry_context.recovery.last_status, 'awaiting_decomposer');
   });
 
-  for (const code of ['goal_contract_invalid', 'phase_contract_graph_invalid']) {
-    it(`#234: redispatch_decomposer also routes ${code}`, () => {
-      writeState(blocked({ block_code: code, retry_context: {} }));
-      const result = recoverBlockedHook(tmp);
-      assert.equal(result.status, 'awaiting_decomposer');
-      assert.match(result.dispatch_instruction, /mpl-decomposer/);
-    });
-  }
+  it(`#234: redispatch_decomposer routes phase_contract_graph_invalid with retry_context.issues`, () => {
+    writeState(blocked({
+      block_code: 'phase_contract_graph_invalid',
+      retry_context: {
+        issue_count: 2,
+        issues: ['phase-2.depends_on:cycle', 'tier-1.execution_mode:missing'],
+      },
+    }));
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'awaiting_decomposer');
+    assert.match(result.dispatch_instruction, /mpl-decomposer/);
+    assert.match(result.dispatch_instruction, /depends_on:cycle/);
+    assert.deepEqual(result.findings, ['phase-2.depends_on:cycle', 'tier-1.execution_mode:missing']);
+  });
+
+  it('#234: legacy retry_context.failures shape still works (back-compat)', () => {
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: { failures: ['legacy-style finding'] },
+    }));
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'awaiting_decomposer');
+    assert.match(result.dispatch_instruction, /legacy-style finding/);
+  });
+
+  it('#234: goal_contract_invalid is routed to user_action (NOT decomposer) — codex r1 [logic]', () => {
+    // codex r1 on PR #242: goal_contract_invalid is emitted with
+    // resumeInstruction "Restore a valid .mpl/goal-contract.yaml" —
+    // a decomposer re-dispatch cannot repair a missing source file.
+    // Recovery must echo the user instruction, NOT generate a Task call.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-require-goal-trace',
+      block_code: 'goal_contract_invalid',
+      resume_instruction: 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.',
+      retry_context: { missing: ['mission.goal', 'acceptance_criteria'] },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_user_action');
+    assert.equal(plan.handler, 'goal_contract_invalid');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'requires_user_action');
+    assert.match(result.user_instruction, /Restore a valid \.mpl\/goal-contract\.yaml/);
+    assert.match(result.user_instruction, /mission\.goal/);
+    assert.deepEqual(result.findings, ['mission.goal', 'acceptance_criteria']);
+    // No dispatch_instruction — this is user action, not agent re-dispatch.
+    assert.equal(result.dispatch_instruction, undefined);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
 
   it('#234: phase_runner_anomaly handler returns anomaly-specific dispatch instruction', () => {
     writeState(blocked({

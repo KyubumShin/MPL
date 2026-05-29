@@ -48,7 +48,7 @@ Safe handlers:
 - `test_agent_evidence`:
   if `state.test_agent_dispatched[phase_id]` already contains valid PASS evidence, clear `blocked_hook`; otherwise keep the block and return the embedded `Task(subagent_type="mpl-test-agent", ...)` instruction.
 - `auto_regenerate` with `decomposition_derived_stale` or `test_agent_briefs_write_failed` (#234):
-  re-run the deterministic postprocess (`writeDerivedDecompositionFields` / `writeTestAgentBriefs`). Capped at 3 attempts via `retry_context.recovery.attempts`; past the budget the handler returns `failed` with the underlying I/O error so the operator can fix the source.
+  re-run the deterministic postprocess (`writeDerivedDecompositionFields` / `writeTestAgentBriefs`). Capped at 3 attempts via `retry_context.recovery.attempts`; past the budget the handler returns `failed` with the underlying I/O error so the operator can fix the source. For brief regeneration, the handler verifies post-conditions (codex r1 on #242): if `decomposition.yaml` is missing or zero briefs were produced for the blocked context, the block stays `failed` with a concrete instruction instead of being mistakenly cleared.
 
 When `test_agent_evidence` returns `awaiting_test_agent`, execute the embedded
 `mpl-test-agent` Task exactly as shown in `resume_instruction`. The agent must
@@ -75,8 +75,10 @@ Approval-required handlers:
 - `missing_artifact_schema` for missing `phase-N.test_agent_required`:
   insert `test_agent_required: true` for the listed phases. This is conservative
   because missing values are already treated as required by AD-0007.
-- `redispatch_decomposer` with `covers_schema_violation`, `goal_contract_invalid`, or `phase_contract_graph_invalid` (#234):
-  the recover skill returns a `Task(subagent_type="mpl-decomposer", ...)` dispatch instruction with the validator's structured `failures[]` echoed back. The orchestrator (not the recover skill) executes the Task.
+- `redispatch_decomposer` with `covers_schema_violation` or `phase_contract_graph_invalid` (#234):
+  the recover skill returns a `Task(subagent_type="mpl-decomposer", ...)` dispatch instruction with the validator's structured findings echoed back. Diagnostics are normalized across `retry_context.failures` / `retry_context.issues` / `retry_context.missing` (each hook records under a different field). The orchestrator (not the recover skill) executes the Task.
+- `goal_contract_invalid` (#234 codex r1):
+  no agent dispatch. Returns the recorded `resume_instruction` ("Restore a valid .mpl/goal-contract.yaml") with the missing-field list appended. A decomposer re-dispatch cannot repair a missing source file.
 - `phase_runner_anomaly` with `phase_runner_<anomaly_type>` (#234):
   the recover skill returns an anomaly-specific `Task(subagent_type="mpl-phase-runner", ...)` dispatch instruction. Anomaly types include `empty_response`, `truncated_response`, `invalid_json`, `no_evidence`. Each has a tailored framing (stronger prompt / reduced context / explicit schema reminder / evidence emphasis).
 - `baseline_immutable` (#234):
