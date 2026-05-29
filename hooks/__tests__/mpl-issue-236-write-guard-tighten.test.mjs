@@ -368,6 +368,95 @@ test('#236 A3 claude r1: shell-expansion / subshell / pushd bypass forms are all
   }
 });
 
+test('#236 A3 codex r2: redundant-slash shell-expanded paths are still blocked (slash collapse)', () => {
+  // Codex r2 [logic]: real shell normalizes `//` after expansion;
+  // `$PWD/.mpl//mpl` deletes `.mpl/mpl` just fine.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'rm -rf $PWD/.mpl//mpl',
+      'rm -rf $(pwd)/.mpl//mpl',
+      'rm -rf .mpl///mpl/phases',
+      'rm -rf .mpl/mpl//',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected slash-collapse to catch: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 codex r2: lock-on-first-write — only the FIRST consuming child transcript may keep writing', () => {
+  // Codex r2 [contract-break]: without lock-on-first-write, any
+  // subagent active during the dispatch window could write
+  // decomposition.yaml. The first non-parent transcript that writes
+  // is locked; any OTHER transcript (e.g. a phase-runner) is rejected
+  // even though it differs from the orchestrator.
+  const cwd = freshWorkspace();
+  try {
+    const orchestratorTranscript = '/tmp/transcript-orchestrator.jsonl';
+    const decomposerTranscript = '/tmp/transcript-decomposer.jsonl';
+    const phaseRunnerTranscript = '/tmp/transcript-phase-runner.jsonl';
+
+    // 1) Orchestrator dispatches decomposer.
+    runHook(cwd, {
+      cwd,
+      tool_name: 'Task',
+      transcript_path: orchestratorTranscript,
+      tool_input: { subagent_type: 'mpl-decomposer', prompt: '...' },
+    });
+
+    // 2) Decomposer writes — first consumer, captures the lock.
+    const firstWrite = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: decomposerTranscript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'x' },
+    });
+    assert.equal(firstWrite.continue, true);
+    assert.equal(firstWrite.suppressOutput, true);
+
+    // Confirm the child lock landed.
+    const lockedState = readState(cwd);
+    assert.equal(
+      lockedState.decomposer_dispatch.child_transcript_path,
+      decomposerTranscript,
+    );
+
+    // 3) Decomposer second write — still allowed.
+    const secondWriteSame = runHook(cwd, {
+      cwd,
+      tool_name: 'Edit',
+      transcript_path: decomposerTranscript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', old_string: 'x', new_string: 'y' },
+    });
+    assert.equal(secondWriteSame.continue, true);
+
+    // 4) Some OTHER subagent (phase-runner, etc.) attempts to write
+    // decomposition.yaml. Different transcript — rejected.
+    const phaseRunnerWrite = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: phaseRunnerTranscript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'forged' },
+    });
+    assert.equal(phaseRunnerWrite.continue, false);
+    assert.equal(phaseRunnerWrite.decision, 'block');
+    assert.match(phaseRunnerWrite.reason, /#236 A1/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r1 retry: workspace-absolute `rm -rf /abs/.../.mpl/mpl` is blocked', () => {
   const cwd = freshWorkspace();
   try {

@@ -197,8 +197,15 @@ function matchesProtectedDelete(command, cwd) {
   // over-blocks on incidental mentions, but `MPL_FORCE_PURGE=1` is
   // already the operator escape hatch — over-blocking is the safe
   // direction for a destructive op.
+  //
+  // Codex r2 on PR #249 [logic]: a real shell normalizes runs of `/`
+  // after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl` just fine).
+  // Collapse repeated slashes in the normalized command before the
+  // substring check so the defense is invariant under redundant-slash
+  // forgery.
+  const slashCollapsed = normalized.replace(/\/+/g, '/');
   for (const target of PROTECTED_DELETE_TARGETS) {
-    if (normalized.includes(target)) return target;
+    if (slashCollapsed.includes(target)) return target;
   }
 
   const resolvedRoots = PROTECTED_DELETE_TARGETS.map((target) => ({
@@ -255,13 +262,24 @@ function recordDecomposerDispatch(cwd, parentTranscriptPath) {
 // #236 A1: is the current write coming from the decomposer subagent?
 //   - dispatch flag must be set,
 //   - within the TTL,
-//   - AND the calling transcript_path must DIFFER from the recorded
-//     parent (orchestrator) transcript_path. A same-transcript write
-//     is the orchestrator itself, which the contract forbids.
+//   - the calling transcript_path must DIFFER from the recorded
+//     parent (orchestrator) transcript_path,
+//   - AND lock-on-first-write: the first non-parent transcript that
+//     writes decomposition.yaml under this dispatch is recorded as
+//     `child_transcript_path`. Subsequent writes MUST come from the
+//     same child transcript — any OTHER subagent (phase-runner, etc.)
+//     calling Write during the window would carry a third transcript
+//     and be rejected.
 //
 // When parent_transcript_path was not recorded (legacy state), we
 // fail closed — the writer-identity check cannot be satisfied without
 // a parent reference, so the write is rejected.
+//
+// Codex r2 on PR #249 [logic]: without lock-on-first-write, ANY
+// subagent active in the window could write decomposition.yaml — the
+// dispatch flag was a capability for "any non-orchestrator", not for
+// the specific decomposer. The lock binds the capability to the
+// FIRST consuming child.
 function isDecomposerDispatchActive(state, callerTranscriptPath) {
   const flag = state?.decomposer_dispatch;
   if (!flag || typeof flag.dispatched_at !== 'string') return false;
@@ -273,7 +291,33 @@ function isDecomposerDispatchActive(state, callerTranscriptPath) {
     : null;
   if (!parent) return false;
   if (!callerTranscriptPath || typeof callerTranscriptPath !== 'string') return false;
-  return callerTranscriptPath !== parent;
+  if (callerTranscriptPath === parent) return false;
+  // Lock-on-first-write: if a child transcript has already been
+  // recorded for this dispatch, only that exact transcript may proceed.
+  const lockedChild = typeof flag.child_transcript_path === 'string'
+    ? flag.child_transcript_path
+    : null;
+  if (lockedChild) return callerTranscriptPath === lockedChild;
+  // First consumer — caller is whoever is acting as the decomposer
+  // subagent. The actual locking write happens in main().
+  return true;
+}
+
+// #236 A1: record the locked child transcript on the FIRST allowed
+// Write/Edit of decomposition.yaml during the dispatch window.
+function lockDecomposerChild(cwd, callerTranscriptPath) {
+  try {
+    const state = readState(cwd) || {};
+    const flag = state.decomposer_dispatch;
+    if (!flag || typeof flag !== 'object') return;
+    if (typeof flag.child_transcript_path === 'string') return;
+    writeState(cwd, {
+      decomposer_dispatch: {
+        ...flag,
+        child_transcript_path: callerTranscriptPath,
+      },
+    });
+  } catch { /* best-effort */ }
 }
 
 function isAllowedPath(filePath, opts = {}) {
@@ -446,7 +490,10 @@ ensure you have the correct target path. The command will proceed, but please ve
       }));
       return;
     }
-    // Decomposer dispatch is active — allow + clear any stale envelope.
+    // Decomposer dispatch is active for THIS caller — lock the child
+    // transcript on first write so a third party can't reuse the
+    // window, then allow + clear any stale envelope.
+    lockDecomposerChild(cwd, callerTranscript);
     clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
