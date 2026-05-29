@@ -322,6 +322,18 @@ test('#238 e2e: soft-signal-emit hook is a no-op outside MPL workspaces', () => 
   }
 });
 
+test('#238 codex r4 [contract-break]: mpl-doctor skill dispatch wires Category 16 into default mode', () => {
+  // Codex r4: the skill (skills/mpl-doctor/SKILL.md) is the actual
+  // command-path entry. If the dispatch prompt says only "Categories
+  // 1-12" then the agent prompt's Category 16 is unreachable from
+  // /mpl:mpl-doctor, defeating the AC. Contract: the dispatch must
+  // reference Category 16 (the user-facing telemetry surface).
+  const skillPath = join(import.meta.dirname, '..', '..', 'skills', 'mpl-doctor', 'SKILL.md');
+  const text = readFileSync(skillPath, 'utf-8');
+  assert.ok(/Category\s*16/i.test(text), 'SKILL.md must reference Category 16 in dispatch');
+  assert.ok(/quality-signals\.jsonl/.test(text), 'SKILL.md must point at .mpl/mpl/quality-signals.jsonl');
+});
+
 test('#238 codex r2 [contract-break] e2e: soft-signal-emit hook accepts camelCase payload shape', () => {
   // Codex r2: sibling hooks normalize both `tool_name` and `toolName`.
   // The new hook initially read only snake_case, silently losing
