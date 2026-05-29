@@ -696,11 +696,13 @@ async function main() {
       // resolves to `.mpl/mpl/...` defeats the literal substring check.
       let symlinkWritesToDecomp = false;
       if (!decompMention) {
-        const targetMatch = normalizedEarly.match(
-          /(?:[\d&]?>{1,2}|\btee\b[^|;&]*|\bdd\b[^|;&]*\bof=)\s*([^\s|;&]+)/,
-        );
-        if (targetMatch) {
-          const target = targetMatch[1];
+        // Claude r18 [security]: iterate EVERY redirect/tee/dd-of
+        // target in the command, not just the first. A multi-statement
+        // line with a benign first redirect followed by a symlink-
+        // through-protected second redirect would otherwise slip.
+        const targetRe = /(?:[\d&]?>{1,2}|\btee\b[^|;&]*|\bdd\b[^|;&]*\bof=)\s*([^\s|;&]+)/g;
+        for (const m of normalizedEarly.matchAll(targetRe)) {
+          const target = m[1];
           const targetAbs = resolvePath(cwd, target);
           try {
             const realParent = realpathSync(dirname(targetAbs));
@@ -708,6 +710,7 @@ async function main() {
             if (/\.mpl\/mpl\/decomposition\.ya?ml$/.test(candidate)) {
               decompMention = true;
               symlinkWritesToDecomp = true;
+              break;
             }
           } catch { /* parent doesn't exist — skip realpath */ }
         }
@@ -859,12 +862,32 @@ async function main() {
     const isSafeRead = SAFE_READ_HEADS.has(headVerb);
     // Detect redirect/tee/dd targeting state.json anywhere in the
     // command (catches pipe-then-redirect forms).
-    const writesToStateJson = (
+    let writesToStateJson = (
       /[\d&]?>{1,2}[^|;&\n]*\.mpl\/state\.json/.test(normalizedCommand) ||
       /\btee\b[^|;&]*\.mpl\/state\.json/.test(normalizedCommand) ||
       /\bdd\b[^|;&]*\bof=[^|;&]*\.mpl\/state\.json/.test(normalizedCommand)
     );
-    if (stateJsonMention && (!isSafeRead || writesToStateJson) && process.env.MPL_FORCE_PURGE !== '1') {
+    // Claude r18 [security] (symmetric to decomp fix): iterate ALL
+    // redirect/tee/dd-of targets and realpath-check each so symlink-
+    // through-state.json forms (single or multi-statement) are caught.
+    let symlinkWritesToStateJson = false;
+    if (!stateJsonMention) {
+      const stateTargetRe = /(?:[\d&]?>{1,2}|\btee\b[^|;&]*|\bdd\b[^|;&]*\bof=)\s*([^\s|;&]+)/g;
+      for (const m of normalizedCommand.matchAll(stateTargetRe)) {
+        const target = m[1];
+        const targetAbs = resolvePath(cwd, target);
+        try {
+          const realParent = realpathSync(dirname(targetAbs));
+          const candidate = join(realParent, basename(targetAbs));
+          if (/\.mpl\/state\.json$/.test(candidate)) {
+            symlinkWritesToStateJson = true;
+            writesToStateJson = true;
+            break;
+          }
+        } catch { /* parent doesn't exist — skip */ }
+      }
+    }
+    if ((stateJsonMention || symlinkWritesToStateJson) && (!isSafeRead || writesToStateJson) && process.env.MPL_FORCE_PURGE !== '1') {
       const reason =
         `[MPL #236 A1] Refused Bash write to .mpl/state.json: only ` +
         `mpl-write-guard's internal writeState may modify the orchestrator ` +

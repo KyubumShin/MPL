@@ -476,6 +476,33 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
   }
 });
 
+test('#236 A1 claude r18 [security]: multi-statement / multi-redirect symlink bypass is closed', () => {
+  // Claude r18: r17's single-shot .match() only checked the FIRST
+  // redirect target. A multi-statement command with a benign first
+  // redirect plus a symlink-through second redirect slipped past.
+  // Fix: .matchAll() iterates EVERY redirect/tee/dd-of target.
+  const cwd = freshWorkspace();
+  try {
+    const symlinkPath = '/tmp/mpl-r18-test-link-' + Date.now();
+    symlinkSync(join(cwd, '.mpl', 'mpl'), symlinkPath);
+    try {
+      // Multi-statement: benign first, malicious second targeting symlink.
+      const command = `echo benign > /tmp/notice.log; printf forged > ${symlinkPath}/decomposition.yaml`;
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(decision.decision, 'block',
+        'Multi-statement symlink-through redirect must block');
+    } finally {
+      try { unlinkSync(symlinkPath); } catch {}
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 claude r17 [security]: symlink-indirection bypasses are closed', () => {
   // Claude r17 found two-step symlink bypass:
   //   Step 1: ln -s /abs/.mpl/mpl /tmp/safe-link
