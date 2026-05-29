@@ -94,11 +94,16 @@ const DECOMPOSITION_FOCUS = new Set([
   'mpl-require-test-agent',
 ]);
 
-// #237 D3: hooks that read state.json fields. A trace of
-// `.mpl/state.json` should narrow to these instead of including every
-// Edit/Write hook (most of which never touch state). Hooks not in the
-// set still appear when there's an active blocker or when the matcher
-// hits the queried tool.
+// #237 D3 (+ codex r1 on PR #243): hooks that read state.json fields.
+// A trace of `.mpl/state.json` should narrow to these instead of
+// including every Edit/Write hook (most of which never touch state).
+// Hooks not in the set still appear when there's an active blocker.
+//
+// Codex r1: STATE_FOCUS membership is evaluated INDEPENDENTLY of the
+// hook's matcher — what matters is whether the hook reads state, not
+// whether it fires on file-write tools. The earlier matcher-gated
+// check dropped `mpl-gate-recorder` (PostToolUse on Bash|Task|Agent)
+// and other non-file-write state readers from state traces.
 const STATE_FOCUS = new Set([
   'mpl-state-invariant',
   'mpl-phase-controller',
@@ -114,6 +119,10 @@ const STATE_FOCUS = new Set([
   'mpl-require-decomposition-delta',
   'mpl-decomposition-postprocess',
   'mpl-require-test-agent-brief',
+  // Codex r1: reads state.e2e_results before blocking finalize_done=true.
+  'mpl-require-e2e',
+  // Codex r1: reads state.e2e_results / state.security_results for authenticity check.
+  'mpl-require-e2e-authenticity',
 ]);
 
 function readHooksConfig(pluginRoot = DEFAULT_PLUGIN_ROOT) {
@@ -177,28 +186,28 @@ function pathCategory(targetPath) {
 
 function shouldIncludeHook({ eventName, matcher, hookId, category }) {
   const fileWriteTools = ['Edit', 'Write', 'MultiEdit'];
+  // #237 D3 + codex r1 on PR #243: for state category, STATE_FOCUS
+  // membership is evaluated FIRST and INDEPENDENTLY of the matcher.
+  // A hook that reads state must appear regardless of whether its
+  // matcher fires on file-write tools, Bash, or Task. Hooks outside
+  // the focus list are filtered out even if their matcher would
+  // otherwise admit them — that's the whole point of the focus.
+  if (category === 'state') {
+    if (eventName === 'Stop') return true;
+    return STATE_FOCUS.has(hookId);
+  }
   if (eventName === 'PreToolUse') {
-    // #237 D3: state-category trace narrows file-write PreToolUse hooks
-    // to the ones that actually read state. The decomposition branch
-    // already had its own focus filter.
-    if (category === 'state' && matcherIncludes(matcher, fileWriteTools)) {
-      return STATE_FOCUS.has(hookId);
-    }
     if (matcherIncludes(matcher, fileWriteTools)) return true;
     if (category === 'decomposition' && matcherIncludes(matcher, ['Task', 'Agent'])) return true;
     return !matcher;
   }
   if (eventName === 'PostToolUse') {
-    if (category === 'state' && matcherIncludes(matcher, fileWriteTools)) {
-      return STATE_FOCUS.has(hookId);
-    }
     if (matcherIncludes(matcher, fileWriteTools)) return true;
     if (category === 'decomposition' && matcherIncludes(matcher, ['Task', 'Agent'])) return true;
     return !matcher;
   }
   if (eventName === 'Stop') return true;
   if (category === 'decomposition') return DECOMPOSITION_FOCUS.has(hookId);
-  if (category === 'state') return STATE_FOCUS.has(hookId);
   return false;
 }
 

@@ -458,13 +458,26 @@ describe('mpl-hook-trace', () => {
       });
       assert.equal(trace.category, 'state');
       const ids = trace.hooks.map((h) => h.hook_id);
-      // E2E authenticity must NOT appear — it's a pure file-write
-      // policy guard that doesn't read state.
-      assert.equal(ids.includes('mpl-require-e2e-authenticity'), false,
-        'state trace should not surface unrelated file-write hooks');
+      // Codex r1: pure file-write policy guards that don't read state
+      // must NOT appear. mpl-write-guard / mpl-fallback-grep are
+      // delegation / anti-pattern checks unrelated to state.
+      assert.equal(ids.includes('mpl-write-guard'), false,
+        'state trace should not surface mpl-write-guard');
+      assert.equal(ids.includes('mpl-fallback-grep'), false,
+        'state trace should not surface mpl-fallback-grep');
       // mpl-state-invariant SHOULD appear — it's the canonical state
       // reader.
       assert.equal(ids.includes('mpl-state-invariant'), true);
+      // Codex r1: mpl-gate-recorder (PostToolUse on Bash|Task|Agent)
+      // must appear in state traces — it reads / writes
+      // state.gate_results. Without matcher-independent STATE_FOCUS
+      // evaluation, it would be silently dropped.
+      assert.equal(ids.includes('mpl-gate-recorder'), true,
+        'mpl-gate-recorder must appear in state trace regardless of matcher');
+      // Codex r1: mpl-require-e2e reads state.e2e_results before
+      // blocking finalize_done=true. Must appear in state traces.
+      assert.equal(ids.includes('mpl-require-e2e'), true,
+        'mpl-require-e2e must appear in state trace');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
