@@ -171,40 +171,144 @@ export const STRICT_GATE_HEAD_ALLOWLIST = Object.freeze(new Set([
   'cargo', 'go',
 ]));
 
-// #240 A4: read .mpl/config.json `gate_classify.allowed_heads` and
-// union it with the built-in set. Returns a Set of lowercase string
-// heads. Non-string / non-array config values are ignored.
-export function allowedGateHeads(cwd) {
-  const merged = new Set(STRICT_GATE_HEAD_ALLOWLIST);
-  if (!cwd) return merged;
+// #240 A4 + codex r1 on PR #244 [data-integrity]: script interpreters
+// take arbitrary text via `-e` / `-c` / etc. that the family regex
+// would erroneously match. These heads MUST NOT be admissible as
+// strict manual gate evidence even if an operator adds them to
+// `.mpl/config.json gate_classify.allowed_heads`. Reject silently at
+// the config-read boundary so I12 stays load-bearing.
+const STRICT_GATE_HEAD_INTERPRETER_DENYLIST = Object.freeze(new Set([
+  'node', 'deno', 'bun', // (deno/bun: CLI runtimes themselves can also `eval`)
+  'python', 'python3', 'python2',
+  'ruby', 'irb',
+  'perl', 'php',
+  'awk', 'sed',
+  'lua', 'luajit',
+  'tclsh', 'expect',
+  'osascript',
+]));
+
+// #240 A4 + codex r1 on PR #244 [contract-break]: configured heads
+// must also map to gate families. The built-in family regex doesn't
+// know about ecosystems like `deno test` / `bun test` / `biome ci`,
+// so `allowed_heads: ['deno']` alone would pass the head check but
+// fail the family classification — defeating the config knob.
+//
+// Two accepted shapes per entry in
+// `.mpl/config.json gate_classify.allowed_heads`:
+//   1. plain string: e.g. `"biome"`. Used only for heads whose
+//      sub-commands already match the built-in family regex.
+//   2. structured object: `{ "head": "deno", "families": {
+//          "hard1_baseline": ["check", "lint", "fmt"],
+//          "hard2_coverage": ["test"],
+//          "hard3_resilience": ["bench", "e2e"]
+//      } }`. Each pattern is matched as a token immediately following
+//      the head (`deno test`, `bun run test`, etc.).
+//
+// Entries with an interpreter head are silently dropped — the
+// denylist always wins.
+function readGateClassifyConfig(cwd) {
+  if (!cwd) return { heads: new Set(), structured: new Map() };
   try {
-    // Lazy import to avoid a circular dependency at module load time.
-    // mpl-config.mjs is small and pure, so the cost is fine.
-    const { loadConfigSync } = readConfigShim(cwd);
-    const cfg = loadConfigSync(cwd);
+    const cfg = loadConfig(cwd);
     const extra = cfg?.gate_classify?.allowed_heads;
-    if (Array.isArray(extra)) {
-      for (const v of extra) {
-        if (typeof v === 'string' && v.trim()) {
-          merged.add(v.trim().toLowerCase());
+    if (!Array.isArray(extra)) return { heads: new Set(), structured: new Map() };
+    const heads = new Set();
+    const structured = new Map();
+    for (const entry of extra) {
+      if (typeof entry === 'string' && entry.trim()) {
+        // Plain string entries: must NOT be interpreters. The string
+        // form delegates classification entirely to the built-in
+        // family regex, which would match arbitrary `-e` / `-c` text.
+        const head = entry.trim().toLowerCase();
+        if (STRICT_GATE_HEAD_INTERPRETER_DENYLIST.has(head)) continue;
+        heads.add(head);
+        continue;
+      }
+      if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        const head = typeof entry.head === 'string' ? entry.head.trim().toLowerCase() : '';
+        if (!head) continue;
+        // Structured entries: the explicit `families` map enumerates
+        // the only sub-commands that count as gate evidence, and the
+        // classifier requires the pattern to appear as the next
+        // non-flag token after the head (see classifyConfiguredHead).
+        // That structurally rejects `deno -e "test"` / `node -e "..."`
+        // — interpreter abuse is still blocked, but legitimate
+        // `deno test` / `bun test` flows through.
+        const families = entry.families && typeof entry.families === 'object' && !Array.isArray(entry.families)
+          ? entry.families
+          : null;
+        if (!families) {
+          // No families → demote to plain string semantics with the
+          // interpreter check (so a structured entry without families
+          // can't bypass the denylist).
+          if (STRICT_GATE_HEAD_INTERPRETER_DENYLIST.has(head)) continue;
+          heads.add(head);
+          continue;
         }
+        heads.add(head);
+        const familyMap = {};
+        for (const familyKey of ['hard1_baseline', 'hard2_coverage', 'hard3_resilience']) {
+          const patterns = families[familyKey];
+          if (Array.isArray(patterns)) {
+            familyMap[familyKey] = patterns
+              .filter((p) => typeof p === 'string' && p.trim())
+              .map((p) => p.trim().toLowerCase());
+          }
+        }
+        structured.set(head, familyMap);
       }
     }
-  } catch { /* fall back to built-in set on any read error */ }
+    return { heads, structured };
+  } catch {
+    return { heads: new Set(), structured: new Map() };
+  }
+}
+
+// #240 A4: read .mpl/config.json `gate_classify.allowed_heads` and
+// union it with the built-in set. Returns a Set of lowercase string
+// heads. Interpreter heads (codex r1 on PR #244) are silently dropped.
+export function allowedGateHeads(cwd) {
+  const merged = new Set(STRICT_GATE_HEAD_ALLOWLIST);
+  const { heads } = readGateClassifyConfig(cwd);
+  for (const h of heads) merged.add(h);
   return merged;
 }
 
-// Lazy-loaded shim for the config reader. Avoids a top-level
-// circular dependency between mpl-gate-classify.mjs and mpl-config.mjs.
-let _loadConfigSync = null;
-function readConfigShim() {
-  if (_loadConfigSync) return { loadConfigSync: _loadConfigSync };
-  // Use a sync import path via require-like read since loadConfig in
-  // mpl-config.mjs is already synchronous.
-  // We import statically at top of file by adding the import; the lazy
-  // wrapper just preserves the previous external API.
-  _loadConfigSync = loadConfig;
-  return { loadConfigSync: _loadConfigSync };
+// #240 A4: classify a (head, canonical_command) against a structured
+// configured-head entry. Returns the gate family key (one of
+// hard1_baseline / hard2_coverage / hard3_resilience) when a
+// subcommand pattern matches; null otherwise. Subcommand match:
+// any pattern that appears as a whole token after the head.
+function classifyConfiguredHead(head, canonical, structuredMap) {
+  const families = structuredMap?.get(head);
+  if (!families) return null;
+  // The configured pattern MUST be the next non-flag token after the
+  // head. Walking the tokens manually (instead of running the pattern
+  // against the whole command) blocks `deno -e "test"`-style
+  // interpreter abuse: the `-e` is a flag, so `test` inside the
+  // quoted argument never reaches the comparison.
+  const tokens = String(canonical || '').toLowerCase().trim().split(/\s+/);
+  if (tokens.length < 2 || tokens[0] !== head) return null;
+  let nextTokenIdx = -1;
+  for (let i = 1; i < tokens.length; i++) {
+    if (tokens[i].startsWith('-')) {
+      // Reject as soon as a flag appears between head and pattern —
+      // structured-entry gating depends on the immediate subcommand,
+      // not on anything after a flag.
+      return null;
+    }
+    nextTokenIdx = i;
+    break;
+  }
+  if (nextTokenIdx === -1) return null;
+  const subcommand = tokens[nextTokenIdx];
+  for (const familyKey of ['hard3_resilience', 'hard2_coverage', 'hard1_baseline']) {
+    const patterns = families[familyKey];
+    if (!Array.isArray(patterns)) continue;
+    if (patterns.includes(subcommand)) return familyKey;
+  }
+  return null;
 }
 
 /**
@@ -256,9 +360,23 @@ export function classifyGateCommand(command, { cwd } = {}) {
   // are NOT accepted manual gate evidence because their `-e`/`-c`
   // forms can contain arbitrary text that the family regex would
   // erroneously match.
-  // #240 A4: union built-in allowlist with config extension when cwd is known.
+  // #240 A4 + codex r1 on PR #244 [data-integrity]: a structured
+  // config entry MUST drive classification on its own — running the
+  // built-in family regex against the whole canonical command would
+  // happily match keywords inside a `-e "console.log('playwright')"`
+  // string literal and forge hard3 evidence. So when the head is in
+  // the structured map, classifyConfiguredHead (which walks tokens
+  // and rejects flags) is the only path; the built-in regex is
+  // bypassed for that head.
+  let structured = null;
+  if (cwd) {
+    structured = readGateClassifyConfig(cwd).structured;
+  }
   const allowed = cwd ? allowedGateHeads(cwd) : STRICT_GATE_HEAD_ALLOWLIST;
   if (!allowed.has(head)) return null;
+  if (structured?.has(head)) {
+    return classifyConfiguredHead(head, canonical, structured);
+  }
   return matchFamilyRegex(canonical);
 }
 

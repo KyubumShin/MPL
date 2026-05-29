@@ -105,29 +105,116 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(family, null);
   });
 
-  it('extending the allowlist via config admits `deno test` as hard2', () => {
-    writeConfig({ gate_classify: { allowed_heads: ['deno', 'bun', 'biome'] } });
+  it('codex r1 [data-integrity]: interpreter heads in config are SILENTLY DROPPED (not allowlisted)', () => {
+    // Codex r1 on PR #244: `.mpl/config.json` extension cannot
+    // admit `node` / `python` / `ruby` / etc. — script interpreters
+    // take arbitrary text via `-e` / `-c` and would let
+    // `node -e "console.log('e2e')"` forge hard3 evidence.
+    writeConfig({
+      gate_classify: {
+        allowed_heads: ['node', 'python', 'ruby', 'perl', 'awk', 'sed', 'lua', 'bun', 'deno'],
+      },
+    });
     const merged = allowedGateHeads(tmp);
-    assert.ok(merged.has('deno'));
-    assert.ok(merged.has('bun'));
-    assert.ok(merged.has('biome'));
-    // Built-in heads still present.
-    assert.ok(merged.has('npm'));
-    // `deno test` now classifies (hard2 via npm-style family regex isn't
-    // strictly guaranteed without a deno-specific family pattern; the
-    // gate-head allowlist passes but family regex may return null —
-    // that's fine, the head check is what this issue narrows).
-    // Verify the head check no longer rejects via STRICT_GATE_HEAD_ALLOWLIST.
-    // Using a head that DOES match the family regex (`npm`-form for npm
-    // package manager doesn't apply, but the test only asserts the
-    // head allowlist is wider).
+    assert.equal(merged.has('node'), false, 'node interpreter must be denied');
+    assert.equal(merged.has('python'), false);
+    assert.equal(merged.has('ruby'), false);
+    assert.equal(merged.has('perl'), false);
+    assert.equal(merged.has('awk'), false);
+    assert.equal(merged.has('bun'), false, 'bun CLI runtime can `eval` — denied');
+    assert.equal(merged.has('deno'), false, 'deno CLI runtime can `eval` — denied');
+    // node/python/etc. classification stays null even with the config
+    // entry — the interpreter denylist is structurally enforced.
+    assert.equal(classifyGateCommand('node -e "console.log(\'e2e\')"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('python -c "print(\'npm test\')"', { cwd: tmp }), null);
+  });
+
+  it('codex r1 [contract-break]: structured allowed_heads entries map heads to gate families', () => {
+    // Codex r1 on PR #244: simple string allowed_heads (`["deno"]`)
+    // passed the head check but family regex returned null, so the
+    // config knob failed its purpose. Structured entries with
+    // explicit `families` map are accepted and `classifyGateCommand`
+    // resolves them.
+    writeConfig({
+      gate_classify: {
+        allowed_heads: [
+          {
+            head: 'deno',
+            families: {
+              hard1_baseline: ['check', 'lint', 'fmt'],
+              hard2_coverage: ['test'],
+              hard3_resilience: ['bench'],
+            },
+          },
+          {
+            head: 'biome',
+            families: {
+              hard1_baseline: ['check', 'lint', 'ci'],
+            },
+          },
+        ],
+      },
+    });
+    assert.equal(classifyGateCommand('deno test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('deno check src/', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('deno bench', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('biome ci', { cwd: tmp }), 'hard1_baseline');
+    // `biome` head with no matching sub-command → null.
+    assert.equal(classifyGateCommand('biome unknown', { cwd: tmp }), null);
+  });
+
+  it('codex r1 [data-integrity]: structured entry with interpreter head — flag check blocks -e/-c abuse', () => {
+    // Structured entries CAN target interpreter heads (operators can
+    // legitimately configure `deno test` / `bun test` / `node test`)
+    // because the classifier requires the configured pattern to be
+    // the IMMEDIATE next non-flag token after the head. `node -e
+    // "console.log('e2e')"` fails because `-e` comes first.
+    writeConfig({
+      gate_classify: {
+        allowed_heads: [
+          { head: 'node', families: { hard2_coverage: ['test'] } },
+          { head: 'deno', families: { hard2_coverage: ['test'] } },
+        ],
+      },
+    });
+    // Legitimate direct invocation: head + non-flag subcommand `test` → matches.
+    assert.equal(classifyGateCommand('node test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('deno test', { cwd: tmp }), 'hard2_coverage');
+    // Interpreter abuse via `-e` / `-c`: flag appears before any
+    // pattern → classifyConfiguredHead returns null.
+    assert.equal(classifyGateCommand('node -e "console.log(\'e2e\')"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('deno -e "console.log(\'playwright\')"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('node --eval "test"', { cwd: tmp }), null);
+  });
+
+  it('codex r1 [data-integrity]: STRING-form entry with interpreter head IS dropped (no flag guard)', () => {
+    // String-form entries delegate fully to the built-in family
+    // regex, which would match arbitrary `-e` / `-c` text — so the
+    // interpreter denylist stays applied at the string-form path.
+    writeConfig({
+      gate_classify: { allowed_heads: ['node', 'python', 'ruby'] },
+    });
+    const merged = allowedGateHeads(tmp);
+    assert.equal(merged.has('node'), false);
+    assert.equal(merged.has('python'), false);
+    assert.equal(merged.has('ruby'), false);
+  });
+
+  it('plain string allowed_heads still extend the head set (back-compat for non-interpreters)', () => {
+    writeConfig({ gate_classify: { allowed_heads: ['gradlew', 'mvn'] } });
+    const merged = allowedGateHeads(tmp);
+    assert.ok(merged.has('gradlew'));
+    assert.ok(merged.has('mvn'));
+    // mvn test happens to also match the built-in family regex via
+    // `\bmvn\s+test\b`-style patterns (not in current set, but the
+    // head check passes regardless).
   });
 
   it('allowlist extension is case-normalized (lowercase)', () => {
-    writeConfig({ gate_classify: { allowed_heads: ['DENO', 'Bun'] } });
+    writeConfig({ gate_classify: { allowed_heads: ['GRADLEW', 'Mvn'] } });
     const merged = allowedGateHeads(tmp);
-    assert.ok(merged.has('deno'));
-    assert.ok(merged.has('bun'));
+    assert.ok(merged.has('gradlew'));
+    assert.ok(merged.has('mvn'));
   });
 
   it('classifyGateCommand without cwd uses built-in set only (back-compat)', () => {
