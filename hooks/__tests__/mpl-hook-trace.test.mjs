@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-import { formatHookTrace, traceHookChain } from '../lib/mpl-hook-trace.mjs';
+import { findPurposeGaps, formatHookTrace, traceHookChain } from '../lib/mpl-hook-trace.mjs';
 import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 
 describe('mpl-hook-trace', () => {
@@ -363,6 +363,132 @@ describe('mpl-hook-trace', () => {
       const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-goal-trace');
       assert.equal(row.status, 'currently_blocking');
       assert.match(formatHookTrace(trace), /BLOCKING/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  /* ──────────────────── #237 D1 / D2 / D3 ──────────────────── */
+
+  it('#237 D1: every hook id registered in hooks.json has a PURPOSES entry', () => {
+    const gaps = findPurposeGaps();
+    assert.deepEqual(gaps, [], `PURPOSES missing entries for: ${gaps.join(', ')}`);
+  });
+
+  it('#237 D2: slash-boundary match — `state.json` does NOT match `state.test_agent_dispatched.phase-1.state.json`', () => {
+    // Pre-D2: bidirectional endsWith treated artifact `state.json` and
+    // target `barstate.json` as matching. Now requires `/` boundary.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d2-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_phase: 'phase-1',
+        blocked_artifact: 'state.json', // suffix-only, no path
+        block_code: 'missing_or_invalid_test_agent_evidence',
+        block_reason: 'block',
+        resume_instruction: 'dispatch test-agent',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { phase_id: 'phase-1' },
+      }));
+      const trace = traceHookChain({
+        targetPath: 'src/api/widgets.test.state.json', // shares suffix but different file
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+      // Without slash boundary, would falsely report currently_blocking.
+      // With boundary, status is not currently_blocking for this target.
+      if (row) {
+        assert.notEqual(row.status, 'currently_blocking',
+          'must NOT match a target that only shares a non-path-segment suffix');
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('#237 D2: slash-boundary match — `.mpl/state.json` artifact DOES match target `state.json`', () => {
+    // Sanity check: legitimate suffix match (artifact = path-prefixed
+    // target with `/` boundary) still works.
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d2-ok-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_phase: 'phase-1',
+        blocked_artifact: '.mpl/state.json',
+        block_code: 'missing_or_invalid_test_agent_evidence',
+        block_reason: 'block',
+        resume_instruction: 'dispatch test-agent',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: { phase_id: 'phase-1' },
+      }));
+      const trace = traceHookChain({
+        targetPath: '/tmp/some/path/.mpl/state.json',
+        cwd: tmp,
+      });
+      const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+      assert.equal(row.status, 'currently_blocking');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('#237 D3: state-category trace omits hooks that do not read state', () => {
+    // Pre-D3: trace on `.mpl/state.json` returned every Edit/Write
+    // PreToolUse hook, including ones like mpl-require-e2e-authenticity
+    // that don't read state — pure noise. Post-D3: only STATE_FOCUS
+    // members appear (plus any active blocker, which is force-included).
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d3-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+      }));
+      const trace = traceHookChain({
+        targetPath: '.mpl/state.json',
+        cwd: tmp,
+      });
+      assert.equal(trace.category, 'state');
+      const ids = trace.hooks.map((h) => h.hook_id);
+      // E2E authenticity must NOT appear — it's a pure file-write
+      // policy guard that doesn't read state.
+      assert.equal(ids.includes('mpl-require-e2e-authenticity'), false,
+        'state trace should not surface unrelated file-write hooks');
+      // mpl-state-invariant SHOULD appear — it's the canonical state
+      // reader.
+      assert.equal(ids.includes('mpl-state-invariant'), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('#237 D3: non-state category trace still includes the broader set', () => {
+    // Sanity check: tracing a code file path returns the full hook
+    // chain (not the narrow state focus).
+    const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d3-non-state-'));
+    try {
+      mkdirSync(join(tmp, '.mpl'), { recursive: true });
+      writeFileSync(join(tmp, '.mpl', 'state.json'), JSON.stringify({
+        schema_version: CURRENT_SCHEMA_VERSION,
+        current_phase: 'phase2-sprint',
+      }));
+      const trace = traceHookChain({
+        targetPath: 'src/api/widgets.ts',
+        cwd: tmp,
+      });
+      assert.equal(trace.category, 'file');
+      const ids = trace.hooks.map((h) => h.hook_id);
+      // file-category should include the broader set of file-write
+      // PreToolUse hooks.
+      assert.equal(ids.includes('mpl-require-e2e-authenticity'), true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

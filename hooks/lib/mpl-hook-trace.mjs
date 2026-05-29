@@ -78,6 +78,9 @@ const PURPOSES = {
   'mpl-compaction-tracker': 'compaction telemetry',
   'mpl-session-init': 'session initialization',
   'mpl-keyword-detector': 'MPL keyword/slash command detection',
+  // #237 D1: hooks added after the original map was authored. Verified
+  // by comparing hooks.json registered ids against PURPOSES keys.
+  'mpl-require-test-agent-brief': 'test-agent brief validation gate (PreToolUse on Task)',
 };
 
 const DECOMPOSITION_PATH = '.mpl/mpl/decomposition.yaml';
@@ -91,9 +94,48 @@ const DECOMPOSITION_FOCUS = new Set([
   'mpl-require-test-agent',
 ]);
 
+// #237 D3: hooks that read state.json fields. A trace of
+// `.mpl/state.json` should narrow to these instead of including every
+// Edit/Write hook (most of which never touch state). Hooks not in the
+// set still appear when there's an active blocker or when the matcher
+// hits the queried tool.
+const STATE_FOCUS = new Set([
+  'mpl-state-invariant',
+  'mpl-phase-controller',
+  'mpl-gate-recorder',
+  'mpl-tool-tracker',
+  'mpl-context-monitor',
+  'mpl-require-test-agent',
+  'mpl-require-finalize-artifacts',
+  'mpl-require-completed-phase-immutability',
+  'mpl-require-phase-evidence',
+  'mpl-require-whole-goal-closure',
+  'mpl-baseline-guard',
+  'mpl-require-decomposition-delta',
+  'mpl-decomposition-postprocess',
+  'mpl-require-test-agent-brief',
+]);
+
 function readHooksConfig(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   const path = join(pluginRoot, 'hooks', 'hooks.json');
   return JSON.parse(readFileSync(path, 'utf-8'));
+}
+
+// #237 D1: regression hook so tests can audit PURPOSES against the
+// live hooks.json registry. Returns the list of hook ids registered
+// in hooks.json that are missing from the PURPOSES map. An empty
+// array means every registered hook has a concrete label.
+export function findPurposeGaps(pluginRoot = DEFAULT_PLUGIN_ROOT) {
+  const config = readHooksConfig(pluginRoot);
+  const registered = new Set();
+  for (const regs of Object.values(config.hooks || {})) {
+    for (const r of regs || []) {
+      for (const h of r.hooks || []) {
+        registered.add(hookIdFromCommand(h.command));
+      }
+    }
+  }
+  return [...registered].filter((id) => !(id in PURPOSES)).sort();
 }
 
 function hookIdFromCommand(command) {
@@ -136,17 +178,27 @@ function pathCategory(targetPath) {
 function shouldIncludeHook({ eventName, matcher, hookId, category }) {
   const fileWriteTools = ['Edit', 'Write', 'MultiEdit'];
   if (eventName === 'PreToolUse') {
+    // #237 D3: state-category trace narrows file-write PreToolUse hooks
+    // to the ones that actually read state. The decomposition branch
+    // already had its own focus filter.
+    if (category === 'state' && matcherIncludes(matcher, fileWriteTools)) {
+      return STATE_FOCUS.has(hookId);
+    }
     if (matcherIncludes(matcher, fileWriteTools)) return true;
     if (category === 'decomposition' && matcherIncludes(matcher, ['Task', 'Agent'])) return true;
     return !matcher;
   }
   if (eventName === 'PostToolUse') {
+    if (category === 'state' && matcherIncludes(matcher, fileWriteTools)) {
+      return STATE_FOCUS.has(hookId);
+    }
     if (matcherIncludes(matcher, fileWriteTools)) return true;
     if (category === 'decomposition' && matcherIncludes(matcher, ['Task', 'Agent'])) return true;
     return !matcher;
   }
   if (eventName === 'Stop') return true;
   if (category === 'decomposition') return DECOMPOSITION_FOCUS.has(hookId);
+  if (category === 'state') return STATE_FOCUS.has(hookId);
   return false;
 }
 
@@ -169,7 +221,15 @@ function blockStatusFor(hookId, state, targetPath) {
   if (!target) {
     return 'invalid_blocked_envelope';
   }
-  if (artifact === target || target.endsWith(artifact) || artifact.endsWith(target)) {
+  // #237 D2: slash-boundary match. Bidirectional endsWith without a
+  // boundary was overly permissive — target `foo.yaml` matched stored
+  // artifact `barfoo.yaml` and vice versa. Now either exact match OR
+  // suffix match where the boundary is a `/` separator.
+  if (
+    artifact === target ||
+    (artifact && target.endsWith('/' + artifact)) ||
+    (target && artifact.endsWith('/' + target))
+  ) {
     return 'currently_blocking';
   }
   return 'registered_blocking_other_artifact';
