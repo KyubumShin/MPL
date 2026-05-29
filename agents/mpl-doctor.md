@@ -365,27 +365,34 @@ disallowedTools: Write, Edit, Task
       prompt-only quality rules (HA-01 vague delegation, seed
       ambiguity-notes gap, etc.). Each line is one JSON record:
       `{ rule, severity, ts, phase, agent, evidence }`.
-    - Aggregate per-rule counts and surface a top-N table. NEVER fails
-      the diagnostic — these are advisory signals, not state
-      corruption. A high count just means the rule is firing often
-      and warrants prompt-tuning attention.
-    - PASS — log file absent (no signals yet) OR all rule counts
-      below the advisory threshold (default: 10 per rule per run).
-    - WARN — any rule count ≥ threshold, OR log file malformed
-      (some lines unparseable). Surface the top 5 rules by count.
+    - Use `readQualitySignals(cwd)` from
+      `hooks/lib/mpl-quality-signals.mjs`, which returns
+      `{ records, malformed }`. The `malformed` count is the number of
+      non-empty lines that failed to parse — surface this directly so
+      a corrupted log triggers a WARN instead of silently degrading.
+    - Aggregate per-rule counts via `summarizeQualitySignals(records)`
+      and surface a top-N table. NEVER fails the diagnostic — these
+      are advisory signals, not state corruption. A high count just
+      means the rule is firing often and warrants prompt-tuning
+      attention.
+    - PASS — log file absent (no signals yet) OR (malformed === 0 AND
+      every rule count below the advisory threshold; default: 10 per
+      rule per run).
+    - WARN — `malformed >= 1`, OR any rule count ≥ threshold. Surface
+      the top 5 rules by count AND the malformed-line count when > 0.
     - FAIL — never (telemetry surface, no blocking).
 
     **Output format for Category 16**:
     ```
     ### Quality Signals (#238)
-    Log: .mpl/mpl/quality-signals.jsonl ({N} records)
+    Log: .mpl/mpl/quality-signals.jsonl ({N} records, {M} malformed lines)
 
     Top rules by hit count:
       HA-01                       {n}   — vague delegation in Task prompts
       seed-ambiguity-notes        {n}   — uncertainty without ambiguity_notes
       …
 
-    Result: PASS / WARN (high-volume rules surfaced)
+    Result: PASS / WARN (high-volume rules / malformed lines surfaced)
     ```
   </Diagnostic_Categories>
 

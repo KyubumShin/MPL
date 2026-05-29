@@ -80,28 +80,45 @@ export function recordQualitySignal(record, cwd) {
 }
 
 /**
- * Read all signal records as an array. Malformed lines are skipped.
- * Returns [] if the log doesn't exist.
+ * Read the quality-signal log.
+ *
+ * Returns `{ records, malformed }`:
+ *   - `records`   — array of parsed records, in file order.
+ *   - `malformed` — count of non-empty lines that failed to parse as JSON.
+ *
+ * Returns `{ records: [], malformed: 0 }` if the log file does not exist
+ * (no signals yet — not an error).
+ *
+ * The `malformed` count is load-bearing for mpl-doctor Category 16
+ * (#238): doctor must distinguish "log is clean" from "log has
+ * unparseable lines" to surface the WARN the category promises.
+ * Silently dropping malformed lines would hide the very condition the
+ * diagnostic is meant to catch (codex r1 [contract-break] finding).
  */
 export function readQualitySignals(cwd) {
   const path = signalsLogPath(cwd);
-  if (!existsSync(path)) return [];
+  if (!existsSync(path)) return { records: [], malformed: 0 };
+  let text;
   try {
-    const text = readFileSync(path, 'utf-8');
-    const out = [];
-    for (const line of text.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        out.push(JSON.parse(trimmed));
-      } catch {
-        /* skip malformed */
-      }
-    }
-    return out;
+    text = readFileSync(path, 'utf-8');
   } catch {
-    return [];
+    // IO error on a present file is itself a degraded read condition;
+    // surface it as a malformed signal so doctor warns rather than
+    // reporting "clean".
+    return { records: [], malformed: 1 };
   }
+  const records = [];
+  let malformed = 0;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      records.push(JSON.parse(trimmed));
+    } catch {
+      malformed += 1;
+    }
+  }
+  return { records, malformed };
 }
 
 /**

@@ -80,8 +80,9 @@ test('#238: recordQualitySignal creates the log file and appends one record per 
       cwd,
     );
 
-    const records = readQualitySignals(cwd);
+    const { records, malformed } = readQualitySignals(cwd);
     assert.equal(records.length, 2);
+    assert.equal(malformed, 0);
     assert.equal(records[0].rule, 'HA-01');
     assert.equal(records[0].severity, 'warn');
     assert.equal(records[0].agent, 'mpl-decomposer');
@@ -110,7 +111,11 @@ test('#238: summarizeQualitySignals counts and sorts by descending rule frequenc
   assert.deepEqual(counts, { 'HA-01': 3, 'seed-ambiguity-notes': 2 });
 });
 
-test('#238: readQualitySignals skips malformed lines without throwing', () => {
+test('#238 codex r1 [contract-break]: readQualitySignals reports malformed-line count (so doctor Category 16 can WARN)', () => {
+  // Codex r1: Category 16's "WARN when log has malformed lines"
+  // promise required a reader contract that surfaces the malformed
+  // count, not silently skips. Test: a log with 2 valid + 1 bad line
+  // returns records.length=2 AND malformed=1.
   const cwd = freshWorkspace();
   try {
     const path = signalsLogPath(cwd);
@@ -118,10 +123,21 @@ test('#238: readQualitySignals skips malformed lines without throwing', () => {
       path,
       '{"rule":"HA-01"}\nnot-json\n{"rule":"seed-ambiguity-notes"}\n',
     );
-    const records = readQualitySignals(cwd);
+    const { records, malformed } = readQualitySignals(cwd);
     assert.equal(records.length, 2);
+    assert.equal(malformed, 1);
     assert.equal(records[0].rule, 'HA-01');
     assert.equal(records[1].rule, 'seed-ambiguity-notes');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#238 codex r1 [contract-break]: readQualitySignals returns {records:[], malformed:0} for an absent log', () => {
+  const cwd = freshWorkspace();
+  try {
+    const result = readQualitySignals(cwd);
+    assert.deepEqual(result, { records: [], malformed: 0 });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -216,8 +232,9 @@ test('#238 e2e: soft-signal-emit hook writes HA-01 record for vague Task prompt 
       },
     });
     assert.equal(decision.continue, true, 'must never block');
-    const records = readQualitySignals(cwd);
+    const { records, malformed } = readQualitySignals(cwd);
     assert.equal(records.length, 1);
+    assert.equal(malformed, 0);
     assert.equal(records[0].rule, 'HA-01');
     assert.equal(records[0].agent, 'mpl-decomposer');
     assert.equal(records[0].evidence.matched_phrase, '이전 결과 참고');
@@ -239,7 +256,7 @@ test('#238 e2e: soft-signal-emit hook stays silent on a well-scoped prompt', () 
       },
     });
     assert.equal(decision.continue, true);
-    assert.equal(readQualitySignals(cwd).length, 0);
+    assert.equal(readQualitySignals(cwd).records.length, 0);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
