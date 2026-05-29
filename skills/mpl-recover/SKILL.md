@@ -76,13 +76,13 @@ Approval-required handlers:
   insert `test_agent_required: true` for the listed phases. This is conservative
   because missing values are already treated as required by AD-0007.
 - `redispatch_decomposer` with `covers_schema_violation` or `phase_contract_graph_invalid` (#234):
-  the recover skill returns a `Task(subagent_type="mpl-decomposer", ...)` dispatch instruction with the validator's structured findings echoed back. Diagnostics are normalized across `retry_context.failures` / `retry_context.issues` / `retry_context.missing` (each hook records under a different field). The orchestrator (not the recover skill) executes the Task.
+  the recover skill returns a `Task(subagent_type="mpl-decomposer", ...)` dispatch instruction with the validator's structured findings echoed back. Diagnostics are normalized across `retry_context.failures` / `retry_context.issues` / `retry_context.missing` (each hook records under a different field). The orchestrator (not the recover skill) executes the Task. **Requires `--approve-unsafe` (codex r7 #242)**: `--apply-safe` keeps the block at `requires_approval` so an automation watching `awaiting_decomposer` cannot side-step the human checkpoint.
 - `goal_contract_invalid` (#234 codex r1):
-  no agent dispatch. Returns the recorded `resume_instruction` ("Restore a valid .mpl/goal-contract.yaml") with the missing-field list appended. A decomposer re-dispatch cannot repair a missing source file.
+  no agent dispatch. Returns the recorded `resume_instruction` ("Restore a valid .mpl/goal-contract.yaml") with the missing-field list appended. A decomposer re-dispatch cannot repair a missing source file. **Requires `--approve-unsafe` (codex r7 #242)**.
 - `phase_runner_anomaly` with `phase_runner_<anomaly_type>` (#234):
-  the recover skill returns an anomaly-specific `Task(subagent_type="mpl-phase-runner", ...)` dispatch instruction. Anomaly types include `empty_response`, `truncated_response`, `invalid_json`, `no_evidence`. Each has a tailored framing (stronger prompt / reduced context / explicit schema reminder / evidence emphasis).
+  the recover skill returns an anomaly-specific `Task(subagent_type="mpl-phase-runner", ...)` dispatch instruction. Anomaly types include `empty_response`, `truncated_response`, `invalid_json`, `no_evidence`. Each has a tailored framing (stronger prompt / reduced context / explicit schema reminder / evidence emphasis). **Requires `--approve-unsafe` (codex r7 #242)**.
 - `baseline_immutable` (#234):
-  no agent dispatch. Returns the recorded `resume_instruction` (touch `.mpl/mpl/.baseline-renewal`) as `user_instruction`.
+  no agent dispatch. Returns the recorded `resume_instruction` (touch `.mpl/mpl/.baseline-renewal`) as `user_instruction`. **Requires `--approve-unsafe` (codex r7 #242)**.
 
 If revalidation still fails, recovery must leave `session_status:"blocked_hook"`
 intact and update `block_reason`, `resume_instruction`, and

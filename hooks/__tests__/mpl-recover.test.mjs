@@ -725,6 +725,8 @@ phases:
     // validator findings under `retry_context.issues`, NOT `failures`.
     // The handler must normalize so the dispatch instruction echoes
     // the real diagnostics.
+    // Codex r7: this is an approval-required route — pass
+    // approveUnsafe to actually receive the dispatch instruction.
     writeState(blocked({
       blocked_by_hook: 'mpl-require-covers',
       block_code: 'covers_schema_violation',
@@ -739,7 +741,7 @@ phases:
     assert.equal(plan.status, 'requires_approval');
     assert.equal(plan.handler, 'redispatch_decomposer');
 
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'awaiting_decomposer');
     assert.match(result.dispatch_instruction, /mpl-decomposer/);
     assert.match(result.dispatch_instruction, /UC-99/);
@@ -758,7 +760,7 @@ phases:
         issues: ['phase-2.depends_on:cycle', 'tier-1.execution_mode:missing'],
       },
     }));
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'awaiting_decomposer');
     assert.match(result.dispatch_instruction, /mpl-decomposer/);
     assert.match(result.dispatch_instruction, /depends_on:cycle/);
@@ -770,9 +772,31 @@ phases:
       block_code: 'covers_schema_violation',
       retry_context: { failures: ['legacy-style finding'] },
     }));
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'awaiting_decomposer');
     assert.match(result.dispatch_instruction, /legacy-style finding/);
+  });
+
+  it('#234 [contract-break] codex r7: redispatch_decomposer route requires --approve-unsafe; --apply-safe keeps requires_approval', () => {
+    // Codex r7: SKILL.md categorizes redispatch_decomposer as "Step 3
+    // Explicit Approval Recovery". --apply-safe (approveUnsafe=false)
+    // must NOT advance state to `awaiting_decomposer` (an automation
+    // watching for awaiting_* would side-step the human checkpoint).
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: { issues: ['phase-1.covers[0]:UC-99 not in goal_contract'] },
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.requires_approval, true);
+    // Must NOT emit a dispatch_instruction in safe mode.
+    assert.equal(result.dispatch_instruction, undefined);
+    // findings ARE surfaced so the operator can review before approving.
+    assert.deepEqual(result.findings, ['phase-1.covers[0]:UC-99 not in goal_contract']);
+
+    const state = readState();
+    assert.equal(state.retry_context.recovery.last_status, 'requires_approval');
   });
 
   it('#234: goal_contract_invalid is routed to user_action (NOT decomposer) — codex r1 [logic]', () => {
@@ -780,6 +804,8 @@ phases:
     // resumeInstruction "Restore a valid .mpl/goal-contract.yaml" —
     // a decomposer re-dispatch cannot repair a missing source file.
     // Recovery must echo the user instruction, NOT generate a Task call.
+    // Codex r7: also approval-gated — pass approveUnsafe to receive
+    // the instruction; --apply-safe surfaces requires_approval.
     writeState(blocked({
       blocked_by_hook: 'mpl-require-goal-trace',
       block_code: 'goal_contract_invalid',
@@ -791,7 +817,7 @@ phases:
     assert.equal(plan.status, 'requires_user_action');
     assert.equal(plan.handler, 'goal_contract_invalid');
 
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'requires_user_action');
     assert.match(result.user_instruction, /Restore a valid \.mpl\/goal-contract\.yaml/);
     assert.match(result.user_instruction, /mission\.goal/);
@@ -801,7 +827,22 @@ phases:
     assert.equal(readState().session_status, 'blocked_hook');
   });
 
+  it('#234 [contract-break] codex r7: goal_contract_invalid route requires --approve-unsafe', () => {
+    writeState(blocked({
+      block_code: 'goal_contract_invalid',
+      resume_instruction: 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.',
+      retry_context: { missing: ['mission.goal'] },
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.user_instruction, undefined);
+    assert.deepEqual(result.findings, ['mission.goal']);
+  });
+
   it('#234: phase_runner_anomaly handler returns anomaly-specific dispatch instruction', () => {
+    // Codex r7: approval-gated — approveUnsafe needed to receive
+    // the dispatch instruction.
     writeState(blocked({
       blocked_by_hook: 'mpl-gate-recorder',
       blocked_phase: 'phase-1',
@@ -814,7 +855,7 @@ phases:
     assert.equal(plan.handler, 'phase_runner_anomaly');
     assert.equal(plan.anomaly, 'empty_response');
 
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'awaiting_phase_runner');
     assert.match(result.dispatch_instruction, /mpl-phase-runner/);
     assert.match(result.dispatch_instruction, /stronger framing/);
@@ -829,13 +870,27 @@ phases:
       retry_context: {},
     }));
 
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'awaiting_phase_runner');
     assert.equal(result.anomaly, 'some_new_anomaly');
     assert.match(result.dispatch_instruction, /mpl-phase-runner/);
   });
 
+  it('#234 [contract-break] codex r7: phase_runner_anomaly route requires --approve-unsafe', () => {
+    writeState(blocked({
+      block_code: 'phase_runner_empty_response',
+      blocked_phase: 'phase-1',
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.dispatch_instruction, undefined);
+    assert.equal(result.anomaly, 'empty_response');
+  });
+
   it('#234: baseline_immutable handler returns user_instruction without agent dispatch', () => {
+    // Codex r7: approval-gated — approveUnsafe needed to receive
+    // the user instruction.
     writeState(blocked({
       blocked_by_hook: 'mpl-baseline-guard',
       block_code: 'baseline_immutable',
@@ -846,10 +901,21 @@ phases:
     assert.equal(plan.status, 'requires_user_action');
     assert.equal(plan.handler, 'baseline_immutable');
 
-    const result = recoverBlockedHook(tmp);
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
     assert.equal(result.status, 'requires_user_action');
     assert.match(result.user_instruction, /baseline-renewal/);
     assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234 [contract-break] codex r7: baseline_immutable route requires --approve-unsafe', () => {
+    writeState(blocked({
+      block_code: 'baseline_immutable',
+      resume_instruction: 'Touch .mpl/mpl/.baseline-renewal',
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.user_instruction, undefined);
   });
 
   it('#234: phantom alias goal_contract_hash_corrupt is NOT routed (drop confirmed)', () => {

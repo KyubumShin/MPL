@@ -778,12 +778,13 @@ function collectValidatorDiagnostics(state) {
     });
 }
 
-// #234: producer-agent re-dispatch. Recover skill returns a dispatch
-// instruction (no actual agent spawn — that's the orchestrator's
-// responsibility). Validator diagnostics from retry_context.failures
-// / .issues / .missing are normalized and echoed back so the producer
-// can fix the exact findings.
-function recoverRedispatchDecomposer(cwd, state) {
+// #234 + codex r7 on PR #242 [contract-break]: producer-agent
+// re-dispatch is an approval-required route per SKILL.md "Step 3
+// Explicit Approval Recovery". `--apply-safe` (approveUnsafe=false)
+// must NOT advance recovery to `awaiting_decomposer`; it must surface
+// the route as `requires_approval` so an automation watching for
+// `awaiting_*` cannot side-step the human checkpoint.
+function recoverRedispatchDecomposer(cwd, state, { approveUnsafe = false } = {}) {
   const code = state.block_code;
   const diagnostics = collectValidatorDiagnostics(state);
   const failureSummary = diagnostics.length > 0
@@ -791,6 +792,23 @@ function recoverRedispatchDecomposer(cwd, state) {
     : '';
   const instruction =
     `Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt=...) to fix ${code}. ${failureSummary}`.trim();
+
+  if (!approveUnsafe) {
+    const reason = `[MPL Recover] ${code} requires explicit approval to surface the mpl-decomposer dispatch instruction.`;
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason,
+      instruction:
+        'Run /mpl:mpl-recover with --approve-unsafe (or rerun the recovery handler explicitly) to receive the decomposer re-dispatch Task call.',
+      details: { handler: 'redispatch_decomposer', code, findings: diagnostics, awaiting_instruction: instruction },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: reason,
+      requires_approval: true,
+      findings: diagnostics,
+    });
+  }
 
   const reason = `[MPL Recover] ${code} requires decomposer re-dispatch.`;
   keepBlocked(cwd, state, {
@@ -812,7 +830,13 @@ function recoverRedispatchDecomposer(cwd, state) {
 // valid .mpl/goal-contract.yaml" — a decomposer re-dispatch cannot
 // repair a missing source file. Echo the recorded instruction (with a
 // generic fallback) so the operator sees the actionable step.
-function recoverGoalContractInvalid(cwd, state) {
+// Codex r7 on PR #242 [contract-break]: goal_contract_invalid is
+// a user-action route (the recorded resume_instruction asks the
+// operator to restore .mpl/goal-contract.yaml). Per SKILL.md "Step 3
+// Explicit Approval Recovery", `--apply-safe` must NOT advance to
+// `requires_user_action` — that would let an automation watching for
+// `user_instruction` mutate state without the human checkpoint.
+function recoverGoalContractInvalid(cwd, state, { approveUnsafe = false } = {}) {
   const diagnostics = collectValidatorDiagnostics(state);
   const missingSummary = diagnostics.length > 0
     ? ` Missing fields: ${diagnostics.slice(0, 8).join(', ')}.`
@@ -821,6 +845,24 @@ function recoverGoalContractInvalid(cwd, state) {
   const instruction =
     state.resume_instruction ||
     'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.';
+
+  if (!approveUnsafe) {
+    const approvalReason = '[MPL Recover] goal_contract_invalid requires explicit approval to surface the restoration instruction.';
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason: approvalReason,
+      instruction:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the goal-contract restoration instruction.',
+      details: { handler: 'goal_contract_invalid', findings: diagnostics },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: approvalReason,
+      requires_approval: true,
+      findings: diagnostics,
+    });
+  }
+
   keepBlocked(cwd, state, {
     status: 'requires_user_action',
     reason,
@@ -851,7 +893,7 @@ const PHASE_RUNNER_ANOMALY_TEMPLATES = {
     'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) emphasizing evidence_required fields. Previous run completed without latching required evidence.',
 };
 
-function recoverPhaseRunnerAnomaly(cwd, state) {
+function recoverPhaseRunnerAnomaly(cwd, state, { approveUnsafe = false } = {}) {
   const code = state.block_code || '';
   const anomalyType = code.startsWith('phase_runner_') ? code.slice('phase_runner_'.length) : '';
   const template = PHASE_RUNNER_ANOMALY_TEMPLATES[anomalyType];
@@ -860,6 +902,30 @@ function recoverPhaseRunnerAnomaly(cwd, state) {
   const instruction = template ||
     state.resume_instruction ||
     `Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) for ${phaseId || 'the blocked phase'} after addressing the recorded ${anomalyType || 'anomaly'}.`;
+
+  if (!approveUnsafe) {
+    const approvalReason = `[MPL Recover] ${code} requires explicit approval to surface the mpl-phase-runner dispatch instruction (anomaly=${anomalyType || 'unknown'}).`;
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason: approvalReason,
+      instruction:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the phase-runner re-dispatch Task call.',
+      details: {
+        handler: 'phase_runner_anomaly',
+        code,
+        anomaly: anomalyType,
+        phase_id: phaseId,
+        awaiting_instruction: instruction,
+      },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: approvalReason,
+      requires_approval: true,
+      anomaly: anomalyType,
+      phase_id: phaseId,
+    });
+  }
 
   const reason = `[MPL Recover] ${code} requires mpl-phase-runner re-dispatch (anomaly=${anomalyType || 'unknown'}).`;
   keepBlocked(cwd, state, {
@@ -877,13 +943,31 @@ function recoverPhaseRunnerAnomaly(cwd, state) {
   });
 }
 
-// #234: baseline_immutable echoes the recorded resume_instruction
-// (touch the renewal sentinel). No agent dispatch; user action.
-function recoverBaselineImmutable(cwd, state) {
+// #234 + codex r7 [contract-break]: baseline_immutable is also an
+// approval-required user-action route. `--apply-safe` must not
+// advance to `requires_user_action`.
+function recoverBaselineImmutable(cwd, state, { approveUnsafe = false } = {}) {
   const reason = '[MPL Recover] Baseline is immutable; renewal sentinel required.';
   const instruction =
     state.resume_instruction ||
     'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.';
+
+  if (!approveUnsafe) {
+    const approvalReason = '[MPL Recover] baseline_immutable requires explicit approval to surface the renewal-sentinel instruction.';
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason: approvalReason,
+      instruction:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the baseline renewal instruction.',
+      details: { handler: 'baseline_immutable' },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: approvalReason,
+      requires_approval: true,
+    });
+  }
+
   keepBlocked(cwd, state, {
     status: 'requires_user_action',
     reason,
@@ -1037,16 +1121,16 @@ export function recoverBlockedHook(cwd = process.cwd(), { approveUnsafe = false 
     return recoverAutoRegenerate(cwd, state);
   }
   if (REDISPATCH_DECOMPOSER_CODES.has(code)) {
-    return recoverRedispatchDecomposer(cwd, state);
+    return recoverRedispatchDecomposer(cwd, state, { approveUnsafe });
   }
   if (code === 'goal_contract_invalid') {
-    return recoverGoalContractInvalid(cwd, state);
+    return recoverGoalContractInvalid(cwd, state, { approveUnsafe });
   }
   if (code && code.startsWith('phase_runner_')) {
-    return recoverPhaseRunnerAnomaly(cwd, state);
+    return recoverPhaseRunnerAnomaly(cwd, state, { approveUnsafe });
   }
   if (code === 'baseline_immutable') {
-    return recoverBaselineImmutable(cwd, state);
+    return recoverBaselineImmutable(cwd, state, { approveUnsafe });
   }
 
   const reason = `[MPL Recover] Unsupported hook block code: ${code || 'unknown'}.`;
