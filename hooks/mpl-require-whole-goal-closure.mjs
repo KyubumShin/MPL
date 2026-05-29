@@ -89,10 +89,21 @@ async function main() {
     return;
   }
 
+  // #241 B4 / #248 codex r2 [contract-break] fix: cohort-scoped
+  // partial-MVP finalize is a caller-declared intent, not a silent
+  // state/config inheritance. Explicitly opt in here when:
+  //   - the active cohort declares `complete_pipeline_optional: true`, OR
+  //   - workspace config sets `release.complete_pipeline_optional: true`.
+  // Default is false → strict whole-pipeline closure.
+  const allowPartial =
+    state?.release?.cohort?.complete_pipeline_optional === true ||
+    cfg?.release?.complete_pipeline_optional === true;
+
   const verdict = validateWholeGoalClosure({
     cwd,
     state,
     contract: goal.valid ? goal.contract : null,
+    allowPartial,
   });
 
   if (!verdict.valid) {

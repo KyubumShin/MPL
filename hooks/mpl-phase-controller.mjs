@@ -1028,26 +1028,31 @@ async function main() {
     }
 
     case 'phase3-gate': {
-      // Stage A defense-in-depth (RFC §5.5): the whole-pipeline phase3-gate
-      // must never advance to phase5-finalize while a release cohort is
-      // still active. Any prior all-PASS gate_results from a previous run
-      // would otherwise let an in-progress release path's finalize be
-      // skipped. Sprint completion routing already prevents this in normal
-      // flow (failed-cohort case stays in phase2-sprint; clean-cohort case
-      // routes to release-gate), but a hand-edited state.json or a
-      // recompose-driven re-entry could still land here with a live cohort.
-      // Surface and revert.
-      if (state.release?.current_cut_id) {
-                if (emitPhase0BlockIfNeeded(cwd, 'phase2-sprint')) return;
-                writeState(cwd, { current_phase: 'phase2-sprint' });
-        console.log(JSON.stringify({
-          continue: true,
-          stopReason: `[MPL] ⚠ phase3-gate entered while release cohort "${state.release.current_cut_id}" is still active. ` +
-            `Whole-pipeline finalize must NOT run before release-finalize completes the active cohort. ` +
-            `Reverting to phase2-sprint; complete the cohort's release path first (release-gate → release-finalize).`
-        }));
-        break;
-      }
+      // #241 B2 (delivered via #248): the previous defense-in-depth
+      // FORCE-REVERTED to phase2-sprint when `state.release.current_cut_id`
+      // was non-null. That over-blocked the legitimate case where the
+      // operator has PASS gate evidence but `current_cut_id` is stale
+      // (e.g., from a partially-rolled-back cohort, hand-edited state,
+      // or recompose-driven re-entry).
+      //
+      // New behavior: emit an advisory stopReason recommending
+      // `mpl-recover` to clear the stale cohort, but DO NOT auto-revert
+      // `state.current_phase`. The existing gate evidence check below
+      // remains the actual gate — if gate_results are PASS, the phase
+      // transitions to phase5-finalize normally; if gates haven't been
+      // recorded, the missing-evidence branches still block.
+      //
+      // Operator workflow:
+      //   - cohort is genuinely active → run `mpl-recover` to clear
+      //     `current_cut_id`, or complete release-gate → release-finalize.
+      //   - cohort is stale → either accept the advisory and proceed
+      //     (gate evidence still gates), or run `mpl-recover` to clean
+      //     up the state.
+      const cohortAdvisory = state.release?.current_cut_id
+        ? `[MPL #241 B2 / #248] ⚠ Advisory: phase3-gate entered while release cohort "${state.release.current_cut_id}" is still tracked in state.release.current_cut_id. ` +
+          `If no release path is in progress, run \`mpl-recover\` to clear the stale cohort marker; if the cohort IS active, complete release-gate → release-finalize before whole-pipeline finalize. ` +
+          `(Per #248: not auto-reverting state.current_phase; gate evidence below remains the actual gate.) `
+        : '';
 
       // Per-rule policy (P0-2, #110): `missing_gate_evidence` resolves the
       // strict toggle for checkGateResults. Default is 'warn' per #110 §정책
@@ -1064,12 +1069,29 @@ async function main() {
         : '';
 
       if (gateResults.allPassed) {
-        // All gates passed → Phase 5
+        // #241 B2 (#248) codex r1 fix: a genuinely active release cohort
+        // (current_cut_id set) with all-PASS top-level gates MUST NOT
+        // bypass release-gate / release-finalize. The whole-pipeline
+        // finalize path would skip completed_cut_ids accounting, the
+        // release manifest, and the cohort-scoped evidence files. Route
+        // to release-gate instead — the cohort's release path validates
+        // and finalizes the cut; if the marker is stale, the operator
+        // clears it via mpl-recover (per the advisory) and re-enters
+        // phase3-gate. Both paths converge cleanly.
+        if (state.release?.current_cut_id) {
+          if (emitPhase0BlockIfNeeded(cwd, 'release-gate')) return;
+          writeState(cwd, { current_phase: 'release-gate' });
+          console.log(JSON.stringify({
+            continue: true,
+            stopReason: `${cohortAdvisory}[MPL] All Quality Gates passed (source=${gateResults.source}). Active cohort "${state.release.current_cut_id}" detected — routing to release-gate (not whole-pipeline phase5-finalize) to complete the cohort's release path. Run \`mpl-recover\` first if the cohort marker is stale.${fallbackWarn}`
+          }));
+          break;
+        }
                 if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
                 writeState(cwd, { current_phase: 'phase5-finalize' });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] All Quality Gates passed (source=${gateResults.source}). Transitioning to Phase 5: Finalize.${fallbackWarn}`
+          stopReason: `${cohortAdvisory}[MPL] All Quality Gates passed (source=${gateResults.source}). Transitioning to Phase 5: Finalize.${fallbackWarn}`
         }));
       } else if (gateResults.anyFailed) {
         // Gate failed → Phase 4
@@ -1093,7 +1115,7 @@ async function main() {
         });
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Quality Gate failed (source=${gateResults.source}). Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}. Transitioning to Phase 4: Fix Loop.${fallbackWarn}`
+          stopReason: `${cohortAdvisory}[MPL] Quality Gate failed (source=${gateResults.source}). Gate results: H1=${gateResults.details.hard1}, H2=${gateResults.details.hard2}, H3=${gateResults.details.hard3}. Transitioning to Phase 4: Fix Loop.${fallbackWarn}`
         }));
       } else if (gateResults.source === 'structured' && gateResults.missingEvidence.length > 0) {
         // Partial structured evidence: gate-recorder produced some entries but not all.
@@ -1107,13 +1129,13 @@ async function main() {
           : `Run the missing gates so mpl-gate-recorder writes structured evidence; the loop will continue once all 3 ${gateResults.missingEvidence.length === 3 ? 'are' : 'remaining are'} recorded.`;
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Phase 3 ${verb}: missing structured gate evidence (${gateResults.missingEvidence.join(', ')}). ${tail}`
+          stopReason: `${cohortAdvisory}[MPL] Phase 3 ${verb}: missing structured gate evidence (${gateResults.missingEvidence.join(', ')}). ${tail}`
         }));
       } else {
         // No gate evidence at all (zero structured + zero legacy).
         console.log(JSON.stringify({
           continue: true,
-          stopReason: `[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.${fallbackWarn}`
+          stopReason: `${cohortAdvisory}[MPL] Phase 3: Quality Gate in progress. Run all 3 gates before proceeding.${fallbackWarn}`
         }));
       }
       break;
@@ -1134,15 +1156,68 @@ async function main() {
       } else {
         // H1: Check convergence before continuing
         const convergenceResult = checkConvergence(state);
+        // #241 B3 (delivered via #248): the previous behavior
+        // auto-finalized on the FIRST detected stagnation tick. A
+        // brief mid-bug plateau (e.g., one tick of zero improvement
+        // while the agent reads files) was enough to force partial
+        // completion. New behavior:
+        //   - Count consecutive stagnant/regressing ticks in
+        //     `state.fix_loop.stagnation_tick_count`.
+        //   - Each tick where status ∈ {'stagnating', 'regressing'}
+        //     increments the counter; otherwise reset to 0.
+        //   - Auto-finalize fires ONLY when:
+        //       count >= `convergence.stagnation_window` (default 3)
+        //       AND `.mpl/config.json:convergence.auto_finalize_on_stagnation`
+        //         is true (default false).
+        //   - Until both conditions hold, emit an advisory stopReason
+        //     and stay in the fix loop. The operator can intervene
+        //     manually (force-finalize, abort, etc.) or let the loop
+        //     re-converge.
+        const cfg = loadConfig(cwd);
+        const convergenceCfg = cfg.convergence || {};
+        const stagnationWindow = Number.isInteger(convergenceCfg.stagnation_window)
+          && convergenceCfg.stagnation_window > 0
+          ? convergenceCfg.stagnation_window
+          : 3;
+        const autoFinalizeOnStagnation = convergenceCfg.auto_finalize_on_stagnation === true;
+
         if (convergenceResult.status === 'stagnating' || convergenceResult.status === 'regressing') {
-                    if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
-                    writeState(cwd, { current_phase: 'phase5-finalize' });
-          console.log(JSON.stringify({
-            continue: true,
-            stopReason: `[MPL] Convergence ${convergenceResult.status} detected (delta: ${convergenceResult.delta?.toFixed(3)}). Fix loop is not improving. Transitioning to Phase 5: Finalize (partial completion).`
-          }));
+          const prevCount = state.fix_loop?.stagnation_tick_count || 0;
+          const newCount = prevCount + 1;
+          if (newCount >= stagnationWindow && autoFinalizeOnStagnation) {
+            if (emitPhase0BlockIfNeeded(cwd, 'phase5-finalize')) return;
+            writeState(cwd, {
+              current_phase: 'phase5-finalize',
+              fix_loop: { ...(state.fix_loop || {}), stagnation_tick_count: newCount },
+            });
+            console.log(JSON.stringify({
+              continue: true,
+              stopReason: `[MPL] Convergence ${convergenceResult.status} for ${newCount}/${stagnationWindow} consecutive ticks ` +
+                `(delta: ${convergenceResult.delta?.toFixed(3)}; auto_finalize_on_stagnation=true). ` +
+                `Transitioning to Phase 5: Finalize (partial completion).`
+            }));
+          } else {
+            // Advisory: increment counter, stay in fix loop. The next tick
+            // either resets (if convergence resumes) or escalates.
+            writeState(cwd, {
+              fix_loop: { ...(state.fix_loop || {}), stagnation_tick_count: newCount },
+            });
+            const autoFinalizeNote = autoFinalizeOnStagnation
+              ? ` After ${stagnationWindow} consecutive stagnant ticks, this will auto-finalize.`
+              : ` Auto-finalize is off (set .mpl/config.json:convergence.auto_finalize_on_stagnation to true to enable). Continue fixing, force-finalize manually, or abort.`;
+            console.log(JSON.stringify({
+              continue: true,
+              stopReason: `[MPL #241 B3 / #248] Advisory: convergence ${convergenceResult.status} on tick ${newCount}/${stagnationWindow} ` +
+                `(delta: ${convergenceResult.delta?.toFixed(3)}).${autoFinalizeNote}`
+            }));
+          }
         } else {
-          // Continue fix loop
+          // Convergence is fine — reset the stagnation counter.
+          if ((state.fix_loop?.stagnation_tick_count || 0) > 0) {
+            writeState(cwd, {
+              fix_loop: { ...(state.fix_loop || {}), stagnation_tick_count: 0 },
+            });
+          }
           console.log(JSON.stringify({
             continue: true,
             stopReason: `[MPL] Phase 4: Fix Loop ${fixCount}/${maxFix}. Continue fixing or re-run Quality Gate.`

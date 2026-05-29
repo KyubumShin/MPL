@@ -945,11 +945,19 @@ mvp_scope:
     assert.match(out.stopReason, /Clear the FAILED TODOs/);
   });
 
-  it('1.6b: phase3-gate defensively reverts to phase2-sprint when release cohort still active (codex round-2 high)', () => {
-    // Defense-in-depth for codex round-2 catch: even if some unknown path
-    // (hand-edited state, partial replay) lands at phase3-gate with an
-    // active release cohort + all-PASS gate evidence, the guard must
-    // refuse to advance to phase5-finalize and instead revert to sprint.
+  it('1.6b: phase3-gate emits advisory stopReason on active cohort, does NOT auto-revert (#241 B2 / #248)', () => {
+    // The original codex round-2 defense-in-depth FORCE-REVERTED to
+    // phase2-sprint whenever `state.release.current_cut_id` was set.
+    // #241 B2 (delivered via #248) flagged this as over-blocking the
+    // legitimate case where the operator has PASS gate evidence but
+    // current_cut_id is stale.
+    //
+    // New behavior: emit an advisory stopReason recommending mpl-recover,
+    // but do NOT mutate current_phase. The gate evidence check below
+    // remains the actual gate — when all 3 hards are PASS, the
+    // controller proceeds to phase5-finalize the same way it would
+    // without a cohort marker. When gates are missing, the
+    // missing-evidence branches still block.
     mkdirSync(join(tmpDir, '.mpl'), { recursive: true });
     const out = runStopHook(tmpDir, {
       current_phase: 'phase3-gate',
@@ -961,12 +969,23 @@ mvp_scope:
       },
     });
     const state = readState();
-    assert.strictEqual(state.current_phase, 'phase2-sprint',
-      'phase3-gate must revert to phase2-sprint when an active cohort exists');
-    assert.strictEqual(state.release.current_cut_id, 'mvp',
-      'current_cut_id must be preserved across the revert');
-    assert.match(out.stopReason, /release cohort .* is still active/);
-    assert.match(out.stopReason, /Reverting to phase2-sprint/);
+    // Auto-revert must NOT happen.
+    assert.notStrictEqual(
+      state.current_phase,
+      'phase2-sprint',
+      '#241 B2: must NOT auto-revert to phase2-sprint',
+    );
+    // current_cut_id is preserved (not cleared by the controller).
+    assert.strictEqual(state.release.current_cut_id, 'mvp');
+    // All-PASS evidence + active cohort → route to release-gate
+    // (codex r1 fix on PR #254: whole-pipeline finalize would bypass
+    // release-gate/release-finalize for a real cohort; routing to
+    // release-gate covers both stale-marker and genuinely-active cases).
+    assert.strictEqual(state.current_phase, 'release-gate');
+    assert.match(
+      out.stopReason,
+      /Quality Gates passed|Active cohort .* detected — routing to release-gate/,
+    );
   });
 
   it('1.6b: release-finalize is idempotent — re-entering with cohort already in completed_cut_ids does not double-append', () => {
