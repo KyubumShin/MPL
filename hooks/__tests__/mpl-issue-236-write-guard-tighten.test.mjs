@@ -562,6 +562,34 @@ test('#236 A1 codex r24 [security]: cd-into-constructed-mpl + bare-filename redi
   }
 });
 
+test('#236 A3 claude r25 [security]: gzip per-segment scan — later -k does not suppress earlier unkeyed gzip', () => {
+  // Claude r25: `gzip .mpl/memory/some.md; gzip -k other.txt`. The
+  // unanchored negative lookahead saw `-k` later in the command and
+  // suppressed isDestructive for the FIRST gzip. Fix: per-segment
+  // scan via split on `[;|&\n]+`.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'gzip .mpl/memory/some.md; gzip -k other.txt',
+      'gzip .mpl/memory/some.md && echo unrelated --keep stuff',
+      'gzip .mpl/memory/some.md | xargs --keep-going echo',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected gzip per-segment block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 claude r24 [security]: gzip / bzip2 / xz remove input file by default', () => {
   // Claude r24: `gzip FILE` deletes FILE after compression (no -k flag).
   // Same for bzip2 / xz / zstd. Treat as destructive against the

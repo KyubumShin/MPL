@@ -349,7 +349,13 @@ function matchesProtectedDelete(command, cwd) {
     // Claude r24 [security]: gzip / bzip2 / xz / zstd delete their
     // input file by default (unless `-k`/`--keep` is set). Treat
     // them as destructive against the operand path.
-    /\b(gzip|bzip2|xz|zstd)\b(?!.*(?:-k|--keep))/.test(normalized) ||
+    //
+    // Claude r25 [security]: scan per-statement — `-k`/`--keep`
+    // anywhere else in the command doesn't suppress an unkeyed
+    // gzip earlier in the chain.
+    normalized.split(/[;|&\n]+/).some((seg) =>
+      /\b(gzip|bzip2|xz|zstd)\b/.test(seg) && !/(?:-k|--keep)\b/.test(seg),
+    ) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
     // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths
