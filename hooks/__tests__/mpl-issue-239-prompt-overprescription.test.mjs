@@ -130,6 +130,30 @@ test('#239 C4: mpl-decomposer no longer requires type_policy: { applies: false }
   );
 });
 
+test('#239 C1 codex r3 [contract-break]: per-symbol + per-tuple floors both apply (max-of-both)', () => {
+  // Codex r3 repro: produces=[createUser, deleteUser] +
+  // contract_files=[{params:{email}, returns:{id}}]. Pre-tightening
+  // wording said "replace the base count" — refined=1 would let
+  // deleteUser go untested. The fix says BOTH floors apply, and the
+  // effective minimum is max(produces.length, tuple_count).
+  const text = readPrompt('agents/mpl-test-agent.md');
+  // Must explicitly say both floors apply / max-of-both / not a replacement.
+  assert.ok(
+    /both\s+floors|both\s+floor|max\s+of\s+both|larger\s+of\s+the\s+two/is.test(text),
+    'C1 rule must say BOTH floors apply (max-of-both), not "refined replaces base"',
+  );
+  // The relationship line must rule out "meeting one waives the other".
+  assert.ok(
+    /does\s+not\s+waive|do\s+not\s+waive|both\s+must|both\s+apply|every\s+produces.*MUST/is.test(text),
+    'C1 rule must explicitly require every produces entry covered even when contract_files non-empty',
+  );
+  // Stale "replace" wording must be gone.
+  assert.ok(
+    !/replace\s+the\s+base\s+count\s+by/i.test(text),
+    'C1 rule must no longer say "replace the base count by" — that wording lets the refined floor undercount per-symbol coverage',
+  );
+});
+
 test('#239 C4 codex r1 [contract-break]: Output_Schema no longer marks type_policy/error_spec as REQUIRED on every phase', () => {
   // Codex r1: the Empty case sections relaxed to omit, but the
   // Output_Schema YAML kept "REQUIRED on every phase" — an agent
