@@ -476,6 +476,45 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
   }
 });
 
+test('#236 A1 codex r16 [security]: Bash writes to decomposition.yaml gated BEFORE isMplActive', () => {
+  // Codex r16: the pre-isMplActive Write/Edit guard for
+  // decomposition.yaml didn't cover Bash. With MPL deactivated,
+  // `printf forged > .mpl/mpl/decomposition.yaml` slipped past.
+  const cwd = freshWorkspace();
+  try {
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify({ current_phase: 'completed' }),
+    );
+    for (const command of [
+      'printf forged > .mpl/mpl/decomposition.yaml',
+      'echo forged | tee .mpl/mpl/decomposition.yaml',
+      'dd if=/tmp/forged of=.mpl/mpl/decomposition.yaml',
+      'install -m 0644 /tmp/forged .mpl/mpl/decomposition.yaml',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected Bash decomposition.yaml write block for: ${command}`,
+      );
+    }
+    // Sanity: read-only ops on decomposition.yaml still pass.
+    const read = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'cat .mpl/mpl/decomposition.yaml' },
+    });
+    assert.notEqual(read.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r15 [security]: find -exec writing state.json is blocked (find removed from safe-read)', () => {
   // Codex r15: `find` was in SAFE_READ_HEADS but `-exec sh -c '… > $1'`
   // bypassed the static regex check (target was a runtime-substituted

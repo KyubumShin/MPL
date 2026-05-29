@@ -675,6 +675,60 @@ async function main() {
     }
   }
 
+  // Codex r16 on PR #249 [security]: also gate Bash writes to
+  // .mpl/mpl/decomposition.yaml BEFORE the isMplActive short-circuit.
+  // The Write/Edit pre-active guard above doesn't cover Bash.
+  // Without this, `printf forged > .mpl/mpl/decomposition.yaml` runs
+  // against a deactivated workspace and overwrites the
+  // decomposer-owned artifact through shell redirection.
+  if (isBashTool && process.env.MPL_FORCE_PURGE !== '1') {
+    const earlyCommand = (data.tool_input || data.toolInput || {}).command || '';
+    if (earlyCommand && existsSync(join(cwd, '.mpl'))) {
+      const normalizedEarly = normalizeShellCommand(earlyCommand);
+      const decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly);
+      if (decompMention) {
+        const headM = normalizedEarly.match(/^(\w+)/);
+        const head = headM ? headM[1].toLowerCase() : '';
+        const SAFE_READS = new Set([
+          'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
+          'grep', 'rg', 'ag', 'ack', 'jq', 'yq',
+          'less', 'more', 'sort', 'uniq', 'tac', 'nl',
+          'diff', 'comm', 'sdiff',
+          'echo', 'printf', 'pwd', 'type', 'which',
+        ]);
+        const writesToDecomp = (
+          /[\d&]?>{1,2}[^|;&\n]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly) ||
+          /\btee\b[^|;&]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly) ||
+          /\bdd\b[^|;&]*\bof=[^|;&]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly)
+        );
+        if (!SAFE_READS.has(head) || writesToDecomp) {
+          const reason =
+            `[MPL #236 A1] Refused Bash write to .mpl/mpl/decomposition.yaml: ` +
+            `only the mpl-decomposer subagent may emit this file. Bash writes ` +
+            `(including those allowed by a deactivated MPL state) bypass the ` +
+            `writer-identity gate. Use Agent(subagent_type='mpl-decomposer', ` +
+            `prompt='...'), OR set MPL_FORCE_PURGE=1 for a one-shot manual edit.`;
+          recordBlockedHook(cwd, {
+            hookId: HOOK_ID,
+            phaseId: (readState(cwd) || {}).current_phase,
+            artifact: '.mpl/mpl/decomposition.yaml',
+            code: 'decomposition_bash_write',
+            reason,
+            resumeInstruction:
+              `Dispatch Agent(subagent_type='mpl-decomposer'); do not write decomposition.yaml from Bash.`,
+            retryContext: { command: earlyCommand },
+          });
+          console.log(JSON.stringify({
+            continue: false,
+            decision: 'block',
+            reason,
+          }));
+          return;
+        }
+      }
+    }
+  }
+
   // Check if MPL is active
   if (!isMplActive(cwd)) {
     // MPL inactive: no interference
