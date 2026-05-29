@@ -12,19 +12,52 @@ import {
   validateMvpGoalTraceCoverage,
 } from './mpl-goal-trace.mjs';
 import { parsePhaseContractGraphText } from './mpl-phase-contract-graph.mjs';
+import {
+  writeDerivedDecompositionFields,
+  writeTestAgentBriefs,
+} from './mpl-decomposition-postprocess.mjs';
 
 const BASELINE_REL_PATH = '.mpl/mpl/baseline.yaml';
 const DECOMPOSITION_REL_PATH = '.mpl/mpl/decomposition.yaml';
 const RECOVERY_SIGNAL_REL_PATH = '.mpl/signals/recovery.jsonl';
 
+// #234: phantom aliases `goal_contract_hash_corrupt` /
+// `goal_contract_hash_mismatch` were routed but no hook ever emitted
+// them. The live emission sites are `goal_contract_baseline_corrupt`
+// (mpl-require-goal-trace.mjs hash check) and `goal_contract_drift`
+// (baseline drift). Keep the sets single-element so future hook
+// authors reading this list see the canonical code names.
 const BASELINE_CORRUPT_CODES = new Set([
   'goal_contract_baseline_corrupt',
-  'goal_contract_hash_corrupt',
 ]);
 
 const BASELINE_DRIFT_CODES = new Set([
   'goal_contract_drift',
-  'goal_contract_hash_mismatch',
+]);
+
+// #234: cap auto-fix retries so a deterministic regeneration that
+// keeps failing (disk permission, malformed source) doesn't loop
+// forever. The recovery handler reads attempts from
+// state.retry_context.recovery.attempts (incremented by recoveryPatch)
+// and degrades to `unsupported` past the budget so the operator sees
+// the underlying error.
+const AUTO_FIX_RETRY_BUDGET = 3;
+
+// Codes the recover skill can resolve by re-running the deterministic
+// postprocess that produced the source artifacts. No agent dispatch.
+const AUTO_FIX_REGENERATE_CODES = new Set([
+  'decomposition_derived_stale',
+  'test_agent_briefs_write_failed',
+]);
+
+// Codes whose recovery is "re-dispatch the producing agent with the
+// validator's structured error list". The recover skill cannot
+// dispatch agents directly — it returns a dispatch instruction
+// pointing at the right agent + the error context.
+const REDISPATCH_DECOMPOSER_CODES = new Set([
+  'covers_schema_violation',
+  'goal_contract_invalid',
+  'phase_contract_graph_invalid',
 ]);
 
 function nowIso() {
@@ -524,6 +557,156 @@ function recoverArtifactSchema(cwd, state, { approveUnsafe = false } = {}) {
   });
 }
 
+// #234: deterministic auto-fix. Re-run the mechanical postprocess
+// that produced the missing/stale derived artifact. Capped retries
+// so a permission / disk error doesn't loop forever.
+function recoverAutoRegenerate(cwd, state) {
+  const code = state.block_code;
+  const attempts = Number(state?.retry_context?.recovery?.attempts || 0);
+  if (attempts >= AUTO_FIX_RETRY_BUDGET) {
+    const reason = `[MPL Recover] Auto-fix budget exhausted for ${code} after ${attempts} attempts; inspect the underlying I/O failure manually.`;
+    keepBlocked(cwd, state, {
+      status: 'failed',
+      reason,
+      instruction:
+        state.resume_instruction ||
+        'Resolve the I/O failure (permissions / disk space / malformed source) and re-save the decomposition source artifact.',
+      details: { handler: 'auto_regenerate', code, attempts },
+    });
+    return buildResult(state, { status: 'failed', message: reason, attempts });
+  }
+
+  try {
+    if (code === 'decomposition_derived_stale') {
+      writeDerivedDecompositionFields(cwd);
+    } else if (code === 'test_agent_briefs_write_failed') {
+      writeTestAgentBriefs(cwd);
+    } else {
+      const reason = `[MPL Recover] No regeneration handler for ${code}.`;
+      keepBlocked(cwd, state, {
+        status: 'unsupported',
+        reason,
+        instruction: state.resume_instruction || 'Resolve the recorded hook block manually.',
+        details: { handler: 'auto_regenerate', code },
+      });
+      return buildResult(state, { status: 'unsupported', message: reason });
+    }
+  } catch (error) {
+    const reason = `[MPL Recover] Auto-fix regeneration failed for ${code}: ${error?.message || 'unknown error'}.`;
+    keepBlocked(cwd, state, {
+      status: 'failed',
+      reason,
+      instruction:
+        'Inspect the source artifact / disk / permissions and retry. Auto-fix will quit after the retry budget is exhausted.',
+      details: { handler: 'auto_regenerate', code, error: error?.message || 'unknown' },
+    });
+    return buildResult(state, { status: 'failed', message: reason });
+  }
+
+  clearCurrentBlock(cwd, state);
+  appendRecoverySignal(cwd, {
+    ...summarizeState(state),
+    result: 'recovered',
+    handler: 'auto_regenerate',
+    code,
+  });
+  return buildResult(state, {
+    status: 'recovered',
+    message: `Regenerated derived artifact for ${code} and cleared blocked_hook.`,
+  });
+}
+
+// #234: producer-agent re-dispatch. Recover skill returns a dispatch
+// instruction (no actual agent spawn — that's the orchestrator's
+// responsibility). retry_context.failures (if recorded by the hook)
+// is echoed back in the instruction so the producer can fix the exact
+// validator findings.
+function recoverRedispatchDecomposer(cwd, state) {
+  const code = state.block_code;
+  const failures = state?.retry_context?.failures;
+  const failureSummary = Array.isArray(failures) && failures.length > 0
+    ? `Validator findings to address: ${failures.slice(0, 8).join('; ')}.`
+    : '';
+  const instruction =
+    `Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt=...) to fix ${code}. ${failureSummary}`.trim();
+
+  const reason = `[MPL Recover] ${code} requires decomposer re-dispatch.`;
+  keepBlocked(cwd, state, {
+    status: 'awaiting_decomposer',
+    reason,
+    instruction,
+    details: { handler: 'redispatch_decomposer', code, failures: failures || [] },
+  });
+  return buildResult(state, {
+    status: 'awaiting_decomposer',
+    message: reason,
+    dispatch_instruction: instruction,
+    failures: failures || [],
+  });
+}
+
+// #234: phase-runner anomaly re-dispatch. block_code shape is
+// `phase_runner_<anomaly_type>` (emitted at hooks/mpl-gate-recorder.mjs
+// per subagent anomaly). Each anomaly has a different corrective
+// framing — keep the dispatch templates here so the recover skill is
+// a single source of truth.
+const PHASE_RUNNER_ANOMALY_TEMPLATES = {
+  empty_response:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) with stronger framing: include the full phase brief and require structured JSON output. Verify the phase prompt isn\'t exceeding context budget.',
+  truncated_response:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) with reduced context: drop optional decomposition fields, focus the prompt on the single phase brief, request output in chunks if necessary.',
+  invalid_json:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) with explicit JSON schema reminder at the prompt tail. The previous run emitted unparseable output.',
+  no_evidence:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) emphasizing evidence_required fields. Previous run completed without latching required evidence.',
+};
+
+function recoverPhaseRunnerAnomaly(cwd, state) {
+  const code = state.block_code || '';
+  const anomalyType = code.startsWith('phase_runner_') ? code.slice('phase_runner_'.length) : '';
+  const template = PHASE_RUNNER_ANOMALY_TEMPLATES[anomalyType];
+  const phaseId = state.blocked_phase || state?.retry_context?.phase_id || null;
+
+  const instruction = template ||
+    state.resume_instruction ||
+    `Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) for ${phaseId || 'the blocked phase'} after addressing the recorded ${anomalyType || 'anomaly'}.`;
+
+  const reason = `[MPL Recover] ${code} requires mpl-phase-runner re-dispatch (anomaly=${anomalyType || 'unknown'}).`;
+  keepBlocked(cwd, state, {
+    status: 'awaiting_phase_runner',
+    reason,
+    instruction,
+    details: { handler: 'phase_runner_anomaly', code, anomaly: anomalyType, phase_id: phaseId },
+  });
+  return buildResult(state, {
+    status: 'awaiting_phase_runner',
+    message: reason,
+    dispatch_instruction: instruction,
+    anomaly: anomalyType,
+    phase_id: phaseId,
+  });
+}
+
+// #234: baseline_immutable echoes the recorded resume_instruction
+// (touch the renewal sentinel). No agent dispatch; user action.
+function recoverBaselineImmutable(cwd, state) {
+  const reason = '[MPL Recover] Baseline is immutable; renewal sentinel required.';
+  const instruction =
+    state.resume_instruction ||
+    'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.';
+  keepBlocked(cwd, state, {
+    status: 'requires_user_action',
+    reason,
+    instruction,
+    details: { handler: 'baseline_immutable' },
+  });
+  return buildResult(state, {
+    status: 'requires_user_action',
+    message: reason,
+    user_instruction: instruction,
+  });
+}
+
 export function inspectRecovery(cwd = process.cwd()) {
   const state = readState(cwd);
   if (!state) {
@@ -579,6 +762,47 @@ export function inspectRecovery(cwd = process.cwd()) {
     });
   }
 
+  // #234 new routes:
+  if (AUTO_FIX_REGENERATE_CODES.has(code)) {
+    const attempts = Number(state?.retry_context?.recovery?.attempts || 0);
+    const exhausted = attempts >= AUTO_FIX_RETRY_BUDGET;
+    return buildResult(state, {
+      status: exhausted ? 'unsupported' : 'recoverable',
+      handler: 'auto_regenerate',
+      safe: true,
+      attempts,
+      message: exhausted
+        ? `Auto-fix budget exhausted (${attempts}/${AUTO_FIX_RETRY_BUDGET}). Resolve the I/O failure manually.`
+        : 'Recover can re-run the deterministic postprocess that produced the derived artifact.',
+    });
+  }
+  if (REDISPATCH_DECOMPOSER_CODES.has(code)) {
+    return buildResult(state, {
+      status: 'requires_approval',
+      handler: 'redispatch_decomposer',
+      safe: false,
+      message: 'Recover returns a mpl-decomposer dispatch instruction with the validator findings; orchestrator must execute the Task call.',
+    });
+  }
+  if (code && code.startsWith('phase_runner_')) {
+    const anomalyType = code.slice('phase_runner_'.length);
+    return buildResult(state, {
+      status: 'requires_approval',
+      handler: 'phase_runner_anomaly',
+      anomaly: anomalyType,
+      safe: false,
+      message: `Recover returns a mpl-phase-runner re-dispatch instruction for anomaly=${anomalyType}.`,
+    });
+  }
+  if (code === 'baseline_immutable') {
+    return buildResult(state, {
+      status: 'requires_user_action',
+      handler: 'baseline_immutable',
+      safe: false,
+      message: 'Baseline renewal sentinel (.mpl/mpl/.baseline-renewal) must be touched manually to authorize the write.',
+    });
+  }
+
   return buildResult(state, {
     status: 'unsupported',
     handler: null,
@@ -610,6 +834,18 @@ export function recoverBlockedHook(cwd = process.cwd(), { approveUnsafe = false 
   }
   if (code === 'missing_artifact_schema') {
     return recoverArtifactSchema(cwd, state, { approveUnsafe });
+  }
+  if (AUTO_FIX_REGENERATE_CODES.has(code)) {
+    return recoverAutoRegenerate(cwd, state);
+  }
+  if (REDISPATCH_DECOMPOSER_CODES.has(code)) {
+    return recoverRedispatchDecomposer(cwd, state);
+  }
+  if (code && code.startsWith('phase_runner_')) {
+    return recoverPhaseRunnerAnomaly(cwd, state);
+  }
+  if (code === 'baseline_immutable') {
+    return recoverBaselineImmutable(cwd, state);
   }
 
   const reason = `[MPL Recover] Unsupported hook block code: ${code || 'unknown'}.`;

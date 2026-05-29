@@ -153,8 +153,10 @@ describe('mpl recover', () => {
   });
 
   it('keeps unsupported block codes intact with recovery context', () => {
+    // #234: phase_contract_graph_invalid is now routed; use a fabricated
+    // unknown code to verify the unsupported fall-through path.
     writeState(blocked({
-      block_code: 'phase_contract_graph_invalid',
+      block_code: 'fabricated_unknown_code',
       retry_context: { issue_count: 1 },
     }));
 
@@ -163,7 +165,7 @@ describe('mpl recover', () => {
 
     const state = readState();
     assert.equal(state.session_status, 'blocked_hook');
-    assert.equal(state.block_code, 'phase_contract_graph_invalid');
+    assert.equal(state.block_code, 'fabricated_unknown_code');
     assert.equal(state.retry_context.recovery.last_status, 'unsupported');
   });
 
@@ -340,5 +342,187 @@ phases:
     const text = readFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), 'utf-8');
     assert.match(text, /test_agent_required: true/);
     assert.equal(readState().session_status, null);
+  });
+
+  /* ──────────────────── #234: new routing ──────────────────── */
+
+  function writeMinimalDecompositionForDerive() {
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: "abc"
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    phase_domain: api
+    impact:
+      modify:
+        - path: src/api.ts
+    interface_contract:
+      produces:
+        - type: function
+          name: createWidget
+          spec: "(body: dict) -> Widget"
+    verification_plan:
+      a_items:
+        - criterion: "valid"
+          type: command
+          command: "pytest"
+      s_items:
+        - criterion: "invalid"
+          test_file: tests/x.py
+          test_command: "pytest"
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: []
+      ontology_entities: [api]
+`);
+  }
+
+  it('#234: auto-regenerate handler reruns writeDerivedDecompositionFields on decomposition_derived_stale', () => {
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'recoverable');
+    assert.equal(plan.handler, 'auto_regenerate');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+    assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'decomposition-derived.json')), true);
+    assert.equal(readState().session_status, null);
+  });
+
+  it('#234: auto-regenerate handler reruns writeTestAgentBriefs on test_agent_briefs_write_failed', () => {
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'test_agent_briefs_write_failed',
+      retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+    assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml')), true);
+    assert.equal(readState().session_status, null);
+  });
+
+  it('#234: auto-regenerate handler exhausts retry budget on persistent failures', () => {
+    // No decomposition.yaml on disk → writeDerivedDecompositionFields throws.
+    // After AUTO_FIX_RETRY_BUDGET (3) attempts the handler should return failed.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      retry_context: { recovery: { attempts: 3 } },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234: redispatch_decomposer handler returns dispatch instruction with validator findings', () => {
+    writeState(blocked({
+      blocked_by_hook: 'mpl-require-covers',
+      block_code: 'covers_schema_violation',
+      retry_context: { failures: ['phase-1.covers[0]:UC-99 not in goal_contract'] },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_approval');
+    assert.equal(plan.handler, 'redispatch_decomposer');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'awaiting_decomposer');
+    assert.match(result.dispatch_instruction, /mpl-decomposer/);
+    assert.match(result.dispatch_instruction, /UC-99/);
+
+    const state = readState();
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.retry_context.recovery.last_status, 'awaiting_decomposer');
+  });
+
+  for (const code of ['goal_contract_invalid', 'phase_contract_graph_invalid']) {
+    it(`#234: redispatch_decomposer also routes ${code}`, () => {
+      writeState(blocked({ block_code: code, retry_context: {} }));
+      const result = recoverBlockedHook(tmp);
+      assert.equal(result.status, 'awaiting_decomposer');
+      assert.match(result.dispatch_instruction, /mpl-decomposer/);
+    });
+  }
+
+  it('#234: phase_runner_anomaly handler returns anomaly-specific dispatch instruction', () => {
+    writeState(blocked({
+      blocked_by_hook: 'mpl-gate-recorder',
+      blocked_phase: 'phase-1',
+      block_code: 'phase_runner_empty_response',
+      retry_context: { phase_id: 'phase-1' },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_approval');
+    assert.equal(plan.handler, 'phase_runner_anomaly');
+    assert.equal(plan.anomaly, 'empty_response');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'awaiting_phase_runner');
+    assert.match(result.dispatch_instruction, /mpl-phase-runner/);
+    assert.match(result.dispatch_instruction, /stronger framing/);
+    assert.equal(result.anomaly, 'empty_response');
+  });
+
+  it('#234: phase_runner_anomaly handler falls back gracefully on unknown anomaly type', () => {
+    writeState(blocked({
+      block_code: 'phase_runner_some_new_anomaly',
+      // Empty resume_instruction forces the generic re-dispatch template path.
+      resume_instruction: '',
+      retry_context: {},
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'awaiting_phase_runner');
+    assert.equal(result.anomaly, 'some_new_anomaly');
+    assert.match(result.dispatch_instruction, /mpl-phase-runner/);
+  });
+
+  it('#234: baseline_immutable handler returns user_instruction without agent dispatch', () => {
+    writeState(blocked({
+      blocked_by_hook: 'mpl-baseline-guard',
+      block_code: 'baseline_immutable',
+      resume_instruction: 'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.',
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_user_action');
+    assert.equal(plan.handler, 'baseline_immutable');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'requires_user_action');
+    assert.match(result.user_instruction, /baseline-renewal/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234: phantom alias goal_contract_hash_corrupt is NOT routed (drop confirmed)', () => {
+    // The pre-#234 alias was unreachable (no hook ever emitted it) but
+    // routed defensively. Now it must fall through to unsupported.
+    writeState(blocked({
+      block_code: 'goal_contract_hash_corrupt',
+      retry_context: {},
+    }));
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'unsupported');
+  });
+
+  it('#234: phantom alias goal_contract_hash_mismatch is NOT routed (drop confirmed)', () => {
+    writeState(blocked({
+      block_code: 'goal_contract_hash_mismatch',
+      retry_context: {},
+    }));
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'unsupported');
   });
 });
