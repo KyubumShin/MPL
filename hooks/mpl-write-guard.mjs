@@ -177,6 +177,36 @@ function isDangerousBashCommand(command) {
 // Resolving each token via path.resolve(cwd, token) normalizes those
 // forms to a single canonical absolute path that we can compare
 // against the resolved protected roots.
+// Codex r7 on PR #249 [data-integrity]: substitute simple variable
+// assignments. `p=.mpl; rm -rf ${p}/mpl` reaches the shell as
+// `rm -rf .mpl/mpl`. Collect every leading `name=value` from each
+// statement (`;`/`&&`/`||`/newline split), then replace `$name` and
+// `${name}` references throughout the command. Supports `export name=…`
+// prefix and quoted values; values stop at the first whitespace
+// (`name="multi word"` is uncommon in protected-path bypass shapes).
+function expandSimpleVars(text) {
+  const vars = new Map();
+  const segments = text.split(/(?:;|&&|\|\||\n)/);
+  for (const seg of segments) {
+    let s = seg.trimStart().replace(/^export\s+/, '');
+    const m = s.match(/^([a-zA-Z_][a-zA-Z0-9_]*)=("([^"]*)"|'([^']*)'|(\S+))/);
+    if (m) {
+      const value = m[3] !== undefined ? m[3]
+        : m[4] !== undefined ? m[4]
+        : (m[5] ?? '');
+      vars.set(m[1], value);
+    }
+  }
+  if (vars.size === 0) return text;
+  let out = text;
+  for (const [name, value] of vars) {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`\\$\\{${esc}\\}`, 'g'), value);
+    out = out.replace(new RegExp(`\\$${esc}\\b`, 'g'), value);
+  }
+  return out;
+}
+
 // Expand bash brace patterns within each whitespace-separated token,
 // repeating until no more `{…}` groups remain (10-round backstop for
 // pathological nesting). Cartesian: `{a,b}{c,d}` → `ac ad bc bd`.
@@ -206,12 +236,27 @@ function matchesProtectedDelete(command, cwd) {
   // Strip leading wrapper before checking the head — `sudo rm -rf …`
   // must still trip.
   let normalized = command.replace(/^\s*(sudo|time|nice|env)\s+/, '').trim();
-  // Identify rm-family / find -delete calls. Multi-command lines
-  // (`a; rm -rf X`, `a && rm -rf X`) still parse because we scan the
-  // whole command for `rm` or `find ... -delete`.
-  if (!/\brm\b/.test(normalized) && !/\bfind\b.*-delete\b/.test(normalized)) {
-    return null;
-  }
+  // Identify destructive operations against the protected paths. Each
+  // of these is a way to remove or wipe a path that the mpl-cancel
+  // SKILL forbids — `rm` is the obvious one, but `mv` away,
+  // redirect-truncate (`> file`), `shred`, `unlink`, `truncate`, and
+  // `cp /dev/null …` are equally destructive.
+  //
+  // Claude r7 on PR #249 [data-integrity]: pre-r7 the entry gate was
+  // only `rm`/`find -delete`, so the non-rm forms above silently
+  // passed.
+  const isDestructive = (
+    /\brm\b/.test(normalized) ||
+    /\bfind\b.*-delete\b/.test(normalized) ||
+    /\bmv\b/.test(normalized) ||
+    /\bshred\b/.test(normalized) ||
+    /\bunlink\b/.test(normalized) ||
+    /\btruncate\b/.test(normalized) ||
+    /\bcp\b.*\/dev\/null/.test(normalized) ||
+    /(^|[\s;|&])>{1,2}\s/.test(normalized) ||
+    /(^|[\s;|&])&>{1}\s/.test(normalized)
+  );
+  if (!isDestructive) return null;
 
   // Pre-normalize the command to the form a real shell would execute,
   // so substring + token checks see the same path the OS sees.
@@ -252,6 +297,7 @@ function matchesProtectedDelete(command, cwd) {
   // checks fire normally. Iterative leftmost-brace expansion handles
   // nested + cartesian forms; we cap at 10 iterations as a backstop.
   normalized = expandShellBraces(normalized);
+  normalized = expandSimpleVars(normalized);
 
   // Claude r1 on PR #249 [logic] (concrete repros): shell-expansion
   // forms (`$PWD`, `$(pwd)`), parenthesized subshells, variable
@@ -279,7 +325,7 @@ function matchesProtectedDelete(command, cwd) {
     // Skip flag tokens; they can't be paths.
     if (token.startsWith('-')) continue;
     // Skip known program names so we don't false-match `rm` itself.
-    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir)$/i.test(token)) continue;
+    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir|mv|shred|unlink|truncate|cp|export)$/i.test(token)) continue;
 
     // Codex r6 on PR #249 [data-integrity]: shell pathname expansion
     // (glob metachars `*`, `?`, `[…]`) lets a command operand expand

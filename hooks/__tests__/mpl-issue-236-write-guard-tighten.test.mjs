@@ -400,6 +400,93 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r7 [data-integrity]: parameter-expansion `${var}` after same-line assignment is blocked', () => {
+  // Codex r7: `p=.mpl; rm -rf ${p}/mpl` reaches the shell as
+  // `rm -rf .mpl/mpl`. Pre-fix the tokenizer saw `${p}/mpl` and
+  // couldn't resolve. Fix substitutes simple `name=value`
+  // assignments collected from the same command line.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'p=.mpl; rm -rf ${p}/mpl',
+      'p=docs; rm -rf ${p}/learnings',
+      'p=.mpl; rm -rf $p/mpl',
+      'export p=.mpl && rm -rf "${p}/contracts"',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected parameter-expansion block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 claude r7 [data-integrity]: non-rm destructive ops are blocked too', () => {
+  // Claude r7: the mpl-cancel SKILL forbids "deleting" protected paths
+  // — `mv`-away, `>`-truncate, `shred`, `unlink`, `cp /dev/null`,
+  // `truncate -s 0` are all forms of deletion the hook is supposed to
+  // gate. Pre-fix entry gate was rm/find -delete only.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'mv .mpl/mpl /tmp/stolen',
+      '> .mpl/mpl/decomposition.yaml',
+      '>> .mpl/mpl/log',
+      'shred -u .mpl/mpl/decomposition.yaml',
+      'unlink .mpl/mpl/decomposition.yaml',
+      'cp /dev/null .mpl/mpl/decomposition.yaml',
+      'truncate -s 0 .mpl/mpl/decomposition.yaml',
+      'echo hello > .mpl/contracts/foo',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected non-rm destructive block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3: non-destructive read operations against protected paths still pass', () => {
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'ls .mpl/mpl/',
+      'cat .mpl/mpl/decomposition.yaml',
+      'grep -r foo .mpl/mpl/',
+      'find .mpl/mpl -type f',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.notEqual(
+        decision.decision,
+        'block',
+        `read-only op should not be blocked: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r6 [data-integrity]: glob-expansion operands are blocked when they can match protected roots', () => {
   // Codex r6: `rm -rf .mpl/m*` expands to `.mpl/mpl .mpl/memory` in
   // real bash. Glob meta (`*`, `?`, `[…]`) in the token wasn't
