@@ -280,6 +280,38 @@ function matchesProtectedDelete(command, cwd) {
     if (token.startsWith('-')) continue;
     // Skip known program names so we don't false-match `rm` itself.
     if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir)$/i.test(token)) continue;
+
+    // Codex r6 on PR #249 [data-integrity]: shell pathname expansion
+    // (glob metachars `*`, `?`, `[…]`) lets a command operand expand
+    // at execution time to a protected path without the literal
+    // appearing in the hook input. E.g. `rm -rf .mpl/m*` expands to
+    // `rm -rf .mpl/mpl` (and `.mpl/memory`). When a token contains
+    // glob meta, the literal prefix (before the first metachar) is
+    // resolved; if the glob COULD reasonably expand into a path that
+    // equals OR shares a path with a protected root, block. Same
+    // ancestor-match logic as below.
+    const globIdx = token.search(/[*?[]/);
+    if (globIdx >= 0) {
+      const literalPrefix = token.slice(0, globIdx);
+      let absPrefix;
+      try { absPrefix = resolvePath(cwd, literalPrefix); }
+      catch { continue; }
+      for (const { target, abs: rootAbs } of resolvedRoots) {
+        // For glob tokens, any protected root whose abs path STARTS
+        // WITH the literal prefix is a possible expansion — the glob
+        // metachar (`*`/`?`/`[…]`) could fill the rest. `.mpl/m*` →
+        // absPrefix `.mpl/m`; `.mpl/mpl` starts with `.mpl/m` → block.
+        // Also include the inverse: `.mpl/sub/*` whose absPrefix is
+        // already deeper than `.mpl/mpl` could expand to a descendant.
+        if (
+          absPrefix === rootAbs ||
+          absPrefix.startsWith(rootAbs + '/') ||
+          rootAbs.startsWith(absPrefix)
+        ) return target;
+      }
+      continue;
+    }
+
     let abs;
     try { abs = resolvePath(cwd, token); }
     catch { continue; }

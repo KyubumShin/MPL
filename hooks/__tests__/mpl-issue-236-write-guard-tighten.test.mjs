@@ -400,6 +400,39 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r6 [data-integrity]: glob-expansion operands are blocked when they can match protected roots', () => {
+  // Codex r6: `rm -rf .mpl/m*` expands to `.mpl/mpl .mpl/memory` in
+  // real bash. Glob meta (`*`, `?`, `[…]`) in the token wasn't
+  // resolved against protected roots. Fix: when token contains glob
+  // meta, take the literal prefix and check if any protected root
+  // starts with that prefix (or vice versa) — any expansion could
+  // land on a protected path.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'rm -rf .mpl/m*',
+      'rm -rf .mpl/*',
+      'rm -rf docs/*',
+      'rm -rf .mpl/m?l',
+      'rm -rf docs/learn*',
+      'rm -rf .mp[lk]/mpl',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected glob block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 claude r5 [data-integrity]: brace expansion is normalized before matching', () => {
   // Claude r5: `rm -rf .mpl/{mpl,contracts}` deletes both protected
   // paths in real bash. Cartesian forms (`{.mpl,docs}/{mpl,learnings}`)
