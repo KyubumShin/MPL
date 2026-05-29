@@ -38,6 +38,9 @@ const { validateBrief } = await import(
 const { writeTestAgentBriefs } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-decomposition-postprocess.mjs')).href
 );
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -105,7 +108,15 @@ function readTestAgentRequired(cwd, phaseId) {
   const nextSibling = tail.slice(1).search(/\n\s*-\s*id\s*:/);
   const phaseBlock = nextSibling === -1 ? tail : tail.slice(0, nextSibling + 1);
   const flagMatch = phaseBlock.match(/^\s*test_agent_required\s*:\s*(true|false)/im);
-  if (!flagMatch) return true; // default: required
+  if (!flagMatch) {
+    // #240 A2 + codex/claude r3 on PR #244 [contract-break]: respect
+    // the workspace config knob when the phase omits the field.
+    try {
+      const cfg = loadConfig(cwd);
+      if (cfg?.test_agent?.default_required === false) return false;
+    } catch { /* fall through to strict default */ }
+    return true; // default: required (AD-0007)
+  }
   return flagMatch[1].toLowerCase() === 'true';
 }
 

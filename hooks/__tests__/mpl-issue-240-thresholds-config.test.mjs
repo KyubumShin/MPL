@@ -5,6 +5,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 import { blockedPhaseTransitionReason } from '../lib/mpl-phase0-artifacts.mjs';
+import { checkInvariants, TRIGGERS } from '../lib/mpl-state-invariant.mjs';
+import { validateArtifactFile } from '../lib/mpl-artifact-schema.mjs';
 import {
   classifyGateCommand,
   STRICT_GATE_HEAD_ALLOWLIST,
@@ -46,6 +48,30 @@ describe('#240 A1: phase0_artifacts_required config knob', () => {
     assert.equal(reason, null);
   });
 
+  it('codex/claude r3 [contract-break]: I13 (state-invariant) ALSO honors phase0_artifacts_required=false', () => {
+    // Claude r2/r3 on PR #244: A1 was honored at the controller boundary
+    // (blockedPhaseTransitionReason) but NOT at I13 in mpl-state-invariant.
+    // After the controller lets the transition through, the next
+    // mpl_state_write in a protected phase fired I13 → block. The knob
+    // must short-circuit BOTH paths.
+    writeConfig({ phase0_artifacts_required: false });
+    const { violations } = checkInvariants(
+      { current_phase: 'phase2-sprint' },
+      { cwd: tmp, trigger: TRIGGERS.STATE_WRITE },
+    );
+    const i13 = violations.find((vio) => vio.id === 'I13');
+    assert.equal(i13, undefined, 'I13 must not fire when phase0_artifacts_required=false');
+  });
+
+  it('codex/claude r3: I13 still fires when phase0_artifacts_required is default (true)', () => {
+    const { violations } = checkInvariants(
+      { current_phase: 'phase2-sprint' },
+      { cwd: tmp, trigger: TRIGGERS.STATE_WRITE },
+    );
+    const i13 = violations.find((vio) => vio.id === 'I13');
+    assert.ok(i13, 'I13 must still fire by default');
+  });
+
   it('phase0_artifacts_required=true (explicit): same as default', () => {
     writeConfig({ phase0_artifacts_required: true });
     const reason = blockedPhaseTransitionReason(tmp, 'phase2-sprint');
@@ -65,6 +91,49 @@ describe('#240 A2: test_agent.default_required config knob', () => {
     writeConfig({ test_agent: { default_required: false } });
     const cfg = loadConfig(tmp);
     assert.equal(cfg.test_agent.default_required, false);
+  });
+
+  it('codex/claude r3 [contract-break]: artifact-schema honors test_agent.default_required', () => {
+    // Claude r2 on PR #244: hand-written decomposition without
+    // `test_agent_required` per phase was flagged by validateDecompositionContract
+    // even when the workspace opted out via config. The schema check
+    // must respect the same knob the runtime hook does.
+    const decomposition = `goal_contract_hash: "abc"
+phases:
+  - id: phase-1
+    scope: "task"
+    covers: [UC-01]
+    impact: { create: [], modify: [], affected_tests: [] }
+    interface_contract: { requires: [], produces: [], contract_files: [] }
+    success_criteria: []
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: []
+      ontology_entities: [api]
+`;
+    // Default: missing test_agent_required is a violation.
+    const defaultVerdict = validateArtifactFile(
+      '.mpl/mpl/decomposition.yaml',
+      decomposition,
+      { cwd: tmp },
+    );
+    assert.ok(
+      defaultVerdict.missing.some((m) => m.includes('test_agent_required')),
+      'default config flags missing test_agent_required',
+    );
+
+    // With opt-out: missing field passes.
+    writeConfig({ test_agent: { default_required: false } });
+    const optedOutVerdict = validateArtifactFile(
+      '.mpl/mpl/decomposition.yaml',
+      decomposition,
+      { cwd: tmp },
+    );
+    assert.equal(
+      optedOutVerdict.missing.some((m) => m.includes('test_agent_required')),
+      false,
+      'config opt-out passes artifact-schema',
+    );
   });
 });
 
@@ -221,6 +290,28 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npm run lint', { cwd: tmp }), 'hard1_baseline');
     assert.equal(classifyGateCommand('npm run build', { cwd: tmp }), 'hard1_baseline');
     assert.equal(classifyGateCommand('npm run test:e2e', { cwd: tmp }), 'hard3_resilience');
+  });
+
+  it('codex r3 [contract-break]: built-in head with eval flag (`npx -c`) does NOT forge gate evidence', () => {
+    // codex r3 on PR #244: r2 fallback to matchFamilyRegex for
+    // built-in heads re-opened forgery. `npx -c "echo playwright"`
+    // would match `\bplaywright\b` in the string literal.
+    // Fix: strip canonical at first eval-shaped flag (-c, --call,
+    // -e, --eval, etc.) before fallback regex.
+    writeConfig({
+      gate_classify: {
+        allowed_heads: [
+          { head: 'npx', families: { hard2_coverage: ['vitest'] } },
+        ],
+      },
+    });
+    // Structured pattern still works.
+    assert.equal(classifyGateCommand('npx vitest', { cwd: tmp }), 'hard2_coverage');
+    // Eval-flag with playwright keyword in string literal → null.
+    assert.equal(classifyGateCommand('npx -c "echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx --call "playwright test"', { cwd: tmp }), null);
+    // Legitimate `npx playwright test` (no eval flag) still classifies via built-in regex.
+    assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
   });
 
   it('codex r2: non-built-in head with structured entry stays structured-only (no regex fallback)', () => {

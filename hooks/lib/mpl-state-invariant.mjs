@@ -22,6 +22,7 @@ import { join } from 'path';
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
 import { classifyGateCommand } from './mpl-gate-classify.mjs';
 import { REQUIRES_PHASE0_ARTIFACTS, missingPhase0Artifacts } from './mpl-phase0-artifacts.mjs';
+import { loadConfig } from './mpl-config.mjs';
 
 // Re-export so consumers (and the H8 single-source-of-truth test) can
 // confirm both modules agree on the version constant via a single
@@ -414,6 +415,13 @@ function checkI13(state, cwd, trigger) {
   if (trigger !== TRIGGERS.STATE_WRITE) return null;
   const phase = state?.current_phase;
   if (!phase || !REQUIRES_PHASE0_ARTIFACTS.has(phase)) return null;
+  // #240 A1 + codex/claude r2 on PR #244 [contract-break]: honor the
+  // workspace config knob. blockedPhaseTransitionReason() already
+  // bails out when phase0_artifacts_required is false; I13 must
+  // match so a workspace that opts out via .mpl/config.json doesn't
+  // hit the invariant on mpl_state_write.
+  const cfg = loadConfig(cwd);
+  if (cfg?.phase0_artifacts_required === false) return null;
 
   const missing = missingPhase0Artifacts(cwd);
   if (missing.length === 0) return null;

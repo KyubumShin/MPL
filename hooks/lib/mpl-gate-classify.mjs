@@ -389,10 +389,29 @@ export function classifyGateCommand(command, { cwd } = {}) {
     // string-form interpreter heads, but structured entries may
     // legitimately target interpreters like deno/bun with token-level
     // matching).
-    if (isBuiltIn) return matchFamilyRegex(canonical);
+    //
+    // Codex r3 on PR #244 [contract-break]: even built-in heads like
+    // `npx` / `pnpx` accept eval-style flags (`-c`, `--call`) whose
+    // string argument the family regex would happily match. Strip
+    // the canonical at the first eval-shaped flag before fallback
+    // so `npx -c "echo playwright"` does NOT classify as hard3 via
+    // the string-literal keyword.
+    if (isBuiltIn) return matchFamilyRegex(stripAtEvalFlag(canonical));
     return null;
   }
   return matchFamilyRegex(canonical);
+}
+
+// Codex r3 on PR #244: cut the canonical command at the first
+// eval-shape flag so the fallback family regex never sees the
+// argument text. `-c`, `--call`, `-e`, `--eval`, `-x`, `--exec`,
+// `--run-script` cover npm-family / shell / interpreter eval forms.
+function stripAtEvalFlag(canonical) {
+  const tokens = String(canonical || '').split(/\s+/);
+  const evalFlags = new Set(['-c', '--call', '-e', '--eval', '-x', '--exec', '--run-script']);
+  const cutAt = tokens.findIndex((t) => evalFlags.has(t.toLowerCase()));
+  if (cutAt <= 0) return canonical;
+  return tokens.slice(0, cutAt).join(' ');
 }
 
 /**
