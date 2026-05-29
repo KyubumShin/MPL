@@ -341,6 +341,11 @@ function matchesProtectedDelete(command, cwd) {
     // tree, removing files not in the source. Same destructive shape
     // as --remove-source-files but against the destination operand.
     /\brsync\b.*--delete(?:-before|-during|-delay|-after)?\b/.test(normalized) ||
+    // Claude r23 [security]: `git clean -fdx` / `-fdX` deletes
+    // untracked + ignored files. .mpl/ is typically gitignored, so
+    // -x sweeps the entire .mpl/ tree. Treat git clean with any -*x*
+    // / -*X* flag as destructive against the workspace.
+    /\bgit\s+clean\b.*-\S*[xX]/.test(normalized) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
     // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths
@@ -409,6 +414,27 @@ function matchesProtectedDelete(command, cwd) {
   // operator escape hatch already documented in the block reason.
   for (const target of PROTECTED_DELETE_TARGETS) {
     if (normalized.includes(target)) return target;
+  }
+
+  // Codex r23 [security]: runtime-constructed paths via
+  // command-substitution + decoder bypass the literal substring
+  // check (`p=$(base64 -d ...); rm -rf "$p"`). Conservatively block
+  // destructive commands that combine a decoder primitive
+  // (base64 / xxd / openssl base64 -d) with command-substitution
+  // operand syntax. MPL_FORCE_PURGE=1 escape applies.
+  const hasDecoder = /\bbase64\b|\bxxd\b|\bopenssl\s+base64\b/.test(normalized);
+  const hasCmdSub = /\$\(|`/.test(normalized);
+  if (hasDecoder && hasCmdSub) {
+    return PROTECTED_DELETE_TARGETS[0];
+  }
+
+  // Claude r23 [security]: `git clean -*x*` sweeps cwd-wide, deleting
+  // untracked + (with -x) ignored files. .mpl/ is typically gitignored.
+  // Block unconditionally when this verb is present in the command —
+  // the operator override via MPL_FORCE_PURGE is the documented
+  // escape for legitimate "reset my repo" flows.
+  if (/\bgit\s+clean\b.*-\S*[xX]/.test(normalized)) {
+    return PROTECTED_DELETE_TARGETS[0];
   }
 
   const resolvedRoots = PROTECTED_DELETE_TARGETS.map((target) => ({

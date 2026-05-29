@@ -534,6 +534,82 @@ test('#236 A1 claude r22 [security]: multi-level /X/../ traversal collapse', () 
   }
 });
 
+test('#236 A3 claude r23 [security]: git clean -*x* sweeps .mpl/ (gitignored) is blocked', () => {
+  // Claude r23: `git clean -fdx` deletes untracked + ignored files.
+  // .mpl/ is gitignored on every real MPL workspace, so -x sweeps the
+  // entire .mpl/ tree.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'git clean -fdx',
+      'git clean -fdX',
+      'git clean -ffdx',
+      'git clean -fdx .mpl',
+      'git clean -fdx -- .mpl/mpl/',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected git clean -*x* block for: ${command}`,
+      );
+    }
+    // Sanity: git clean WITHOUT -x doesn't reach into ignored files.
+    const safeClean = runHook(cwd, {
+      cwd, tool_name: 'Bash', tool_input: { command: 'git clean -fd' },
+    });
+    assert.notEqual(safeClean.decision, 'block');
+    // Sanity: legit git ops.
+    const status = runHook(cwd, {
+      cwd, tool_name: 'Bash', tool_input: { command: 'git status' },
+    });
+    assert.notEqual(status.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 codex r23 [security]: decoder + command-substitution runtime-constructed paths are blocked', () => {
+  // Codex r23: `p=$(base64 -d ...); rm -rf "$p"` constructs the
+  // protected path at runtime via command substitution + decoder.
+  // The literal string never appears in the static normalize form.
+  // Fix: any destructive command with both `base64`/`xxd`/`openssl
+  // base64` AND a command-substitution `$()` / backticks is treated
+  // as suspicious and blocked. MPL_FORCE_PURGE=1 escape applies.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'p=$(printf Lm1wbC9tcGw= | base64 -d); rm -rf "$p"',
+      'p=$(echo 2e6d706c2f6d706c | xxd -r -p); rm -rf "$p"',
+      'rm -rf $(printf .mpl/contracts | base64 -d 2>/dev/null || cat <<< .mpl/contracts)',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected runtime-decoder block for: ${command}`,
+      );
+    }
+    // Sanity: legit base64 without rm passes.
+    const legitBase64 = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'echo data | base64' },
+    });
+    assert.notEqual(legitBase64.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r22 [security]: rsync --delete variants are blocked', () => {
   // Codex r22: `rsync --delete` prunes destination tree. Adding to
   // destructive entry gate.
