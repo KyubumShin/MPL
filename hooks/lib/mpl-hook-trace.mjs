@@ -57,6 +57,7 @@ const PURPOSES = {
   'mpl-require-phase-evidence': 'phase evidence guard',
   'mpl-baseline-guard': 'baseline immutability/hash guard',
   'mpl-ambiguity-gate': 'ambiguity score gate before decomposer dispatch',
+  'mpl-soft-signal-emit': 'soft-signal telemetry emitter (HA-01 vague delegation etc.) — never blocks',
   'mpl-require-chain-assignment': 'chain assignment guard before seed generation',
   'mpl-tool-tracker': 'last-tool telemetry',
   'mpl-gate-recorder': 'gate/test-agent evidence recorder',

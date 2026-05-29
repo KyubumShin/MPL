@@ -358,6 +358,35 @@ disallowedTools: Write, Edit, Task
     [d] inverse audit (scripts/agents/commands): ✓ clean   or ⚠️ {n} hit(s) outside F3 runtime scope
     Result: PASS / WARN ({m} advisories) / FAIL (any blocker above)
     ```
+
+    ### Category 16: Quality Signals (#238)
+    - **Scope**: `.mpl/mpl/quality-signals.jsonl`
+    - Read the append-only log of soft-signal records emitted by
+      prompt-only quality rules (HA-01 vague delegation, seed
+      ambiguity-notes gap, etc.). Each line is one JSON record:
+      `{ rule, severity, ts, phase, agent, evidence }`.
+    - Aggregate per-rule counts and surface a top-N table. NEVER fails
+      the diagnostic — these are advisory signals, not state
+      corruption. A high count just means the rule is firing often
+      and warrants prompt-tuning attention.
+    - PASS — log file absent (no signals yet) OR all rule counts
+      below the advisory threshold (default: 10 per rule per run).
+    - WARN — any rule count ≥ threshold, OR log file malformed
+      (some lines unparseable). Surface the top 5 rules by count.
+    - FAIL — never (telemetry surface, no blocking).
+
+    **Output format for Category 16**:
+    ```
+    ### Quality Signals (#238)
+    Log: .mpl/mpl/quality-signals.jsonl ({N} records)
+
+    Top rules by hit count:
+      HA-01                       {n}   — vague delegation in Task prompts
+      seed-ambiguity-notes        {n}   — uncertainty without ambiguity_notes
+      …
+
+    Result: PASS / WARN (high-volume rules surfaced)
+    ```
   </Diagnostic_Categories>
 
   <Output_Schema>
@@ -387,6 +416,7 @@ disallowedTools: Write, Edit, Task
     | 10 | MCP Server | {PASS|WARN|FAIL} | {tools or "not available"} |
     | 11 | Documentation | {PASS|WARN|FAIL} | {brief} |
     | 12 | Measurement Integrity Audit | {PASS|WARN|FAIL} | AD-0006/0007/0008 (audit mode only) |
+    | 16 | Quality Signals | {PASS|WARN} | {N} records, top rule: {rule}={count} (or "no signals yet") |
 
     ## Tool Availability Detail
 
