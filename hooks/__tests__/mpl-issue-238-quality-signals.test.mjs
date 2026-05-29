@@ -207,6 +207,48 @@ test('#238 [seed-ambiguity-notes]: presence of ambiguity_notes suppresses the si
   assert.equal(detectSeedAmbiguityNotesGap(yaml), null);
 });
 
+test('#238 codex r3 [logic]: empty ambiguity_notes block followed by sibling key still emits the signal', () => {
+  // Codex r3 [logic]: the previous regex `\s+[-\w]` could swallow the
+  // newline before the SIBLING key (same indent) and treat it as the
+  // ambiguity_notes child, hiding the gap. Fix: indentation-aware
+  // check requires the next non-blank line to be STRICTLY deeper.
+  const emptyBlock = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes:
+  acceptance_criteria:
+    - returns 200
+`;
+  const result = detectSeedAmbiguityNotesGap(emptyBlock);
+  assert.ok(result, 'empty ambiguity_notes + sibling key must still fire signal');
+  assert.equal(result.matched, 'TBD');
+
+  // Sanity: empty block at end-of-string (no following sibling).
+  const emptyEof = `phase_seed:
+  goal: TBD
+  ambiguity_notes:
+`;
+  assert.ok(detectSeedAmbiguityNotesGap(emptyEof));
+
+  // Sanity: inline scalar form counts as populated.
+  const inlineScalar = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: "Boundary unclear"
+  acceptance_criteria:
+    - x
+`;
+  assert.equal(detectSeedAmbiguityNotesGap(inlineScalar), null);
+
+  // Sanity: block with deeper child (list bullet) counts as populated.
+  const blockChild = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes:
+    - Boundary unclear
+  acceptance_criteria:
+    - x
+`;
+  assert.equal(detectSeedAmbiguityNotesGap(blockChild), null);
+});
+
 test('#238 [seed-ambiguity-notes]: no uncertainty vocabulary → no signal', () => {
   const yaml = `phase_seed:
   goal: "Implement /healthz endpoint"

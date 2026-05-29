@@ -208,12 +208,59 @@ const UNCERTAINTY_TOKENS = [
 
 export function detectSeedAmbiguityNotesGap(yamlText) {
   if (!yamlText || typeof yamlText !== 'string') return null;
-  // If the seed already provides a non-empty ambiguity_notes block,
-  // the escape hatch was used — no signal.
-  if (/^\s*ambiguity_notes\s*:\s*\S/m.test(yamlText)) return null;
-  if (/^\s*ambiguity_notes\s*:\s*\n\s+[-\w]/m.test(yamlText)) return null;
+  if (hasNonEmptyAmbiguityNotes(yamlText)) return null;
   const re = new RegExp(`(?:${UNCERTAINTY_TOKENS.join('|')})`, 'i');
   const m = yamlText.match(re);
   if (!m) return null;
   return { reason: 'uncertainty-without-ambiguity-notes', matched: m[0] };
+}
+
+/**
+ * Indentation-aware check: does the YAML contain a populated
+ * `ambiguity_notes:` block?
+ *
+ * Populated means EITHER:
+ *   1. inline scalar on the same line: `ambiguity_notes: "TBD"` (non-blank after `:`).
+ *   2. block opener with a child line indented STRICTLY deeper than
+ *      the `ambiguity_notes:` line, where the first such non-blank
+ *      child starts with `-` (list item) or `\w` (sub-key).
+ *
+ * An empty `ambiguity_notes:` followed by a sibling key at the SAME
+ * indent (codex r3 [logic] repro) is NOT populated — the previous
+ * `\s+[-\w]` regex collapsed the newline + sibling indent into one
+ * `\s+` run and incorrectly treated the sibling as the child.
+ */
+function hasNonEmptyAmbiguityNotes(yamlText) {
+  const lines = yamlText.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(/^(\s*)ambiguity_notes\s*:(.*)$/);
+    if (!m) continue;
+    const headerIndent = m[1].length;
+    const rest = m[2];
+    // Form 1: inline scalar.
+    if (rest.trim().length > 0) {
+      // Strip a possible inline `# comment` — any non-whitespace token
+      // before `#` counts as a value.
+      const noComment = rest.replace(/\s+#.*$/, '').trim();
+      if (noComment.length > 0) return true;
+    }
+    // Form 2: block opener — scan forward for the first non-blank,
+    // non-comment line. If its indent > headerIndent AND it begins
+    // with a list bullet or word-char (sub-key), the block is populated.
+    for (let j = i + 1; j < lines.length; j++) {
+      const next = lines[j];
+      if (!next.trim()) continue;
+      if (/^\s*#/.test(next)) continue;
+      const indentMatch = next.match(/^(\s*)/);
+      const indent = indentMatch ? indentMatch[1].length : 0;
+      if (indent <= headerIndent) return false; // sibling or shallower → empty block
+      // Indented deeper → only counts as content if it actually
+      // introduces a list item or mapping (not a stray inline
+      // continuation that's never valid as a child here).
+      return /^\s*(-|\w)/.test(next);
+    }
+    return false; // EOF after the header → empty
+  }
+  return false;
 }
