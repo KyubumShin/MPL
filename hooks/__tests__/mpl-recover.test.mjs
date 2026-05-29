@@ -153,8 +153,10 @@ describe('mpl recover', () => {
   });
 
   it('keeps unsupported block codes intact with recovery context', () => {
+    // #234: phase_contract_graph_invalid is now routed; use a fabricated
+    // unknown code to verify the unsupported fall-through path.
     writeState(blocked({
-      block_code: 'phase_contract_graph_invalid',
+      block_code: 'fabricated_unknown_code',
       retry_context: { issue_count: 1 },
     }));
 
@@ -163,7 +165,7 @@ describe('mpl recover', () => {
 
     const state = readState();
     assert.equal(state.session_status, 'blocked_hook');
-    assert.equal(state.block_code, 'phase_contract_graph_invalid');
+    assert.equal(state.block_code, 'fabricated_unknown_code');
     assert.equal(state.retry_context.recovery.last_status, 'unsupported');
   });
 
@@ -340,5 +342,812 @@ phases:
     const text = readFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), 'utf-8');
     assert.match(text, /test_agent_required: true/);
     assert.equal(readState().session_status, null);
+  });
+
+  /* ──────────────────── #234: new routing ──────────────────── */
+
+  function writeMinimalDecompositionForDerive() {
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+goal_contract_hash: "abc"
+phases:
+  - id: phase-1
+    phase_lang: typescript
+    phase_domain: api
+    impact:
+      modify:
+        - path: src/api.ts
+    interface_contract:
+      produces:
+        - type: function
+          name: createWidget
+          spec: "(body: dict) -> Widget"
+    verification_plan:
+      a_items:
+        - criterion: "valid"
+          type: command
+          command: "pytest"
+      s_items:
+        - criterion: "invalid"
+          test_file: tests/x.py
+          test_command: "pytest"
+    goal_trace:
+      acceptance_criteria: [AC-1]
+      variation_axes: []
+      ontology_entities: [api]
+`);
+  }
+
+  it('#234: auto-regenerate handler reruns writeDerivedDecompositionFields on decomposition_derived_stale', () => {
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'recoverable');
+    assert.equal(plan.handler, 'auto_regenerate');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+    assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'decomposition-derived.json')), true);
+    assert.equal(readState().session_status, null);
+  });
+
+  it('#234: auto-regenerate handler reruns writeTestAgentBriefs on test_agent_briefs_write_failed', () => {
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'test_agent_briefs_write_failed',
+      retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+    assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'phases', 'phase-1', 'test-agent-brief.yaml')), true);
+    assert.equal(Array.isArray(result.produced) && result.produced.includes('phase-1'), true);
+    assert.equal(readState().session_status, null);
+  });
+
+  it('#234 [data-integrity] codex r1: test_agent_briefs_write_failed does NOT clear block when decomposition.yaml is missing', () => {
+    // codex r1 on PR #242: writeTestAgentBriefs returns an empty list
+    // when decomposition.yaml is absent (no throw). The handler must
+    // verify the post-condition and keep the block instead of
+    // marking it recovered with no briefs produced.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'test_agent_briefs_write_failed',
+      retry_context: { target: '.mpl/mpl/decomposition.yaml' },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.decomposition_present, false);
+    assert.equal(result.produced_count, 0);
+    assert.match(result.message, /decomposition\.yaml is missing/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234 [data-integrity] codex r1: test_agent_briefs_write_failed keeps block when decomposition has zero required phases', () => {
+    // Decomposition exists but no phase has test_agent_required:true —
+    // writeTestAgentBriefs returns [] → handler must keep the block.
+    mkdirSync(join(tmp, '.mpl', 'mpl'), { recursive: true });
+    writeFileSync(join(tmp, '.mpl', 'mpl', 'decomposition.yaml'), `
+phases:
+  - id: phase-x
+    test_agent_required: false
+`);
+    writeState(blocked({
+      block_code: 'test_agent_briefs_write_failed',
+      retry_context: {},
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.decomposition_present, true);
+    assert.equal(result.produced_count, 0);
+    assert.match(result.message, /zero briefs/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234 [data-integrity] codex r2: stale retry_context.recovery from a prior block does NOT poison a fresh auto-regenerate envelope', () => {
+    // Codex r2 on PR #242: writeState uses deepMerge, so a prior
+    // unresolved block's retry_context.recovery.attempts can survive
+    // into a new block's envelope. Without scope-tagging, the budget
+    // check would falsely refuse a fresh recoverable block.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      // Fresh envelope blocked_at:
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        // Stale recovery survived from a different prior block. Note
+        // its block_code / blocked_at do NOT match the current envelope.
+        recovery: {
+          block_code: 'goal_contract_baseline_corrupt',
+          blocked_at: '2026-05-01T00:00:00Z',
+          attempts: 3,
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    // Should NOT report budget exhausted — the stored attempts belong
+    // to a different block. The fresh block must run the auto-fix.
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'recoverable');
+    assert.equal(plan.handler, 'auto_regenerate');
+    assert.equal(plan.attempts, 0);
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+    assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'decomposition-derived.json')), true);
+  });
+
+  it('#234 [contract-break] codex r3: pre-r2 untagged recovery from the SAME block is adopted (last_attempt_at >= blocked_at)', () => {
+    // codex r3 on PR #242: when upgrading from r1 to r2, existing
+    // blocked-hook envelopes on disk have untagged
+    // retry_context.recovery (no block_code / blocked_at fields).
+    // Treating them all as stale would silently reset an
+    // r1-budget-exhausted block to attempts=0 and allow extra auto-fix
+    // attempts past the cap.
+    //
+    // Migration: adopt untagged recovery when last_attempt_at is at
+    // or after the current block's blocked_at — proving the recovery
+    // was written within this block's lifetime.
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          // Pre-r2 shape: no block_code / blocked_at tag.
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:05:00Z', // AFTER blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'unsupported');
+    assert.equal(plan.attempts, 3, 'pre-r2 attempts must be inherited when last_attempt_at >= blocked_at');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+  });
+
+  it('#234 [data-integrity] codex r4: mixed-precision ISO timestamps compare chronologically (not lexicographically)', () => {
+    // codex r4 on PR #242: `2026-06-01T12:00:00.500Z` is chronologically
+    // AFTER `2026-06-01T12:00:00Z` but is lexicographically SMALLER
+    // because `.` (0x2E) < `Z` (0x5A). String comparison falsely
+    // treats the post-blocked_at recovery as stale → resets attempts
+    // and reopens the budget. Numeric Date.parse comparison fixes it.
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:00:00.500Z', // chronologically AFTER blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    // String comparison would say "0.500Z" < "Z" → discard → attempts=0.
+    // Numeric comparison says 12:00:00.500 > 12:00:00 → adopt → attempts=3.
+    assert.equal(plan.attempts, 3, 'sub-second precision must compare chronologically');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+  });
+
+  it('#234 [data-integrity] codex r4: inverse precision case — string comparison would falsely adopt stale state', () => {
+    // The mirror case: untagged recovery `last_attempt_at:
+    // 2026-06-01T12:00:00Z` and current blocked_at:
+    // 2026-06-01T12:00:00.500Z. Recovery is chronologically OLDER
+    // than the current block (stale → discard). But string comparison
+    // says "Z" > ".500Z" → adopt. Numeric comparison correctly
+    // discards.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00.500Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:00:00Z', // chronologically BEFORE blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0, 'stale pre-block recovery must be discarded regardless of string lex order');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+  });
+
+  it('#234 [data-integrity] codex r5: impossible calendar dates that Date.parse normalizes are REJECTED', () => {
+    // codex r5 on PR #242: Date.parse('2026-02-31T00:00:00Z') silently
+    // rolls forward to 2026-03-03T00:00:00Z. Without strict
+    // round-trip validation, a corrupt legacy recovery
+    // last_attempt_at: '2026-02-31...' would be parsed into a real
+    // instant, possibly >= the current block's blocked_at, and adopt
+    // stale attempts that should have been discarded.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-03-02T00:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          // Impossible date — Date.parse normalizes to 2026-03-03,
+          // which would be > the current blocked_at of 2026-03-02.
+          last_attempt_at: '2026-02-31T00:00:00Z',
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0, 'invalid calendar date must be rejected, not normalized + adopted');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+  });
+
+  it('#234 [data-integrity] codex r5: non-UTC ISO timestamps are REJECTED', () => {
+    // Non-Z local-time form: ambiguous wall clock, must not be admitted
+    // as legitimate recovery state.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:00:00', // no Z
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0);
+  });
+
+  it('#234 [data-integrity] codex r4: malformed ISO timestamps fall closed (discarded)', () => {
+    // If either timestamp fails Date.parse, the safe direction is to
+    // discard the untagged recovery rather than admit garbage.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: 'not-a-real-date',
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0);
+  });
+
+  it('#234 [contract-break] codex r3: pre-r2 untagged recovery from an OLDER block is treated as stale', () => {
+    // The other half of the migration rule: untagged recovery written
+    // BEFORE the current block's blocked_at must still be discarded,
+    // since it belongs to a prior block.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-05-15T09:00:00Z', // BEFORE blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'recoverable', 'older untagged recovery must be discarded');
+    assert.equal(plan.attempts, 0);
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+  });
+
+  it('#234 [data-integrity] codex r2: scope-matched retry_context.recovery is honored', () => {
+    // Sanity check: when the stored recovery DOES match the current
+    // block (same code + blocked_at), the budget enforcement still
+    // works.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          block_code: 'decomposition_derived_stale',
+          blocked_at: '2026-06-01T12:00:00Z',
+          attempts: 3,
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'unsupported');
+    assert.equal(plan.attempts, 3);
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+  });
+
+  it('#234: auto-regenerate handler exhausts retry budget on persistent failures', () => {
+    // No decomposition.yaml on disk → writeDerivedDecompositionFields throws.
+    // After AUTO_FIX_RETRY_BUDGET (3) attempts the handler should return failed.
+    // Recovery state is scope-tagged to the active block (codex r2 fix).
+    writeState(blocked({
+      blocked_by_hook: 'mpl-decomposition-postprocess',
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          block_code: 'decomposition_derived_stale',
+          blocked_at: '2026-06-01T12:00:00Z',
+          attempts: 3,
+        },
+      },
+    }));
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234: redispatch_decomposer handler reads diagnostics from retry_context.issues (real envelope shape) — codex r1', () => {
+    // codex r1 on PR #242: covers_schema_violation hook records
+    // validator findings under `retry_context.issues`, NOT `failures`.
+    // The handler must normalize so the dispatch instruction echoes
+    // the real diagnostics.
+    // Codex r7: this is an approval-required route — pass
+    // approveUnsafe to actually receive the dispatch instruction.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-require-covers',
+      block_code: 'covers_schema_violation',
+      retry_context: {
+        target: '.mpl/mpl/decomposition.yaml',
+        issue_count: 1,
+        issues: ['phase-1.covers[0]:UC-99 not in goal_contract'],
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_approval');
+    assert.equal(plan.handler, 'redispatch_decomposer');
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'awaiting_decomposer');
+    assert.match(result.dispatch_instruction, /mpl-decomposer/);
+    assert.match(result.dispatch_instruction, /UC-99/);
+    assert.deepEqual(result.findings, ['phase-1.covers[0]:UC-99 not in goal_contract']);
+
+    const state = readState();
+    assert.equal(state.session_status, 'blocked_hook');
+    assert.equal(state.retry_context.recovery.last_status, 'awaiting_decomposer');
+  });
+
+  it(`#234: redispatch_decomposer routes phase_contract_graph_invalid with retry_context.issues`, () => {
+    writeState(blocked({
+      block_code: 'phase_contract_graph_invalid',
+      retry_context: {
+        issue_count: 2,
+        issues: ['phase-2.depends_on:cycle', 'tier-1.execution_mode:missing'],
+      },
+    }));
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'awaiting_decomposer');
+    assert.match(result.dispatch_instruction, /mpl-decomposer/);
+    assert.match(result.dispatch_instruction, /depends_on:cycle/);
+    assert.deepEqual(result.findings, ['phase-2.depends_on:cycle', 'tier-1.execution_mode:missing']);
+  });
+
+  it('#234: legacy retry_context.failures shape still works (back-compat)', () => {
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: { failures: ['legacy-style finding'] },
+    }));
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'awaiting_decomposer');
+    assert.match(result.dispatch_instruction, /legacy-style finding/);
+  });
+
+  it('#234 [security] codex r11: caller-supplied retryContext.recovery.awaiting_instruction CANNOT override the tombstone', async () => {
+    // Codex r11: my r10 fix had the spread order wrong:
+    //   { ...recoveryTombstone, ...incomingRecovery }
+    // → caller's awaiting_instruction overrode the null tombstone.
+    // Tombstone must be applied AFTER the caller spread so it WINS
+    // regardless of caller input.
+    const { buildBlockedHookPatch } = await import('../lib/mpl-blocked-hook.mjs');
+    const patch = buildBlockedHookPatch({
+      retryContext: {
+        recovery: {
+          awaiting_instruction: 'LEAK Re-dispatch Task(subagent_type="mpl-decomposer")',
+          attempts: 7,
+        },
+      },
+      blockedAt: '2026-06-01T00:00:00Z',
+    });
+
+    // Caller's non-sensitive field (attempts) is preserved.
+    assert.equal(patch.retry_context.recovery.attempts, 7);
+    // The sensitive field is structurally null regardless of caller intent.
+    assert.equal(patch.retry_context.recovery.awaiting_instruction, null);
+    // No "LEAK" text anywhere in the patch.
+    assert.doesNotMatch(JSON.stringify(patch), /LEAK/);
+  });
+
+  it('#234 [security] codex r10: pre-existing recovery.awaiting_instruction is TOMBSTONED on hook-envelope write', async () => {
+    // Codex r10 [security] defense-in-depth: r9 tombstoned the field
+    // inside recoveryPatch (recover writes), but a NEW hook block can
+    // fire BEFORE recovery runs. If state contains a stale
+    // recovery.awaiting_instruction, recordBlockedHook's writeState
+    // deep-merge would preserve the leaked text under the fresh
+    // envelope — visible to any external state watcher before the
+    // recover skill even runs.
+    //
+    // Repro: seed state with stale recovery.awaiting_instruction,
+    // then call recordBlockedHook with a fresh retryContext. The
+    // persisted state must not contain the leaked Task text.
+    const { recordBlockedHook } = await import('../lib/mpl-blocked-hook.mjs');
+    writeState({
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-prior-hook',
+      blocked_phase: 'phase-0',
+      blocked_artifact: '.mpl/x',
+      block_code: 'prior_code',
+      block_reason: 'prior',
+      resume_instruction: 'prior',
+      blocked_at: '2026-01-01T00:00:00Z',
+      retry_context: {
+        recovery: {
+          awaiting_instruction: 'Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt="...")',
+          attempts: 1,
+          last_status: 'awaiting_decomposer',
+        },
+      },
+    });
+
+    recordBlockedHook(tmp, {
+      hookId: 'mpl-new-hook',
+      phaseId: 'phase-1',
+      artifact: '.mpl/y',
+      code: 'new_block_code',
+      reason: 'new block',
+      resumeInstruction: 'new instruction',
+      retryContext: { issues: ['x'] },
+      blockedAt: '2026-06-01T12:00:00Z',
+    });
+
+    const state = readState();
+    const stateJson = JSON.stringify(state);
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/,
+      'persisted state must not contain the gated Task text after hook envelope write');
+    assert.equal(state.retry_context.recovery.awaiting_instruction, null,
+      'hook-envelope write must tombstone recovery.awaiting_instruction');
+  });
+
+  it('#234 [security] codex r9: pre-existing awaiting_instruction in state is TOMBSTONED on safe-mode write', () => {
+    // Codex r9 [security]: writeState's deepMerge preserves nested
+    // keys that aren't in the patch. If prior recovery state stashed
+    // `recovery.awaiting_instruction = "Re-dispatch Task(...)"` (the
+    // r7-era leak), simply omitting the field in the r8 patch would
+    // leave the stale value on disk. Must explicitly tombstone.
+    //
+    // Repro: seed state with r7-style retry_context.recovery
+    // containing awaiting_instruction, then run --apply-safe. The
+    // persisted state must no longer contain the Re-dispatch text.
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: {
+        issues: ['phase-1.covers[0]:UC-99'],
+        recovery: {
+          // Pre-existing leaked value from a prior r7 write.
+          awaiting_instruction: 'Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt="...")',
+          attempts: 1,
+          last_status: 'awaiting_decomposer',
+        },
+      },
+    }));
+
+    recoverBlockedHook(tmp); // --apply-safe
+
+    const state = readState();
+    assert.equal(state.retry_context.recovery.awaiting_instruction, null,
+      'safe-mode write must tombstone the leaked awaiting_instruction');
+
+    const stateJson = JSON.stringify(state);
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/,
+      'persisted state must not contain the gated Task text after safe-mode write');
+  });
+
+  it('#234 [contract-break] codex r8: safe mode does NOT persist gated dispatch text in state', () => {
+    // Codex r8 [contract-break]: r7 stashed the gated Re-dispatch
+    // Task(...) string in details.awaiting_instruction, which spread
+    // into state.retry_context.recovery.awaiting_instruction. Any
+    // automation reading state could extract and dispatch the Task
+    // call without approval.
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: { issues: ['phase-1.covers[0]:UC-99'] },
+    }));
+
+    const result = recoverBlockedHook(tmp); // --apply-safe
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.dispatch_instruction, undefined);
+
+    const state = readState();
+    const rec = state.retry_context.recovery;
+    // Must not contain dispatch text anywhere in persisted state.
+    const stateJson = JSON.stringify(state);
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/, 'persisted state must not contain the gated Task text');
+    assert.doesNotMatch(stateJson, /subagent_type="mpl-decomposer"/, 'persisted state must not contain subagent_type=mpl-decomposer');
+    // Codex r9 follow-up: tombstoned (null) rather than absent.
+    assert.equal(rec.awaiting_instruction, null, 'awaiting_instruction must be explicitly tombstoned in safe mode');
+  });
+
+  it('#234 [contract-break] codex r8: phase_runner_anomaly safe mode does not persist gated Task text', () => {
+    writeState(blocked({
+      block_code: 'phase_runner_empty_response',
+      blocked_phase: 'phase-1',
+    }));
+    recoverBlockedHook(tmp); // --apply-safe
+    const stateJson = JSON.stringify(readState());
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/);
+    assert.doesNotMatch(stateJson, /subagent_type="mpl-phase-runner"/);
+    assert.doesNotMatch(stateJson, /stronger framing/);
+  });
+
+  it('#234 [logic] codex r8: safe-then-approve preserves original resume_instruction (goal_contract_invalid)', () => {
+    // Codex r8 [logic]: r7 wrote the approval prompt as `instruction`
+    // into keepBlocked, which became state.resume_instruction. On the
+    // next --approve-unsafe call, the handler read state.resume_instruction
+    // and echoed back the approval prompt instead of the original
+    // restore instruction.
+    //
+    // Repro: --apply-safe then --approve-unsafe → user_instruction
+    // MUST contain the original "Restore a valid .mpl/goal-contract.yaml"
+    // text, not "Run /mpl:mpl-recover with --approve-unsafe".
+    const originalInstruction = 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.';
+    writeState(blocked({
+      block_code: 'goal_contract_invalid',
+      resume_instruction: originalInstruction,
+      retry_context: { missing: ['mission.goal'] },
+    }));
+
+    // Step 1: safe mode (--apply-safe).
+    const safeResult = recoverBlockedHook(tmp);
+    assert.equal(safeResult.status, 'requires_approval');
+    // Original resume_instruction must still be intact on disk.
+    assert.equal(readState().resume_instruction, originalInstruction);
+
+    // Step 2: approved (--approve-unsafe). Must echo the original.
+    const approvedResult = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(approvedResult.status, 'requires_user_action');
+    assert.match(approvedResult.user_instruction, /Restore a valid \.mpl\/goal-contract\.yaml/);
+    assert.match(approvedResult.user_instruction, /mission\.goal/);
+    assert.doesNotMatch(approvedResult.user_instruction, /--approve-unsafe/);
+  });
+
+  it('#234 [logic] codex r8: safe-then-approve preserves baseline_immutable resume_instruction', () => {
+    const originalInstruction = 'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.';
+    writeState(blocked({
+      block_code: 'baseline_immutable',
+      resume_instruction: originalInstruction,
+    }));
+
+    recoverBlockedHook(tmp); // safe
+    assert.equal(readState().resume_instruction, originalInstruction);
+
+    const approved = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(approved.status, 'requires_user_action');
+    assert.match(approved.user_instruction, /baseline-renewal/);
+    assert.doesNotMatch(approved.user_instruction, /--approve-unsafe/);
+  });
+
+  it('#234 [logic] codex r8: safe-then-approve preserves phase_runner_anomaly fallback for unknown anomaly', () => {
+    // For unknown anomaly type, the handler falls back to
+    // state.resume_instruction. If safe mode clobbered it, the
+    // fallback would emit the approval prompt instead of the actual
+    // re-dispatch text.
+    const originalInstruction = 'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt="...") for phase-1.';
+    writeState(blocked({
+      block_code: 'phase_runner_some_new_anomaly',
+      resume_instruction: originalInstruction,
+    }));
+
+    recoverBlockedHook(tmp); // safe
+    assert.equal(readState().resume_instruction, originalInstruction);
+
+    const approved = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(approved.status, 'awaiting_phase_runner');
+    assert.match(approved.dispatch_instruction, /mpl-phase-runner/);
+    assert.doesNotMatch(approved.dispatch_instruction, /--approve-unsafe/);
+  });
+
+  it('#234 [contract-break] codex r7: redispatch_decomposer route requires --approve-unsafe; --apply-safe keeps requires_approval', () => {
+    // Codex r7: SKILL.md categorizes redispatch_decomposer as "Step 3
+    // Explicit Approval Recovery". --apply-safe (approveUnsafe=false)
+    // must NOT advance state to `awaiting_decomposer` (an automation
+    // watching for awaiting_* would side-step the human checkpoint).
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: { issues: ['phase-1.covers[0]:UC-99 not in goal_contract'] },
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.requires_approval, true);
+    // Must NOT emit a dispatch_instruction in safe mode.
+    assert.equal(result.dispatch_instruction, undefined);
+    // findings ARE surfaced so the operator can review before approving.
+    assert.deepEqual(result.findings, ['phase-1.covers[0]:UC-99 not in goal_contract']);
+
+    const state = readState();
+    assert.equal(state.retry_context.recovery.last_status, 'requires_approval');
+  });
+
+  it('#234: goal_contract_invalid is routed to user_action (NOT decomposer) — codex r1 [logic]', () => {
+    // codex r1 on PR #242: goal_contract_invalid is emitted with
+    // resumeInstruction "Restore a valid .mpl/goal-contract.yaml" —
+    // a decomposer re-dispatch cannot repair a missing source file.
+    // Recovery must echo the user instruction, NOT generate a Task call.
+    // Codex r7: also approval-gated — pass approveUnsafe to receive
+    // the instruction; --apply-safe surfaces requires_approval.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-require-goal-trace',
+      block_code: 'goal_contract_invalid',
+      resume_instruction: 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.',
+      retry_context: { missing: ['mission.goal', 'acceptance_criteria'] },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_user_action');
+    assert.equal(plan.handler, 'goal_contract_invalid');
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'requires_user_action');
+    assert.match(result.user_instruction, /Restore a valid \.mpl\/goal-contract\.yaml/);
+    assert.match(result.user_instruction, /mission\.goal/);
+    assert.deepEqual(result.findings, ['mission.goal', 'acceptance_criteria']);
+    // No dispatch_instruction — this is user action, not agent re-dispatch.
+    assert.equal(result.dispatch_instruction, undefined);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234 [contract-break] codex r7: goal_contract_invalid route requires --approve-unsafe', () => {
+    writeState(blocked({
+      block_code: 'goal_contract_invalid',
+      resume_instruction: 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.',
+      retry_context: { missing: ['mission.goal'] },
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.user_instruction, undefined);
+    assert.deepEqual(result.findings, ['mission.goal']);
+  });
+
+  it('#234: phase_runner_anomaly handler returns anomaly-specific dispatch instruction', () => {
+    // Codex r7: approval-gated — approveUnsafe needed to receive
+    // the dispatch instruction.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-gate-recorder',
+      blocked_phase: 'phase-1',
+      block_code: 'phase_runner_empty_response',
+      retry_context: { phase_id: 'phase-1' },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_approval');
+    assert.equal(plan.handler, 'phase_runner_anomaly');
+    assert.equal(plan.anomaly, 'empty_response');
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'awaiting_phase_runner');
+    assert.match(result.dispatch_instruction, /mpl-phase-runner/);
+    assert.match(result.dispatch_instruction, /stronger framing/);
+    assert.equal(result.anomaly, 'empty_response');
+  });
+
+  it('#234: phase_runner_anomaly handler falls back gracefully on unknown anomaly type', () => {
+    writeState(blocked({
+      block_code: 'phase_runner_some_new_anomaly',
+      // Empty resume_instruction forces the generic re-dispatch template path.
+      resume_instruction: '',
+      retry_context: {},
+    }));
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'awaiting_phase_runner');
+    assert.equal(result.anomaly, 'some_new_anomaly');
+    assert.match(result.dispatch_instruction, /mpl-phase-runner/);
+  });
+
+  it('#234 [contract-break] codex r7: phase_runner_anomaly route requires --approve-unsafe', () => {
+    writeState(blocked({
+      block_code: 'phase_runner_empty_response',
+      blocked_phase: 'phase-1',
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.dispatch_instruction, undefined);
+    assert.equal(result.anomaly, 'empty_response');
+  });
+
+  it('#234: baseline_immutable handler returns user_instruction without agent dispatch', () => {
+    // Codex r7: approval-gated — approveUnsafe needed to receive
+    // the user instruction.
+    writeState(blocked({
+      blocked_by_hook: 'mpl-baseline-guard',
+      block_code: 'baseline_immutable',
+      resume_instruction: 'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.',
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'requires_user_action');
+    assert.equal(plan.handler, 'baseline_immutable');
+
+    const result = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(result.status, 'requires_user_action');
+    assert.match(result.user_instruction, /baseline-renewal/);
+    assert.equal(readState().session_status, 'blocked_hook');
+  });
+
+  it('#234 [contract-break] codex r7: baseline_immutable route requires --approve-unsafe', () => {
+    writeState(blocked({
+      block_code: 'baseline_immutable',
+      resume_instruction: 'Touch .mpl/mpl/.baseline-renewal',
+    }));
+
+    const result = recoverBlockedHook(tmp); // approveUnsafe: false
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.user_instruction, undefined);
+  });
+
+  it('#234: phantom alias goal_contract_hash_corrupt is NOT routed (drop confirmed)', () => {
+    // The pre-#234 alias was unreachable (no hook ever emitted it) but
+    // routed defensively. Now it must fall through to unsupported.
+    writeState(blocked({
+      block_code: 'goal_contract_hash_corrupt',
+      retry_context: {},
+    }));
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'unsupported');
+  });
+
+  it('#234: phantom alias goal_contract_hash_mismatch is NOT routed (drop confirmed)', () => {
+    writeState(blocked({
+      block_code: 'goal_contract_hash_mismatch',
+      retry_context: {},
+    }));
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'unsupported');
   });
 });

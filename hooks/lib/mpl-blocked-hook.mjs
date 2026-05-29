@@ -45,6 +45,31 @@ export function buildBlockedHookPatch({
   retryContext = {},
   blockedAt = new Date().toISOString(),
 }) {
+  // Codex r10 on PR #242 [security] defense-in-depth: writeState's
+  // deepMerge preserves nested keys absent from the patch. A new
+  // blocked-hook envelope is a fresh block, so any stale
+  // retry_context.recovery from a prior block (including a leaked
+  // recovery.awaiting_instruction that could leak gated dispatch
+  // text) must be tombstoned at the envelope boundary. Explicitly
+  // null the recovery sub-object's known sensitive fields so deepMerge
+  // overwrites any stale value. Scope-tagging in `activeRecoveryState`
+  // already neutralizes the recover-skill's own consumption, but an
+  // external state watcher reading state.json directly would still
+  // see the stale text without this guard.
+  const inboundRetryContext =
+    retryContext && typeof retryContext === 'object' && !Array.isArray(retryContext)
+      ? retryContext
+      : {};
+  // Codex r11 on PR #242 [security]: previously the tombstone was
+  // spread BEFORE the caller's recovery object, so a caller passing
+  // `retryContext.recovery.awaiting_instruction = "LEAK"` would
+  // override the null. Tombstone must WIN — strip the sensitive
+  // field unconditionally regardless of caller intent.
+  const incomingRecovery =
+    inboundRetryContext.recovery && typeof inboundRetryContext.recovery === 'object'
+      && !Array.isArray(inboundRetryContext.recovery)
+      ? inboundRetryContext.recovery
+      : null;
   return {
     session_status: 'blocked_hook',
     blocked_by_hook: hookId,
@@ -53,10 +78,15 @@ export function buildBlockedHookPatch({
     block_code: code || 'blocked',
     block_reason: reason || 'Hook blocked progress.',
     resume_instruction: resumeInstruction || 'Resolve the recorded hook block, then retry the blocked operation.',
-    retry_context:
-      retryContext && typeof retryContext === 'object' && !Array.isArray(retryContext)
-        ? retryContext
-        : {},
+    retry_context: {
+      ...inboundRetryContext,
+      recovery: {
+        ...(incomingRecovery || {}),
+        // Tombstone WINS — applied after the caller spread so it cannot
+        // be overridden. No caller path may emit gated dispatch text.
+        awaiting_instruction: null,
+      },
+    },
     blocked_at: blockedAt,
   };
 }

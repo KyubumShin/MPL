@@ -43,10 +43,12 @@ node hooks/lib/mpl-recover.mjs --apply-safe
 ```
 
 Safe handlers:
-- `goal_baseline_hash` with `goal_contract_baseline_corrupt` or `goal_contract_hash_corrupt`:
+- `goal_baseline_hash` with `goal_contract_baseline_corrupt`:
   repair `.mpl/mpl/baseline.yaml` from the normalized hash of `.mpl/goal-contract.yaml`, then clear `blocked_hook`.
 - `test_agent_evidence`:
   if `state.test_agent_dispatched[phase_id]` already contains valid PASS evidence, clear `blocked_hook`; otherwise keep the block and return the embedded `Task(subagent_type="mpl-test-agent", ...)` instruction.
+- `auto_regenerate` with `decomposition_derived_stale` or `test_agent_briefs_write_failed` (#234):
+  re-run the deterministic postprocess (`writeDerivedDecompositionFields` / `writeTestAgentBriefs`). Capped at 3 attempts via `retry_context.recovery.attempts`; past the budget the handler returns `failed` with the underlying I/O error so the operator can fix the source. For brief regeneration, the handler verifies post-conditions (codex r1 on #242): if `decomposition.yaml` is missing or zero briefs were produced for the blocked context, the block stays `failed` with a concrete instruction instead of being mistakenly cleared.
 
 When `test_agent_evidence` returns `awaiting_test_agent`, execute the embedded
 `mpl-test-agent` Task exactly as shown in `resume_instruction`. The agent must
@@ -64,7 +66,7 @@ node hooks/lib/mpl-recover.mjs --approve-unsafe
 ```
 
 Approval-required handlers:
-- `goal_contract_drift` / `goal_contract_hash_mismatch`:
+- `goal_contract_drift`:
   update `baseline.yaml` to the current normalized goal contract hash. Use only
   when the current `.mpl/goal-contract.yaml` is intentionally the source of truth.
 - `goal_trace_incomplete` with only `goal_contract_hash:*` issues:
@@ -73,6 +75,14 @@ Approval-required handlers:
 - `missing_artifact_schema` for missing `phase-N.test_agent_required`:
   insert `test_agent_required: true` for the listed phases. This is conservative
   because missing values are already treated as required by AD-0007.
+- `redispatch_decomposer` with `covers_schema_violation` or `phase_contract_graph_invalid` (#234):
+  the recover skill returns a `Task(subagent_type="mpl-decomposer", ...)` dispatch instruction with the validator's structured findings echoed back. Diagnostics are normalized across `retry_context.failures` / `retry_context.issues` / `retry_context.missing` (each hook records under a different field). The orchestrator (not the recover skill) executes the Task. **Requires `--approve-unsafe` (codex r7 #242)**: `--apply-safe` keeps the block at `requires_approval` so an automation watching `awaiting_decomposer` cannot side-step the human checkpoint.
+- `goal_contract_invalid` (#234 codex r1):
+  no agent dispatch. Returns the recorded `resume_instruction` ("Restore a valid .mpl/goal-contract.yaml") with the missing-field list appended. A decomposer re-dispatch cannot repair a missing source file. **Requires `--approve-unsafe` (codex r7 #242)**.
+- `phase_runner_anomaly` with `phase_runner_<anomaly_type>` (#234):
+  the recover skill returns an anomaly-specific `Task(subagent_type="mpl-phase-runner", ...)` dispatch instruction. Anomaly types include `empty_response`, `truncated_response`, `invalid_json`, `no_evidence`. Each has a tailored framing (stronger prompt / reduced context / explicit schema reminder / evidence emphasis). **Requires `--approve-unsafe` (codex r7 #242)**.
+- `baseline_immutable` (#234):
+  no agent dispatch. Returns the recorded `resume_instruction` (touch `.mpl/mpl/.baseline-renewal`) as `user_instruction`. **Requires `--approve-unsafe` (codex r7 #242)**.
 
 If revalidation still fails, recovery must leave `session_status:"blocked_hook"`
 intact and update `block_reason`, `resume_instruction`, and

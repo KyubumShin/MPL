@@ -12,19 +12,57 @@ import {
   validateMvpGoalTraceCoverage,
 } from './mpl-goal-trace.mjs';
 import { parsePhaseContractGraphText } from './mpl-phase-contract-graph.mjs';
+import {
+  writeDerivedDecompositionFields,
+  writeTestAgentBriefs,
+} from './mpl-decomposition-postprocess.mjs';
 
 const BASELINE_REL_PATH = '.mpl/mpl/baseline.yaml';
 const DECOMPOSITION_REL_PATH = '.mpl/mpl/decomposition.yaml';
 const RECOVERY_SIGNAL_REL_PATH = '.mpl/signals/recovery.jsonl';
 
+// #234: phantom aliases `goal_contract_hash_corrupt` /
+// `goal_contract_hash_mismatch` were routed but no hook ever emitted
+// them. The live emission sites are `goal_contract_baseline_corrupt`
+// (mpl-require-goal-trace.mjs hash check) and `goal_contract_drift`
+// (baseline drift). Keep the sets single-element so future hook
+// authors reading this list see the canonical code names.
 const BASELINE_CORRUPT_CODES = new Set([
   'goal_contract_baseline_corrupt',
-  'goal_contract_hash_corrupt',
 ]);
 
 const BASELINE_DRIFT_CODES = new Set([
   'goal_contract_drift',
-  'goal_contract_hash_mismatch',
+]);
+
+// #234: cap auto-fix retries so a deterministic regeneration that
+// keeps failing (disk permission, malformed source) doesn't loop
+// forever. The recovery handler reads attempts from
+// state.retry_context.recovery.attempts (incremented by recoveryPatch)
+// and degrades to `unsupported` past the budget so the operator sees
+// the underlying error.
+const AUTO_FIX_RETRY_BUDGET = 3;
+
+// Codes the recover skill can resolve by re-running the deterministic
+// postprocess that produced the source artifacts. No agent dispatch.
+const AUTO_FIX_REGENERATE_CODES = new Set([
+  'decomposition_derived_stale',
+  'test_agent_briefs_write_failed',
+]);
+
+// Codes whose recovery is "re-dispatch the producing agent with the
+// validator's structured error list". The recover skill cannot
+// dispatch agents directly — it returns a dispatch instruction
+// pointing at the right agent + the error context.
+//
+// Note (codex r1 [logic]): `goal_contract_invalid` is NOT in this set.
+// Its emission site (hooks/mpl-require-goal-trace.mjs) is "missing or
+// invalid .mpl/goal-contract.yaml" — re-dispatching the decomposer
+// cannot repair a missing/invalid goal contract. That code is routed
+// to user_action below, echoing the recorded resume_instruction.
+const REDISPATCH_DECOMPOSER_CODES = new Set([
+  'covers_schema_violation',
+  'phase_contract_graph_invalid',
 ]);
 
 function nowIso() {
@@ -61,13 +99,22 @@ function buildResult(state, patch) {
   };
 }
 
+// Codex r2 on PR #242 [data-integrity]: writeState uses deepMerge,
+// which recursively merges nested plain objects. That means a stale
+// `retry_context.recovery` from a prior, unrelated block survives
+// into a new block's envelope. If that stale `recovery.attempts`
+// happens to be 3, `recoverAutoRegenerate` reports budget-exhausted
+// before ever running the deterministic postprocess on a fresh,
+// recoverable block.
+//
+// Scope recovery state to the active block by tagging it with the
+// block_code + blocked_at. Readers (see `activeRecoveryState`) only
+// trust the stored attempts when the tag matches the current envelope.
 function recoveryPatch(state, { status, reason, instruction, details = {} }) {
   const context = state?.retry_context && typeof state.retry_context === 'object'
     ? jsonClone(state.retry_context)
     : {};
-  const prev = context.recovery && typeof context.recovery === 'object'
-    ? context.recovery
-    : {};
+  const prev = activeRecoveryState(state);
 
   return {
     session_status: 'blocked_hook',
@@ -80,14 +127,107 @@ function recoveryPatch(state, { status, reason, instruction, details = {} }) {
     retry_context: {
       ...context,
       recovery: {
+        // Scope tag — readers compare to current state before trusting.
+        block_code: state.block_code || null,
+        blocked_at: state.blocked_at || null,
         attempts: (Number.isFinite(prev.attempts) ? prev.attempts : 0) + 1,
         last_status: status,
         last_attempt_at: nowIso(),
+        // Codex r9 on PR #242 [security]: writeState's deepMerge
+        // preserves nested keys that aren't in the patch. A prior
+        // approved-or-r7 recovery write may have stashed
+        // `awaiting_instruction: "Re-dispatch Task(...)"`; without an
+        // explicit tombstone, deepMerge would keep that string in
+        // state even after r8's safe-mode handler omitted it. Always
+        // null it here so safe-mode writes structurally cannot leak
+        // gated dispatch text. The approved branch (which sets
+        // `details: { ... }` not including awaiting_instruction)
+        // surfaces the actual dispatch via state.resume_instruction
+        // and the buildResult dispatch_instruction field instead.
+        awaiting_instruction: null,
         ...details,
       },
     },
     blocked_at: state.blocked_at || nowIso(),
   };
+}
+
+// Read the recovery sub-object only when it belongs to the active
+// block. Returns `{}` (a fresh slate) otherwise.
+//
+// Three cases:
+//   (a) Tagged recovery (post-codex-r2): trust iff
+//       (block_code, blocked_at) matches the current envelope.
+//   (b) Untagged recovery (pre-codex-r2 / pre-existing on-disk state)
+//       with `last_attempt_at >= state.blocked_at`: adopt as
+//       legitimately belonging to the current block. Codex r3
+//       [contract-break] migration path — without this, an r1
+//       budget-exhausted block would reset to attempts=0 after the
+//       r2 upgrade, allowing extra auto-fix attempts past the cap.
+//   (c) Untagged recovery with no timestamp signal or older than the
+//       current block: treat as stale → fresh slate.
+function activeRecoveryState(state) {
+  const rec = state?.retry_context?.recovery;
+  if (!rec || typeof rec !== 'object') return {};
+  const currentCode = state?.block_code || null;
+  const currentBlockedAt = state?.blocked_at || null;
+  const stampedCode = rec.block_code ?? null;
+  const stampedAt = rec.blocked_at ?? null;
+
+  // (a) Tagged → strict match.
+  if (stampedCode !== null || stampedAt !== null) {
+    if (stampedCode === currentCode && stampedAt === currentBlockedAt) {
+      return rec;
+    }
+    return {};
+  }
+
+  // (b)/(c) Untagged: legacy adoption iff last_attempt_at >= blocked_at.
+  // When the current state has neither code nor blocked_at, fall back
+  // to the original pre-tag behavior (genuinely ambiguous → trust).
+  if (currentCode === null && currentBlockedAt === null) return rec;
+  // Codex r4/r5 on PR #242 [data-integrity]: must compare
+  // chronologically (mixed millisecond precision misorders strings)
+  // AND reject inputs that Date.parse silently normalizes from
+  // impossible calendar dates (e.g. `2026-02-31` → 2026-03-03). Strict
+  // ISO-Z parser: regex shape check + Date.parse + round-trip
+  // verification of the parsed numeric components against the claimed
+  // ones. Anything that doesn't survive this is treated as malformed
+  // → discard untagged recovery (fail-closed).
+  const stampedLastAt = typeof rec.last_attempt_at === 'string' ? rec.last_attempt_at : null;
+  if (!stampedLastAt || !currentBlockedAt) return {};
+  const stampedMs = parseStrictIsoUtcMs(stampedLastAt);
+  const currentMs = parseStrictIsoUtcMs(currentBlockedAt);
+  if (stampedMs === null || currentMs === null) return {};
+  if (stampedMs >= currentMs) return rec;
+  return {};
+}
+
+// Strict ISO 8601 UTC parser. Returns the numeric milliseconds since
+// epoch only when the input is in canonical `YYYY-MM-DDTHH:MM:SS(.\d+)?Z`
+// shape AND the parsed Date's components match the input verbatim
+// (so an impossible calendar date like 2026-02-31 — which Date.parse
+// silently rolls forward to 2026-03-03 — is rejected). Returns null
+// for any malformed / non-UTC / out-of-range input.
+const STRICT_ISO_Z = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z$/;
+function parseStrictIsoUtcMs(input) {
+  if (typeof input !== 'string') return null;
+  const m = STRICT_ISO_Z.exec(input);
+  if (!m) return null;
+  const ms = Date.parse(input);
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  if (
+    d.getUTCFullYear() !== Number(m[1]) ||
+    d.getUTCMonth() + 1 !== Number(m[2]) ||
+    d.getUTCDate() !== Number(m[3]) ||
+    d.getUTCHours() !== Number(m[4]) ||
+    d.getUTCMinutes() !== Number(m[5]) ||
+    d.getUTCSeconds() !== Number(m[6])
+  ) {
+    return null;
+  }
+  return ms;
 }
 
 function keepBlocked(cwd, state, opts) {
@@ -524,6 +664,356 @@ function recoverArtifactSchema(cwd, state, { approveUnsafe = false } = {}) {
   });
 }
 
+// #234: deterministic auto-fix. Re-run the mechanical postprocess
+// that produced the missing/stale derived artifact. Capped retries
+// so a permission / disk error doesn't loop forever.
+function recoverAutoRegenerate(cwd, state) {
+  const code = state.block_code;
+  // Codex r2 [data-integrity]: read attempts only from the
+  // scope-tagged recovery state so stale attempts from a previous
+  // block can't poison a fresh, recoverable envelope.
+  const attempts = Number(activeRecoveryState(state).attempts || 0);
+  if (attempts >= AUTO_FIX_RETRY_BUDGET) {
+    const reason = `[MPL Recover] Auto-fix budget exhausted for ${code} after ${attempts} attempts; inspect the underlying I/O failure manually.`;
+    keepBlocked(cwd, state, {
+      status: 'failed',
+      reason,
+      instruction:
+        state.resume_instruction ||
+        'Resolve the I/O failure (permissions / disk space / malformed source) and re-save the decomposition source artifact.',
+      details: { handler: 'auto_regenerate', code, attempts },
+    });
+    return buildResult(state, { status: 'failed', message: reason, attempts });
+  }
+
+  let written = null;
+  try {
+    if (code === 'decomposition_derived_stale') {
+      writeDerivedDecompositionFields(cwd);
+    } else if (code === 'test_agent_briefs_write_failed') {
+      // Codex r1 on PR #242 [data-integrity]: writeTestAgentBriefs
+      // does NOT throw when decomposition.yaml is absent — it returns
+      // an empty list. Blindly treating that as success would clear
+      // the block while no brief was actually regenerated. Verify the
+      // produced phase ids before declaring recovery.
+      written = writeTestAgentBriefs(cwd);
+    } else {
+      const reason = `[MPL Recover] No regeneration handler for ${code}.`;
+      keepBlocked(cwd, state, {
+        status: 'unsupported',
+        reason,
+        instruction: state.resume_instruction || 'Resolve the recorded hook block manually.',
+        details: { handler: 'auto_regenerate', code },
+      });
+      return buildResult(state, { status: 'unsupported', message: reason });
+    }
+  } catch (error) {
+    const reason = `[MPL Recover] Auto-fix regeneration failed for ${code}: ${error?.message || 'unknown error'}.`;
+    keepBlocked(cwd, state, {
+      status: 'failed',
+      reason,
+      instruction:
+        'Inspect the source artifact / disk / permissions and retry. Auto-fix will quit after the retry budget is exhausted.',
+      details: { handler: 'auto_regenerate', code, error: error?.message || 'unknown' },
+    });
+    return buildResult(state, { status: 'failed', message: reason });
+  }
+
+  // Post-condition check: silent no-op (empty produced list) when the
+  // source artifact is missing must NOT clear the block.
+  if (code === 'test_agent_briefs_write_failed') {
+    const decompositionPresent = existsSync(join(cwd, DECOMPOSITION_REL_PATH));
+    const producedCount = Array.isArray(written) ? written.length : 0;
+    if (!decompositionPresent || producedCount === 0) {
+      const reason = decompositionPresent
+        ? '[MPL Recover] writeTestAgentBriefs produced zero briefs (no phases declared test_agent_required); keeping the block.'
+        : '[MPL Recover] Cannot regenerate test-agent briefs because .mpl/mpl/decomposition.yaml is missing.';
+      keepBlocked(cwd, state, {
+        status: 'failed',
+        reason,
+        instruction: decompositionPresent
+          ? 'Verify the blocked phase has test_agent_required: true in decomposition.yaml, then retry.'
+          : 'Re-run decomposition to recreate decomposition.yaml, then retry.',
+        details: {
+          handler: 'auto_regenerate',
+          code,
+          decomposition_present: decompositionPresent,
+          produced_count: producedCount,
+        },
+      });
+      return buildResult(state, {
+        status: 'failed',
+        message: reason,
+        decomposition_present: decompositionPresent,
+        produced_count: producedCount,
+      });
+    }
+  }
+
+  clearCurrentBlock(cwd, state);
+  appendRecoverySignal(cwd, {
+    ...summarizeState(state),
+    result: 'recovered',
+    handler: 'auto_regenerate',
+    code,
+    produced: written,
+  });
+  return buildResult(state, {
+    status: 'recovered',
+    message: `Regenerated derived artifact for ${code} and cleared blocked_hook.`,
+    produced: written,
+  });
+}
+
+// Codex r1 on PR #242 [contract-break]: real hooks record validator
+// diagnostics under different retry_context field names. Normalize
+// across all known shapes so the dispatch instruction echoes the
+// actual findings instead of dropping them.
+//
+//   covers_schema_violation        → retry_context.issues
+//   phase_contract_graph_invalid   → retry_context.issues
+//   (legacy test fixtures used `failures` — preserved for back-compat)
+function collectValidatorDiagnostics(state) {
+  const ctx = state?.retry_context || {};
+  const items = [];
+  for (const key of ['failures', 'issues', 'missing']) {
+    const v = ctx[key];
+    if (Array.isArray(v)) {
+      for (const entry of v) items.push(entry);
+    }
+  }
+  return items
+    .filter((x) => x !== null && x !== undefined)
+    .map((x) => {
+      if (typeof x === 'string') return x;
+      try { return JSON.stringify(x); } catch { return String(x); }
+    });
+}
+
+// #234 + codex r7 on PR #242 [contract-break]: producer-agent
+// re-dispatch is an approval-required route per SKILL.md "Step 3
+// Explicit Approval Recovery". `--apply-safe` (approveUnsafe=false)
+// must NOT advance recovery to `awaiting_decomposer`; it must surface
+// the route as `requires_approval` so an automation watching for
+// `awaiting_*` cannot side-step the human checkpoint.
+function recoverRedispatchDecomposer(cwd, state, { approveUnsafe = false } = {}) {
+  const code = state.block_code;
+  const diagnostics = collectValidatorDiagnostics(state);
+  const failureSummary = diagnostics.length > 0
+    ? `Validator findings to address: ${diagnostics.slice(0, 8).join('; ')}.`
+    : '';
+  const instruction =
+    `Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt=...) to fix ${code}. ${failureSummary}`.trim();
+
+  if (!approveUnsafe) {
+    // Codex r8 [contract-break] + [logic]: must NOT persist the gated
+    // dispatch text in state.retry_context.recovery (any reader could
+    // dispatch without approval), AND must NOT overwrite the original
+    // state.resume_instruction with the "run --approve-unsafe" prompt
+    // (the next approved run reads resume_instruction and would echo
+    // the approval prompt instead of the original recovery instruction).
+    //
+    // Pass `instruction: undefined` so recoveryPatch falls back to the
+    // existing state.resume_instruction. Surface the approval prompt
+    // only at the buildResult layer (user-visible JSON output) — not
+    // in state.
+    const reason = `[MPL Recover] ${code} requires explicit approval to surface the mpl-decomposer dispatch instruction.`;
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason,
+      instruction: undefined,
+      details: { handler: 'redispatch_decomposer', code, findings: diagnostics },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: reason,
+      requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe (or rerun the recovery handler explicitly) to receive the decomposer re-dispatch Task call.',
+      findings: diagnostics,
+    });
+  }
+
+  const reason = `[MPL Recover] ${code} requires decomposer re-dispatch.`;
+  keepBlocked(cwd, state, {
+    status: 'awaiting_decomposer',
+    reason,
+    instruction,
+    details: { handler: 'redispatch_decomposer', code, findings: diagnostics },
+  });
+  return buildResult(state, {
+    status: 'awaiting_decomposer',
+    message: reason,
+    dispatch_instruction: instruction,
+    findings: diagnostics,
+  });
+}
+
+// Codex r1 on PR #242 [logic]: `goal_contract_invalid` recovery is a
+// user-action route. The recorded resume_instruction is "Restore a
+// valid .mpl/goal-contract.yaml" — a decomposer re-dispatch cannot
+// repair a missing source file. Echo the recorded instruction (with a
+// generic fallback) so the operator sees the actionable step.
+// Codex r7 on PR #242 [contract-break]: goal_contract_invalid is
+// a user-action route (the recorded resume_instruction asks the
+// operator to restore .mpl/goal-contract.yaml). Per SKILL.md "Step 3
+// Explicit Approval Recovery", `--apply-safe` must NOT advance to
+// `requires_user_action` — that would let an automation watching for
+// `user_instruction` mutate state without the human checkpoint.
+function recoverGoalContractInvalid(cwd, state, { approveUnsafe = false } = {}) {
+  const diagnostics = collectValidatorDiagnostics(state);
+  const missingSummary = diagnostics.length > 0
+    ? ` Missing fields: ${diagnostics.slice(0, 8).join(', ')}.`
+    : '';
+  const reason = '[MPL Recover] goal_contract_invalid requires restoring .mpl/goal-contract.yaml.';
+  const instruction =
+    state.resume_instruction ||
+    'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.';
+
+  if (!approveUnsafe) {
+    // Codex r8: same anti-clobber pattern — preserve the original
+    // resume_instruction in state, surface the approval prompt only
+    // in the returned JSON.
+    const approvalReason = '[MPL Recover] goal_contract_invalid requires explicit approval to surface the restoration instruction.';
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason: approvalReason,
+      instruction: undefined,
+      details: { handler: 'goal_contract_invalid', findings: diagnostics },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: approvalReason,
+      requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the goal-contract restoration instruction.',
+      findings: diagnostics,
+    });
+  }
+
+  keepBlocked(cwd, state, {
+    status: 'requires_user_action',
+    reason,
+    instruction: `${instruction}${missingSummary}`.trim(),
+    details: { handler: 'goal_contract_invalid', findings: diagnostics },
+  });
+  return buildResult(state, {
+    status: 'requires_user_action',
+    message: reason,
+    user_instruction: `${instruction}${missingSummary}`.trim(),
+    findings: diagnostics,
+  });
+}
+
+// #234: phase-runner anomaly re-dispatch. block_code shape is
+// `phase_runner_<anomaly_type>` (emitted at hooks/mpl-gate-recorder.mjs
+// per subagent anomaly). Each anomaly has a different corrective
+// framing — keep the dispatch templates here so the recover skill is
+// a single source of truth.
+const PHASE_RUNNER_ANOMALY_TEMPLATES = {
+  empty_response:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) with stronger framing: include the full phase brief and require structured JSON output. Verify the phase prompt isn\'t exceeding context budget.',
+  truncated_response:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) with reduced context: drop optional decomposition fields, focus the prompt on the single phase brief, request output in chunks if necessary.',
+  invalid_json:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) with explicit JSON schema reminder at the prompt tail. The previous run emitted unparseable output.',
+  no_evidence:
+    'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) emphasizing evidence_required fields. Previous run completed without latching required evidence.',
+};
+
+function recoverPhaseRunnerAnomaly(cwd, state, { approveUnsafe = false } = {}) {
+  const code = state.block_code || '';
+  const anomalyType = code.startsWith('phase_runner_') ? code.slice('phase_runner_'.length) : '';
+  const template = PHASE_RUNNER_ANOMALY_TEMPLATES[anomalyType];
+  const phaseId = state.blocked_phase || state?.retry_context?.phase_id || null;
+
+  const instruction = template ||
+    state.resume_instruction ||
+    `Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) for ${phaseId || 'the blocked phase'} after addressing the recorded ${anomalyType || 'anomaly'}.`;
+
+  if (!approveUnsafe) {
+    // Codex r8: do NOT persist `awaiting_instruction` in state, do NOT
+    // overwrite resume_instruction with the approval prompt. Approval
+    // prompt lives only in the returned JSON.
+    const approvalReason = `[MPL Recover] ${code} requires explicit approval to surface the mpl-phase-runner dispatch instruction (anomaly=${anomalyType || 'unknown'}).`;
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason: approvalReason,
+      instruction: undefined,
+      details: {
+        handler: 'phase_runner_anomaly',
+        code,
+        anomaly: anomalyType,
+        phase_id: phaseId,
+      },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: approvalReason,
+      requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the phase-runner re-dispatch Task call.',
+      anomaly: anomalyType,
+      phase_id: phaseId,
+    });
+  }
+
+  const reason = `[MPL Recover] ${code} requires mpl-phase-runner re-dispatch (anomaly=${anomalyType || 'unknown'}).`;
+  keepBlocked(cwd, state, {
+    status: 'awaiting_phase_runner',
+    reason,
+    instruction,
+    details: { handler: 'phase_runner_anomaly', code, anomaly: anomalyType, phase_id: phaseId },
+  });
+  return buildResult(state, {
+    status: 'awaiting_phase_runner',
+    message: reason,
+    dispatch_instruction: instruction,
+    anomaly: anomalyType,
+    phase_id: phaseId,
+  });
+}
+
+// #234 + codex r7 [contract-break]: baseline_immutable is also an
+// approval-required user-action route. `--apply-safe` must not
+// advance to `requires_user_action`.
+function recoverBaselineImmutable(cwd, state, { approveUnsafe = false } = {}) {
+  const reason = '[MPL Recover] Baseline is immutable; renewal sentinel required.';
+  const instruction =
+    state.resume_instruction ||
+    'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.';
+
+  if (!approveUnsafe) {
+    // Codex r8: same anti-clobber pattern.
+    const approvalReason = '[MPL Recover] baseline_immutable requires explicit approval to surface the renewal-sentinel instruction.';
+    keepBlocked(cwd, state, {
+      status: 'requires_approval',
+      reason: approvalReason,
+      instruction: undefined,
+      details: { handler: 'baseline_immutable' },
+    });
+    return buildResult(state, {
+      status: 'requires_approval',
+      message: approvalReason,
+      requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the baseline renewal instruction.',
+    });
+  }
+
+  keepBlocked(cwd, state, {
+    status: 'requires_user_action',
+    reason,
+    instruction,
+    details: { handler: 'baseline_immutable' },
+  });
+  return buildResult(state, {
+    status: 'requires_user_action',
+    message: reason,
+    user_instruction: instruction,
+  });
+}
+
 export function inspectRecovery(cwd = process.cwd()) {
   const state = readState(cwd);
   if (!state) {
@@ -579,6 +1069,55 @@ export function inspectRecovery(cwd = process.cwd()) {
     });
   }
 
+  // #234 new routes:
+  if (AUTO_FIX_REGENERATE_CODES.has(code)) {
+    const attempts = Number(activeRecoveryState(state).attempts || 0);
+    const exhausted = attempts >= AUTO_FIX_RETRY_BUDGET;
+    return buildResult(state, {
+      status: exhausted ? 'unsupported' : 'recoverable',
+      handler: 'auto_regenerate',
+      safe: true,
+      attempts,
+      message: exhausted
+        ? `Auto-fix budget exhausted (${attempts}/${AUTO_FIX_RETRY_BUDGET}). Resolve the I/O failure manually.`
+        : 'Recover can re-run the deterministic postprocess that produced the derived artifact.',
+    });
+  }
+  if (REDISPATCH_DECOMPOSER_CODES.has(code)) {
+    return buildResult(state, {
+      status: 'requires_approval',
+      handler: 'redispatch_decomposer',
+      safe: false,
+      message: 'Recover returns a mpl-decomposer dispatch instruction with the validator findings; orchestrator must execute the Task call.',
+    });
+  }
+  if (code === 'goal_contract_invalid') {
+    return buildResult(state, {
+      status: 'requires_user_action',
+      handler: 'goal_contract_invalid',
+      safe: false,
+      message: 'goal_contract_invalid requires restoring .mpl/goal-contract.yaml; recover echoes the recorded user instruction.',
+    });
+  }
+  if (code && code.startsWith('phase_runner_')) {
+    const anomalyType = code.slice('phase_runner_'.length);
+    return buildResult(state, {
+      status: 'requires_approval',
+      handler: 'phase_runner_anomaly',
+      anomaly: anomalyType,
+      safe: false,
+      message: `Recover returns a mpl-phase-runner re-dispatch instruction for anomaly=${anomalyType}.`,
+    });
+  }
+  if (code === 'baseline_immutable') {
+    return buildResult(state, {
+      status: 'requires_user_action',
+      handler: 'baseline_immutable',
+      safe: false,
+      message: 'Baseline renewal sentinel (.mpl/mpl/.baseline-renewal) must be touched manually to authorize the write.',
+    });
+  }
+
   return buildResult(state, {
     status: 'unsupported',
     handler: null,
@@ -610,6 +1149,21 @@ export function recoverBlockedHook(cwd = process.cwd(), { approveUnsafe = false 
   }
   if (code === 'missing_artifact_schema') {
     return recoverArtifactSchema(cwd, state, { approveUnsafe });
+  }
+  if (AUTO_FIX_REGENERATE_CODES.has(code)) {
+    return recoverAutoRegenerate(cwd, state);
+  }
+  if (REDISPATCH_DECOMPOSER_CODES.has(code)) {
+    return recoverRedispatchDecomposer(cwd, state, { approveUnsafe });
+  }
+  if (code === 'goal_contract_invalid') {
+    return recoverGoalContractInvalid(cwd, state, { approveUnsafe });
+  }
+  if (code && code.startsWith('phase_runner_')) {
+    return recoverPhaseRunnerAnomaly(cwd, state, { approveUnsafe });
+  }
+  if (code === 'baseline_immutable') {
+    return recoverBaselineImmutable(cwd, state, { approveUnsafe });
   }
 
   const reason = `[MPL Recover] Unsupported hook block code: ${code || 'unknown'}.`;
