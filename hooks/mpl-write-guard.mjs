@@ -346,6 +346,10 @@ function matchesProtectedDelete(command, cwd) {
     // -x sweeps the entire .mpl/ tree. Treat git clean with any -*x*
     // / -*X* flag as destructive against the workspace.
     /\bgit\s+clean\b.*-\S*[xX]/.test(normalized) ||
+    // Claude r24 [security]: gzip / bzip2 / xz / zstd delete their
+    // input file by default (unless `-k`/`--keep` is set). Treat
+    // them as destructive against the operand path.
+    /\b(gzip|bzip2|xz|zstd)\b(?!.*(?:-k|--keep))/.test(normalized) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
     // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths
@@ -498,10 +502,16 @@ function matchesProtectedDelete(command, cwd) {
       // `.mpl/contracts`, `.mpl/memory`. `find . -delete` destroys
       // every file under cwd including protected ones. The pre-fix
       // check only caught descendants of a root, not roots-of-the-root.
+      //
+      // Refinement after r24 regression: the ancestor match must
+      // only fire when the operand is INSIDE the workspace cwd —
+      // otherwise `cd /tmp && …` (with cwd `/tmp/X`) trips because
+      // `/tmp` is a filesystem-level ancestor of `/tmp/X/.mpl/mpl`.
+      const cwdAbs = resolvePath(cwd);
       if (
         abs === rootAbs ||
         abs.startsWith(rootAbs + '/') ||
-        rootAbs.startsWith(abs + '/')
+        (rootAbs.startsWith(abs + '/') && (abs === cwdAbs || abs.startsWith(cwdAbs + '/')))
       ) return target;
     }
   }
@@ -753,7 +763,19 @@ async function main() {
       // the same inode as `.mpl/...`. All subsequent regexes match
       // lowercase ASCII so lowercasing the input is structurally safe.
       const normalizedEarly = normalizeShellCommand(earlyCommand).toLowerCase();
-      let decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/i.test(normalizedEarly);
+      // Codex r24 [security]: detect `cd …` followed by a redirect/tee/
+      // dd-of to a bare basename matching a protected file. Static
+      // checks can't model directory changes, so a command like
+      // `cd .$(printf mpl)/mpl && printf forged > decomposition.yaml`
+      // would otherwise slip — after the cd, `decomposition.yaml` is
+      // resolved against the new cwd. Treat the combination as a
+      // protected write.
+      const hasCdCmdSub = /\bcd\b[^;|&\n]*\$\(/.test(normalizedEarly) ||
+                          /\bcd\b[^;|&\n]*`/.test(normalizedEarly);
+      const hasCdBareDecompWrite = /\bcd\b[\s\S]*&&[\s\S]*(?:>{1,2}|\btee\b|\bdd\b[^;|&]*\bof=)\s*decomposition\.ya?ml\b/i.test(normalizedEarly);
+      const cdConstructedDecomp = hasCdCmdSub && /(?:>{1,2}|\btee\b|\bdd\b[^;|&]*\bof=)\s*decomposition\.ya?ml\b/i.test(normalizedEarly);
+      let decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/i.test(normalizedEarly)
+                          || hasCdBareDecompWrite || cdConstructedDecomp;
       // Claude r17 [security]: also resolve redirect/tee/dd-of target
       // paths through symlinks. A pre-existing symlink whose target
       // resolves to `.mpl/mpl/...` defeats the literal substring check.
@@ -859,7 +881,14 @@ async function main() {
         'diff', 'comm', 'sdiff',
         'echo', 'printf', 'pwd', 'type', 'which',
       ]);
-      let stateMention = /\.mpl\/state\.json/.test(normalizedEarly);
+      // Codex r24 [security]: detect cd-into-constructed-mpl + bare
+      // state.json write.
+      const cdCmdSubState = /\bcd\b[^;|&\n]*\$\(/.test(normalizedEarly) ||
+                            /\bcd\b[^;|&\n]*`/.test(normalizedEarly);
+      const hasCdBareStateWrite = /\bcd\b[\s\S]*&&[\s\S]*(?:>{1,2}|\btee\b|\bdd\b[^;|&]*\bof=)\s*state\.json\b/i.test(normalizedEarly);
+      const cdConstructedState = cdCmdSubState && /(?:>{1,2}|\btee\b|\bdd\b[^;|&]*\bof=)\s*state\.json\b/i.test(normalizedEarly);
+      let stateMention = /\.mpl\/state\.json/.test(normalizedEarly)
+                         || hasCdBareStateWrite || cdConstructedState;
       let symlinkWritesToState = false;
       if (!stateMention) {
         const stateTargetReEarly = /(?:[\d&]?>{1,2}\s*|\btee\b(?:\s+-\S+)*\s+|\bdd\b[^|;&]*\bof=\s*)([^\s|;&]+)/g;

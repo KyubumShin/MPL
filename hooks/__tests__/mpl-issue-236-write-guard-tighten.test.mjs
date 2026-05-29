@@ -534,6 +534,86 @@ test('#236 A1 claude r22 [security]: multi-level /X/../ traversal collapse', () 
   }
 });
 
+test('#236 A1 codex r24 [security]: cd-into-constructed-mpl + bare-filename redirect is blocked', () => {
+  // Codex r24: `cd .$(printf mpl)/mpl && printf forged > decomposition.yaml`
+  // constructs the path at runtime via command-substitution, cds into
+  // it, then writes bare basename. The static substring check misses
+  // the protected path. Fix: detect cd + cmdSub + bare protected
+  // basename redirect.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      `cd .$(printf mpl)/mpl && printf forged > decomposition.yaml`,
+      `cd .$(printf mpl) && printf forged > state.json`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected cd-constructed block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 claude r24 [security]: gzip / bzip2 / xz remove input file by default', () => {
+  // Claude r24: `gzip FILE` deletes FILE after compression (no -k flag).
+  // Same for bzip2 / xz / zstd. Treat as destructive against the
+  // operand path.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'gzip .mpl/memory/some.md',
+      'bzip2 .mpl/memory/some.md',
+      'xz .mpl/memory/some.md',
+      'gzip docs/learnings/learn.md',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected gzip/bzip2/xz block for: ${command}`,
+      );
+    }
+    // Sanity: --keep flag preserves the input → NOT block.
+    const keep = runHook(cwd, {
+      cwd, tool_name: 'Bash',
+      tool_input: { command: 'gzip --keep .mpl/memory/some.md' },
+    });
+    assert.notEqual(keep.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 regression: filesystem-level ancestor (cd /tmp from /tmp/X) does NOT trip ancestor-of-protected', () => {
+  // Refinement after r24: the ancestor match was too broad — `cd /tmp`
+  // with cwd `/tmp/X` tripped because `/tmp` is a filesystem-level
+  // ancestor of `/tmp/X/.mpl/mpl`. Fix: only trigger ancestor match
+  // when the operand resolves to a path INSIDE the workspace cwd.
+  const cwd = freshWorkspace();
+  try {
+    const legit = runHook(cwd, {
+      cwd, tool_name: 'Bash',
+      tool_input: { command: 'cd /tmp && echo X > foo.txt' },
+    });
+    assert.notEqual(legit.decision, 'block',
+      '`cd /tmp` from a subdir must not be ancestor-blocked');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 claude r23 [security]: git clean -*x* sweeps .mpl/ (gitignored) is blocked', () => {
   // Claude r23: `git clean -fdx` deletes untracked + ignored files.
   // .mpl/ is gitignored on every real MPL workspace, so -x sweeps the
