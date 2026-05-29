@@ -177,6 +177,30 @@ function isDangerousBashCommand(command) {
 // Resolving each token via path.resolve(cwd, token) normalizes those
 // forms to a single canonical absolute path that we can compare
 // against the resolved protected roots.
+// Expand bash brace patterns within each whitespace-separated token,
+// repeating until no more `{…}` groups remain (10-round backstop for
+// pathological nesting). Cartesian: `{a,b}{c,d}` → `ac ad bc bd`.
+function expandShellBraces(text) {
+  let tokens = text.split(/\s+/);
+  for (let iter = 0; iter < 10; iter++) {
+    let changed = false;
+    const next = [];
+    for (const t of tokens) {
+      const m = t.match(/^([^{}]*)\{([^{}]+)\}(.*)$/);
+      if (m && m[2].includes(',')) {
+        const [, pre, body, post] = m;
+        for (const p of body.split(',')) next.push(`${pre}${p}${post}`);
+        changed = true;
+      } else {
+        next.push(t);
+      }
+    }
+    tokens = next;
+    if (!changed) break;
+  }
+  return tokens.join(' ');
+}
+
 function matchesProtectedDelete(command, cwd) {
   if (!command || typeof command !== 'string') return null;
   // Strip leading wrapper before checking the head — `sudo rm -rf …`
@@ -189,25 +213,45 @@ function matchesProtectedDelete(command, cwd) {
     return null;
   }
 
-  // Pre-normalize:
+  // Pre-normalize the command to the form a real shell would execute,
+  // so substring + token checks see the same path the OS sees.
+  // Layered from "most decoded" to "least decoded":
+  //   - Codex r5 on PR #249 [data-integrity]: Bash ANSI-C quoting
+  //     ($'…') decodes hex (\xHH), octal (\OOO), and Unicode (\uHHHH /
+  //     \UHHHHHHHH) escapes. `rm -rf $'.mpl\x2fmpl'` deletes `.mpl/mpl`.
+  //     Decode these escapes to characters BEFORE the generic
+  //     backslash strip so they don't get clobbered to `x2f`.
   //   - Codex r4 on PR #249 [data-integrity]: POSIX shells remove
-  //     backslash escapes before exec — `rm -rf .mpl\/mpl` deletes
-  //     `.mpl/mpl`. Strip every `\X` → `X` first so backslash-escape
-  //     forgery collapses to the same literal a real shell would see.
-  //   - Codex r3 on PR #249 [data-integrity]: POSIX shells concatenate
-  //     adjacent quote fragments. `.mpl/""mpl` and `.mpl"/"mpl` both
-  //     resolve to `.mpl/mpl` at execution time. Strip every `"`, `'`,
-  //     backtick character so quote-concatenation forgery collapses to
-  //     the same literal a real shell would see.
-  //   - Codex r2 on PR #249 [logic]: a real shell normalizes runs of
-  //     `/` after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl`).
+  //     generic backslash escapes — `rm -rf .mpl\/mpl` deletes
+  //     `.mpl/mpl`. After ANSI-C decoding, strip every remaining
+  //     `\X` → `X`.
+  //   - Codex r3 on PR #249 [data-integrity]: shells concatenate
+  //     adjacent quote fragments — `.mpl/""mpl` and `.mpl"/"mpl`
+  //     resolve to `.mpl/mpl`. Strip every `"`, `'`, backtick.
+  //   - Codex r2 on PR #249 [logic]: shells normalize runs of `/`
+  //     after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl`).
   //     Collapse repeated slashes to one.
-  // All three transforms preserve token-boundary whitespace, so
-  // downstream tokenization still works.
+  // All transforms preserve token-boundary whitespace.
   normalized = normalized
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\U([0-9a-fA-F]{8})/g, (_, h) => {
+      const cp = parseInt(h, 16);
+      try { return String.fromCodePoint(cp); } catch { return ''; }
+    })
+    .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
     .replace(/\\([\s\S])/g, '$1')
     .replace(/["'`]/g, '')
     .replace(/\/+/g, '/');
+
+  // Claude r5 on PR #249 [data-integrity]: Bash brace expansion
+  // (`.mpl/{mpl,contracts}` → `.mpl/mpl .mpl/contracts`, cartesian
+  // `{a,b}{c,d}` → `ac ad bc bd`) was a new class outside the
+  // previously-closed list. Expand braces here so the literal target
+  // appears in one of the expanded tokens and the substring + token
+  // checks fire normally. Iterative leftmost-brace expansion handles
+  // nested + cartesian forms; we cap at 10 iterations as a backstop.
+  normalized = expandShellBraces(normalized);
 
   // Claude r1 on PR #249 [logic] (concrete repros): shell-expansion
   // forms (`$PWD`, `$(pwd)`), parenthesized subshells, variable

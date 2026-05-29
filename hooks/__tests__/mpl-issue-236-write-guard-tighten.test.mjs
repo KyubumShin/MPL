@@ -400,6 +400,67 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 claude r5 [data-integrity]: brace expansion is normalized before matching', () => {
+  // Claude r5: `rm -rf .mpl/{mpl,contracts}` deletes both protected
+  // paths in real bash. Cartesian forms (`{.mpl,docs}/{mpl,learnings}`)
+  // and partial forms (`.mpl/mp{l,n}`) too. The fix expands every
+  // `prefix{a,b,…}suffix` per-token (cartesian when multiple groups)
+  // before the substring + token checks.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'rm -rf .mpl/{mpl,contracts}',
+      'rm -rf .mpl/{mpl,contracts,memory}',
+      'rm -rf {.mpl,docs}/{mpl,learnings}',
+      'rm -rf .mpl/mp{l,n}',
+      'rm -rf .{mpl,omc}/mpl',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected brace-expansion block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 codex r5 [data-integrity]: ANSI-C quoted escape sequences are decoded before matching', () => {
+  // Codex r5: Bash $'…' ANSI-C quoting decodes hex/octal/Unicode
+  // escapes. `rm -rf $'.mpl\\x2fmpl'` deletes `.mpl/mpl`. The fix
+  // decodes \xHH / \uHHHH / \UHHHHHHHH / \OOO before the generic
+  // backslash strip so they don't get clobbered to `x2f`.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      String.raw`rm -rf $'.mpl\x2fmpl'`,
+      String.raw`rm -rf $'.mpl\057mpl'`,
+      String.raw`rm -rf $'.mpl/mpl'`,
+      String.raw`rm -rf $'docs\x2flearnings'`,
+      String.raw`rm -rf $'docs\057learnings'`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected ANSI-C decode block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r4 [data-integrity]: backslash-escaped path separators are blocked', () => {
   // Codex r4: POSIX shells remove `\X` escapes before exec, so
   // `rm -rf .mpl\/mpl` and `rm -rf docs\/learnings` actually delete
