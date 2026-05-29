@@ -590,6 +590,62 @@ test('#236 A3 claude r25 [security]: gzip per-segment scan — later -k does not
   }
 });
 
+test('#236 A3 claude r27 [security]: -k/--keep keep-flag only counts as standalone token, not filename substring', () => {
+  // Claude r27 (generalizes Codex r26): `gzip .mpl/mpl/-k` (no `--`)
+  // was bypassing because the segment-wide `/(?:-k|--keep)\b/` regex
+  // matched the filename tail. Pure `gzip FILE` deletes FILE, so the
+  // matching filename `.mpl/mpl/-k` is destructive, but the gate saw
+  // `-k` substring and suppressed. Fix: tokenize the segment after
+  // the compressor verb and only treat `-k` / `--keep` / `--keep=…` /
+  // `-Xk…` as the keep flag when they're standalone option tokens.
+  const cwd = freshWorkspace();
+  try {
+    writeFileSync(join(cwd, '.mpl', 'mpl', '-k'), 'data');
+    writeFileSync(join(cwd, '.mpl', 'mpl', 'foo-k'), 'data');
+    writeFileSync(join(cwd, '.mpl', 'mpl', 'keep-this'), 'data');
+    for (const command of [
+      'gzip .mpl/mpl/-k',
+      'gzip .mpl/mpl/foo-k',
+      'gzip .mpl/mpl/keep-this',
+      'bzip2 .mpl/mpl/-k',
+      'xz .mpl/mpl/foo-k',
+      'zstd .mpl/mpl/-k',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected claude r27 standalone-flag block for: ${command}`,
+      );
+    }
+    // Sanity: real flag forms still suppress (legitimate keep).
+    for (const command of [
+      'gzip -k .mpl/memory/some.md',
+      'gzip --keep .mpl/memory/some.md',
+      'gzip --keep=true .mpl/memory/some.md',
+      'gzip -kn .mpl/memory/some.md',
+      'gzip -nk .mpl/memory/some.md',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.continue,
+        true,
+        `expected legit keep flag to pass for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r27 [data-integrity]: quote/backslash-concat destructive VERB tokens still trip the gate', () => {
   // Codex r27: before the fix, `isDestructive` matched `\brm\b` /
   // `\bgzip\b` on the partially-stripped command (only sudo/time/nice/

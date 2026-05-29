@@ -366,13 +366,40 @@ function matchesProtectedDelete(command, cwd) {
     // gzip earlier in the chain.
     normalized.split(/[;|&\n]+/).some((seg) => {
       if (!/\b(gzip|bzip2|xz|zstd)\b/.test(seg)) return false;
-      // Codex r26 [security]: `-k`/`--keep` only counts as an option
-      // when it appears BEFORE `--` (POSIX end-of-options sentinel).
-      // After `--` any `-k` is a literal filename. So `gzip -- .mpl/mpl/-k`
-      // still deletes the protected file. Split the segment at `--` and
-      // only inspect the pre-options portion for the keep flag.
-      const beforeDoubleDash = seg.split(/\s--(?:\s|$)/)[0];
-      return !/(?:-k|--keep)\b/.test(beforeDoubleDash);
+      // Claude r27 [security] (generalizes Codex r26): `-k`/`--keep`
+      // must be a STANDALONE option token, not a substring of an
+      // operand path. Otherwise `gzip .mpl/mpl/-k` and similar
+      // filename-ends-in-`-k` paths suppress the destructive check
+      // even without a POSIX `--` end-of-options sentinel — the
+      // segment-wide `/(?:-k|--keep)\b/` matched the filename tail.
+      //
+      // Tokenize on whitespace; only consider tokens after the
+      // compressor verb and BEFORE a literal `--` token. A keep flag
+      // is one of:
+      //   - exactly `-k`
+      //   - exactly `--keep`
+      //   - `--keep=…` (long option with value)
+      //   - `-Xk[Y…]` (combined short-flag bundle including `k`)
+      const tokens = seg.trim().split(/\s+/);
+      let pastVerb = false;
+      let hasKeep = false;
+      for (const t of tokens) {
+        if (!pastVerb) {
+          if (/^(gzip|bzip2|xz|zstd)$/.test(t)) pastVerb = true;
+          continue;
+        }
+        if (t === '--') break;
+        if (
+          t === '-k' ||
+          t === '--keep' ||
+          /^--keep=/.test(t) ||
+          /^-[a-zA-Z]*k[a-zA-Z]*$/.test(t)
+        ) {
+          hasKeep = true;
+          break;
+        }
+      }
+      return !hasKeep;
     }) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
