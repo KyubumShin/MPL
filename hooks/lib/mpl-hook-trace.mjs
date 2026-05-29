@@ -78,6 +78,9 @@ const PURPOSES = {
   'mpl-compaction-tracker': 'compaction telemetry',
   'mpl-session-init': 'session initialization',
   'mpl-keyword-detector': 'MPL keyword/slash command detection',
+  // #237 D1: hooks added after the original map was authored. Verified
+  // by comparing hooks.json registered ids against PURPOSES keys.
+  'mpl-require-test-agent-brief': 'test-agent brief validation gate (PreToolUse on Task)',
 };
 
 const DECOMPOSITION_PATH = '.mpl/mpl/decomposition.yaml';
@@ -91,9 +94,57 @@ const DECOMPOSITION_FOCUS = new Set([
   'mpl-require-test-agent',
 ]);
 
+// #237 D3 (+ codex r1 on PR #243): hooks that read state.json fields.
+// A trace of `.mpl/state.json` should narrow to these instead of
+// including every Edit/Write hook (most of which never touch state).
+// Hooks not in the set still appear when there's an active blocker.
+//
+// Codex r1: STATE_FOCUS membership is evaluated INDEPENDENTLY of the
+// hook's matcher — what matters is whether the hook reads state, not
+// whether it fires on file-write tools. The earlier matcher-gated
+// check dropped `mpl-gate-recorder` (PostToolUse on Bash|Task|Agent)
+// and other non-file-write state readers from state traces.
+const STATE_FOCUS = new Set([
+  'mpl-state-invariant',
+  'mpl-phase-controller',
+  'mpl-gate-recorder',
+  'mpl-tool-tracker',
+  'mpl-context-monitor',
+  'mpl-require-test-agent',
+  'mpl-require-finalize-artifacts',
+  'mpl-require-completed-phase-immutability',
+  'mpl-require-phase-evidence',
+  'mpl-require-whole-goal-closure',
+  'mpl-baseline-guard',
+  'mpl-require-decomposition-delta',
+  'mpl-decomposition-postprocess',
+  'mpl-require-test-agent-brief',
+  // Codex r1: reads state.e2e_results before blocking finalize_done=true.
+  'mpl-require-e2e',
+  // Codex r1: reads state.e2e_results / state.security_results for authenticity check.
+  'mpl-require-e2e-authenticity',
+]);
+
 function readHooksConfig(pluginRoot = DEFAULT_PLUGIN_ROOT) {
   const path = join(pluginRoot, 'hooks', 'hooks.json');
   return JSON.parse(readFileSync(path, 'utf-8'));
+}
+
+// #237 D1: regression hook so tests can audit PURPOSES against the
+// live hooks.json registry. Returns the list of hook ids registered
+// in hooks.json that are missing from the PURPOSES map. An empty
+// array means every registered hook has a concrete label.
+export function findPurposeGaps(pluginRoot = DEFAULT_PLUGIN_ROOT) {
+  const config = readHooksConfig(pluginRoot);
+  const registered = new Set();
+  for (const regs of Object.values(config.hooks || {})) {
+    for (const r of regs || []) {
+      for (const h of r.hooks || []) {
+        registered.add(hookIdFromCommand(h.command));
+      }
+    }
+  }
+  return [...registered].filter((id) => !(id in PURPOSES)).sort();
 }
 
 function hookIdFromCommand(command) {
@@ -124,17 +175,56 @@ function matcherIncludes(matcher, tools) {
   });
 }
 
+// Codex r2 on PR #243 [logic]: pathCategory must require a slash
+// boundary on the suffix match. Without it, `src/foo.mpl/state.json`
+// — a regular file in a directory called `foo.mpl` — would be
+// miscategorized as the canonical state path, and the same applies
+// to `foo.mpl/mpl/decomposition.yaml` vs the canonical decomposition
+// path. The state/decomposition focus filters then hide the legitimate
+// file hooks for these targets.
+function endsWithSegment(path, segment) {
+  if (path === segment) return true;
+  return path.endsWith('/' + segment);
+}
+
+// Codex r5 on PR #243: narrow Windows-shape detection to ONLY
+// unambiguous Windows path forms — drive letter (`C:\...`) and UNC
+// (`\\server\share`). Pure-backslash relative strings like
+// `foo\state.json` are NOT classified as Windows: on POSIX,
+// backslash is a legal filename character and the input is a single
+// basename, not a separated path. Mixed `/\` paths already preserve
+// POSIX semantics. Drop the pure-backslash branch because the
+// runtime cannot disambiguate "Windows path" from "POSIX literal
+// filename" without an explicit context flag.
+function normalizeWindowsPath(p) {
+  if (typeof p !== 'string' || !p) return p;
+  if (!p.includes('\\')) return p;
+  // Drive letter prefix (e.g. `C:\`, `c:\`, or `c:/`).
+  if (/^[A-Za-z]:[/\\]/.test(p)) return p.replace(/\\/g, '/');
+  // UNC prefix (`\\server\share`).
+  if (p.startsWith('\\\\')) return p.replace(/\\/g, '/');
+  return p;
+}
+
 function pathCategory(targetPath) {
-  const normalized = String(targetPath || '').replace(/\\/g, '/');
-  if (normalized.endsWith(DECOMPOSITION_PATH) || normalized === DECOMPOSITION_PATH) {
-    return 'decomposition';
-  }
-  if (normalized.endsWith('.mpl/state.json')) return 'state';
+  const normalized = normalizeWindowsPath(String(targetPath || ''));
+  if (endsWithSegment(normalized, DECOMPOSITION_PATH)) return 'decomposition';
+  if (endsWithSegment(normalized, '.mpl/state.json')) return 'state';
   return 'file';
 }
 
 function shouldIncludeHook({ eventName, matcher, hookId, category }) {
   const fileWriteTools = ['Edit', 'Write', 'MultiEdit'];
+  // #237 D3 + codex r1 on PR #243: for state category, STATE_FOCUS
+  // membership is evaluated FIRST and INDEPENDENTLY of the matcher.
+  // A hook that reads state must appear regardless of whether its
+  // matcher fires on file-write tools, Bash, or Task. Hooks outside
+  // the focus list are filtered out even if their matcher would
+  // otherwise admit them — that's the whole point of the focus.
+  if (category === 'state') {
+    if (eventName === 'Stop') return true;
+    return STATE_FOCUS.has(hookId);
+  }
   if (eventName === 'PreToolUse') {
     if (matcherIncludes(matcher, fileWriteTools)) return true;
     if (category === 'decomposition' && matcherIncludes(matcher, ['Task', 'Agent'])) return true;
@@ -164,12 +254,32 @@ function blockStatusFor(hookId, state, targetPath) {
   if (missing.length > 0) {
     return 'invalid_blocked_envelope';
   }
-  const artifact = String(state.blocked_artifact || '').trim();
-  const target = String(targetPath || '').trim();
+  // Codex r3/r4 on PR #243: balance two concrete edge cases:
+  //   r3 — `C:\repo\.mpl\state.json` (Windows-style) target should
+  //        match `.mpl/state.json` artifact (active blocker visible).
+  //   r4 — `src/foo\state.json` on POSIX is a single filename
+  //        `foo\state.json`; unconditional `\` → `/` would fabricate
+  //        a path boundary and falsely match a `state.json` artifact.
+  //
+  // Conservative narrowing: only normalize when the input is
+  // structurally Windows-shaped — drive-letter prefix, UNC prefix,
+  // OR pure-backslash with no forward slashes. Mixed `/\` paths and
+  // bare-backslash-in-segment leave the raw comparison alone, which
+  // preserves the r4 POSIX semantics.
+  const artifact = normalizeWindowsPath(String(state.blocked_artifact || '').trim());
+  const target = normalizeWindowsPath(String(targetPath || '').trim());
   if (!target) {
     return 'invalid_blocked_envelope';
   }
-  if (artifact === target || target.endsWith(artifact) || artifact.endsWith(target)) {
+  // #237 D2: slash-boundary match. Bidirectional endsWith without a
+  // boundary was overly permissive — target `foo.yaml` matched stored
+  // artifact `barfoo.yaml` and vice versa. Now either exact match OR
+  // suffix match where the boundary is a `/` separator.
+  if (
+    artifact === target ||
+    (artifact && target.endsWith('/' + artifact)) ||
+    (target && artifact.endsWith('/' + target))
+  ) {
     return 'currently_blocking';
   }
   return 'registered_blocking_other_artifact';
