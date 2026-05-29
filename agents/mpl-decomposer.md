@@ -88,9 +88,12 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
       using matching `framework_convention_profiles` rather than hardcoded
       framework knowledge.
 
-      **Empty case**: pure doc/infra phases with no type surface emit
-      `type_policy: { applies: false }`. Do NOT omit the field — explicit false
-      is the signal that the phase was considered.
+      **Empty case** (#239 C4): pure doc/infra phases with no type
+      surface may OMIT the `type_policy` field. Downstream consumers
+      (`mpl-require-goal-trace.mjs`, reviewers) treat absence as
+      "not applicable". The legacy form `type_policy: { applies: false }`
+      is still accepted for backward compatibility — both
+      `type_policy` omitted and `{ applies: false }` mean N/A.
 
     Step 5.6: Per-phase Error Spec Synthesis (v0.17, #57)
       Read raw-scan.md sections: `Error Throw Sites`, `Error Locations`, and the
@@ -107,8 +110,10 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           - Go: ≥5 ignored-error sites → advisory "explicit error handling"
         - Validation order (when multiple validations apply to same input)
 
-      **Empty case**: pure doc/infra/migration phases with no error surface emit
-      `error_spec: { applies: false }`. Same rule as type_policy.
+      **Empty case** (#239 C4): pure doc/infra/migration phases may
+      OMIT the `error_spec` field. Downstream tolerates absence the
+      same way as `type_policy`. The legacy `error_spec: { applies: false }`
+      remains accepted for backward compatibility.
 
     Step 6: Define interface contracts
       - Specify requires/produces for each phase.
@@ -635,6 +640,6 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
     - **AP-DECOMP-02 · Horizontal decomposition of multi-layer project**: splitting by layer (all types → all backend → all UI) instead of vertical slices. Horizontal phases cannot be verified independently and amplify cross-layer contract failures at integration time.
     - **AP-DECOMP-03 · Missing interfaces**: phases that cannot communicate because `requires`/`produces` are undefined. Every phase's `requires` must be satisfied by a prior phase's `produces`. Orphan phases indicate decomposition error, not harmless slack.
     - **AP-DECOMP-04 · Synthesis drift from raw scan (v0.17 #57)**: inventing type-policy or error-spec facts the raw scan did not produce. Type rules must trace back to raw-scan Type Hints or PP tech stack; error categories to Error Throw Sites or PP conventions. If the raw scan is empty (greenfield + no PP spec), `type_policy`/`error_spec` may be minimal — that is honest output. Do not fabricate to "fill the field".
-    - **AP-DECOMP-05 · Skipping synthesis fields as absent (v0.17 #57)**: `type_policy` and `error_spec` are REQUIRED on every phase. Emit `applies: false` with empty subfields when the phase legitimately has no type/error surface (pure docs/migrations). Omission is a validation error — absence and "not applicable" are distinct states.
+    - **AP-DECOMP-05 · Synthesis-field discipline (v0.17 #57; relaxed #239 C4)**: `type_policy` and `error_spec` are optional fields. When the phase legitimately has no type/error surface (pure docs/migrations), OMIT them — downstream consumers treat absence as "not applicable". The legacy `applies: false` form is still accepted for back-compat. The original "absence ≠ N/A" rule was over-enforcement of an output-budget tax; the audit found the field added no signal vs. omission.
   </Failure_Modes>
 </Agent_Prompt>
