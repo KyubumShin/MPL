@@ -400,6 +400,34 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r9 [data-integrity]: writer utilities (tee, dd of=) are blocked on protected paths', () => {
+  // Codex r9: `tee FILE` opens FILE for write and overwrites it;
+  // `dd of=FILE` does the same. Pre-fix entry gate didn't include
+  // these writer utilities so the protected operand check never ran.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'echo x | tee .mpl/mpl/decomposition.yaml',
+      'echo x | tee -a .mpl/mpl/log',
+      'tee -a .mpl/contracts/foo',
+      'dd if=/dev/zero of=.mpl/mpl/decomposition.yaml',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected writer-utility block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r8 [data-integrity]: no-space and fd-prefix redirects are blocked', () => {
   // Codex r8: POSIX shell redirection doesn't require whitespace
   // after `>`/`>>`/`&>`. Pre-fix entry gate required `\s` after `>`.

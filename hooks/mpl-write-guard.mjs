@@ -253,6 +253,11 @@ function matchesProtectedDelete(command, cwd) {
     /\bunlink\b/.test(normalized) ||
     /\btruncate\b/.test(normalized) ||
     /\bcp\b.*\/dev\/null/.test(normalized) ||
+    // Codex r9 on PR #249 [data-integrity]: writer utilities that
+    // create/overwrite their path operand are destructive too.
+    // `tee FILE` opens FILE for write and overwrites it.
+    /\btee\b/.test(normalized) ||
+    /\bdd\b.*\bof=/.test(normalized) ||
     // Codex r8 on PR #249 [data-integrity]: POSIX shell redirection
     // does not require whitespace after `>`/`>>`/`&>`. `echo x
     // >.mpl/mpl/foo` truncates the protected file. Allow optional
@@ -332,7 +337,7 @@ function matchesProtectedDelete(command, cwd) {
     // Skip flag tokens; they can't be paths.
     if (token.startsWith('-')) continue;
     // Skip known program names so we don't false-match `rm` itself.
-    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir|mv|shred|unlink|truncate|cp|export)$/i.test(token)) continue;
+    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir|mv|shred|unlink|truncate|cp|export|tee|dd|tar|rsync|echo|cat|printf)$/i.test(token)) continue;
 
     // Codex r6 on PR #249 [data-integrity]: shell pathname expansion
     // (glob metachars `*`, `?`, `[…]`) lets a command operand expand
