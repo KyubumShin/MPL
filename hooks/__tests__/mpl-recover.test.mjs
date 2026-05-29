@@ -575,6 +575,55 @@ phases:
     assert.equal(result.status, 'recovered');
   });
 
+  it('#234 [data-integrity] codex r5: impossible calendar dates that Date.parse normalizes are REJECTED', () => {
+    // codex r5 on PR #242: Date.parse('2026-02-31T00:00:00Z') silently
+    // rolls forward to 2026-03-03T00:00:00Z. Without strict
+    // round-trip validation, a corrupt legacy recovery
+    // last_attempt_at: '2026-02-31...' would be parsed into a real
+    // instant, possibly >= the current block's blocked_at, and adopt
+    // stale attempts that should have been discarded.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-03-02T00:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          // Impossible date — Date.parse normalizes to 2026-03-03,
+          // which would be > the current blocked_at of 2026-03-02.
+          last_attempt_at: '2026-02-31T00:00:00Z',
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0, 'invalid calendar date must be rejected, not normalized + adopted');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+  });
+
+  it('#234 [data-integrity] codex r5: non-UTC ISO timestamps are REJECTED', () => {
+    // Non-Z local-time form: ambiguous wall clock, must not be admitted
+    // as legitimate recovery state.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:00:00', // no Z
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.attempts, 0);
+  });
+
   it('#234 [data-integrity] codex r4: malformed ISO timestamps fall closed (discarded)', () => {
     // If either timestamp fails Date.parse, the safe direction is to
     // discard the untagged recovery rather than admit garbage.

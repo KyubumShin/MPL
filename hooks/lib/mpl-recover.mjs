@@ -174,19 +174,48 @@ function activeRecoveryState(state) {
   // When the current state has neither code nor blocked_at, fall back
   // to the original pre-tag behavior (genuinely ambiguous → trust).
   if (currentCode === null && currentBlockedAt === null) return rec;
-  // Codex r4 on PR #242 [data-integrity]: ISO 8601 strings with mixed
-  // millisecond precision (`2026-06-01T12:00:00Z` vs
-  // `2026-06-01T12:00:00.500Z`) sort lexicographically against the
-  // chronological intent (`.` < `Z` in ASCII). Compare via Date.parse
-  // numeric milliseconds; fall closed (discard untagged recovery) if
-  // either timestamp fails to parse.
+  // Codex r4/r5 on PR #242 [data-integrity]: must compare
+  // chronologically (mixed millisecond precision misorders strings)
+  // AND reject inputs that Date.parse silently normalizes from
+  // impossible calendar dates (e.g. `2026-02-31` → 2026-03-03). Strict
+  // ISO-Z parser: regex shape check + Date.parse + round-trip
+  // verification of the parsed numeric components against the claimed
+  // ones. Anything that doesn't survive this is treated as malformed
+  // → discard untagged recovery (fail-closed).
   const stampedLastAt = typeof rec.last_attempt_at === 'string' ? rec.last_attempt_at : null;
   if (!stampedLastAt || !currentBlockedAt) return {};
-  const stampedMs = Date.parse(stampedLastAt);
-  const currentMs = Date.parse(currentBlockedAt);
-  if (!Number.isFinite(stampedMs) || !Number.isFinite(currentMs)) return {};
+  const stampedMs = parseStrictIsoUtcMs(stampedLastAt);
+  const currentMs = parseStrictIsoUtcMs(currentBlockedAt);
+  if (stampedMs === null || currentMs === null) return {};
   if (stampedMs >= currentMs) return rec;
   return {};
+}
+
+// Strict ISO 8601 UTC parser. Returns the numeric milliseconds since
+// epoch only when the input is in canonical `YYYY-MM-DDTHH:MM:SS(.\d+)?Z`
+// shape AND the parsed Date's components match the input verbatim
+// (so an impossible calendar date like 2026-02-31 — which Date.parse
+// silently rolls forward to 2026-03-03 — is rejected). Returns null
+// for any malformed / non-UTC / out-of-range input.
+const STRICT_ISO_Z = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z$/;
+function parseStrictIsoUtcMs(input) {
+  if (typeof input !== 'string') return null;
+  const m = STRICT_ISO_Z.exec(input);
+  if (!m) return null;
+  const ms = Date.parse(input);
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  if (
+    d.getUTCFullYear() !== Number(m[1]) ||
+    d.getUTCMonth() + 1 !== Number(m[2]) ||
+    d.getUTCDate() !== Number(m[3]) ||
+    d.getUTCHours() !== Number(m[4]) ||
+    d.getUTCMinutes() !== Number(m[5]) ||
+    d.getUTCSeconds() !== Number(m[6])
+  ) {
+    return null;
+  }
+  return ms;
 }
 
 function keepBlocked(cwd, state, opts) {
