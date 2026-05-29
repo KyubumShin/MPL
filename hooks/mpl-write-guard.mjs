@@ -269,6 +269,11 @@ function matchesProtectedDelete(command, cwd) {
     // `tee FILE` opens FILE for write and overwrites it.
     /\btee\b/.test(normalized) ||
     /\bdd\b.*\bof=/.test(normalized) ||
+    // Codex r11 on PR #249 [data-integrity]: `tar --remove-files` and
+    // `rsync --remove-source-files` are destructive — both delete
+    // their source operand after the copy completes.
+    /\btar\b.*--remove-files\b/.test(normalized) ||
+    /\brsync\b.*--remove-source-files\b/.test(normalized) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
     // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths

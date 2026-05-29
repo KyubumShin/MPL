@@ -400,6 +400,49 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r11 [data-integrity]: tar --remove-files and rsync --remove-source-files are blocked', () => {
+  // Codex r11: tar with --remove-files deletes the source file after
+  // archiving; rsync with --remove-source-files does the same. Plain
+  // tar / rsync without those flags is read-only-from-source and
+  // should NOT block.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'tar --remove-files -cf /tmp/mpl.tar .mpl/mpl',
+      'rsync --remove-source-files -av .mpl/mpl/ /tmp/dest/',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected tar/rsync remove block for: ${command}`,
+      );
+    }
+    // Sanity: plain tar / rsync (no remove flag) → NOT block.
+    for (const command of [
+      'tar -cf /tmp/x.tar .mpl/mpl',
+      'rsync -av .mpl/mpl /tmp/',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.notEqual(
+        decision.decision,
+        'block',
+        `plain tar/rsync (no remove flag) should NOT block: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r10 [data-integrity]: interpreter one-liners that mention protected paths are blocked', () => {
   // Codex r10: `node -e "require('fs').rmSync('.mpl/mpl')"`,
   // `python -c "shutil.rmtree('.mpl/mpl')"` can destroy protected
