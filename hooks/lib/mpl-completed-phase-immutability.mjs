@@ -11,12 +11,20 @@
  * (line comments, trailing whitespace) are allowed to change.
  *
  * The closed list of load-bearing fields (per the over-enforcement
- * audit B1 acceptance criteria + AD-0006 / AD-0007 contracts):
+ * audit B1 acceptance criteria + AD-0006 / AD-0007 contracts + the
+ * decomposer Output_Schema in `agents/mpl-decomposer.md`):
  *   - id, interface_contract, depends_on, impact, acceptance_criteria,
- *     variation_axes, success_criteria, covers, scope,
+ *     variation_axes, success_criteria, covers, scope, scope_files,
  *     test_agent_required, evidence_required, test_command,
- *     verification_strategy, scope_files
+ *     change_policy, resource_locks, goal_trace, verification_plan
  * Anything outside this set may change without violating immutability.
+ *
+ * NOTE: `verification_strategy` is NOT a per-phase decomposition
+ * field — it lives at the top level of `state.json` (see
+ * `hooks/lib/mpl-state.mjs:142`). The decomposer's per-phase
+ * verification surface is `verification_plan` (already in the set).
+ * Earlier doc drafts conflated the two; fixed in the codex/claude r1
+ * + r4 round on PR #247.
  */
 
 import { existsSync, readdirSync } from 'fs';
