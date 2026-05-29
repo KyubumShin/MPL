@@ -590,6 +590,52 @@ test('#236 A3 claude r25 [security]: gzip per-segment scan — later -k does not
   }
 });
 
+test('#236 A3 codex r26 [security]: -k / --keep AFTER `--` is a filename, not a flag', () => {
+  // Codex r26: `gzip -- .mpl/mpl/-k`. The pre-fix per-segment regex saw
+  // `-k` anywhere in the segment and incorrectly suppressed
+  // isDestructive even though `-k` was the operand (filename), not an
+  // option. POSIX `--` ends options, so any `-k`/`--keep` after it is
+  // a literal path. Fix: only inspect the pre-`--` portion of the
+  // segment for the keep flag.
+  const cwd = freshWorkspace();
+  try {
+    // Realize the `-k` filename on disk so it's a real protected target.
+    const protectedDir = join(cwd, '.mpl', 'mpl');
+    writeFileSync(join(protectedDir, '-k'), 'data');
+    writeFileSync(join(protectedDir, '--keep'), 'data');
+    for (const command of [
+      'gzip -- .mpl/mpl/-k',
+      'gzip -- .mpl/mpl/--keep',
+      'bzip2 -- .mpl/mpl/-k',
+      'xz -- .mpl/mpl/--keep',
+      'zstd -- .mpl/mpl/-k',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected codex r26 -- block for: ${command}`,
+      );
+    }
+    // Sanity: real -k BEFORE `--` still suppresses (legitimate keep).
+    const legitKeep = runHook(cwd, {
+      cwd, tool_name: 'Bash',
+      tool_input: { command: 'gzip -k -- .mpl/memory/some.md' },
+    });
+    assert.equal(
+      legitKeep.continue,
+      true,
+      'real -k before `--` still keeps file',
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 claude r24 [security]: gzip / bzip2 / xz remove input file by default', () => {
   // Claude r24: `gzip FILE` deletes FILE after compression (no -k flag).
   // Same for bzip2 / xz / zstd. Treat as destructive against the

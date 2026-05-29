@@ -353,9 +353,16 @@ function matchesProtectedDelete(command, cwd) {
     // Claude r25 [security]: scan per-statement — `-k`/`--keep`
     // anywhere else in the command doesn't suppress an unkeyed
     // gzip earlier in the chain.
-    normalized.split(/[;|&\n]+/).some((seg) =>
-      /\b(gzip|bzip2|xz|zstd)\b/.test(seg) && !/(?:-k|--keep)\b/.test(seg),
-    ) ||
+    normalized.split(/[;|&\n]+/).some((seg) => {
+      if (!/\b(gzip|bzip2|xz|zstd)\b/.test(seg)) return false;
+      // Codex r26 [security]: `-k`/`--keep` only counts as an option
+      // when it appears BEFORE `--` (POSIX end-of-options sentinel).
+      // After `--` any `-k` is a literal filename. So `gzip -- .mpl/mpl/-k`
+      // still deletes the protected file. Split the segment at `--` and
+      // only inspect the pre-options portion for the keep flag.
+      const beforeDoubleDash = seg.split(/\s--(?:\s|$)/)[0];
+      return !/(?:-k|--keep)\b/.test(beforeDoubleDash);
+    }) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
     // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths
