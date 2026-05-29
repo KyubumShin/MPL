@@ -1,0 +1,282 @@
+/**
+ * #251 — Follow-up to #239 C2/C3/C6 runtime work.
+ *
+ * AC coverage:
+ *   - C2: docs phase with `reviewer_required: false` + non-empty
+ *     rationale → adversarial-reviewer not dispatched.
+ *   - C3: refactor phase with `batch_test: true` → per-TODO test
+ *     rule relaxed.
+ *   - C6: phase with `evidence_required: [goal_trace]` → Hard 1
+ *     skips tooling demand.
+ *
+ * Runtime tests cover the new hook + schema-field declarations +
+ * prompt wiring that downstream consumers will read.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execSync } from 'child_process';
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+import { findReviewerRationaleGaps } from '../mpl-require-reviewer.mjs';
+
+const REPO_ROOT = join(import.meta.dirname, '..', '..');
+const HOOKS_DIR = join(REPO_ROOT, 'hooks');
+
+function readPrompt(relPath) {
+  return readFileSync(join(REPO_ROOT, relPath), 'utf-8');
+}
+
+function freshWorkspace() {
+  const cwd = mkdtempSync(join(tmpdir(), 'mpl-251-'));
+  mkdirSync(join(cwd, '.mpl', 'mpl'), { recursive: true });
+  writeFileSync(
+    join(cwd, '.mpl', 'state.json'),
+    JSON.stringify({ current_phase: 'phase-1' }),
+  );
+  return cwd;
+}
+
+function runReviewerHook(cwd, payload) {
+  const json = JSON.stringify(payload);
+  const out = execSync(
+    `node "${join(HOOKS_DIR, 'mpl-require-reviewer.mjs')}"`,
+    {
+      input: json,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000,
+    },
+  ).toString();
+  return JSON.parse(out.trim());
+}
+
+// ---------------------------------------------------------------------------
+// C2 — reviewer_required + reviewer_rationale unit tests
+// ---------------------------------------------------------------------------
+
+test('#251 C2 [unit]: findReviewerRationaleGaps reports phases with reviewer_required:false but empty rationale', () => {
+  const yaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: "Pure docs phase, no code change"
+  - id: phase-2
+    reviewer_required: false
+    reviewer_rationale: ""
+  - id: phase-3
+    reviewer_required: false
+  - id: phase-4
+    reviewer_required: true
+  - id: phase-5
+`;
+  const { offenders } = findReviewerRationaleGaps(yaml);
+  // phase-2 has empty rationale, phase-3 has no rationale.
+  // phase-1 has valid rationale → no offense.
+  // phase-4 / phase-5 have reviewer_required:true or absent → no offense.
+  assert.deepEqual(offenders.sort(), ['phase-2', 'phase-3']);
+});
+
+test('#251 C2 [unit]: quoted rationale string is treated as content', () => {
+  const yaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: 'Single-quoted reason'
+  - id: phase-2
+    reviewer_required: false
+    reviewer_rationale: "Double-quoted reason"
+`;
+  const { offenders } = findReviewerRationaleGaps(yaml);
+  assert.deepEqual(offenders, []);
+});
+
+// ---------------------------------------------------------------------------
+// C2 — hook end-to-end behavior
+// ---------------------------------------------------------------------------
+
+test('#251 C2 e2e: hook blocks decomposition.yaml Write when reviewer_required:false has no rationale', () => {
+  const cwd = freshWorkspace();
+  try {
+    const decompPath = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
+    const yaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+`;
+    writeFileSync(decompPath, yaml);
+    const decision = runReviewerHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: { file_path: decompPath, content: yaml },
+    });
+    assert.equal(decision.continue, false);
+    assert.equal(decision.decision, 'block');
+    assert.match(decision.reason, /phase-1/);
+    assert.match(decision.reason, /reviewer_rationale/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#251 C2 e2e: hook lets a valid rationale through', () => {
+  const cwd = freshWorkspace();
+  try {
+    const decompPath = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
+    const yaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: "Pure docs phase, no code surface"
+`;
+    writeFileSync(decompPath, yaml);
+    const decision = runReviewerHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: { file_path: decompPath, content: yaml },
+    });
+    assert.equal(decision.continue, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#251 C2 e2e: hook is silent on non-decomposition writes', () => {
+  const cwd = freshWorkspace();
+  try {
+    const decision = runReviewerHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: { file_path: join(cwd, 'README.md'), content: 'hi' },
+    });
+    assert.equal(decision.continue, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#251 C2 e2e: hook is silent outside MPL workspaces', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'mpl-251-no-mpl-'));
+  try {
+    const decision = runReviewerHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: {
+        file_path: join(cwd, '.mpl', 'mpl', 'decomposition.yaml'),
+        content: 'phases:\n  - id: phase-1\n    reviewer_required: false\n',
+      },
+    });
+    assert.equal(decision.continue, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#251 C2 e2e: hook accepts camelCase payload shape', () => {
+  // Sibling-hook convention from #238 codex r2.
+  const cwd = freshWorkspace();
+  try {
+    const decompPath = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
+    const yaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+`;
+    writeFileSync(decompPath, yaml);
+    const decision = runReviewerHook(cwd, {
+      cwd,
+      toolName: 'Write',
+      toolInput: { file_path: decompPath, content: yaml },
+    });
+    assert.equal(decision.continue, false);
+    assert.equal(decision.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C2 — schema declaration in decomposer prompt
+// ---------------------------------------------------------------------------
+
+test('#251 C2 schema: mpl-decomposer Output_Schema declares reviewer_required + reviewer_rationale', () => {
+  const text = readPrompt('agents/mpl-decomposer.md');
+  assert.match(text, /reviewer_required\s*:\s*boolean/);
+  assert.match(text, /reviewer_rationale\s*:\s*string/);
+  // Must mirror the test_agent_required idiom: default true, set false
+  // only for specific phase types.
+  assert.match(text, /Default[^\n]*true/i);
+  assert.match(text, /REQUIRED when reviewer_required is false/i);
+});
+
+test('#251 C2 wire: executor dispatch (commands/mpl-run-execute.md) honors reviewer_required:false', () => {
+  const text = readPrompt('commands/mpl-run-execute.md');
+  assert.match(text, /reviewer_required\s*==\s*false|reviewer_required:\s*false/);
+  assert.match(text, /reviewer-skipped/);
+  assert.match(text, /recordQualitySignal/);
+});
+
+// ---------------------------------------------------------------------------
+// C3 — batch_test schema + Phase Runner Rule 4 prompt wiring
+// ---------------------------------------------------------------------------
+
+test('#251 C3 schema: decomposer Output_Schema declares phase-level batch_test', () => {
+  const text = readPrompt('agents/mpl-decomposer.md');
+  const c3Block = text.match(/#239 C3[\s\S]{0,800}?batch_test\s*:\s*boolean/);
+  assert.ok(c3Block, 'mpl-decomposer.md must declare batch_test boolean under #239 C3');
+});
+
+test('#251 C3 schema: Seed Generator propagates batch_test to phase_seed', () => {
+  const text = readPrompt('agents/mpl-seed-generator.md');
+  assert.match(text, /batch_test\s*:\s*boolean/);
+  assert.match(text, /#239 C3|phase_domain\s*∈\s*\{refactor/i);
+});
+
+test('#251 C3 wire: Phase Runner Rule 4 relaxes per-TODO test when batch_test:true', () => {
+  const text = readPrompt('commands/mpl-run-execute.md');
+  const rule4 = text.match(/Incremental testing[\s\S]{0,800}?(?=\n\s*\d+\.|$)/);
+  assert.ok(rule4, 'Rule 4 block must exist');
+  assert.match(rule4[0], /batch_test:\s*true/);
+  assert.match(rule4[0], /Exception.*#239 C3|#239 C3.*Exception|batched implement-then-verify/i);
+});
+
+// ---------------------------------------------------------------------------
+// C6 — Hard 1 honors phase.evidence_required
+// ---------------------------------------------------------------------------
+
+test('#251 C6 wire: Hard 1 skips tooling demand when evidence_required excludes tooling', () => {
+  const text = readPrompt('commands/mpl-run-execute-gates.md');
+  // The gate logic must name the field and the skip path.
+  assert.match(text, /phase\.evidence_required|evidence_required/);
+  assert.match(text, /Hard 1 SKIPPED.*evidence_required|evidence_required.*Hard 1 SKIPPED|#239 C6/i);
+  // The tooling vs non-tooling distinction must be explicit.
+  assert.match(text, /TOOLING_EVIDENCE|tooling.based evidence/i);
+});
+
+test('#251 C6 wire: Hard 1 still fails when tooling is requested but no tools are present', () => {
+  // Sanity: the previous defensive check must still fire for the
+  // tooling-requested path.
+  const text = readPrompt('commands/mpl-run-execute-gates.md');
+  assert.match(
+    text,
+    /Hard 1 FAIL.*No lint, type check, or build tool/i,
+    'tooling-requested path must still hard-fail when no tools detected',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Discoverability — hook table, PURPOSES map
+// ---------------------------------------------------------------------------
+
+test('#251: docs/design.md Hook System table includes mpl-require-reviewer', () => {
+  const text = readPrompt('docs/design.md');
+  assert.match(text, /`mpl-require-reviewer`/);
+  assert.match(text, /41 registered hook commands/);
+});
+
+test('#251: PURPOSES map (hooks/lib/mpl-hook-trace.mjs) has entry for mpl-require-reviewer', () => {
+  const text = readPrompt('hooks/lib/mpl-hook-trace.mjs');
+  assert.match(text, /'mpl-require-reviewer':\s*'[^']+'/);
+});

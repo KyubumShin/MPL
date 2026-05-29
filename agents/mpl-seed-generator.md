@@ -135,6 +135,12 @@ disallowedTools: Write,Edit,Bash,Task,WebFetch,WebSearch,NotebookEdit
     phases:
       phase-{id}:
         goal: string
+        # #239 C3 / #251: propagate `batch_test` from the decomposer's
+        # per-phase field so Phase Runner Rule 4 sees the same flag.
+        # OPTIONAL (default false). Set true when the decomposer's
+        # phase entry has batch_test:true (auto-derived when
+        # `phase_domain ∈ {refactor, schema_migration}`).
+        batch_test: boolean
         acceptance_criteria: [string]  # sourced from design-intent + machine-verifiable refinement
         todo_structure:
           - id: string

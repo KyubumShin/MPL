@@ -457,7 +457,7 @@ result = Task(subagent_type="mpl-phase-runner", model=phase_model,
      1. Scope discipline: Only work within this phase's scope.
      2. Impact awareness: Impact section lists files to touch. Out-of-scope -> create Discovery.
      3. Direct implementation: Implement code changes DIRECTLY using Edit/Write/Bash. You are the implementer — all code changes happen directly in Phase Runner.
-     4. Incremental testing: After each TODO, immediately test the affected module. Fix failures before moving to the next TODO. Do NOT batch all implementation before testing.
+     4. Incremental testing: After each TODO, immediately test the affected module. Fix failures before moving to the next TODO. Do NOT batch all implementation before testing. **Exception (#239 C3 / #251)**: when the phase's seed sets `batch_test: true` (auto-set by the Seed Generator when `phase_domain ∈ {refactor, schema_migration}`), batched implement-then-verify is allowed — the TODOs are co-dependent (e.g., rename + update every caller + fix interface) and per-TODO isolation would create an invalid intermediate state. Verify once after all TODOs land. Set this flag for refactor/migration phases ONLY when intermediate states would not compile / would dirty the test suite.
      5. Cumulative verification: Run ALL tests (current + prior phases) at phase end. Record pass_rate.
      6. Discovery reporting: Unexpected findings -> Discovery with PP conflict assessment.
      7. PD Override: Changing past decisions -> explicit PD Override request.
@@ -868,11 +868,35 @@ keeping actual additions at ~80-100K.
       announce: "[MPL] Regression suite: {regression_suite.total_assertions} assertions accumulated across {regression_suite.accumulated_tests.length} phases"
     ```
 
-12. **Adversarial Review (P0-A redesign, #103)** — dispatch the reviewer
-    before the dependency frontier can consume this phase. In v0.18.6, this may
-    run in the background under the same `can_pipeline_verification` predicate
-    used for Test Agent; it MUST join before a dependent phase, Gate entry, or
-    finalize:
+12. **Adversarial Review (P0-A redesign, #103; #239 C2 / #251)** — dispatch the
+    reviewer before the dependency frontier can consume this phase. In v0.18.6,
+    this may run in the background under the same `can_pipeline_verification`
+    predicate used for Test Agent; it MUST join before a dependent phase, Gate
+    entry, or finalize.
+
+    **Skip path (#239 C2 / #251)**: when the phase's decomposition entry sets
+    `reviewer_required: false`, skip the dispatch entirely AND record a
+    `reviewer-skipped` telemetry signal so over-use is measurable:
+    ```
+    if phase_definition.reviewer_required == false:
+      # Pre-condition: hooks/mpl-require-reviewer.mjs already enforced
+      # that reviewer_rationale is a non-empty string. The dispatch is
+      # legitimately optional for pure-docs / mechanical-migration phases.
+      recordQualitySignal({
+        rule: "reviewer-skipped",
+        severity: "warn",
+        evidence: {
+          phase_id: phase.id,
+          phase_domain: phase_definition.phase_domain,
+          reviewer_rationale: phase_definition.reviewer_rationale
+        }
+      }, cwd)
+      // Treat the phase's adversarial step as PASS with no score
+      // contribution. mpl-quality-gate.mjs handles the absent JSON.
+      proceed to step 13
+    ```
+
+    Default path (`reviewer_required: true` or absent):
     ```
     reviewer_handle_or_result = Task({
       subagent_type: "mpl-adversarial-reviewer",

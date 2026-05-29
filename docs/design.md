@@ -450,7 +450,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 40 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 41 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -469,6 +469,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-require-phase-contract-graph` | PreToolUse: Edit/Write/MultiEdit | Enforce graph metadata, evidence policy, resource locks, and valid phase dependencies in `decomposition.yaml`. | v0.18.3 guard stream; resource locks v0.18.5 |
 | `mpl-require-decomposition-delta` | PreToolUse: Edit/Write/MultiEdit | Require recomposition deltas for existing decomposition graph rewrites. | v0.18.3 guard stream |
 | `mpl-require-completed-phase-immutability` | PreToolUse: Edit/Write/MultiEdit | Prevent completed phase blocks from being mutated or removed during recomposition. | v0.18.3 guard stream |
+| `mpl-require-reviewer` | PreToolUse: Edit/Write/MultiEdit | Enforce non-empty `reviewer_rationale` when a phase declares `reviewer_required: false`. | #239 C2 / #251 |
 | `mpl-require-phase-evidence` | PreToolUse: Edit/Write/MultiEdit | Require phase Evidence Latches before completion artifacts or completion state writes. | v0.18.3 guard stream |
 | `mpl-baseline-guard` | PreToolUse: Edit/Write/MultiEdit | Protect `.mpl/mpl/baseline.yaml` after creation unless an explicit renewal sentinel exists. | v0.17.0 P2 stream (#59) |
 | `mpl-ambiguity-gate` | PreToolUse: Task/Agent | Block decomposer dispatch until ambiguity and user-contract readiness gates pass. | v0.11.2; UC readiness v0.16.0 |
