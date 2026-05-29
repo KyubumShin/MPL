@@ -400,6 +400,54 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A1 claude r13 [security]: 2-step deactivation chain via Write/Edit is blocked', () => {
+  // Claude r13: an attacker can flip current_phase to 'completed'
+  // via a benign-looking Write/Edit (no forbidden field), then once
+  // isMplActive returns false the next Write of forged dispatch
+  // fields short-circuits the hook. The structural fix is to refuse
+  // ANY Write/Edit to .mpl/state.json BEFORE the isMplActive
+  // short-circuit, regardless of payload.
+  const cwd = freshWorkspace();
+  try {
+    // Step 1: deactivation Write — must block now.
+    const deactivate = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        content: JSON.stringify({ current_phase: 'completed' }),
+      },
+    });
+    assert.equal(deactivate.decision, 'block',
+      'deactivation Write to state.json must block');
+
+    // Even simpler write: blocked too.
+    const plain = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        content: JSON.stringify({ current_phase: 'phase-2' }),
+      },
+    });
+    assert.equal(plain.decision, 'block');
+
+    // Edit form blocked too.
+    const edit = runHook(cwd, {
+      cwd,
+      tool_name: 'Edit',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        old_string: 'phase-1',
+        new_string: 'phase-2',
+      },
+    });
+    assert.equal(edit.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r13 [security]: ANY Bash write to .mpl/state.json is blocked (base64/heredoc/etc. forgery)', () => {
   // Codex r13: a literal-keyword check (decomposer_dispatch /
   // first_transcript_seen) can't catch base64-decoded payloads. The
@@ -740,16 +788,10 @@ test('#236 A1 claude r9 [security]: planting decomposer_dispatch via Write/Edit 
     });
     assert.equal(editDecision.decision, 'block');
 
-    // Sanity: writing OTHER state fields still works.
-    const plainState = runHook(cwd, {
-      cwd,
-      tool_name: 'Write',
-      tool_input: {
-        file_path: '.mpl/state.json',
-        content: JSON.stringify({ current_phase: 'phase-2' }),
-      },
-    });
-    assert.notEqual(plainState.decision, 'block');
+    // r13 structural change: ANY Write/Edit to .mpl/state.json now
+    // blocks. The "benign" sanity case is inverted per the r13
+    // contract (state writes go through writeState() / mpl_state_write,
+    // not direct Write/Edit tool).
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

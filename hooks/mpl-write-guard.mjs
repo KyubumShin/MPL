@@ -14,6 +14,7 @@
  */
 
 import { dirname, join, extname, resolve as resolvePath } from 'path';
+import { existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -592,8 +593,50 @@ async function main() {
     return;
   }
 
-  // Check if MPL is active
   const cwd = data.cwd || data.directory || process.cwd();
+
+  // Claude r13 on PR #249 [security]: refuse direct Write/Edit to
+  // .mpl/state.json BEFORE the isMplActive short-circuit. Without
+  // this, an attacker can deactivate MPL via a benign-looking
+  // state.json write, then forge dispatch fields in a second write
+  // while the hook short-circuits, then write decomposition.yaml
+  // from the orchestrator's own transcript.
+  if (isWriteTool && process.env.MPL_FORCE_PURGE !== '1') {
+    const earlyFilePath = (data.tool_input || data.toolInput || {}).file_path
+      || (data.tool_input || data.toolInput || {}).filePath
+      || '';
+    // isMplDir: workspace has the .mpl/ directory (regardless of
+    // current_phase). This guards the deactivation chain even when
+    // current_phase has been flipped to completed/cancelled.
+    const isMplDir = existsSync(join(cwd, '.mpl'));
+    if (earlyFilePath && STATE_FILE_REGEX.test(earlyFilePath) && isMplDir) {
+      const reason =
+        `[MPL #236 A1] Refused direct ${toolName} of .mpl/state.json: only ` +
+        `mpl-write-guard's internal writeState may modify the orchestrator ` +
+        `state file. Direct Write/Edit can be chained (deactivate MPL → ` +
+        `forge decomposer_dispatch → write decomposition.yaml) to bypass ` +
+        `the A1 writer-identity gate. Use mpl_state_write / writeState, OR ` +
+        `set MPL_FORCE_PURGE=1 in the same shell for a one-shot manual edit.`;
+      recordBlockedHook(cwd, {
+        hookId: HOOK_ID,
+        phaseId: (readState(cwd) || {}).current_phase,
+        artifact: earlyFilePath,
+        code: 'state_json_direct_write',
+        reason,
+        resumeInstruction:
+          `Route the change through writeState() / mpl_state_write. Set MPL_FORCE_PURGE=1 only for a one-shot manual reset.`,
+        retryContext: { file_path: earlyFilePath, tool: toolName },
+      });
+      console.log(JSON.stringify({
+        continue: false,
+        decision: 'block',
+        reason,
+      }));
+      return;
+    }
+  }
+
+  // Check if MPL is active
   if (!isMplActive(cwd)) {
     // MPL inactive: no interference
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -779,45 +822,8 @@ ensure you have the correct target path. The command will proceed, but please ve
   // the dispatch flag; an orchestrator that plants a forged flag
   // could otherwise unlock the A1 writer-identity check and Write
   // decomposition.yaml from its own transcript.
-  if (STATE_FILE_REGEX.test(filePath)) {
-    const payload = (() => {
-      const t = data.tool_input || data.toolInput || {};
-      const parts = [];
-      if (typeof t.content === 'string') parts.push(t.content);
-      if (typeof t.new_string === 'string') parts.push(t.new_string);
-      if (typeof t.newString === 'string') parts.push(t.newString);
-      if (Array.isArray(t.edits)) {
-        for (const e of t.edits) {
-          if (e?.new_string) parts.push(String(e.new_string));
-          if (e?.newString) parts.push(String(e.newString));
-        }
-      }
-      return parts.join('\n');
-    })();
-    if (DECOMPOSER_DISPATCH_FIELD_REGEX.test(payload) || FIRST_TRANSCRIPT_FIELD_REGEX.test(payload)) {
-      const reason =
-        `[MPL #236 A1] Refused to Write/Edit decomposer_dispatch into ` +
-        `.mpl/state.json: only mpl-write-guard itself may set that key. ` +
-        `Planting it from outside would let the orchestrator forge the ` +
-        `decomposition.yaml writer-identity flag.`;
-      recordBlockedHook(cwd, {
-        hookId: HOOK_ID,
-        phaseId: state?.current_phase,
-        artifact: filePath,
-        code: 'decomposer_dispatch_forgery',
-        reason,
-        resumeInstruction:
-          `Remove the decomposer_dispatch field from the .mpl/state.json patch; the hook will populate it on Agent(subagent_type='mpl-decomposer') dispatch.`,
-        retryContext: { file_path: filePath },
-      });
-      console.log(JSON.stringify({
-        continue: false,
-        decision: 'block',
-        reason,
-      }));
-      return;
-    }
-  }
+  // (state.json Write/Edit guard moved to the top of main() to run
+  // BEFORE the isMplActive short-circuit — see Claude r13.)
 
   // #236 A1: decomposition.yaml may ONLY be Written/Edited by the
   // mpl-decomposer subagent. The hook detects this via a dispatch
