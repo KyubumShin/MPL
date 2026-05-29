@@ -360,22 +360,37 @@ export function classifyGateCommand(command, { cwd } = {}) {
   // are NOT accepted manual gate evidence because their `-e`/`-c`
   // forms can contain arbitrary text that the family regex would
   // erroneously match.
-  // #240 A4 + codex r1 on PR #244 [data-integrity]: a structured
-  // config entry MUST drive classification on its own — running the
-  // built-in family regex against the whole canonical command would
-  // happily match keywords inside a `-e "console.log('playwright')"`
-  // string literal and forge hard3 evidence. So when the head is in
-  // the structured map, classifyConfiguredHead (which walks tokens
-  // and rejects flags) is the only path; the built-in regex is
-  // bypassed for that head.
+  // #240 A4 + codex r1/r2 on PR #244:
+  //   r1 [data-integrity] — interpreter abuse: a structured entry for
+  //     a non-built-in head (e.g. `deno`) must drive classification on
+  //     its own. Running matchFamilyRegex against the whole canonical
+  //     would happily match keywords inside a `-e "console.log('e2e')"`
+  //     literal and forge hard3 evidence. classifyConfiguredHead
+  //     walks tokens and rejects flags, so it's safe for new heads.
+  //   r2 [contract-break] — structured entries for BUILT-IN heads must
+  //     NOT shadow the built-in family regex (otherwise a structured
+  //     entry like `{head: 'npm', families: {hard2_coverage: ['test']}}`
+  //     would break `npm run lint`'s built-in hard1 classification).
+  //     For built-in heads, structured patterns ADD; built-in regex
+  //     stays the fallback.
   let structured = null;
   if (cwd) {
     structured = readGateClassifyConfig(cwd).structured;
   }
   const allowed = cwd ? allowedGateHeads(cwd) : STRICT_GATE_HEAD_ALLOWLIST;
   if (!allowed.has(head)) return null;
+  const isBuiltIn = STRICT_GATE_HEAD_ALLOWLIST.has(head);
   if (structured?.has(head)) {
-    return classifyConfiguredHead(head, canonical, structured);
+    const configured = classifyConfiguredHead(head, canonical, structured);
+    if (configured !== null) return configured;
+    // r2: for built-in heads, fall back to the regex. For non-built-in
+    // heads, structured-only — the regex is unsafe (matches keywords
+    // in string literals; the interpreter denylist already excludes
+    // string-form interpreter heads, but structured entries may
+    // legitimately target interpreters like deno/bun with token-level
+    // matching).
+    if (isBuiltIn) return matchFamilyRegex(canonical);
+    return null;
   }
   return matchFamilyRegex(canonical);
 }

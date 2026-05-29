@@ -200,6 +200,49 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(merged.has('ruby'), false);
   });
 
+  it('codex r2 [contract-break]: structured entry for BUILT-IN head does NOT shadow existing classifications', () => {
+    // Codex r2 on PR #244: a structured entry like
+    //   { head: 'npm', families: { hard2_coverage: ['test'] } }
+    // would otherwise force structured-only classification for npm,
+    // breaking `npm run lint` / `npm run build` (which the built-in
+    // regex classifies as hard1_baseline). Built-in heads must
+    // preserve their built-in classification as the fallback when
+    // the structured pattern doesn't match.
+    writeConfig({
+      gate_classify: {
+        allowed_heads: [
+          { head: 'npm', families: { hard2_coverage: ['test'] } },
+        ],
+      },
+    });
+    // Structured pattern matches → uses structured family.
+    assert.equal(classifyGateCommand('npm test', { cwd: tmp }), 'hard2_coverage');
+    // Built-in regex preserved for non-structured sub-commands.
+    assert.equal(classifyGateCommand('npm run lint', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('npm run build', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('npm run test:e2e', { cwd: tmp }), 'hard3_resilience');
+  });
+
+  it('codex r2: non-built-in head with structured entry stays structured-only (no regex fallback)', () => {
+    // For non-built-in heads, structured-only is correct — falling
+    // back to matchFamilyRegex would match keywords in string
+    // literals (the interpreter abuse codex r1 caught).
+    writeConfig({
+      gate_classify: {
+        allowed_heads: [
+          { head: 'deno', families: { hard2_coverage: ['test'] } },
+        ],
+      },
+    });
+    // Structured match works.
+    assert.equal(classifyGateCommand('deno test', { cwd: tmp }), 'hard2_coverage');
+    // No structured match + no built-in regex fallback → null.
+    assert.equal(classifyGateCommand('deno fmt', { cwd: tmp }), null);
+    // Critical: no regex fallback means `deno -e "playwright"` cannot
+    // forge hard3 evidence via string literal keywords.
+    assert.equal(classifyGateCommand('deno -e "console.log(\'playwright\')"', { cwd: tmp }), null);
+  });
+
   it('plain string allowed_heads still extend the head set (back-compat for non-interpreters)', () => {
     writeConfig({ gate_classify: { allowed_heads: ['gradlew', 'mvn'] } });
     const merged = allowedGateHeads(tmp);
