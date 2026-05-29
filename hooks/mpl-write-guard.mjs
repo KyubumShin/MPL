@@ -700,19 +700,28 @@ async function main() {
         // target in the command, not just the first. A multi-statement
         // line with a benign first redirect followed by a symlink-
         // through-protected second redirect would otherwise slip.
-        const targetRe = /(?:[\d&]?>{1,2}|\btee\b[^|;&]*|\bdd\b[^|;&]*\bof=)\s*([^\s|;&]+)/g;
+        //
+        // Claude r19 [security]: the tee alternation was greedy and
+        // swallowed the path itself via regex backtracking. Anchor
+        // tee's capture group AFTER any flag tokens: `tee (-X)* PATH`.
+        const targetRe = /(?:[\d&]?>{1,2}\s*|\btee\b(?:\s+-\S+)*\s+|\bdd\b[^|;&]*\bof=\s*)([^\s|;&]+)/g;
         for (const m of normalizedEarly.matchAll(targetRe)) {
           const target = m[1];
           const targetAbs = resolvePath(cwd, target);
-          try {
-            const realParent = realpathSync(dirname(targetAbs));
-            const candidate = join(realParent, basename(targetAbs));
-            if (/\.mpl\/mpl\/decomposition\.ya?ml$/.test(candidate)) {
-              decompMention = true;
-              symlinkWritesToDecomp = true;
-              break;
-            }
-          } catch { /* parent doesn't exist — skip realpath */ }
+          // Try the WHOLE target first (catches the case where the
+          // target itself is a symlink to a protected file). Fall back
+          // to realpath(dirname) if the target doesn't exist yet.
+          let candidate = null;
+          try { candidate = realpathSync(targetAbs); }
+          catch {
+            try { candidate = join(realpathSync(dirname(targetAbs)), basename(targetAbs)); }
+            catch { /* parent doesn't exist — skip */ }
+          }
+          if (candidate && /\.mpl\/mpl\/decomposition\.ya?ml$/.test(candidate)) {
+            decompMention = true;
+            symlinkWritesToDecomp = true;
+            break;
+          }
         }
       }
       if (decompMention) {
@@ -886,19 +895,22 @@ async function main() {
     // through-state.json forms (single or multi-statement) are caught.
     let symlinkWritesToStateJson = false;
     if (!stateJsonMention) {
-      const stateTargetRe = /(?:[\d&]?>{1,2}|\btee\b[^|;&]*|\bdd\b[^|;&]*\bof=)\s*([^\s|;&]+)/g;
+      // Claude r19 [security]: anchor tee's capture after option list.
+      const stateTargetRe = /(?:[\d&]?>{1,2}\s*|\btee\b(?:\s+-\S+)*\s+|\bdd\b[^|;&]*\bof=\s*)([^\s|;&]+)/g;
       for (const m of normalizedCommand.matchAll(stateTargetRe)) {
         const target = m[1];
         const targetAbs = resolvePath(cwd, target);
-        try {
-          const realParent = realpathSync(dirname(targetAbs));
-          const candidate = join(realParent, basename(targetAbs));
-          if (/\.mpl\/state\.json$/.test(candidate)) {
-            symlinkWritesToStateJson = true;
-            writesToStateJson = true;
-            break;
-          }
-        } catch { /* parent doesn't exist — skip */ }
+        let candidate = null;
+        try { candidate = realpathSync(targetAbs); }
+        catch {
+          try { candidate = join(realpathSync(dirname(targetAbs)), basename(targetAbs)); }
+          catch { /* skip */ }
+        }
+        if (candidate && /\.mpl\/state\.json$/.test(candidate)) {
+          symlinkWritesToStateJson = true;
+          writesToStateJson = true;
+          break;
+        }
       }
     }
     if ((stateJsonMention || symlinkWritesToStateJson) && (!isSafeRead || writesToStateJson) && process.env.MPL_FORCE_PURGE !== '1') {
