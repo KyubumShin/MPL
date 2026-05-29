@@ -656,22 +656,53 @@ async function main() {
     // substring check, so quote-concat / backslash-escape / ANSI-C /
     // slash-collapse forms of `.mpl/state.json` can't bypass.
     const normalizedCommand = normalizeShellCommand(command);
-    if (/\.mpl\/state\.json/.test(normalizedCommand) &&
-        (/decomposer_dispatch/.test(normalizedCommand) ||
-         /first_transcript_seen/.test(normalizedCommand))) {
+    // Codex r13 on PR #249 [security]: an encoded write (e.g. base64
+    // -d > .mpl/state.json) can plant decomposer_dispatch without the
+    // literal field name appearing in the Bash command. The right
+    // structural fix is to refuse ANY Bash command that writes to
+    // .mpl/state.json — the hook itself uses writeState() (not Bash)
+    // so legit hook operation is unaffected. MPL_FORCE_PURGE=1 is the
+    // documented escape hatch for legitimate manual state edits.
+    //
+    // Detection: command mentions `.mpl/state.json` (in normalized
+    // form) AND has any destructive verb / redirect / interpreter
+    // (the same `isDestructive` indicator matchesProtectedDelete
+    // uses). Read-only operations against state.json (`cat .mpl/
+    // state.json`, `ls .mpl/state.json`) still pass.
+    const stateJsonMention = /\.mpl\/state\.json/.test(normalizedCommand);
+    const hasWriteVerb = (
+      /\brm\b/.test(normalizedCommand) ||
+      /\bfind\b.*-delete\b/.test(normalizedCommand) ||
+      /\bmv\b/.test(normalizedCommand) ||
+      /\bshred\b/.test(normalizedCommand) ||
+      /\bunlink\b/.test(normalizedCommand) ||
+      /\btruncate\b/.test(normalizedCommand) ||
+      /\bcp\b/.test(normalizedCommand) ||
+      /\btee\b/.test(normalizedCommand) ||
+      /\bdd\b.*\bof=/.test(normalizedCommand) ||
+      /\btar\b.*--remove-files\b/.test(normalizedCommand) ||
+      /\brsync\b.*--remove-source-files\b/.test(normalizedCommand) ||
+      /\b(node|deno|bun|python\d?|ruby|perl|php|lua|tclsh|osascript|awk|sed)\b/.test(normalizedCommand) ||
+      /(?:^|[\s;|&])\d?>{1,2}/.test(normalizedCommand) ||
+      /(?:^|[\s;|&])&>{1,2}/.test(normalizedCommand) ||
+      /\bbase64\b/.test(normalizedCommand) // codex r13: catches the base64 decode path explicitly
+    );
+    if (stateJsonMention && hasWriteVerb && process.env.MPL_FORCE_PURGE !== '1') {
       const reason =
-        `[MPL #236 A1] Refused Bash that mentions both .mpl/state.json AND ` +
-        `decomposer_dispatch — only mpl-write-guard itself may plant that flag. ` +
-        `Allowing this would let the orchestrator forge the decomposition.yaml ` +
-        `writer-identity check.`;
+        `[MPL #236 A1] Refused Bash write to .mpl/state.json: only ` +
+        `mpl-write-guard's internal writeState may modify the orchestrator ` +
+        `state file. Allowing this would let any caller forge ` +
+        `decomposer_dispatch / first_transcript_seen / other capability ` +
+        `fields. If you really need to edit state manually, set ` +
+        `MPL_FORCE_PURGE=1 in the same shell.`;
       recordBlockedHook(cwd, {
         hookId: HOOK_ID,
         phaseId: (readState(cwd) || {}).current_phase,
         artifact: '.mpl/state.json',
-        code: 'decomposer_dispatch_forgery',
+        code: 'state_json_bash_write',
         reason,
         resumeInstruction:
-          `Remove the decomposer_dispatch reference from the Bash command. The hook will populate it on Agent(subagent_type='mpl-decomposer') dispatch.`,
+          `Use the orchestrator's state-write tool path (or the Read+Edit tool if appropriate); set MPL_FORCE_PURGE=1 only if a manual reset is intended.`,
         retryContext: { command },
       });
       console.log(JSON.stringify({

@@ -400,6 +400,71 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A1 codex r13 [security]: ANY Bash write to .mpl/state.json is blocked (base64/heredoc/etc. forgery)', () => {
+  // Codex r13: a literal-keyword check (decomposer_dispatch /
+  // first_transcript_seen) can't catch base64-decoded payloads. The
+  // structural fix is to refuse ANY Bash command that writes to
+  // .mpl/state.json — the hook itself uses writeState() (not Bash)
+  // so legit hook operation is unaffected.
+  const cwd = freshWorkspace();
+  try {
+    const base64Payload = Buffer.from(JSON.stringify({
+      current_phase: 'phase-1',
+      decomposer_dispatch: {
+        dispatched_at: '2026-05-29T00:00:00Z',
+        parent_transcript_path: '/tmp/other.jsonl',
+      },
+    })).toString('base64');
+    for (const command of [
+      `printf %s ${base64Payload} | base64 -d > .mpl/state.json`,
+      'echo opaque-blob > .mpl/state.json',
+      'cat /tmp/forged | tee .mpl/state.json',
+      'dd if=/tmp/forged of=.mpl/state.json',
+      'mv /tmp/forged .mpl/state.json',
+      'cp /tmp/forged .mpl/state.json',
+      `node -e fs.writeFileSync(".mpl/state.json", "forged")`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected Bash state.json write block for: ${command}`,
+      );
+    }
+    // Sanity: read-only ops against state.json still pass.
+    for (const command of [
+      'cat .mpl/state.json',
+      'ls .mpl/state.json',
+      'jq . .mpl/state.json',
+      'grep current_phase .mpl/state.json',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.notEqual(
+        decision.decision,
+        'block',
+        `read-only on state.json should not block: ${command}`,
+      );
+    }
+    // Sanity: writes to OTHER .mpl files (not state.json) unaffected.
+    const otherWrite = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'echo x > .mpl/runbook.md' },
+    });
+    assert.notEqual(otherWrite.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r12 [security]: only the first-seen (orchestrator-role) transcript may dispatch mpl-decomposer', () => {
   // Codex r12: the dispatch flag was recorded for ANY Task caller
   // claiming `subagent_type='mpl-decomposer'`. A non-orchestrator
@@ -538,13 +603,10 @@ test('#236 A1 claude r11 [security]: Bash that mentions both .mpl/state.json AND
       );
       assert.match(decision.reason, /decomposer_dispatch/);
     }
-    // Sanity: Bash that touches state.json WITHOUT decomposer_dispatch passes.
-    const benign = runHook(cwd, {
-      cwd,
-      tool_name: 'Bash',
-      tool_input: { command: 'echo hello > .mpl/state.json' },
-    });
-    assert.notEqual(benign.decision, 'block');
+    // r13 structural change: ANY Bash write to .mpl/state.json now
+    // blocks (forgery-class via base64/heredoc/etc. is unconditional).
+    // Bash reads of state.json (cat/ls) still pass — see the
+    // standalone r13 test.
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
