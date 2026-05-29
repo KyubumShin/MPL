@@ -487,10 +487,15 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           # `.mpl/mpl/decomposition-derived.json.phases[phase_id].invariants`
           # from design-intent.yaml with verbatim copy semantics.
 
-        # v0.17 (#57): synthesis absorbed from ex-phase0-analyzer. REQUIRED on every phase.
+        # v0.17 (#57): synthesis absorbed from ex-phase0-analyzer.
+        # OPTIONAL per #239 C4 — omit on pure doc/infra phases with no
+        # type surface. Downstream consumers (Phase Runner, reviewers)
+        # treat absence as "not applicable". The legacy form
+        # `type_policy: { applies: false }` is still accepted for
+        # back-compat — both shapes mean N/A.
         # Consumer: Phase Runner loads these as context for the phase's implementation.
-        type_policy:
-          applies: boolean            # false for doc/infra phases with no type surface
+        type_policy:                  # optional; omit when no type surface
+          applies: boolean            # legacy back-compat marker; omit field entirely is preferred
           layer: string               # "backend" | "frontend" | "sidecar" | "shared" (when applies)
           naming: string              # naming convention description (when applies)
           null_handling: string       # per-language null/option convention (when applies)
@@ -498,9 +503,12 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           prohibited_patterns: [string]  # patterns that would violate policy (when applies)
           conversion_points: [string] # contract_file boundary_ids where types transform (when applies)
 
-        # v0.17 (#57): synthesis absorbed from ex-phase0-analyzer. REQUIRED on every phase.
-        error_spec:
-          applies: boolean            # false for doc/infra/migration phases
+        # v0.17 (#57): synthesis absorbed from ex-phase0-analyzer.
+        # OPTIONAL per #239 C4 — omit on pure doc/infra/migration phases
+        # with no error surface. Same back-compat rule as `type_policy`:
+        # omission and `error_spec: { applies: false }` are equivalent.
+        error_spec:                   # optional; omit when no error surface
+          applies: boolean            # legacy back-compat marker; omit field entirely is preferred
           categories:                 # which error categories this phase surfaces
             - name: string            # "validation" | "network" | "auth" | "not_found" | "internal" | custom
               exception_type: string  # concrete type raised (e.g., "ValidationError", "HTTPException(422)")
