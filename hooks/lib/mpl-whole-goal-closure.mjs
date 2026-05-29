@@ -63,14 +63,36 @@ export function resolveCohortScope({ cwd, state = {} } = {}) {
   return cohort.phases;
 }
 
-export function validateWholeGoalClosure({ cwd, state = {}, contract = null }) {
+/**
+ * @param {object} args
+ * @param {string} args.cwd
+ * @param {object} args.state
+ * @param {object} [args.contract]
+ * @param {boolean} [args.allowPartial=false]
+ *   Codex r2 [contract-break] fix: cohort-scoped closure is now an
+ *   EXPLICIT caller decision, not a silent state/config inheritance.
+ *   `mpl-require-whole-goal-closure.mjs` (the only production caller)
+ *   reads `release.complete_pipeline_optional` / cohort opt-in and
+ *   passes `allowPartial: true` only when partial-MVP finalize is the
+ *   declared intent. A different caller (e.g. a future release-finalize
+ *   validator that should also accept cohort closure) can pass `true`
+ *   on its own terms. When `allowPartial` is the default `false`, the
+ *   function is strictly whole-pipeline — even if state/config carry
+ *   a cohort opt-in marker, the closure check stays whole-pipeline.
+ */
+export function validateWholeGoalClosure({
+  cwd,
+  state = {},
+  contract = null,
+  allowPartial = false,
+}) {
   const issues = [];
   const decomposition = readDecompositionGoalTrace(cwd);
   if (!decomposition || !Array.isArray(decomposition.phases) || decomposition.phases.length === 0) {
     return { valid: false, issues: ['decomposition:missing'] };
   }
 
-  const cohortPhaseIds = resolveCohortScope({ cwd, state });
+  const cohortPhaseIds = allowPartial ? resolveCohortScope({ cwd, state }) : null;
   const decompPhaseIdSet = new Set(decomposition.phases.map((p) => p.id));
   const scopedPhases = cohortPhaseIds
     ? decomposition.phases.filter((p) => cohortPhaseIds.includes(p.id))

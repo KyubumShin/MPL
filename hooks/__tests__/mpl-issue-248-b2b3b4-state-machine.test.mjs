@@ -358,8 +358,14 @@ test('#248 B4 [logic]: validateWholeGoalClosure scopes to cohort phases when opt
     };
 
     // With B4: cohort-scoped → AC-3 doesn't block (it's a non-cohort
-    // contract item).
-    const cohortVerdict = validateWholeGoalClosure({ cwd, state, contract });
+    // contract item). Codex r2 fix: cohort scope requires explicit
+    // `allowPartial: true` from the caller.
+    const cohortVerdict = validateWholeGoalClosure({
+      cwd,
+      state,
+      contract,
+      allowPartial: true,
+    });
     assert.equal(cohortVerdict.cohort_scoped, true);
     assert.deepEqual(cohortVerdict.scoped_phase_ids, ['phase-1', 'phase-2']);
     // The cohort's AC universe = {AC-1, AC-2}. AC-3 is outside the
@@ -374,12 +380,14 @@ test('#248 B4 [logic]: validateWholeGoalClosure scopes to cohort phases when opt
       'cohort-scoped run must not flag non-cohort phases',
     );
 
-    // Without B4 (no opt-in): same decomposition, no flag → whole pipeline.
-    const wholePipelineState = { release: { cohort: { phases: ['phase-1', 'phase-2'] } } };
+    // Without B4 (allowPartial: false by default, even if state has the flag):
+    // codex r2 fix means cohort scope NEVER applies without explicit caller
+    // opt-in. So the whole-pipeline check fires.
     const wholeVerdict = validateWholeGoalClosure({
       cwd,
-      state: wholePipelineState,
+      state,
       contract,
+      // allowPartial intentionally omitted → defaults to false → strict
     });
     assert.equal(wholeVerdict.cohort_scoped, false);
     // Both phase-3 incomplete AND AC-3 not covered must surface.
@@ -387,6 +395,84 @@ test('#248 B4 [logic]: validateWholeGoalClosure scopes to cohort phases when opt
     assert.ok(
       wholeVerdict.issues.some((i) => i === 'acceptance_criteria:not_completed:AC-3'),
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#248 B4 codex r2 [contract-break]: cohort scope is gated by explicit allowPartial=true, not silent state/config inheritance', () => {
+  // Codex r2: validateWholeGoalClosure is also called by
+  // `mpl-require-whole-goal-closure.mjs` (the finalize_done=true gate).
+  // If cohort scope applied silently whenever state/config carried the
+  // flag, a workspace that set `release.complete_pipeline_optional`
+  // could mark the WHOLE pipeline finalized while non-cohort phases
+  // remained incomplete. Fix: cohort scope requires the caller to
+  // explicitly pass `allowPartial: true`. Default `false` is strict.
+  const cwd = freshWorkspace({
+    release: {
+      cohort: {
+        complete_pipeline_optional: true,
+        phases: ['phase-1'],
+      },
+    },
+  });
+  try {
+    mkdirSync(join(cwd, '.mpl', 'mpl', 'phases', 'phase-1'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.mpl', 'mpl', 'phases', 'phase-1', 'state-summary.md'),
+      '# evidence',
+    );
+    writeFileSync(
+      join(cwd, '.mpl', 'mpl', 'decomposition.yaml'),
+      `phases:
+  - id: phase-1
+    goal_trace:
+      acceptance_criteria: ['AC-1']
+  - id: phase-2
+    goal_trace:
+      acceptance_criteria: ['AC-2']
+`,
+    );
+    // Also set the workspace config flag to confirm it ALSO doesn't
+    // silently activate cohort scope.
+    writeFileSync(
+      join(cwd, '.mpl', 'config.json'),
+      JSON.stringify({ release: { complete_pipeline_optional: true } }),
+    );
+    const stateWithFlag = {
+      release: {
+        cohort: {
+          complete_pipeline_optional: true,
+          phases: ['phase-1'],
+        },
+      },
+    };
+    const contract = { acceptance_criteria: ['AC-1', 'AC-2'] };
+
+    // Default call (no allowPartial) → strict whole-pipeline → phase-2
+    // and AC-2 surface as missing.
+    const defaultVerdict = validateWholeGoalClosure({
+      cwd,
+      state: stateWithFlag,
+      contract,
+    });
+    assert.equal(defaultVerdict.valid, false);
+    assert.equal(defaultVerdict.cohort_scoped, false);
+    assert.ok(defaultVerdict.issues.includes('phase-2:not_completed'));
+    assert.ok(
+      defaultVerdict.issues.some((i) => i === 'acceptance_criteria:not_completed:AC-2'),
+    );
+
+    // Explicit allowPartial: true → cohort scope applies and the
+    // closure accepts cohort closure as sufficient.
+    const partialVerdict = validateWholeGoalClosure({
+      cwd,
+      state: stateWithFlag,
+      contract,
+      allowPartial: true,
+    });
+    assert.equal(partialVerdict.cohort_scoped, true);
+    assert.ok(!partialVerdict.issues.includes('phase-2:not_completed'));
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -426,6 +512,7 @@ test('#248 B4 codex r1 [logic]: partially stale cohort (some ids missing from de
         },
       },
       contract: { acceptance_criteria: ['AC-1'] },
+      allowPartial: true,
     });
     assert.equal(verdict.valid, false);
     assert.match(
@@ -471,6 +558,7 @@ test('#248 B4 [logic]: stale cohort phase ids (not in decomposition) fail closed
         },
       },
       contract: { acceptance_criteria: ['AC-1'] },
+      allowPartial: true,
     });
     assert.equal(verdict.valid, false);
     assert.match(
