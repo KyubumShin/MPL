@@ -368,6 +368,69 @@ test('#236 A3 claude r1: shell-expansion / subshell / pushd bypass forms are all
   }
 });
 
+test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too', () => {
+  // Concrete repros — `rm -rf .mpl` destroys `.mpl/mpl`, `.mpl/contracts`,
+  // `.mpl/memory`. `find . -delete` destroys everything under cwd
+  // including protected. Pre-fix substring + descendant-only check
+  // missed these.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'rm -rf .mpl',
+      'rm -rf .mpl/',
+      'rm -rf docs/',
+      'rm -rf docs',
+      'find docs -delete',
+      'find . -name "*.yaml" -delete',
+      'find . -delete',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected ancestor/find traversal block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 codex r3 [data-integrity]: quote-concatenation forgery is blocked', () => {
+  // Codex r3: POSIX shells concatenate adjacent quoted fragments,
+  // so `.mpl/""mpl`, `.mpl"/"mpl`, `.mpl''/''mpl` all resolve to
+  // `.mpl/mpl` at execution time. The fix strips all `"` and `'`
+  // and backticks from the command before the substring + token
+  // checks so quote-concatenation forgery collapses to the same
+  // literal a real shell would see.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      `rm -rf .mpl/""mpl`,
+      `rm -rf .mpl"/"mpl`,
+      `rm -rf .mpl''/''mpl`,
+      `rm -rf 'doc's'/'learnings`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected quote-concat block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r2: redundant-slash shell-expanded paths are still blocked (slash collapse)', () => {
   // Codex r2 [logic]: real shell normalizes `//` after expansion;
   // `$PWD/.mpl//mpl` deletes `.mpl/mpl` just fine.
@@ -390,6 +453,72 @@ test('#236 A3 codex r2: redundant-slash shell-expanded paths are still blocked (
         `expected slash-collapse to catch: ${command}`,
       );
     }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 claude r3 [contract-break]: re-dispatch of mpl-decomposer resets the child lock so the new run is allowed', () => {
+  // Concrete repro shape: APPEND-MODE / RECOMPOSE-MODE re-dispatches
+  // the decomposer (see commands/mpl-run-decompose.md). Without the
+  // explicit child_transcript_path: null on each dispatch, the
+  // previous run's lock persists and the second run's writes are
+  // wrongly rejected.
+  const cwd = freshWorkspace();
+  try {
+    const orchestratorTranscript = '/tmp/transcript-orchestrator.jsonl';
+    const decomposer1Transcript = '/tmp/transcript-decomposer-1.jsonl';
+    const decomposer2Transcript = '/tmp/transcript-decomposer-2.jsonl';
+
+    // Run 1: dispatch + first decomposer Write captures lock.
+    runHook(cwd, {
+      cwd,
+      tool_name: 'Task',
+      transcript_path: orchestratorTranscript,
+      tool_input: { subagent_type: 'mpl-decomposer', prompt: '...' },
+    });
+    runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: decomposer1Transcript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'v1' },
+    });
+    const afterRun1 = readState(cwd);
+    assert.equal(
+      afterRun1.decomposer_dispatch.child_transcript_path,
+      decomposer1Transcript,
+    );
+
+    // Run 2: orchestrator re-dispatches (recompose). New dispatch
+    // must reset the locked child to null.
+    runHook(cwd, {
+      cwd,
+      tool_name: 'Task',
+      transcript_path: orchestratorTranscript,
+      tool_input: { subagent_type: 'mpl-decomposer', prompt: '...' },
+    });
+    const afterRun2Dispatch = readState(cwd);
+    assert.equal(
+      afterRun2Dispatch.decomposer_dispatch.child_transcript_path,
+      null,
+      'Expected re-dispatch to clear the locked child transcript',
+    );
+
+    // The NEW decomposer (fresh transcript) writes — allowed.
+    const newDecomposerWrite = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: decomposer2Transcript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'v2' },
+    });
+    assert.equal(newDecomposerWrite.continue, true);
+
+    // New child lock recorded as the second decomposer.
+    const afterRun2Write = readState(cwd);
+    assert.equal(
+      afterRun2Write.decomposer_dispatch.child_transcript_path,
+      decomposer2Transcript,
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

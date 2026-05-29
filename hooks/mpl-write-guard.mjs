@@ -181,7 +181,7 @@ function matchesProtectedDelete(command, cwd) {
   if (!command || typeof command !== 'string') return null;
   // Strip leading wrapper before checking the head — `sudo rm -rf …`
   // must still trip.
-  const normalized = command.replace(/^\s*(sudo|time|nice|env)\s+/, '').trim();
+  let normalized = command.replace(/^\s*(sudo|time|nice|env)\s+/, '').trim();
   // Identify rm-family / find -delete calls. Multi-command lines
   // (`a; rm -rf X`, `a && rm -rf X`) still parse because we scan the
   // whole command for `rm` or `find ... -delete`.
@@ -189,23 +189,27 @@ function matchesProtectedDelete(command, cwd) {
     return null;
   }
 
+  // Pre-normalize:
+  //   - Codex r3 on PR #249 [data-integrity]: POSIX shells concatenate
+  //     adjacent quote fragments. `.mpl/""mpl` and `.mpl"/"mpl` both
+  //     resolve to `.mpl/mpl` at execution time. Strip every `"`, `'`,
+  //     backtick character so quote-concatenation forgery collapses to
+  //     the same literal a real shell would see.
+  //   - Codex r2 on PR #249 [logic]: a real shell normalizes runs of
+  //     `/` after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl`).
+  //     Collapse repeated slashes to one.
+  // Both transforms preserve token-boundary whitespace, so downstream
+  // tokenization still works.
+  normalized = normalized.replace(/["'`]/g, '').replace(/\/+/g, '/');
+
   // Claude r1 on PR #249 [logic] (concrete repros): shell-expansion
-  // forms (`$PWD`, `$(pwd)`), parenthesized subshells (`(cd … && rm
-  // -rf …)`), `pushd … && rm -rf …` splits, and shell-variable
+  // forms (`$PWD`, `$(pwd)`), parenthesized subshells, variable
   // operands all defeat literal token resolution. Defense-in-depth:
-  // ALSO match the protected substring anywhere in the command. This
-  // over-blocks on incidental mentions, but `MPL_FORCE_PURGE=1` is
-  // already the operator escape hatch — over-blocking is the safe
-  // direction for a destructive op.
-  //
-  // Codex r2 on PR #249 [logic]: a real shell normalizes runs of `/`
-  // after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl` just fine).
-  // Collapse repeated slashes in the normalized command before the
-  // substring check so the defense is invariant under redundant-slash
-  // forgery.
-  const slashCollapsed = normalized.replace(/\/+/g, '/');
+  // ALSO match the protected substring anywhere in the command.
+  // Over-blocks on incidental mentions — `MPL_FORCE_PURGE=1` is the
+  // operator escape hatch already documented in the block reason.
   for (const target of PROTECTED_DELETE_TARGETS) {
-    if (slashCollapsed.includes(target)) return target;
+    if (normalized.includes(target)) return target;
   }
 
   const resolvedRoots = PROTECTED_DELETE_TARGETS.map((target) => ({
@@ -214,12 +218,10 @@ function matchesProtectedDelete(command, cwd) {
   }));
 
   // Tokenize on whitespace AND `;`/`&&`/`||`/`|`/`(`/`)` so a
-  // multi-command line + subshell surfaces every operand. We don't
-  // honour quoting precisely — strip leading/trailing quote and
-  // paren chars and check each token.
+  // multi-command line + subshell surfaces every operand.
   const tokens = normalized
     .split(/[\s;|&()]+/)
-    .map((t) => t.replace(/^[\\$"'`]+/, '').replace(/[\\"'`)]+$/, ''))
+    .map((t) => t.replace(/^[\\$]+/, '').replace(/[\\)]+$/, ''))
     .filter(Boolean);
 
   for (const token of tokens) {
@@ -227,12 +229,20 @@ function matchesProtectedDelete(command, cwd) {
     if (token.startsWith('-')) continue;
     // Skip known program names so we don't false-match `rm` itself.
     if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir)$/i.test(token)) continue;
-    // path.resolve handles `./`, `../`, abs, and trailing `/`.
     let abs;
     try { abs = resolvePath(cwd, token); }
     catch { continue; }
     for (const { target, abs: rootAbs } of resolvedRoots) {
-      if (abs === rootAbs || abs.startsWith(rootAbs + '/')) return target;
+      // Claude r2 on PR #249 [security]: also match ANCESTORS of
+      // protected roots. `rm -rf .mpl` destroys `.mpl/mpl`,
+      // `.mpl/contracts`, `.mpl/memory`. `find . -delete` destroys
+      // every file under cwd including protected ones. The pre-fix
+      // check only caught descendants of a root, not roots-of-the-root.
+      if (
+        abs === rootAbs ||
+        abs.startsWith(rootAbs + '/') ||
+        rootAbs.startsWith(abs + '/')
+      ) return target;
     }
   }
   return null;
@@ -254,6 +264,13 @@ function recordDecomposerDispatch(cwd, parentTranscriptPath) {
       decomposer_dispatch: {
         dispatched_at: new Date().toISOString(),
         parent_transcript_path: parentTranscriptPath || null,
+        // Claude r3 on PR #249 [contract-break]: re-dispatch must
+        // reset the lock — without an explicit null, writeState's
+        // deepMerge preserves the previous child_transcript_path,
+        // so the new decomposer's write (with a fresh transcript)
+        // is wrongly rejected even though it IS the legitimate
+        // freshly-dispatched subagent.
+        child_transcript_path: null,
       },
     });
   } catch { /* best-effort */ }
