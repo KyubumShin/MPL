@@ -13,8 +13,8 @@
  * When MPL is active: guards Edit/Write on source files + warns on dangerous Bash
  */
 
-import { dirname, join, extname, resolve as resolvePath } from 'path';
-import { existsSync } from 'fs';
+import { dirname, join, extname, resolve as resolvePath, basename } from 'path';
+import { existsSync, realpathSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -298,6 +298,11 @@ function matchesProtectedDelete(command, cwd) {
     // `tee FILE` opens FILE for write and overwrites it.
     /\btee\b/.test(normalized) ||
     /\bdd\b.*\bof=/.test(normalized) ||
+    // Claude r17 on PR #249 [security]: `ln -s SRC DST` creating a
+    // symlink whose source is a protected root/descendant lets a
+    // later redirect-write reach the protected file through
+    // indirection. Catch the creation step itself.
+    /\bln\b/.test(normalized) ||
     // Codex r11 on PR #249 [data-integrity]: `tar --remove-files` and
     // `rsync --remove-source-files` are destructive — both delete
     // their source operand after the copy completes.
@@ -392,7 +397,7 @@ function matchesProtectedDelete(command, cwd) {
     // Skip flag tokens; they can't be paths.
     if (token.startsWith('-')) continue;
     // Skip known program names so we don't false-match `rm` itself.
-    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir|mv|shred|unlink|truncate|cp|export|tee|dd|tar|rsync|echo|cat|printf)$/i.test(token)) continue;
+    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir|mv|shred|unlink|truncate|cp|export|tee|dd|tar|rsync|echo|cat|printf|ln)$/i.test(token)) continue;
 
     // Codex r6 on PR #249 [data-integrity]: shell pathname expansion
     // (glob metachars `*`, `?`, `[…]`) lets a command operand expand
@@ -685,7 +690,28 @@ async function main() {
     const earlyCommand = (data.tool_input || data.toolInput || {}).command || '';
     if (earlyCommand && existsSync(join(cwd, '.mpl'))) {
       const normalizedEarly = normalizeShellCommand(earlyCommand);
-      const decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly);
+      let decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly);
+      // Claude r17 [security]: also resolve redirect/tee/dd-of target
+      // paths through symlinks. A pre-existing symlink whose target
+      // resolves to `.mpl/mpl/...` defeats the literal substring check.
+      let symlinkWritesToDecomp = false;
+      if (!decompMention) {
+        const targetMatch = normalizedEarly.match(
+          /(?:[\d&]?>{1,2}|\btee\b[^|;&]*|\bdd\b[^|;&]*\bof=)\s*([^\s|;&]+)/,
+        );
+        if (targetMatch) {
+          const target = targetMatch[1];
+          const targetAbs = resolvePath(cwd, target);
+          try {
+            const realParent = realpathSync(dirname(targetAbs));
+            const candidate = join(realParent, basename(targetAbs));
+            if (/\.mpl\/mpl\/decomposition\.ya?ml$/.test(candidate)) {
+              decompMention = true;
+              symlinkWritesToDecomp = true;
+            }
+          } catch { /* parent doesn't exist — skip realpath */ }
+        }
+      }
       if (decompMention) {
         const headM = normalizedEarly.match(/^(\w+)/);
         const head = headM ? headM[1].toLowerCase() : '';
@@ -701,7 +727,7 @@ async function main() {
           /\btee\b[^|;&]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly) ||
           /\bdd\b[^|;&]*\bof=[^|;&]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly)
         );
-        if (!SAFE_READS.has(head) || writesToDecomp) {
+        if (!SAFE_READS.has(head) || writesToDecomp || symlinkWritesToDecomp) {
           const reason =
             `[MPL #236 A1] Refused Bash write to .mpl/mpl/decomposition.yaml: ` +
             `only the mpl-decomposer subagent may emit this file. Bash writes ` +

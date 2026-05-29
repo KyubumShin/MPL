@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 
@@ -471,6 +471,48 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
     });
     assert.equal(decision.decision, 'block');
     assert.match(decision.reason, /#236 A1/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 claude r17 [security]: symlink-indirection bypasses are closed', () => {
+  // Claude r17 found two-step symlink bypass:
+  //   Step 1: ln -s /abs/.mpl/mpl /tmp/safe-link
+  //   Step 2: printf forged > /tmp/safe-link/decomposition.yaml
+  // Fix (a): added `ln` to A3 destructive verbs so step 1 itself blocks.
+  // Fix (b): added realpath resolution on redirect target dirname so
+  //          a write through a pre-existing symlink is also blocked.
+  const cwd = freshWorkspace();
+  try {
+    // Step 1: ln creation blocks via A3 (substring `.mpl/mpl` in src).
+    const step1 = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: {
+        command: `ln -s ${cwd}/.mpl/mpl /tmp/mpl-r17-symlink-test`,
+      },
+    });
+    assert.equal(step1.decision, 'block',
+      'Step 1 (symlink creation pointing at protected) must block');
+
+    // Step 2: write through pre-existing symlink — also blocks via
+    // realpath resolution.
+    const symlinkPath = '/tmp/mpl-r17-test-link-' + Date.now();
+    try {
+      symlinkSync(join(cwd, '.mpl', 'mpl'), symlinkPath);
+      const step2 = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: {
+          command: `printf forged > ${symlinkPath}/decomposition.yaml`,
+        },
+      });
+      assert.equal(step2.decision, 'block',
+        'Step 2 (write through pre-existing symlink) must block');
+    } finally {
+      try { unlinkSync(symlinkPath); } catch {}
+    }
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
