@@ -80,11 +80,51 @@ function phaseBlocks(text) {
  * `normalizePhaseBlock` name and have it perform the load-bearing
  * extraction.)
  */
+/**
+ * Strip an inline `# …` comment from a YAML line while respecting
+ * single- and double-quoted strings. A `#` that appears inside an
+ * unterminated quote on the same line is preserved (it's part of the
+ * value, not a comment). A `#` that appears outside quotes AND
+ * follows whitespace (or starts the comment span) becomes the cut
+ * point. The trailing whitespace before the `#` is also stripped.
+ *
+ * This is a heuristic — block scalars (`|` / `>`) and multi-line
+ * folded values that legitimately contain `#` are emitted by
+ * `normalizePhaseBlock`'s continuation-line path, where this strip
+ * runs equally on both old and new sides, so symmetric strips don't
+ * produce diffs even if they're semantically lossy.
+ */
+function stripInlineYamlComment(line) {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\' && (inSingle || inDouble)) {
+      // Skip the escaped char.
+      i++;
+      continue;
+    }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+    if (ch !== '#') continue;
+    if (inSingle || inDouble) continue;
+    // A `#` is a comment only when it starts a token (preceded by
+    // whitespace, or at the start of the line). Otherwise it's part
+    // of a value (e.g. anchors / refs / URL fragments).
+    if (i > 0 && !/\s/.test(line[i - 1])) continue;
+    return line.slice(0, i).replace(/[ \t]+$/g, '');
+  }
+  return line;
+}
+
 export function normalizePhaseBlock(text) {
   const raw = String(text || '');
   if (!raw.trim()) return '';
 
-  const lines = raw.split('\n').map((l) => l.replace(/\r$/, ''));
+  const lines = raw
+    .split('\n')
+    .map((l) => l.replace(/\r$/, ''))
+    .map((l) => stripInlineYamlComment(l));
 
   // Establish phase-field indent: the indent of the first non-blank,
   // non-comment line that comes after the `- id:` line.

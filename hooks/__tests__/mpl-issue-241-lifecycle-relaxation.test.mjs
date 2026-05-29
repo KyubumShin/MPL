@@ -221,6 +221,56 @@ phases:
   }
 });
 
+test('#241 B1 codex r1: inline `# comment` on a load-bearing field is stripped quote-aware', () => {
+  // codex r1 [contract-break]: stripping only full-line comments
+  // left `impact: high # comment` byte-different across edits.
+  const oldText = `
+phases:
+  - id: phase-1
+    impact: high   # old operator note
+    interface_contract:
+      produces:
+        - type: artifact
+          name: out_a
+`;
+  const newText = `
+phases:
+  - id: phase-1
+    impact: high   # new operator note explaining context
+    interface_contract:
+      produces:
+        - type: artifact
+          name: out_a
+`;
+  const verdict = validateCompletedPhaseImmutability({
+    oldText,
+    newText,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(verdict.valid, true, verdict.issues.join(', '));
+});
+
+test('#241 B1 codex r1: `#` inside quoted strings is NOT treated as a comment', () => {
+  const oldText = `
+phases:
+  - id: phase-1
+    scope: "tag #1"
+`;
+  const newText = `
+phases:
+  - id: phase-1
+    scope: "tag #2"
+`;
+  const verdict = validateCompletedPhaseImmutability({
+    oldText,
+    newText,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(verdict.valid, false,
+    'Expected scope value change inside quotes to block — `#` must NOT have been stripped');
+  assert.ok(verdict.issues.includes('phase-1:contract:modified'));
+});
+
 test('#241 B1: normalizePhaseBlock produces identical output for blocks differing only in non-load-bearing fields', () => {
   const a = `
   - id: phase-1
