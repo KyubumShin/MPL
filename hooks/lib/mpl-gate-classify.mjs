@@ -404,10 +404,24 @@ export function classifyGateCommand(command, { cwd } = {}) {
 // eval-shape flag so the fallback family regex never sees the
 // argument text. `-c`, `--call`, `-e`, `--eval`, `-x`, `--exec`,
 // `--run-script` cover npm-family / shell / interpreter eval forms.
+//
+// Codex r5 + claude r5 [contract-break] on PR #244: also cut on the
+// attached-value form (`--call=value`, `-c=value`). npm/npx option
+// parsing accepts both `--call value` and `--call=value`; missing the
+// `=` form let `npx --call="echo playwright"` still classify as
+// hard3 via the string-literal keyword. Match `token === flag` OR
+// `token.toLowerCase().startsWith(flag + '=')`.
 function stripAtEvalFlag(canonical) {
   const tokens = String(canonical || '').split(/\s+/);
-  const evalFlags = new Set(['-c', '--call', '-e', '--eval', '-x', '--exec', '--run-script']);
-  const cutAt = tokens.findIndex((t) => evalFlags.has(t.toLowerCase()));
+  const evalFlags = ['-c', '--call', '-e', '--eval', '-x', '--exec', '--run-script'];
+  const cutAt = tokens.findIndex((t) => {
+    const low = t.toLowerCase();
+    for (const flag of evalFlags) {
+      if (low === flag) return true;
+      if (low.startsWith(flag + '=')) return true;
+    }
+    return false;
+  });
   if (cutAt <= 0) return canonical;
   return tokens.slice(0, cutAt).join(' ');
 }

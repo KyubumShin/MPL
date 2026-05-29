@@ -308,6 +308,26 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
   });
 
+  it('codex r5 + claude r5 [contract-break]: stripAtEvalFlag must also cut on the --flag=value attached form', () => {
+    // r4 only handled space-separated forms (`--call value`). npm/npx
+    // option parsing also accepts attached value forms (`--call=value`,
+    // `-c=value`), so a manual `state.gate_results.hard3_resilience.command`
+    // could still forge Hard 3 with `npx --call="echo playwright"`.
+    // Both default path and structured fallback must reject every
+    // attached-form variant.
+    // No writeConfig — default workspace, fallback regex path.
+    assert.equal(classifyGateCommand('npx --call="echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm exec --call="playwright test"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx -c="echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx --eval="playwright test"', { cwd: tmp }), null);
+    // Case-insensitive on the flag itself.
+    assert.equal(classifyGateCommand('npx --CALL="echo playwright"', { cwd: tmp }), null);
+    // No-cwd path (no config read at all) — same fix applies.
+    assert.equal(classifyGateCommand('npx --call="echo playwright"'), null);
+    // Legitimate `npx playwright test` (no eval flag) still hard3.
+    assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
+  });
+
   it('codex r3 [contract-break]: built-in head with eval flag (`npx -c`) does NOT forge gate evidence', () => {
     // codex r3 on PR #244: r2 fallback to matchFamilyRegex for
     // built-in heads re-opened forgery. `npx -c "echo playwright"`
