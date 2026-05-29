@@ -140,9 +140,20 @@ function recoveryPatch(state, { status, reason, instruction, details = {} }) {
   };
 }
 
-// Read the recovery sub-object only when its scope tag matches the
-// current block. Returns `{ attempts: 0 }` (i.e. a fresh slate) when
-// the stored recovery belongs to a different block.
+// Read the recovery sub-object only when it belongs to the active
+// block. Returns `{}` (a fresh slate) otherwise.
+//
+// Three cases:
+//   (a) Tagged recovery (post-codex-r2): trust iff
+//       (block_code, blocked_at) matches the current envelope.
+//   (b) Untagged recovery (pre-codex-r2 / pre-existing on-disk state)
+//       with `last_attempt_at >= state.blocked_at`: adopt as
+//       legitimately belonging to the current block. Codex r3
+//       [contract-break] migration path — without this, an r1
+//       budget-exhausted block would reset to attempts=0 after the
+//       r2 upgrade, allowing extra auto-fix attempts past the cap.
+//   (c) Untagged recovery with no timestamp signal or older than the
+//       current block: treat as stale → fresh slate.
 function activeRecoveryState(state) {
   const rec = state?.retry_context?.recovery;
   if (!rec || typeof rec !== 'object') return {};
@@ -150,15 +161,21 @@ function activeRecoveryState(state) {
   const currentBlockedAt = state?.blocked_at || null;
   const stampedCode = rec.block_code ?? null;
   const stampedAt = rec.blocked_at ?? null;
-  // Untagged recovery (pre-codex-r2 patches) is trusted ONLY when the
-  // current block has neither code nor blocked_at — i.e., genuinely
-  // ambiguous. Once either is set, a missing/mismatched tag means the
-  // stored recovery belongs to a different block.
-  if (stampedCode === null && stampedAt === null) {
-    if (currentCode === null && currentBlockedAt === null) return rec;
+
+  // (a) Tagged → strict match.
+  if (stampedCode !== null || stampedAt !== null) {
+    if (stampedCode === currentCode && stampedAt === currentBlockedAt) {
+      return rec;
+    }
     return {};
   }
-  if (stampedCode === currentCode && stampedAt === currentBlockedAt) {
+
+  // (b)/(c) Untagged: legacy adoption iff last_attempt_at >= blocked_at.
+  // When the current state has neither code nor blocked_at, fall back
+  // to the original pre-tag behavior (genuinely ambiguous → trust).
+  if (currentCode === null && currentBlockedAt === null) return rec;
+  const stampedLastAt = typeof rec.last_attempt_at === 'string' ? rec.last_attempt_at : null;
+  if (stampedLastAt && currentBlockedAt && stampedLastAt >= currentBlockedAt) {
     return rec;
   }
   return {};

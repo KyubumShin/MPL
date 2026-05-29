@@ -487,6 +487,64 @@ phases:
     assert.equal(existsSync(join(tmp, '.mpl', 'mpl', 'decomposition-derived.json')), true);
   });
 
+  it('#234 [contract-break] codex r3: pre-r2 untagged recovery from the SAME block is adopted (last_attempt_at >= blocked_at)', () => {
+    // codex r3 on PR #242: when upgrading from r1 to r2, existing
+    // blocked-hook envelopes on disk have untagged
+    // retry_context.recovery (no block_code / blocked_at fields).
+    // Treating them all as stale would silently reset an
+    // r1-budget-exhausted block to attempts=0 and allow extra auto-fix
+    // attempts past the cap.
+    //
+    // Migration: adopt untagged recovery when last_attempt_at is at
+    // or after the current block's blocked_at — proving the recovery
+    // was written within this block's lifetime.
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          // Pre-r2 shape: no block_code / blocked_at tag.
+          attempts: 3,
+          last_attempt_at: '2026-06-01T12:05:00Z', // AFTER blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'unsupported');
+    assert.equal(plan.attempts, 3, 'pre-r2 attempts must be inherited when last_attempt_at >= blocked_at');
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'failed');
+    assert.match(result.message, /budget exhausted/);
+  });
+
+  it('#234 [contract-break] codex r3: pre-r2 untagged recovery from an OLDER block is treated as stale', () => {
+    // The other half of the migration rule: untagged recovery written
+    // BEFORE the current block's blocked_at must still be discarded,
+    // since it belongs to a prior block.
+    writeMinimalDecompositionForDerive();
+    writeState(blocked({
+      block_code: 'decomposition_derived_stale',
+      blocked_at: '2026-06-01T12:00:00Z',
+      retry_context: {
+        recovery: {
+          attempts: 3,
+          last_attempt_at: '2026-05-15T09:00:00Z', // BEFORE blocked_at
+          last_status: 'failed',
+        },
+      },
+    }));
+
+    const plan = inspectRecovery(tmp);
+    assert.equal(plan.status, 'recoverable', 'older untagged recovery must be discarded');
+    assert.equal(plan.attempts, 0);
+
+    const result = recoverBlockedHook(tmp);
+    assert.equal(result.status, 'recovered');
+  });
+
   it('#234 [data-integrity] codex r2: scope-matched retry_context.recovery is honored', () => {
     // Sanity check: when the stored recovery DOES match the current
     // block (same code + blocked_at), the budget enforcement still
