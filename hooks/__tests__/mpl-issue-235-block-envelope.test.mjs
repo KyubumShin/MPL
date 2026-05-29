@@ -303,6 +303,54 @@ test('#235 codex r1: config opt-out (X_required:false) on previously-blocked hoo
   }
 });
 
+test('#235 codex r2: mpl-write-guard direct_source_edit=off clears stale envelope', () => {
+  // Codex r2 repro shape: write-guard records envelope for source
+  // file at filePath. Operator flips direct_source_edit to off and
+  // retries. The off branch must clear the envelope tagged to the
+  // exact filePath.
+  const cwd = freshWorkspace();
+  try {
+    const sourceFile = 'src/app.js';
+    // Seed a stale envelope tagged with mpl-write-guard + filePath.
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify(
+        {
+          current_phase: 'phase-1',
+          execution: { phases: { completed: 0 } },
+          session_status: 'blocked_hook',
+          blocked_by_hook: 'mpl-write-guard',
+          blocked_phase: 'phase-1',
+          blocked_artifact: sourceFile,
+          block_code: 'direct_source_edit',
+          block_reason: 'stale',
+          resume_instruction: 'stale',
+          blocked_at: new Date(0).toISOString(),
+          retry_context: { file_path: sourceFile, tool: 'Write' },
+        },
+        null,
+        2,
+      ),
+    );
+    writeConfig(cwd, { enforcement: { direct_source_edit: 'off' } });
+
+    const decision = runHook('mpl-write-guard.mjs', cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: { file_path: sourceFile, content: 'placeholder' },
+    });
+    assert.equal(decision.continue, true);
+    assert.equal(decision.suppressOutput, true);
+
+    const env = readEnvelope(cwd);
+    assert.ok(env.session_status == null);
+    assert.ok(env.blocked_by_hook == null);
+    assert.ok(env.block_code == null);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#235 surfaceBlockedHook helper: envelope written + block payload returned on block; off clears stale envelope', async () => {
   // Direct exercise of the lib for tighter coverage of off/warn/block tiers
   // without needing each hook's pre-conditions.

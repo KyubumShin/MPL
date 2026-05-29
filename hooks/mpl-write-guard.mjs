@@ -215,6 +215,9 @@ ensure you have the correct target path. The command will proceed, but please ve
   if (isSourceFile(filePath)) {
     const action = resolveRuleAction(cwd, state, 'direct_source_edit');
     if (action === 'off') {
+      // Codex r2 on PR #246: explicit opt-out must clear any stale
+      // envelope from a prior block for the same (hookId, filePath).
+      clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -266,6 +269,9 @@ Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} t
         if (!inScope) {
           const action = resolveRuleAction(cwd, state, 'phase_scope_violation');
           if (action === 'off') {
+            // Codex r2 on PR #246: explicit opt-out must clear any
+            // stale envelope from a prior phase_scope_violation block.
+            clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
             console.log(JSON.stringify({ continue: true, suppressOutput: true }));
             return;
           }
@@ -312,7 +318,14 @@ This may cause cross-phase side effects. Verify this modification belongs in the
     // Phase scope check failure: fail-open (don't block on parser errors)
   }
 
-  // All checks passed: allow
+  // All checks passed: allow. Codex r2 on PR #246: a write that
+  // passes both direct_source_edit AND phase_scope_violation means
+  // any envelope previously recorded for THIS (HOOK_ID, filePath) is
+  // resolved — clear it so mpl-recover/BLOCKED_HOOK_STALE see the
+  // unblocked state.
+  if (filePath) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
+  }
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
