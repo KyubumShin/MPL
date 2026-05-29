@@ -13,7 +13,7 @@
  * When MPL is active: guards Edit/Write on source files + warns on dangerous Bash
  */
 
-import { dirname, join, extname } from 'path';
+import { dirname, join, extname, resolve as resolvePath } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -166,24 +166,67 @@ function isDangerousBashCommand(command) {
 
 // #236 A3: does `command` attempt to remove any PROTECTED_DELETE_TARGETS
 // path (or one of its descendants)? Returns the matched target on hit,
-// null otherwise. Matches the canonical `rm` family — `rm`, `rm -r*`,
-// `rm -f*`, `rm --force`, and the wrapped `find ... -delete` form.
-// The check is conservative — over-matching is acceptable because the
-// MPL_FORCE_PURGE escape hatch exists for legitimate cleanup.
-function matchesProtectedDelete(command) {
+// null otherwise. Matches the canonical `rm` family and the wrapped
+// `find ... -delete` form, and resolves each path token against the
+// workspace `cwd` so workspace-absolute paths (`/abs/.../MPL/.mpl/mpl`)
+// and `..`/`.` traversal forms still match.
+//
+// Codex r1 retry on PR #249: the original token-prefix regex missed
+// `rm -rf /Users/.../MPL/.mpl/mpl` because the protected substring
+// appeared mid-path (no whitespace/quote boundary just before it).
+// Resolving each token via path.resolve(cwd, token) normalizes those
+// forms to a single canonical absolute path that we can compare
+// against the resolved protected roots.
+function matchesProtectedDelete(command, cwd) {
   if (!command || typeof command !== 'string') return null;
-  // Strip leading `sudo ` etc. before checking the head — `sudo rm -rf .mpl/mpl`
+  // Strip leading wrapper before checking the head — `sudo rm -rf …`
   // must still trip.
   const normalized = command.replace(/^\s*(sudo|time|nice|env)\s+/, '').trim();
-  // Identify rm calls — `rm`, `rm -*`, `\brm\b` inside a pipeline, etc.
+  // Identify rm-family / find -delete calls. Multi-command lines
+  // (`a; rm -rf X`, `a && rm -rf X`) still parse because we scan the
+  // whole command for `rm` or `find ... -delete`.
   if (!/\brm\b/.test(normalized) && !/\bfind\b.*-delete\b/.test(normalized)) {
     return null;
   }
+
+  // Claude r1 on PR #249 [logic] (concrete repros): shell-expansion
+  // forms (`$PWD`, `$(pwd)`), parenthesized subshells (`(cd … && rm
+  // -rf …)`), `pushd … && rm -rf …` splits, and shell-variable
+  // operands all defeat literal token resolution. Defense-in-depth:
+  // ALSO match the protected substring anywhere in the command. This
+  // over-blocks on incidental mentions, but `MPL_FORCE_PURGE=1` is
+  // already the operator escape hatch — over-blocking is the safe
+  // direction for a destructive op.
   for (const target of PROTECTED_DELETE_TARGETS) {
-    // Whole target OR `target/` prefix to catch descendants.
-    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(^|[\\s'"])(\\./)?${escaped}(/|\\b|['"])`);
-    if (re.test(normalized)) return target;
+    if (normalized.includes(target)) return target;
+  }
+
+  const resolvedRoots = PROTECTED_DELETE_TARGETS.map((target) => ({
+    target,
+    abs: resolvePath(cwd, target),
+  }));
+
+  // Tokenize on whitespace AND `;`/`&&`/`||`/`|`/`(`/`)` so a
+  // multi-command line + subshell surfaces every operand. We don't
+  // honour quoting precisely — strip leading/trailing quote and
+  // paren chars and check each token.
+  const tokens = normalized
+    .split(/[\s;|&()]+/)
+    .map((t) => t.replace(/^[\\$"'`]+/, '').replace(/[\\"'`)]+$/, ''))
+    .filter(Boolean);
+
+  for (const token of tokens) {
+    // Skip flag tokens; they can't be paths.
+    if (token.startsWith('-')) continue;
+    // Skip known program names so we don't false-match `rm` itself.
+    if (/^(rm|find|sudo|time|nice|env|cd|pushd|popd|mkdir)$/i.test(token)) continue;
+    // path.resolve handles `./`, `../`, abs, and trailing `/`.
+    let abs;
+    try { abs = resolvePath(cwd, token); }
+    catch { continue; }
+    for (const { target, abs: rootAbs } of resolvedRoots) {
+      if (abs === rootAbs || abs.startsWith(rootAbs + '/')) return target;
+    }
   }
   return null;
 }
@@ -191,24 +234,46 @@ function matchesProtectedDelete(command) {
 // #236 A1: record state.decomposer_dispatch when the orchestrator
 // dispatches Agent(subagent_type='mpl-decomposer'). Used by the
 // decomposition.yaml writer-identity check below.
-function recordDecomposerDispatch(cwd) {
+//
+// Codex r1 retry on PR #249: an ambient time-only flag let the
+// orchestrator itself write decomposition.yaml within the TTL
+// window. The fix is to also pin the PARENT (orchestrator) transcript
+// path at dispatch time, then on a later write require the calling
+// transcript to be DIFFERENT from the dispatcher's — a subagent's
+// transcript is always a distinct file.
+function recordDecomposerDispatch(cwd, parentTranscriptPath) {
   try {
     writeState(cwd, {
       decomposer_dispatch: {
         dispatched_at: new Date().toISOString(),
+        parent_transcript_path: parentTranscriptPath || null,
       },
     });
   } catch { /* best-effort */ }
 }
 
-// #236 A1: is a decomposer subagent currently expected to be running?
-// True when state.decomposer_dispatch.dispatched_at is within the TTL.
-function isDecomposerDispatchActive(cwd, state) {
+// #236 A1: is the current write coming from the decomposer subagent?
+//   - dispatch flag must be set,
+//   - within the TTL,
+//   - AND the calling transcript_path must DIFFER from the recorded
+//     parent (orchestrator) transcript_path. A same-transcript write
+//     is the orchestrator itself, which the contract forbids.
+//
+// When parent_transcript_path was not recorded (legacy state), we
+// fail closed — the writer-identity check cannot be satisfied without
+// a parent reference, so the write is rejected.
+function isDecomposerDispatchActive(state, callerTranscriptPath) {
   const flag = state?.decomposer_dispatch;
   if (!flag || typeof flag.dispatched_at !== 'string') return false;
   const ts = Date.parse(flag.dispatched_at);
   if (Number.isNaN(ts)) return false;
-  return (Date.now() - ts) <= DECOMPOSER_DISPATCH_TTL_MS;
+  if ((Date.now() - ts) > DECOMPOSER_DISPATCH_TTL_MS) return false;
+  const parent = typeof flag.parent_transcript_path === 'string'
+    ? flag.parent_transcript_path
+    : null;
+  if (!parent) return false;
+  if (!callerTranscriptPath || typeof callerTranscriptPath !== 'string') return false;
+  return callerTranscriptPath !== parent;
 }
 
 function isAllowedPath(filePath, opts = {}) {
@@ -268,7 +333,14 @@ async function main() {
   if (isTaskTool) {
     const sub = String(toolInput.subagent_type || toolInput.subagentType || '');
     if (DECOMPOSER_SUBAGENT_TYPES.has(sub)) {
-      recordDecomposerDispatch(cwd);
+      // The transcript_path on a PreToolUse Task dispatch is the
+      // DISPATCHING agent's transcript (the orchestrator's). Pin it
+      // so the writer-identity check can reject any future write
+      // arriving with the same transcript_path.
+      const parentTranscript = typeof data.transcript_path === 'string'
+        ? data.transcript_path
+        : (typeof data.transcriptPath === 'string' ? data.transcriptPath : null);
+      recordDecomposerDispatch(cwd, parentTranscript);
     }
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
@@ -279,7 +351,7 @@ async function main() {
     const command = toolInput.command || '';
     // #236 A3: protected-path delete — hard-block regardless of safe-cleanup
     // allowlist. Override via env MPL_FORCE_PURGE=1 set by the operator.
-    const protectedTarget = matchesProtectedDelete(command);
+    const protectedTarget = matchesProtectedDelete(command, cwd);
     if (protectedTarget && process.env.MPL_FORCE_PURGE !== '1') {
       const reason =
         `[MPL #236 A3] Refused destructive write to protected path "${protectedTarget}". ` +
@@ -348,7 +420,10 @@ ensure you have the correct target path. The command will proceed, but please ve
   // generic `isAllowedPath` (.mpl/* is otherwise an allowlisted
   // orchestrator path) so the writer identity wins.
   if (DECOMPOSITION_FILE_REGEX.test(filePath)) {
-    if (!isDecomposerDispatchActive(cwd, state)) {
+    const callerTranscript = typeof data.transcript_path === 'string'
+      ? data.transcript_path
+      : (typeof data.transcriptPath === 'string' ? data.transcriptPath : null);
+    if (!isDecomposerDispatchActive(state, callerTranscript)) {
       const reason =
         `[MPL #236 A1] Refused direct ${toolName} of decomposition.yaml: ` +
         `the orchestrator must NOT write this file. Only the mpl-decomposer ` +

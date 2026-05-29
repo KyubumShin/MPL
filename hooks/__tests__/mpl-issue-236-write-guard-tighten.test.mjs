@@ -92,14 +92,21 @@ test('#236 A1: orchestrator direct Edit of decomposition.yaml is blocked', () =>
   }
 });
 
-test('#236 A1: Write of decomposition.yaml after mpl-decomposer dispatch is allowed', () => {
+test('#236 A1: Write from a DIFFERENT transcript than the dispatcher is allowed within TTL', () => {
+  // Codex r1 retry fix: dispatch records the orchestrator's
+  // transcript_path; only writes from a DIFFERENT transcript (the
+  // subagent's) pass identity.
   const cwd = freshWorkspace();
   try {
-    // Step 1: orchestrator dispatches Agent(subagent_type='mpl-decomposer').
-    // Write-guard records state.decomposer_dispatch.
+    const orchestratorTranscript = '/tmp/transcript-orchestrator.jsonl';
+    const subagentTranscript = '/tmp/transcript-decomposer.jsonl';
+
+    // Step 1: orchestrator dispatches Agent. Hook pins orchestrator's
+    // transcript_path in state.
     const dispatchDecision = runHook(cwd, {
       cwd,
       tool_name: 'Task',
+      transcript_path: orchestratorTranscript,
       tool_input: {
         subagent_type: 'mpl-decomposer',
         prompt: 'Decompose ...',
@@ -109,18 +116,72 @@ test('#236 A1: Write of decomposition.yaml after mpl-decomposer dispatch is allo
     const dispatchState = readState(cwd);
     assert.ok(dispatchState.decomposer_dispatch, 'expected decomposer_dispatch flag');
     assert.equal(typeof dispatchState.decomposer_dispatch.dispatched_at, 'string');
+    assert.equal(
+      dispatchState.decomposer_dispatch.parent_transcript_path,
+      orchestratorTranscript,
+    );
 
-    // Step 2: subagent writes decomposition.yaml — allowed.
-    const writeDecision = runHook(cwd, {
+    // Step 2a: SUBAGENT writes decomposition.yaml from its OWN
+    // transcript — allowed.
+    const subagentWrite = runHook(cwd, {
       cwd,
       tool_name: 'Write',
+      transcript_path: subagentTranscript,
       tool_input: {
         file_path: '.mpl/mpl/decomposition.yaml',
         content: 'phases: []\ngenerated_by: mpl-decomposer\n',
       },
     });
-    assert.equal(writeDecision.continue, true);
-    assert.equal(writeDecision.suppressOutput, true);
+    assert.equal(subagentWrite.continue, true);
+    assert.equal(subagentWrite.suppressOutput, true);
+
+    // Step 2b: ORCHESTRATOR writes the same file from the SAME
+    // transcript as the dispatcher — codex r1 retry repro shape.
+    // Must still block: the dispatch flag is a capability for the
+    // SUBAGENT, not an ambient unlock.
+    const orchestratorWrite = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: orchestratorTranscript,
+      tool_input: {
+        file_path: '.mpl/mpl/decomposition.yaml',
+        content: 'phases: []\ngenerated_by: forged\n',
+      },
+    });
+    assert.equal(orchestratorWrite.continue, false);
+    assert.equal(orchestratorWrite.decision, 'block');
+    assert.match(orchestratorWrite.reason, /#236 A1/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1: legacy dispatch flag without parent_transcript_path is rejected (fail-closed)', () => {
+  const cwd = freshWorkspace();
+  try {
+    // Pre-fill state with a time-only dispatch (no parent_transcript_path).
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify(
+        {
+          current_phase: 'phase-1',
+          decomposer_dispatch: { dispatched_at: new Date().toISOString() },
+        },
+        null,
+        2,
+      ),
+    );
+    const decision = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: '/tmp/subagent.jsonl',
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'x' },
+    });
+    assert.equal(
+      decision.decision,
+      'block',
+      'legacy time-only dispatch without parent_transcript_path must be rejected',
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -266,6 +327,71 @@ test('#236 A3: rm targeting node_modules (safe-cleanup) still passes silently', 
     });
     assert.equal(decision.continue, true);
     assert.equal(decision.suppressOutput, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 claude r1: shell-expansion / subshell / pushd bypass forms are all blocked', () => {
+  // Concrete repros from claude r1 [logic]. Defense-in-depth: a
+  // substring match covers expansion forms (`$PWD`, `$(pwd)`) and
+  // variable operands; widened tokenization covers parenthesized
+  // subshells and pushd splits.
+  const cwd = freshWorkspace();
+  try {
+    // The substring check + widened tokenization covers shell-expansion,
+    // subshell, and variable-operand forms. `pushd <target> && rm -rf <rel>`
+    // is a working-directory-change pattern the hook cannot fully resolve
+    // without a shell parser — operators using that form should rely on
+    // the dangerous-bash warning and the MPL_FORCE_PURGE escape hatch.
+    const bypasses = [
+      'rm -rf $PWD/.mpl/mpl',
+      'rm -rf "$PWD/.mpl/mpl"',
+      'rm -rf $(pwd)/.mpl/mpl',
+      '(cd /tmp && rm -rf .mpl/mpl)',
+      'a=docs/learnings; rm -rf $a',
+    ];
+    for (const command of bypasses) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected protected-delete block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 codex r1 retry: workspace-absolute `rm -rf /abs/.../.mpl/mpl` is blocked', () => {
+  const cwd = freshWorkspace();
+  try {
+    const decision = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: `rm -rf ${cwd}/.mpl/mpl` },
+    });
+    assert.equal(decision.decision, 'block');
+    assert.match(decision.reason, /#236 A3/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 codex r1 retry: path-traversal `rm -rf .mpl/mpl/../mpl` is blocked', () => {
+  const cwd = freshWorkspace();
+  try {
+    const decision = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf .mpl/mpl/../mpl' },
+    });
+    assert.equal(decision.decision, 'block');
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
