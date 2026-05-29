@@ -51,13 +51,18 @@ async function main() {
     return;
   }
 
-  const toolName = data.tool_name || '';
+  // Codex r2 [contract-break]: sibling hooks (`mpl-validate-seed`,
+  // `mpl-ambiguity-gate`, etc.) accept both snake_case AND camelCase
+  // payload shapes. Reading only `data.tool_name` would silently drop
+  // HA-01 signals when the harness delivers `toolName` / `toolInput`,
+  // breaking the doctor count.
+  const toolName = data.tool_name || data.toolName || '';
   if (toolName !== 'Task' && toolName !== 'Agent') {
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
   }
 
-  const toolInput = data.tool_input || {};
+  const toolInput = data.tool_input || data.toolInput || {};
   const subagentType = toolInput.subagent_type || toolInput.subagentType || '';
   const prompt = toolInput.prompt || toolInput.description || '';
 

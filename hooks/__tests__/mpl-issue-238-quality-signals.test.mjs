@@ -280,6 +280,31 @@ test('#238 e2e: soft-signal-emit hook is a no-op outside MPL workspaces', () => 
   }
 });
 
+test('#238 codex r2 [contract-break] e2e: soft-signal-emit hook accepts camelCase payload shape', () => {
+  // Codex r2: sibling hooks normalize both `tool_name` and `toolName`.
+  // The new hook initially read only snake_case, silently losing
+  // HA-01 signals on a camelCase harness delivery.
+  const cwd = freshWorkspace();
+  try {
+    const decision = runHook('mpl-soft-signal-emit.mjs', {
+      cwd,
+      toolName: 'Task',
+      toolInput: {
+        subagent_type: 'mpl-decomposer',
+        prompt: 'Decompose this. 이전 결과 참고해서 알아서 판단.',
+      },
+    });
+    assert.equal(decision.continue, true, 'must never block');
+    const { records, malformed } = readQualitySignals(cwd);
+    assert.equal(records.length, 1, 'HA-01 record must be appended even on camelCase payload');
+    assert.equal(malformed, 0);
+    assert.equal(records[0].rule, 'HA-01');
+    assert.equal(records[0].agent, 'mpl-decomposer');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#238 e2e: soft-signal-emit hook ignores non-Task tools', () => {
   const cwd = freshWorkspace();
   try {
