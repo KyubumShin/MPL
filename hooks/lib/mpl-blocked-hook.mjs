@@ -60,12 +60,11 @@ export function buildBlockedHookPatch({
     retryContext && typeof retryContext === 'object' && !Array.isArray(retryContext)
       ? retryContext
       : {};
-  const recoveryTombstone = {
-    awaiting_instruction: null,
-  };
-  // If the caller explicitly passes a `recovery` sub-object in
-  // retryContext, preserve its content but ensure the tombstone fields
-  // are at least null (caller can override by setting them themselves).
+  // Codex r11 on PR #242 [security]: previously the tombstone was
+  // spread BEFORE the caller's recovery object, so a caller passing
+  // `retryContext.recovery.awaiting_instruction = "LEAK"` would
+  // override the null. Tombstone must WIN — strip the sensitive
+  // field unconditionally regardless of caller intent.
   const incomingRecovery =
     inboundRetryContext.recovery && typeof inboundRetryContext.recovery === 'object'
       && !Array.isArray(inboundRetryContext.recovery)
@@ -81,9 +80,12 @@ export function buildBlockedHookPatch({
     resume_instruction: resumeInstruction || 'Resolve the recorded hook block, then retry the blocked operation.',
     retry_context: {
       ...inboundRetryContext,
-      recovery: incomingRecovery
-        ? { ...recoveryTombstone, ...incomingRecovery }
-        : recoveryTombstone,
+      recovery: {
+        ...(incomingRecovery || {}),
+        // Tombstone WINS — applied after the caller spread so it cannot
+        // be overridden. No caller path may emit gated dispatch text.
+        awaiting_instruction: null,
+      },
     },
     blocked_at: blockedAt,
   };
