@@ -456,7 +456,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 |----|--------|------|------------|
 | `mpl-compaction-tracker` | PreCompact | Track compaction events and create checkpoints (F-31). | v0.13.x baseline |
 | `mpl-auto-permit` | PreToolUse | Apply learned safe permission decisions (F-34). | v0.13.x baseline |
-| `mpl-write-guard` | PreToolUse: Edit/Write/MultiEdit/Bash | Warn or block unsafe direct source edits and dangerous shell commands while MPL is active. | v0.13.x baseline; MultiEdit/MCP hardening v0.18.1 |
+| `mpl-write-guard` | PreToolUse: Edit/Write/MultiEdit/Bash/Task/Agent | Warn or block unsafe direct source edits and dangerous shell commands; #236: protect mpl-cancel SKILL paths from `rm -rf` and require mpl-decomposer subagent identity for decomposition.yaml writes. | v0.13.x baseline; MultiEdit/MCP hardening v0.18.1; protected-path + decomposition-writer v0.18.5 |
 | `mpl-bash-timeout` | PreToolUse: Bash | Enforce timeout budgets on build, lint, test, and verification commands. | v0.18.1 |
 | `mpl-state-invariant` | PreToolUse: Task/Agent/Edit/Write/MultiEdit; Stop | Validate state schema, gate evidence, pause/block status, and completion invariants before state can drift. | v0.18.1; I10/I11 recovery v0.18.4 |
 | `mpl-require-e2e` | PreToolUse: Edit/Write/MultiEdit | Block finalize when required E2E scenarios or UC coverage are missing, failing, or explicitly uncovered. | v0.15.2; UC coverage v0.16.0 |
