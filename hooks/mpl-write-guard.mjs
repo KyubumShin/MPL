@@ -716,8 +716,6 @@ async function main() {
         }
       }
       if (decompMention) {
-        const headM = normalizedEarly.match(/^(\w+)/);
-        const head = headM ? headM[1].toLowerCase() : '';
         const SAFE_READS = new Set([
           'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
           'grep', 'rg', 'ag', 'ack', 'jq', 'yq',
@@ -725,12 +723,22 @@ async function main() {
           'diff', 'comm', 'sdiff',
           'echo', 'printf', 'pwd', 'type', 'which',
         ]);
+        // Codex r19 [security]: check EVERY pipeline / statement
+        // segment's head verb, not just the first. `printf forged |
+        // sponge .mpl/mpl/decomposition.yaml` has a safe-read head
+        // (`printf`) but a downstream writer (`sponge`) that
+        // overwrites the protected file.
+        const segments = normalizedEarly.split(/[|;&]+/).map((s) => s.trim()).filter(Boolean);
+        const allSegmentsSafe = segments.every((seg) => {
+          const segHead = (seg.match(/^(\w+)/) || ['', ''])[1].toLowerCase();
+          return SAFE_READS.has(segHead);
+        });
         const writesToDecomp = (
           /[\d&]?>{1,2}[^|;&\n]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly) ||
           /\btee\b[^|;&]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly) ||
           /\bdd\b[^|;&]*\bof=[^|;&]*\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly)
         );
-        if (!SAFE_READS.has(head) || writesToDecomp || symlinkWritesToDecomp) {
+        if (!allSegmentsSafe || writesToDecomp || symlinkWritesToDecomp) {
           const reason =
             `[MPL #236 A1] Refused Bash write to .mpl/mpl/decomposition.yaml: ` +
             `only the mpl-decomposer subagent may emit this file. Bash writes ` +
@@ -857,9 +865,15 @@ async function main() {
       'diff', 'comm', 'sdiff',
       'echo', 'printf', 'pwd', 'type', 'which',
     ]);
-    const headVerbMatch = normalizedCommand.match(/^(\w+)/);
-    const headVerb = headVerbMatch ? headVerbMatch[1].toLowerCase() : '';
-    const isSafeRead = SAFE_READ_HEADS.has(headVerb);
+    // Codex r19 [security]: check EVERY pipeline / statement segment's
+    // head verb, not just the first. `printf forged | sponge
+    // .mpl/state.json` has a safe-read head but a downstream writer.
+    const segmentsStateGuard = normalizedCommand
+      .split(/[|;&]+/).map((s) => s.trim()).filter(Boolean);
+    const isSafeRead = segmentsStateGuard.length > 0 && segmentsStateGuard.every((seg) => {
+      const segHead = (seg.match(/^(\w+)/) || ['', ''])[1].toLowerCase();
+      return SAFE_READ_HEADS.has(segHead);
+    });
     // Detect redirect/tee/dd targeting state.json anywhere in the
     // command (catches pipe-then-redirect forms).
     let writesToStateJson = (

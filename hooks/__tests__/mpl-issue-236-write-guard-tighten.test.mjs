@@ -476,6 +476,43 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
   }
 });
 
+test('#236 A1 codex r19 [security]: pipeline writer downstream of safe-read head is blocked', () => {
+  // Codex r19: `printf forged | sponge .mpl/mpl/decomposition.yaml`
+  // has a safe-read head (`printf`) but a downstream writer (`sponge`)
+  // that overwrites the protected file. Pre-fix the head-only check
+  // missed this. Fix: split on `|`/`;`/`&` and require EVERY pipeline
+  // segment's head verb to be in SAFE_READS.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'printf forged | sponge .mpl/mpl/decomposition.yaml',
+      'printf forged | sponge .mpl/state.json',
+      'cat /tmp/forged | install -m 0644 /dev/stdin .mpl/mpl/decomposition.yaml',
+      'echo forged | perl -pi -e0 .mpl/state.json',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected pipeline-writer block for: ${command}`,
+      );
+    }
+    // Sanity: all-safe-read pipeline still passes.
+    const allSafe = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'cat .mpl/state.json | grep phase | wc -l' },
+    });
+    assert.notEqual(allSafe.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 claude r18 [security]: multi-statement / multi-redirect symlink bypass is closed', () => {
   // Claude r18: r17's single-shot .match() only checked the FIRST
   // redirect target. A multi-statement command with a benign first
