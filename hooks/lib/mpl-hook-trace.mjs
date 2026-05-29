@@ -187,8 +187,28 @@ function endsWithSegment(path, segment) {
   return path.endsWith('/' + segment);
 }
 
+// Conservative Windows-shape detection. Returns the input normalized
+// to forward slashes ONLY when the input is structurally Windows
+// (drive letter, UNC, or pure-backslash). Mixed `/\` paths and
+// POSIX paths with literal backslash in filenames are left alone.
+function normalizeWindowsPath(p) {
+  if (typeof p !== 'string' || !p) return p;
+  const hasBackslash = p.includes('\\');
+  if (!hasBackslash) return p;
+  const hasForward = p.includes('/');
+  // Drive letter prefix (e.g. `C:\`, `c:\`, or `c:/`).
+  if (/^[A-Za-z]:[/\\]/.test(p)) return p.replace(/\\/g, '/');
+  // UNC prefix (`\\server\share`).
+  if (p.startsWith('\\\\')) return p.replace(/\\/g, '/');
+  // Pure-backslash separators (no `/` anywhere).
+  if (!hasForward) return p.replace(/\\/g, '/');
+  // Mixed `/\` — treat backslash as a literal filename character
+  // (POSIX-correct behavior).
+  return p;
+}
+
 function pathCategory(targetPath) {
-  const normalized = String(targetPath || '').replace(/\\/g, '/');
+  const normalized = normalizeWindowsPath(String(targetPath || ''));
   if (endsWithSegment(normalized, DECOMPOSITION_PATH)) return 'decomposition';
   if (endsWithSegment(normalized, '.mpl/state.json')) return 'state';
   return 'file';
@@ -235,15 +255,20 @@ function blockStatusFor(hookId, state, targetPath) {
   if (missing.length > 0) {
     return 'invalid_blocked_envelope';
   }
-  // Codex r3 on PR #243: pathCategory normalizes backslash to forward
-  // slash but blockStatusFor compared raw strings, so a Windows-style
-  // target (`C:\repo\.mpl\state.json`) with a normalized blocked_artifact
-  // (`.mpl/state.json`) would be classified as state but reported as
-  // `registered_blocking_other_artifact` — the active blocker hidden
-  // from the trace. Apply the same `\` → `/` normalization before
-  // comparison so the boundary check is path-shape-agnostic.
-  const artifact = String(state.blocked_artifact || '').trim().replace(/\\/g, '/');
-  const target = String(targetPath || '').trim().replace(/\\/g, '/');
+  // Codex r3/r4 on PR #243: balance two concrete edge cases:
+  //   r3 — `C:\repo\.mpl\state.json` (Windows-style) target should
+  //        match `.mpl/state.json` artifact (active blocker visible).
+  //   r4 — `src/foo\state.json` on POSIX is a single filename
+  //        `foo\state.json`; unconditional `\` → `/` would fabricate
+  //        a path boundary and falsely match a `state.json` artifact.
+  //
+  // Conservative narrowing: only normalize when the input is
+  // structurally Windows-shaped — drive-letter prefix, UNC prefix,
+  // OR pure-backslash with no forward slashes. Mixed `/\` paths and
+  // bare-backslash-in-segment leave the raw comparison alone, which
+  // preserves the r4 POSIX semantics.
+  const artifact = normalizeWindowsPath(String(state.blocked_artifact || '').trim());
+  const target = normalizeWindowsPath(String(targetPath || '').trim());
   if (!target) {
     return 'invalid_blocked_envelope';
   }

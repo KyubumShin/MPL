@@ -483,6 +483,36 @@ describe('mpl-hook-trace', () => {
     }
   });
 
+  it('#237 codex r4 [logic]: POSIX literal-backslash filename does NOT fabricate a path boundary', () => {
+    // codex r4 on PR #243: r3 unconditional `\` → `/` normalization
+    // broke a POSIX edge case. `src/foo\state.json` on POSIX is a
+    // single basename `foo\state.json`, not a `state.json` segment.
+    // Unconditional normalization let it falsely match a `state.json`
+    // artifact. Narrowed normalization (drive-letter / UNC /
+    // pure-backslash only) keeps POSIX semantics.
+    const trace = traceHookChain({
+      // Mixed `/\` path: backslash here is a literal filename character.
+      targetPath: 'src/foo\\state.json',
+      state: {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        session_status: 'blocked_hook',
+        blocked_by_hook: 'mpl-require-test-agent',
+        blocked_artifact: 'state.json',
+        blocked_phase: 'phase-1',
+        block_code: 'x',
+        block_reason: 'x',
+        resume_instruction: 'x',
+        blocked_at: '2026-05-27T00:00:00.000Z',
+        retry_context: {},
+      },
+    });
+    const row = trace.hooks.find((h) => h.hook_id === 'mpl-require-test-agent');
+    // Must NOT be currently_blocking — POSIX `foo\state.json` is a
+    // different file from `state.json`.
+    assert.notEqual(row?.status, 'currently_blocking',
+      'POSIX literal-backslash filename must not fabricate a path boundary');
+  });
+
   it('#237 codex r3 [logic]: blockStatusFor normalizes backslash paths for active-blocker match', () => {
     // codex r3 on PR #243: pathCategory normalized backslash to
     // forward slash but blockStatusFor compared raw strings. A
