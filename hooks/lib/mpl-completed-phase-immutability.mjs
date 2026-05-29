@@ -171,12 +171,23 @@ export function normalizePhaseBlock(text) {
   let inBlockScalar = false;
 
   for (const rawLine of lines) {
-    // Drop pure comment lines (`# …`).
+    const lineIndent = (rawLine.match(/^(\s*)/) || ['', ''])[1].length;
+
+    // Inside a block scalar — until indent backs up to fieldIndent.
+    // Claude r2 follow-up: full-line `#` is literal payload inside
+    // `|` / `>` scalars (e.g. markdown-style criterion text), not a
+    // YAML comment. Emit verbatim BEFORE the `^\s*#` skip below.
+    if (inBlockScalar && rawLine.trim() && lineIndent > fieldIndent) {
+      if (currentField && LOAD_BEARING_FIELDS.has(currentField)) {
+        out.push(rawLine.replace(/[ \t]+$/g, ''));
+      }
+      continue;
+    }
+
+    // Drop pure comment lines (`# …`) — only outside block scalars.
     if (/^\s*#/.test(rawLine)) continue;
     // Drop empty lines.
     if (!rawLine.trim()) continue;
-
-    const lineIndent = (rawLine.match(/^(\s*)/) || ['', ''])[1].length;
 
     // `- id:` line — always emitted; resets currentField, exits scalar.
     if (/^\s*-\s+id\s*:/.test(rawLine)) {
@@ -186,15 +197,6 @@ export function normalizePhaseBlock(text) {
       continue;
     }
 
-    // Inside a block scalar — until indent backs up to fieldIndent.
-    if (inBlockScalar && lineIndent > fieldIndent) {
-      // Block-scalar payload: emit verbatim (NO inline comment strip)
-      // when the parent field is load-bearing.
-      if (currentField && LOAD_BEARING_FIELDS.has(currentField)) {
-        out.push(rawLine.replace(/[ \t]+$/g, ''));
-      }
-      continue;
-    }
     inBlockScalar = false;
 
     // Field-level line (at fieldIndent).

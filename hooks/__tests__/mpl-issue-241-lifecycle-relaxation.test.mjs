@@ -156,6 +156,54 @@ phases:
   assert.ok(vpVerdict.issues.includes('phase-1:contract:modified'));
 });
 
+test('#241 B1 claude r2: full-line `#`-prefixed lines INSIDE block scalars must block on change (still literal payload)', () => {
+  const oldText = `
+phases:
+  - id: phase-1
+    impact: high
+    scope: |
+      # Must validate X
+      criterion text
+`;
+  const newText = `
+phases:
+  - id: phase-1
+    impact: high
+    scope: |
+      # Optional
+      criterion text
+`;
+  const verdict = validateCompletedPhaseImmutability({
+    oldText,
+    newText,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(verdict.valid, false,
+    'Expected full-line `#` change inside `scope: |` block scalar to block');
+  assert.ok(verdict.issues.includes('phase-1:contract:modified'));
+});
+
+test('#241 B1: top-level `#`-prefixed comment line (NOT inside a block scalar) is still allowed', () => {
+  const oldText = `
+phases:
+  - id: phase-1
+    # old top-level comment
+    impact: high
+`;
+  const newText = `
+phases:
+  - id: phase-1
+    # new top-level comment
+    impact: high
+`;
+  const verdict = validateCompletedPhaseImmutability({
+    oldText,
+    newText,
+    completedIds: ['phase-1'],
+  });
+  assert.equal(verdict.valid, true, verdict.issues.join(', '));
+});
+
 test('#241 B1 codex r2: block-scalar payload changes after `#` MUST block (no inline-comment strip in scalar body)', () => {
   // Concrete repro from codex r2 [contract-break].
   const oldText = `
