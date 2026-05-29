@@ -82,12 +82,30 @@ export function classifyCommand(command) {
   return null;
 }
 
+// #240 A5: apply config overrides for per-category max_ms from
+// .mpl/config.json `bash_timeout.{category}.max_ms`. Returns a new
+// category object with merged bounds; the canonical CATEGORIES array
+// stays read-only.
+function applyConfigOverrides(cat, configOverride) {
+  if (!cat) return cat;
+  const o = configOverride?.[cat.name];
+  if (!o || typeof o !== 'object') return cat;
+  const next = { ...cat };
+  if (Number.isFinite(o.max_ms) && o.max_ms > 0) next.maxMs = o.max_ms;
+  if (Number.isFinite(o.min_ms) && o.min_ms > 0) next.minMs = o.min_ms;
+  if (Number.isFinite(o.recommended_ms) && o.recommended_ms > 0) {
+    next.recommendedMs = o.recommended_ms;
+  }
+  return next;
+}
+
 /**
  * Decide whether a command + timeout combination is acceptable.
  *
  * @param {string} command
  * @param {number | undefined | null} timeoutMs - tool_input.timeout in milliseconds
- * @param {{ strict?: boolean }} [opts]
+ * @param {{ strict?: boolean, configOverride?: object }} [opts]
+ *   - configOverride: shape `.mpl/config.json bash_timeout` (per-category overrides)
  * @returns {{
  *   action: 'silent' | 'warn' | 'block',
  *   category: string | null,
@@ -97,8 +115,9 @@ export function classifyCommand(command) {
  */
 export function decideTimeout(command, timeoutMs, opts = {}) {
   const strict = opts.strict === true;
-  const cat = classifyCommand(command);
-  if (!cat) return { action: 'silent', category: null, reason: '', recommendedMs: null };
+  const baseCat = classifyCommand(command);
+  if (!baseCat) return { action: 'silent', category: null, reason: '', recommendedMs: null };
+  const cat = applyConfigOverrides(baseCat, opts.configOverride);
 
   const present = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0;
 

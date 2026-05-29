@@ -72,6 +72,26 @@ const TEST_WAIT_DEFAULTS = {
   pipelining_enabled: true,
 };
 
+// #240: extracted hard-coded thresholds. All defaults keep the prior
+// behavior; setting these in `.mpl/config.json` is opt-in relaxation.
+//   phase0_artifacts_required — when false, allow protected-phase
+//       transitions without raw-scan.md / design-intent.yaml / contracts.
+//   test_agent.default_required — when false, absence in
+//       decomposition.yaml means NOT required (overrides AD-0007).
+//   ambiguity.threshold — float upper bound (default 0.2). Scores ≤
+//       threshold proceed; scores > threshold loop back to ambiguity-resolve.
+//   ambiguity.force_proceed_after_rounds — when set, allow
+//       state.ambiguity_force_proceed: true to override threshold after
+//       N rounds; null means no force-proceed path.
+//   gate_classify.allowed_heads — extends/replaces STRICT_GATE_HEAD_ALLOWLIST
+//       (manual gate evidence head allowlist).
+//   bash_timeout.{category}.max_ms — per-category ceiling override.
+const PHASE0_ARTIFACTS_REQUIRED_DEFAULT = true;
+const TEST_AGENT_DEFAULTS = { default_required: true };
+const AMBIGUITY_DEFAULTS = { threshold: 0.2, force_proceed_after_rounds: null };
+const GATE_CLASSIFY_DEFAULTS = { allowed_heads: [] };
+const BASH_TIMEOUT_DEFAULTS = {};
+
 const DEFAULTS = {
   max_fix_loops: 10,
   gate1_strategy: 'auto',  // 'docker', 'native', 'skip'
@@ -85,6 +105,11 @@ const DEFAULTS = {
   whole_goal_closure_required: true,
   e2e_authenticity_required: true,
   finalize_artifacts_required: true,
+  phase0_artifacts_required: PHASE0_ARTIFACTS_REQUIRED_DEFAULT,
+  test_agent: TEST_AGENT_DEFAULTS,
+  ambiguity: AMBIGUITY_DEFAULTS,
+  gate_classify: GATE_CLASSIFY_DEFAULTS,
+  bash_timeout: BASH_TIMEOUT_DEFAULTS,
   convergence: {
     stagnation_window: 3,
     min_improvement: 0.05,

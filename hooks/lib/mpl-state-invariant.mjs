@@ -22,6 +22,7 @@ import { join } from 'path';
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
 import { classifyGateCommand } from './mpl-gate-classify.mjs';
 import { REQUIRES_PHASE0_ARTIFACTS, missingPhase0Artifacts } from './mpl-phase0-artifacts.mjs';
+import { loadConfig } from './mpl-config.mjs';
 
 // Re-export so consumers (and the H8 single-source-of-truth test) can
 // confirm both modules agree on the version constant via a single
@@ -360,7 +361,7 @@ function checkI11(state) {
     { missing });
 }
 
-function checkGateFamilyForBlock(block, label) {
+function checkGateFamilyForBlock(block, label, cwd) {
   // A "structured gate entry" carries { command, exit_code, ... }. Check
   // that the recorded `command` belongs to the family this slot expects.
   // mpl-gate-recorder produces commands the classifier recognizes; manual
@@ -391,7 +392,7 @@ function checkGateFamilyForBlock(block, label) {
       });
       continue;
     }
-    const family = classifyGateCommand(command);
+    const family = classifyGateCommand(command, { cwd });
     if (family !== expectedFamily) {
       issues.push({
         gate: `${label}.${slot}`,
@@ -414,6 +415,13 @@ function checkI13(state, cwd, trigger) {
   if (trigger !== TRIGGERS.STATE_WRITE) return null;
   const phase = state?.current_phase;
   if (!phase || !REQUIRES_PHASE0_ARTIFACTS.has(phase)) return null;
+  // #240 A1 + codex/claude r2 on PR #244 [contract-break]: honor the
+  // workspace config knob. blockedPhaseTransitionReason() already
+  // bails out when phase0_artifacts_required is false; I13 must
+  // match so a workspace that opts out via .mpl/config.json doesn't
+  // hit the invariant on mpl_state_write.
+  const cfg = loadConfig(cwd);
+  if (cfg?.phase0_artifacts_required === false) return null;
 
   const missing = missingPhase0Artifacts(cwd);
   if (missing.length === 0) return null;
@@ -427,13 +435,13 @@ function checkI13(state, cwd, trigger) {
     { phase, missing });
 }
 
-function checkI12(state, trigger) {
+function checkI12(state, trigger, cwd) {
   // Exp22 R13 / #209. Surface on STATE_WRITE so manual patches that try
   // to land malformed evidence are caught at the write boundary.
   if (trigger !== TRIGGERS.STATE_WRITE) return null;
   const issues = [
-    ...checkGateFamilyForBlock(state?.gate_results, 'state.gate_results'),
-    ...checkGateFamilyForBlock(state?.release?.gate_results, 'state.release.gate_results'),
+    ...checkGateFamilyForBlock(state?.gate_results, 'state.gate_results', cwd),
+    ...checkGateFamilyForBlock(state?.release?.gate_results, 'state.release.gate_results', cwd),
   ];
   if (issues.length === 0) return null;
   const messages = issues
@@ -476,7 +484,7 @@ export function checkInvariants(state, opts = {}) {
     () => checkI9(state),
     () => checkI10(state),
     () => checkI11(state),
-    () => checkI12(state, trigger),
+    () => checkI12(state, trigger, cwd),
     () => checkI13(state, cwd, trigger),
   ];
 

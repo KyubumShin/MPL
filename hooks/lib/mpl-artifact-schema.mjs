@@ -29,6 +29,8 @@
  * Pure functions. The hook handles I/O / signal emission.
  */
 
+import { loadConfig } from './mpl-config.mjs';
+
 const ARTIFACTS = [
   {
     artifact: 'goal-contract',
@@ -165,8 +167,12 @@ export function hasKey(content, key, parser) {
  * `{ valid, missing, missingAnyOf }` — `missing` lists individual
  * required keys that weren't found; `missingAnyOf` lists groups where
  * none of the alternatives matched.
+ *
+ * #240 + codex/claude r3 on PR #244: when the caller provides cwd in
+ * opts, it's threaded into customValidate so schema-level checks can
+ * honor workspace config knobs (e.g. test_agent.default_required).
  */
-export function validateAgainstSchema(content, schema) {
+export function validateAgainstSchema(content, schema, opts = {}) {
   if (!schema) return { valid: true, missing: [], missingAnyOf: [] };
   const missing = [];
   for (const key of schema.required ?? []) {
@@ -179,7 +185,7 @@ export function validateAgainstSchema(content, schema) {
     }
   }
   if (typeof schema.customValidate === 'function') {
-    const custom = schema.customValidate(content);
+    const custom = schema.customValidate(content, opts);
     missing.push(...(custom.missing ?? []));
     missingAnyOf.push(...(custom.missingAnyOf ?? []));
   }
@@ -225,10 +231,23 @@ function parseDecompositionPhases(content) {
   return phases;
 }
 
-function validateDecompositionContract(content) {
+function validateDecompositionContract(content, opts = {}) {
+  // #240 A2 + codex/claude r3 on PR #244 [contract-break]: when the
+  // workspace explicitly opted out of "absence is required" via
+  // `test_agent.default_required: false`, hand-written / legacy
+  // decompositions that omit `test_agent_required` per phase must
+  // NOT trip the artifact schema. Explicit `test_agent_required:
+  // false` still requires a rationale per AD-0007.
+  let defaultRequired = true;
+  if (opts.cwd) {
+    try {
+      const cfg = loadConfig(opts.cwd);
+      if (cfg?.test_agent?.default_required === false) defaultRequired = false;
+    } catch { /* fall back to strict default on read error */ }
+  }
   const missing = [];
   for (const phase of parseDecompositionPhases(content)) {
-    if (!phase.hasTestAgentRequired) {
+    if (!phase.hasTestAgentRequired && defaultRequired) {
       missing.push(`${phase.id}.test_agent_required`);
     }
     if (phase.testAgentRequired === false && !phase.hasTestAgentRationale) {
@@ -242,10 +261,10 @@ function validateDecompositionContract(content) {
  * One-shot helper: match path → validate → return verdict object.
  * Returns `null` when the path is out of scope.
  */
-export function validateArtifactFile(relPath, content) {
+export function validateArtifactFile(relPath, content, opts = {}) {
   const schema = matchArtifactSchema(relPath);
   if (!schema) return null;
-  const { valid, missing, missingAnyOf } = validateAgainstSchema(content, schema);
+  const { valid, missing, missingAnyOf } = validateAgainstSchema(content, schema, opts);
   return {
     artifact: schema.artifact,
     relPath,

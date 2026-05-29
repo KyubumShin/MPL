@@ -37,6 +37,10 @@ const { decideTimeout } = await import(
 const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
+// #240 A5: bash_timeout per-category overrides from .mpl/config.json.
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -67,7 +71,14 @@ async function main() {
   if (ruleAction === 'off') return silent();
   const strict = ruleAction === 'block';
 
-  const decision = decideTimeout(command, timeoutMs, { strict });
+  // #240 A5: thread the workspace's bash_timeout overrides into the
+  // category bounds so monorepo / cargo-release builds can raise the
+  // ceiling without disabling enforcement entirely.
+  const cfg = loadConfig(cwd);
+  const decision = decideTimeout(command, timeoutMs, {
+    strict,
+    configOverride: cfg?.bash_timeout,
+  });
 
   if (decision.action === 'silent') return silent();
 

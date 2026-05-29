@@ -1,3 +1,5 @@
+import { loadConfig } from './mpl-config.mjs';
+
 /**
  * Shared Bash command → gate-family classifier.
  *
@@ -147,7 +149,14 @@ function extractCommandHead(command) {
 // a denylist; it explicitly enumerates the only heads we accept as
 // manual gate evidence. The recorder path (`classifyRecordedCommand`)
 // still uses regex-only matching to keep wrapper invocations working.
-const STRICT_GATE_HEAD_ALLOWLIST = new Set([
+//
+// #240 A4: the BUILTIN set covers JS/TS/Python/Rust/Go ecosystems.
+// Projects on Bun/Deno/PHP/Swift/.NET/Elixir/etc. extend the set via
+// `.mpl/config.json` `gate_classify.allowed_heads: [...]`. Use
+// `allowedGateHeads(cwd)` to read the merged set for a given workspace
+// (built-in ∪ config extension). The bare `STRICT_GATE_HEAD_ALLOWLIST`
+// export remains the built-in canonical reference.
+export const STRICT_GATE_HEAD_ALLOWLIST = Object.freeze(new Set([
   // Hard 1 — lint / typecheck / build / compile
   'tsc', 'eslint', 'ruff', 'mypy',
   // Hard 2 — unit / integration test runners
@@ -160,7 +169,310 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
   'npm', 'pnpm', 'yarn', 'npx', 'pnpx',
   // Compiled / system languages
   'cargo', 'go',
+]));
+
+// #240 A4 + codex r1 on PR #244 [data-integrity]: script interpreters
+// take arbitrary text via `-e` / `-c` / etc. that the family regex
+// would erroneously match. These heads MUST NOT be admissible as
+// strict manual gate evidence even if an operator adds them to
+// `.mpl/config.json gate_classify.allowed_heads`. Reject silently at
+// the config-read boundary so I12 stays load-bearing.
+const STRICT_GATE_HEAD_INTERPRETER_DENYLIST = Object.freeze(new Set([
+  'node', 'deno', 'bun', // (deno/bun: CLI runtimes themselves can also `eval`)
+  'python', 'python3', 'python2',
+  'ruby', 'irb',
+  'perl', 'php',
+  'awk', 'sed',
+  'lua', 'luajit',
+  'tclsh', 'expect',
+  'osascript',
+]));
+
+// #240 A4 + codex r1 on PR #244 [contract-break]: configured heads
+// must also map to gate families. The built-in family regex doesn't
+// know about ecosystems like `deno test` / `bun test` / `biome ci`,
+// so `allowed_heads: ['deno']` alone would pass the head check but
+// fail the family classification — defeating the config knob.
+//
+// Two accepted shapes per entry in
+// `.mpl/config.json gate_classify.allowed_heads`:
+//   1. plain string: e.g. `"biome"`. Used only for heads whose
+//      sub-commands already match the built-in family regex.
+//   2. structured object: `{ "head": "deno", "families": {
+//          "hard1_baseline": ["check", "lint", "fmt"],
+//          "hard2_coverage": ["test"],
+//          "hard3_resilience": ["bench", "e2e"]
+//      } }`. Each pattern is matched as a token immediately following
+//      the head (`deno test`, `bun run test`, etc.).
+//
+// Entries with an interpreter head are silently dropped — the
+// denylist always wins.
+function readGateClassifyConfig(cwd) {
+  if (!cwd) return { heads: new Set(), structured: new Map() };
+  try {
+    const cfg = loadConfig(cwd);
+    const extra = cfg?.gate_classify?.allowed_heads;
+    if (!Array.isArray(extra)) return { heads: new Set(), structured: new Map() };
+    const heads = new Set();
+    const structured = new Map();
+    for (const entry of extra) {
+      if (typeof entry === 'string' && entry.trim()) {
+        // Plain string entries: must NOT be interpreters. The string
+        // form delegates classification entirely to the built-in
+        // family regex, which would match arbitrary `-e` / `-c` text.
+        const head = entry.trim().toLowerCase();
+        if (STRICT_GATE_HEAD_INTERPRETER_DENYLIST.has(head)) continue;
+        heads.add(head);
+        continue;
+      }
+      if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        const head = typeof entry.head === 'string' ? entry.head.trim().toLowerCase() : '';
+        if (!head) continue;
+        // Structured entries: the explicit `families` map enumerates
+        // the only sub-commands that count as gate evidence, and the
+        // classifier requires the pattern to appear as the next
+        // non-flag token after the head (see classifyConfiguredHead).
+        // That structurally rejects `deno -e "test"` / `node -e "..."`
+        // — interpreter abuse is still blocked, but legitimate
+        // `deno test` / `bun test` flows through.
+        const families = entry.families && typeof entry.families === 'object' && !Array.isArray(entry.families)
+          ? entry.families
+          : null;
+        if (!families) {
+          // No families → demote to plain string semantics with the
+          // interpreter check (so a structured entry without families
+          // can't bypass the denylist).
+          if (STRICT_GATE_HEAD_INTERPRETER_DENYLIST.has(head)) continue;
+          heads.add(head);
+          continue;
+        }
+        heads.add(head);
+        const familyMap = {};
+        for (const familyKey of ['hard1_baseline', 'hard2_coverage', 'hard3_resilience']) {
+          const patterns = families[familyKey];
+          if (Array.isArray(patterns)) {
+            familyMap[familyKey] = patterns
+              .filter((p) => typeof p === 'string' && p.trim())
+              .map((p) => p.trim().toLowerCase());
+          }
+        }
+        structured.set(head, familyMap);
+      }
+    }
+    return { heads, structured };
+  } catch {
+    return { heads: new Set(), structured: new Map() };
+  }
+}
+
+// #240 A4: read .mpl/config.json `gate_classify.allowed_heads` and
+// union it with the built-in set. Returns a Set of lowercase string
+// heads. Interpreter heads (codex r1 on PR #244) are silently dropped.
+export function allowedGateHeads(cwd) {
+  const merged = new Set(STRICT_GATE_HEAD_ALLOWLIST);
+  const { heads } = readGateClassifyConfig(cwd);
+  for (const h of heads) merged.add(h);
+  return merged;
+}
+
+// Codex r8 on PR #244 [contract-break]: runner-head argument forgery.
+// `npx`/`pnpx`/`npm exec` allow arbitrary scripts after the head; the
+// family regex naively scanned the whole command, so `npx cowsay
+// playwright` matched `\bplaywright\b` and forged hard3 evidence.
+//
+// Fix: for these runner heads, the FIRST positional (non-flag) token
+// after the head IS the script. Only accept the command as gate
+// evidence if that script is itself a known gate runner. Anything
+// else (cowsay, http-server, install args, etc.) → null.
+//
+// Recognized runner scripts and their gate family:
+const RUNNER_SCRIPT_FAMILIES = new Map([
+  ['playwright', 'hard3_resilience'],
+  ['cypress', 'hard3_resilience'],
+  ['wdio', 'hard3_resilience'],
+  ['vitest', 'hard2_coverage'],
+  ['jest', 'hard2_coverage'],
+  ['mocha', 'hard2_coverage'],
+  ['pytest', 'hard2_coverage'],
+  ['tsc', 'hard1_baseline'],
+  ['eslint', 'hard1_baseline'],
+  ['ruff', 'hard1_baseline'],
+  ['mypy', 'hard1_baseline'],
+  ['biome', 'hard1_baseline'],
 ]);
+
+// npm/pnpm/yarn subcommands that are NEVER gate evidence even when
+// the keyword appears in their args (`npm install playwright` etc.).
+const NPM_SUBCOMMANDS_NOT_TEST = new Set([
+  'install', 'i', 'add', 'uninstall', 'remove', 'rm', 'un',
+  'ci', 'audit', 'view', 'info', 'init', 'publish', 'pack',
+  'link', 'unlink', 'outdated', 'update', 'upgrade', 'up',
+  'config', 'help', 'doctor', 'whoami', 'token', 'org', 'team',
+  'access', 'search', 'fund', 'login', 'logout', 'set',
+]);
+
+// npm/pnpm/yarn subcommands that DO execute an arbitrary script — the
+// script-name gate applies after consuming the subcommand.
+const NPM_EXEC_SUBCOMMANDS = new Set(['exec', 'dlx', 'x']);
+
+// Codex r9 on PR #244 [contract-break]: npm-family subcommands whose
+// anchored HARD1/2 regex shapes (`\bnpm\s+(run\s+)?test\b`,
+// `\bnpm\s+(run\s+)?lint\b`, etc.) the family regex CAN safely
+// classify. After skipping global flags, only fall through to
+// matchFamilyRegex when the subcommand is one of these "gate shapes";
+// anything else (install/add/version/audit/arbitrary-binary) is
+// rejected outright instead of trusting the keyword-anywhere regex.
+const NPM_GATE_SUBCOMMANDS_REGEX = new Set([
+  'test', 'run', 'lint', 'build', 'typecheck', 'check',
+]);
+
+// Claude r9 on PR #244 [data-integrity]: same forgery class for the
+// other built-in heads. matchFamilyRegex scans the whole canonical so
+// `cargo install playwright` or `go run ./cmd/playwright-x` match
+// `\bplaywright\b`/`\be2e\b` even though they are NOT a real gate
+// run. cargo/go subcommands have well-known closed sets; only allow
+// fall-through for those.
+const CARGO_GATE_SUBCOMMANDS = new Set(['test', 'build', 'check', 'clippy']);
+const GO_GATE_SUBCOMMANDS = new Set(['test', 'build', 'vet']);
+
+// npx flags that take a value (so the next token is NOT the script).
+// `-c`/`--call`/`-e`/`--eval`/`-x`/`--exec`/`--run-script` are already
+// removed at canonical level by stripAtEvalFlag — no need to repeat.
+const NPX_FLAGS_WITH_VALUE = new Set([
+  '-p', '--package', '--shell',
+  '-w', '--workspace', '--workspaces',
+]);
+
+// Codex r9 on PR #244: npm/pnpm/yarn global flags that take a value
+// and may appear BEFORE the real subcommand. `npm --prefix /tmp
+// install playwright` previously surfaced `--prefix` as the
+// subcommand candidate, missed the install-reject set, and fell
+// through to whole-command regex.
+const NPM_GLOBAL_FLAGS_WITH_VALUE = new Set([
+  '--prefix', '-C',
+  '--workspace', '-w',
+  '--registry', '--location', '--userconfig', '--cache',
+  '--dir', '--cwd',
+  '--filter', '-F',
+  '--use-yarnrc',
+]);
+
+// Walk forward past flag tokens (and their values where known). Returns
+// the index of the next positional token, or tokens.length if none.
+function skipFlagsAt(tokens, start, flagsWithValue) {
+  let i = start;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (!t) { i++; continue; }
+    if (t === '--') return i + 1; // explicit end-of-options
+    if (!t.startsWith('-')) return i;
+    if (t.includes('=')) { i++; continue; }
+    const flagKey = t.toLowerCase();
+    if (flagsWithValue && flagsWithValue.has(flagKey)) { i += 2; continue; }
+    i++;
+  }
+  return i;
+}
+
+// Returns:
+//   string    → recognized runner family (definitive verdict)
+//   null      → runner head with unrecognized script → reject (NO regex fallback)
+//   undefined → not a runner-style invocation; caller falls through
+function classifyRunnerHead(head, canonical) {
+  const tokens = String(canonical || '').trim().split(/\s+/);
+  let i = 1; // skip the head itself
+
+  if (head === 'npm' || head === 'pnpm' || head === 'yarn') {
+    // Codex r9 [contract-break]: global flags (`--prefix`, `--workspace`,
+    // `--cwd`, `--location=…`, etc.) may sit between the head and the
+    // real subcommand. Skip them first so install/add detection sees
+    // the actual subcommand, not the flag.
+    i = skipFlagsAt(tokens, i, NPM_GLOBAL_FLAGS_WITH_VALUE);
+    if (i >= tokens.length) return null;
+    const sub = tokens[i].toLowerCase();
+    if (NPM_EXEC_SUBCOMMANDS.has(sub)) {
+      i++;
+    } else if (NPM_GATE_SUBCOMMANDS_REGEX.has(sub)) {
+      // `npm test` / `npm run lint` etc. — the anchored HARD1/HARD2
+      // regex can classify safely. Fall through.
+      return undefined;
+    } else {
+      // Anything else (install/add/version/audit/publish/init/an
+      // arbitrary binary name placed where the subcommand goes …) is
+      // NOT gate evidence. Codex r9: do NOT fall back to the
+      // keyword-anywhere regex for these — that's the very bypass r8
+      // closed for npx/pnpx and r9 closes for npm-family.
+      return null;
+    }
+  } else if (head === 'cargo') {
+    // Claude r9 [data-integrity]: same first-positional-token gate as
+    // the npm family. Skip any global flags (none of cargo's common
+    // global flags take values that look like subcommands; conservative
+    // skip).
+    i = skipFlagsAt(tokens, i, new Set());
+    if (i >= tokens.length) return null;
+    const sub = tokens[i].toLowerCase();
+    if (CARGO_GATE_SUBCOMMANDS.has(sub)) return undefined; // fall through to anchored regex
+    return null; // cargo install/doc/run/etc. → not gate evidence
+  } else if (head === 'go') {
+    i = skipFlagsAt(tokens, i, new Set());
+    if (i >= tokens.length) return null;
+    const sub = tokens[i].toLowerCase();
+    if (GO_GATE_SUBCOMMANDS.has(sub)) return undefined;
+    return null;
+  } else if (head !== 'npx' && head !== 'pnpx') {
+    return undefined;
+  }
+
+  // Post-(npx|pnpx|`npm exec`)... — find the first positional script.
+  i = skipFlagsAt(tokens, i, NPX_FLAGS_WITH_VALUE);
+  if (i >= tokens.length) return null;
+  const t = tokens[i];
+  const stripped = t.toLowerCase()
+    .replace(/^[\\$"'`]+/, '')
+    .replace(/[\\"'`]+$/, '');
+  const basename = stripped.split('/').pop();
+  if (RUNNER_SCRIPT_FAMILIES.has(basename)) {
+    return RUNNER_SCRIPT_FAMILIES.get(basename);
+  }
+  return null;
+}
+
+// #240 A4: classify a (head, canonical_command) against a structured
+// configured-head entry. Returns the gate family key (one of
+// hard1_baseline / hard2_coverage / hard3_resilience) when a
+// subcommand pattern matches; null otherwise. Subcommand match:
+// any pattern that appears as a whole token after the head.
+function classifyConfiguredHead(head, canonical, structuredMap) {
+  const families = structuredMap?.get(head);
+  if (!families) return null;
+  // The configured pattern MUST be the next non-flag token after the
+  // head. Walking the tokens manually (instead of running the pattern
+  // against the whole command) blocks `deno -e "test"`-style
+  // interpreter abuse: the `-e` is a flag, so `test` inside the
+  // quoted argument never reaches the comparison.
+  const tokens = String(canonical || '').toLowerCase().trim().split(/\s+/);
+  if (tokens.length < 2 || tokens[0] !== head) return null;
+  let nextTokenIdx = -1;
+  for (let i = 1; i < tokens.length; i++) {
+    if (tokens[i].startsWith('-')) {
+      // Reject as soon as a flag appears between head and pattern —
+      // structured-entry gating depends on the immediate subcommand,
+      // not on anything after a flag.
+      return null;
+    }
+    nextTokenIdx = i;
+    break;
+  }
+  if (nextTokenIdx === -1) return null;
+  const subcommand = tokens[nextTokenIdx];
+  for (const familyKey of ['hard3_resilience', 'hard2_coverage', 'hard1_baseline']) {
+    const patterns = families[familyKey];
+    if (!Array.isArray(patterns)) continue;
+    if (patterns.includes(subcommand)) return familyKey;
+  }
+  return null;
+}
 
 /**
  * Strict classifier — used by the I12 state-invariant on manual
@@ -186,7 +498,7 @@ const STRICT_GATE_HEAD_ALLOWLIST = new Set([
  * exit-code-vs-leading-command gap and any I12 / recorder source-of-
  * truth refactor are NOT in this PR.
  */
-export function classifyGateCommand(command) {
+export function classifyGateCommand(command, { cwd } = {}) {
   if (typeof command !== 'string' || !command.trim()) return null;
   // #220 on PR #231: canonicalize composite/redirect/comment forms
   // via `stripNonExecutedSuffix` so the leading simple command (the
@@ -211,8 +523,112 @@ export function classifyGateCommand(command) {
   // are NOT accepted manual gate evidence because their `-e`/`-c`
   // forms can contain arbitrary text that the family regex would
   // erroneously match.
-  if (!STRICT_GATE_HEAD_ALLOWLIST.has(head)) return null;
-  return matchFamilyRegex(canonical);
+  // #240 A4 + codex r1/r2 on PR #244:
+  //   r1 [data-integrity] — interpreter abuse: a structured entry for
+  //     a non-built-in head (e.g. `deno`) must drive classification on
+  //     its own. Running matchFamilyRegex against the whole canonical
+  //     would happily match keywords inside a `-e "console.log('e2e')"`
+  //     literal and forge hard3 evidence. classifyConfiguredHead
+  //     walks tokens and rejects flags, so it's safe for new heads.
+  //   r2 [contract-break] — structured entries for BUILT-IN heads must
+  //     NOT shadow the built-in family regex (otherwise a structured
+  //     entry like `{head: 'npm', families: {hard2_coverage: ['test']}}`
+  //     would break `npm run lint`'s built-in hard1 classification).
+  //     For built-in heads, structured patterns ADD; built-in regex
+  //     stays the fallback.
+  let structured = null;
+  if (cwd) {
+    structured = readGateClassifyConfig(cwd).structured;
+  }
+  const allowed = cwd ? allowedGateHeads(cwd) : STRICT_GATE_HEAD_ALLOWLIST;
+  if (!allowed.has(head)) return null;
+  const isBuiltIn = STRICT_GATE_HEAD_ALLOWLIST.has(head);
+  // Codex r3/r4 on PR #244 [contract-break]: built-in heads like
+  // `npx`/`pnpx` accept eval-style flags (`-c`, `--call`) whose
+  // string argument the family regex would otherwise match. Strip
+  // the canonical at the first eval-shaped flag before ANY regex
+  // fallback so `npx -c "echo playwright"` does NOT classify as
+  // hard3 via the string-literal keyword — regardless of whether
+  // structured config is present.
+  const safeCanonical = stripAtEvalFlag(canonical);
+  // Codex r8 on PR #244 [contract-break]: for package-runner heads,
+  // gate on the FIRST positional script token, not on whole-command
+  // regex. `npx cowsay playwright` etc. is rejected because cowsay
+  // is not a known gate runner. Structured config still takes
+  // precedence (operators can opt-in to non-standard invocations).
+  const familyFallback = () => {
+    const runnerVerdict = classifyRunnerHead(head, safeCanonical);
+    if (runnerVerdict !== undefined) return runnerVerdict;
+    return matchFamilyRegex(safeCanonical);
+  };
+  if (structured?.has(head)) {
+    const configured = classifyConfiguredHead(head, canonical, structured);
+    if (configured !== null) return configured;
+    // For built-in heads, fall back to the runner-gate / regex.
+    // For non-built-in heads, structured-only — regex against
+    // arbitrary text is unsafe.
+    if (isBuiltIn) return familyFallback();
+    return null;
+  }
+  return familyFallback();
+}
+
+// Codex r3 on PR #244: cut the canonical command at the first
+// eval-shape flag so the fallback family regex never sees the
+// argument text. `-c`, `--call`, `-e`, `--eval`, `-x`, `--exec`,
+// `--run-script` cover npm-family / shell / interpreter eval forms.
+//
+// Codex r5 + claude r5 [contract-break] on PR #244: also cut on the
+// attached-value form (`--call=value`, `-c=value`). npm/npx option
+// parsing accepts both `--call value` and `--call=value`; missing the
+// `=` form let `npx --call="echo playwright"` still classify as
+// hard3 via the string-literal keyword. Match `token === flag` OR
+// `token.toLowerCase().startsWith(flag + '=')`.
+//
+// Codex r6 [contract-break] on PR #244: also handle shell-quoted
+// attached flags. `npx "--call=echo playwright"` tokenizes as
+// `["npx", "\"--call=echo", "playwright\""]` after whitespace split;
+// the actual argv (after shell strips quotes) is the same attached
+// form. Same class covers the quoted standalone flag form
+// (`npx "--call" "echo playwright"` → token `"--call"`). Strip BOTH
+// leading and trailing shell quote characters (`"`, `'`, backtick)
+// from each token before the eval-flag comparison so the cut catches
+// all single-token quoting patterns: `"--call=v`, `--call="`,
+// `"--call"`, `'--call'`.
+//
+// Codex r7 [contract-break] on PR #244: also strip ANSI-C / locale
+// quote prefixes — bash/zsh `$'...'` (ANSI-C) and `$"..."` (locale
+// translation) evaluate to the unquoted argv at execution time, so
+// `npx $'--call=echo playwright'` is the same attached `--call=...`
+// eval flag at argv level.
+//
+// Claude r7 [contract-break] on PR #244 (same surface, different
+// quoting form): backslash-escaped quotes (`\"`, `\'`) common in
+// JSON-encoded state.json entries also survived the r6 strip.
+// `npx \"--call=echo playwright\"` token `\"--call=echo` was never
+// trimmed.
+//
+// Unified strip: leading and trailing character class covers every
+// shell-quote glyph that can wrap a flag token at the literal-text
+// level: backslash, `$`, `"`, `'`, backtick. Each is independent of
+// the others; the char class lets any combination peel off
+// (`\"--call=...` → `\"`, `$'--call=...` → `$'`, `\'--call=...` →
+// `\'`). A bare flag with no quoting is untouched.
+function stripAtEvalFlag(canonical) {
+  const tokens = String(canonical || '').split(/\s+/);
+  const evalFlags = ['-c', '--call', '-e', '--eval', '-x', '--exec', '--run-script'];
+  const cutAt = tokens.findIndex((t) => {
+    const low = t.toLowerCase()
+      .replace(/^[\\$"'`]+/, '')
+      .replace(/[\\"'`]+$/, '');
+    for (const flag of evalFlags) {
+      if (low === flag) return true;
+      if (low.startsWith(flag + '=')) return true;
+    }
+    return false;
+  });
+  if (cutAt <= 0) return canonical;
+  return tokens.slice(0, cutAt).join(' ');
 }
 
 /**
@@ -290,7 +706,7 @@ function matchFamilyRegex(command) {
  * evidence. Manual writers MUST use a recognized command family or
  * record evidence through the recorder hook itself.
  */
-export function commandMatchesGate(gateKey, command) {
-  const family = classifyGateCommand(command);
+export function commandMatchesGate(gateKey, command, { cwd } = {}) {
+  const family = classifyGateCommand(command, { cwd });
   return family !== null && family === gateKey;
 }

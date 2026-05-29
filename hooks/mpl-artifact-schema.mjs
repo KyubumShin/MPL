@@ -137,7 +137,7 @@ async function main() {
     if (!existsSync(abs)) continue;
     let content;
     try { content = readFileSync(abs, 'utf-8'); } catch { continue; }
-    const verdict = validateArtifactFile(rel, content);
+    const verdict = validateArtifactFile(rel, content, { cwd });
     if (!verdict) continue;
     checkedArtifacts.push(verdict.relPath);
     // Always persist signals for audit trail, even when action='off'.
@@ -219,7 +219,7 @@ function runCli(workspaceRoot) {
     let content;
     try { content = readFileSync(abs, 'utf-8'); }
     catch { continue; }
-    const verdict = validateArtifactFile(rel, content);
+    const verdict = validateArtifactFile(rel, content, { cwd: root });
     if (!verdict) continue;
     results.push({
       artifact: verdict.artifact,
