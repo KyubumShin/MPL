@@ -450,7 +450,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 39 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 40 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -472,6 +472,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-require-phase-evidence` | PreToolUse: Edit/Write/MultiEdit | Require phase Evidence Latches before completion artifacts or completion state writes. | v0.18.3 guard stream |
 | `mpl-baseline-guard` | PreToolUse: Edit/Write/MultiEdit | Protect `.mpl/mpl/baseline.yaml` after creation unless an explicit renewal sentinel exists. | v0.17.0 P2 stream (#59) |
 | `mpl-ambiguity-gate` | PreToolUse: Task/Agent | Block decomposer dispatch until ambiguity and user-contract readiness gates pass. | v0.11.2; UC readiness v0.16.0 |
+| `mpl-soft-signal-emit` | PreToolUse: Task/Agent | Emit quality-signal telemetry records (HA-01 vague delegation, etc.) to `.mpl/mpl/quality-signals.jsonl`. Never blocks. | #238 |
 | `mpl-require-chain-assignment` | PreToolUse: Task/Agent | Require `chain-assignment.yaml` before seed-generator dispatch when chain seed is enabled. | v0.17.0 P1-4d |
 | `mpl-tool-tracker` | PostToolUse: Bash/Edit/Write/MultiEdit/Task/Agent/Read/Grep/Glob/TodoWrite/NotebookEdit/WebFetch/WebSearch/SlashCommand/BashOutput/KillShell/ExitPlanMode/mcp__.* | Stamp `state.last_tool_at` for hang detection and telemetry freshness. | v0.18.1 |
 | `mpl-gate-recorder` | PostToolUse: Bash/Task/Agent | Record structured gate, E2E, sprint, and test-agent PASS evidence from real tool results. | v0.15.0; blocked-hook cleanup v0.18.3/v0.18.4 |

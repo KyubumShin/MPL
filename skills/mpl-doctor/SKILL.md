@@ -22,8 +22,8 @@ Record the MPL root path for all subsequent checks.
 
 Invocation mode decides which categories run:
 
-- `/mpl:mpl-doctor` (default) → Categories 1-12 (installation health)
-- `/mpl:mpl-doctor audit` → Categories 1-12 + **Category 13 Measurement Integrity Audit** (AD-0006, v0.15.0). Requires a finalized pipeline (`.mpl/state.json.finalize_done == true`); otherwise Category 13 returns "NOT APPLICABLE".
+- `/mpl:mpl-doctor` (default) → Categories 1-12 (installation health) **and Category 16 (Quality Signals, #238)**. Category 16 is always run because the soft-signal log is a per-workspace runtime artifact whose freshness only matters when doctor is actually invoked.
+- `/mpl:mpl-doctor audit` → adds **Category 13 Measurement Integrity Audit** (AD-0006, v0.15.0). Requires a finalized pipeline (`.mpl/state.json.finalize_done == true`); otherwise Category 13 returns "NOT APPLICABLE".
 
 Delegate to the `mpl-doctor` agent:
 
@@ -33,7 +33,7 @@ audit_mode = (arguments include "audit") ? "yes" : "no"
 Task(
   subagent_type="mpl-doctor",
   model="haiku",
-  prompt=f"Run MPL diagnostics on the plugin at {MPL_ROOT}. Check Categories 1-12 (installation health). audit_mode={audit_mode}. If audit_mode=yes AND .mpl/state.json.finalize_done==true, ALSO run Category 13 Measurement Integrity Audit (AD-0006 [a]-[g] checks) against the completed pipeline. Working dir: {CWD}."
+  prompt=f"Run MPL diagnostics on the plugin at {MPL_ROOT}. Check Categories 1-12 (installation health) AND Category 16 (Quality Signals — read .mpl/mpl/quality-signals.jsonl via hooks/lib/mpl-quality-signals.mjs, surface per-rule counts and malformed-line count; PASS when clean, WARN on malformed>=1 or high-volume rule). audit_mode={audit_mode}. If audit_mode=yes AND .mpl/state.json.finalize_done==true, ALSO run Category 13 Measurement Integrity Audit (AD-0006 [a]-[g] checks) against the completed pipeline. Working dir: {CWD}."
 )
 ```
 

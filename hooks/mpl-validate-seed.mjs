@@ -34,6 +34,9 @@ const { readStdin } = await import(
 const { collectFileWrites, isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
+const { detectSeedAmbiguityNotesGap, recordQualitySignal } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-quality-signals.mjs')).href
+);
 
 // ---------------------------------------------------------------------------
 // YAML extraction (regex-based, no external parser — MPL minimal deps)
@@ -456,6 +459,22 @@ Do NOT proceed to Phase Runner until a valid Phase Seed is produced.
   // Detect boundary phase context
   const promptText = toolInput.prompt || toolInput.description || '';
   const hasContracts = hasContractFilesContext(promptText);
+
+  // #238 [soft-signal]: seed contains uncertainty vocabulary but no
+  // ambiguity_notes — the Seed Generator likely invented criteria
+  // instead of using the escape hatch. Telemetry-only, never blocks.
+  const ambiguityGap = detectSeedAmbiguityNotesGap(yamlText);
+  if (ambiguityGap) {
+    recordQualitySignal(
+      {
+        rule: 'seed-ambiguity-notes',
+        severity: 'warn',
+        agent: toolName,
+        evidence: ambiguityGap,
+      },
+      cwd,
+    );
+  }
 
   // Validate seed
   const result = validateSeed(yamlText, { hasContractFiles: hasContracts });
