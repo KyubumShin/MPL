@@ -308,6 +308,41 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
   });
 
+  it('codex r9 + claude r9 [contract-break][data-integrity]: skip global flags before npm-family subcommand, and gate cargo/go subcommands too', () => {
+    // Codex r9 [contract-break]: npm/pnpm/yarn global flags before
+    // the real subcommand let `npm --prefix /tmp install playwright`
+    // bypass the install-reject and fall through to whole-command
+    // regex.
+    assert.equal(classifyGateCommand('npm --prefix /tmp install playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm --workspace app install playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm --location=global install playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('pnpm --dir /tmp add playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('yarn --cwd /tmp add playwright', { cwd: tmp }), null);
+    // npm-family arbitrary subcommand placed where install/test would
+    // go (e.g. `npm --prefix /tmp playwright`) is also rejected — must
+    // be in NPM_GATE_SUBCOMMANDS_REGEX or NPM_EXEC_SUBCOMMANDS.
+    assert.equal(classifyGateCommand('npm --prefix /tmp playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm playwright', { cwd: tmp }), null);
+
+    // Claude r9 [data-integrity]: same forgery class for cargo/go.
+    // The keyword-anywhere regex matched `\bplaywright\b`/`\be2e\b`
+    // in args to install/doc/run.
+    assert.equal(classifyGateCommand('cargo install playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('cargo doc playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('cargo run --bin e2e-helper', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('go install ./e2e', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('go run ./cmd/playwright-x', { cwd: tmp }), null);
+
+    // Legitimate cargo/go subcommands still classify by anchored regex.
+    assert.equal(classifyGateCommand('cargo test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('cargo build', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('cargo clippy', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('cargo check', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('go test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('go build', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('go vet', { cwd: tmp }), 'hard1_baseline');
+  });
+
   it('codex r8 [contract-break]: package-runner heads must gate on the first positional script, not the whole-command regex', () => {
     // Genuinely new class: not a shell-quote bypass. The family regex
     // scans the WHOLE command, so `\bplaywright\b` matched arbitrary

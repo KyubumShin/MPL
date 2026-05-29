@@ -315,6 +315,26 @@ const NPM_SUBCOMMANDS_NOT_TEST = new Set([
 // script-name gate applies after consuming the subcommand.
 const NPM_EXEC_SUBCOMMANDS = new Set(['exec', 'dlx', 'x']);
 
+// Codex r9 on PR #244 [contract-break]: npm-family subcommands whose
+// anchored HARD1/2 regex shapes (`\bnpm\s+(run\s+)?test\b`,
+// `\bnpm\s+(run\s+)?lint\b`, etc.) the family regex CAN safely
+// classify. After skipping global flags, only fall through to
+// matchFamilyRegex when the subcommand is one of these "gate shapes";
+// anything else (install/add/version/audit/arbitrary-binary) is
+// rejected outright instead of trusting the keyword-anywhere regex.
+const NPM_GATE_SUBCOMMANDS_REGEX = new Set([
+  'test', 'run', 'lint', 'build', 'typecheck', 'check',
+]);
+
+// Claude r9 on PR #244 [data-integrity]: same forgery class for the
+// other built-in heads. matchFamilyRegex scans the whole canonical so
+// `cargo install playwright` or `go run ./cmd/playwright-x` match
+// `\bplaywright\b`/`\be2e\b` even though they are NOT a real gate
+// run. cargo/go subcommands have well-known closed sets; only allow
+// fall-through for those.
+const CARGO_GATE_SUBCOMMANDS = new Set(['test', 'build', 'check', 'clippy']);
+const GO_GATE_SUBCOMMANDS = new Set(['test', 'build', 'vet']);
+
 // npx flags that take a value (so the next token is NOT the script).
 // `-c`/`--call`/`-e`/`--eval`/`-x`/`--exec`/`--run-script` are already
 // removed at canonical level by stripAtEvalFlag — no need to repeat.
@@ -322,6 +342,37 @@ const NPX_FLAGS_WITH_VALUE = new Set([
   '-p', '--package', '--shell',
   '-w', '--workspace', '--workspaces',
 ]);
+
+// Codex r9 on PR #244: npm/pnpm/yarn global flags that take a value
+// and may appear BEFORE the real subcommand. `npm --prefix /tmp
+// install playwright` previously surfaced `--prefix` as the
+// subcommand candidate, missed the install-reject set, and fell
+// through to whole-command regex.
+const NPM_GLOBAL_FLAGS_WITH_VALUE = new Set([
+  '--prefix', '-C',
+  '--workspace', '-w',
+  '--registry', '--location', '--userconfig', '--cache',
+  '--dir', '--cwd',
+  '--filter', '-F',
+  '--use-yarnrc',
+]);
+
+// Walk forward past flag tokens (and their values where known). Returns
+// the index of the next positional token, or tokens.length if none.
+function skipFlagsAt(tokens, start, flagsWithValue) {
+  let i = start;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (!t) { i++; continue; }
+    if (t === '--') return i + 1; // explicit end-of-options
+    if (!t.startsWith('-')) return i;
+    if (t.includes('=')) { i++; continue; }
+    const flagKey = t.toLowerCase();
+    if (flagsWithValue && flagsWithValue.has(flagKey)) { i += 2; continue; }
+    i++;
+  }
+  return i;
+}
 
 // Returns:
 //   string    → recognized runner family (definitive verdict)
@@ -332,34 +383,57 @@ function classifyRunnerHead(head, canonical) {
   let i = 1; // skip the head itself
 
   if (head === 'npm' || head === 'pnpm' || head === 'yarn') {
-    if (i >= tokens.length) return undefined;
+    // Codex r9 [contract-break]: global flags (`--prefix`, `--workspace`,
+    // `--cwd`, `--location=…`, etc.) may sit between the head and the
+    // real subcommand. Skip them first so install/add detection sees
+    // the actual subcommand, not the flag.
+    i = skipFlagsAt(tokens, i, NPM_GLOBAL_FLAGS_WITH_VALUE);
+    if (i >= tokens.length) return null;
     const sub = tokens[i].toLowerCase();
-    if (NPM_SUBCOMMANDS_NOT_TEST.has(sub)) return null;
-    if (!NPM_EXEC_SUBCOMMANDS.has(sub)) return undefined;
-    i++; // consumed exec/dlx/x
+    if (NPM_EXEC_SUBCOMMANDS.has(sub)) {
+      i++;
+    } else if (NPM_GATE_SUBCOMMANDS_REGEX.has(sub)) {
+      // `npm test` / `npm run lint` etc. — the anchored HARD1/HARD2
+      // regex can classify safely. Fall through.
+      return undefined;
+    } else {
+      // Anything else (install/add/version/audit/publish/init/an
+      // arbitrary binary name placed where the subcommand goes …) is
+      // NOT gate evidence. Codex r9: do NOT fall back to the
+      // keyword-anywhere regex for these — that's the very bypass r8
+      // closed for npx/pnpx and r9 closes for npm-family.
+      return null;
+    }
+  } else if (head === 'cargo') {
+    // Claude r9 [data-integrity]: same first-positional-token gate as
+    // the npm family. Skip any global flags (none of cargo's common
+    // global flags take values that look like subcommands; conservative
+    // skip).
+    i = skipFlagsAt(tokens, i, new Set());
+    if (i >= tokens.length) return null;
+    const sub = tokens[i].toLowerCase();
+    if (CARGO_GATE_SUBCOMMANDS.has(sub)) return undefined; // fall through to anchored regex
+    return null; // cargo install/doc/run/etc. → not gate evidence
+  } else if (head === 'go') {
+    i = skipFlagsAt(tokens, i, new Set());
+    if (i >= tokens.length) return null;
+    const sub = tokens[i].toLowerCase();
+    if (GO_GATE_SUBCOMMANDS.has(sub)) return undefined;
+    return null;
   } else if (head !== 'npx' && head !== 'pnpx') {
     return undefined;
   }
 
-  while (i < tokens.length) {
-    const t = tokens[i];
-    if (!t) { i++; continue; }
-    if (t === '--') { i++; continue; }
-    if (t.startsWith('-')) {
-      const flagKey = t.toLowerCase().split('=')[0];
-      if (t.includes('=')) { i++; continue; }
-      if (NPX_FLAGS_WITH_VALUE.has(flagKey)) { i += 2; continue; }
-      i++;
-      continue;
-    }
-    const stripped = t.toLowerCase()
-      .replace(/^[\\$"'`]+/, '')
-      .replace(/[\\"'`]+$/, '');
-    const basename = stripped.split('/').pop();
-    if (RUNNER_SCRIPT_FAMILIES.has(basename)) {
-      return RUNNER_SCRIPT_FAMILIES.get(basename);
-    }
-    return null;
+  // Post-(npx|pnpx|`npm exec`)... — find the first positional script.
+  i = skipFlagsAt(tokens, i, NPX_FLAGS_WITH_VALUE);
+  if (i >= tokens.length) return null;
+  const t = tokens[i];
+  const stripped = t.toLowerCase()
+    .replace(/^[\\$"'`]+/, '')
+    .replace(/[\\"'`]+$/, '');
+  const basename = stripped.split('/').pop();
+  if (RUNNER_SCRIPT_FAMILIES.has(basename)) {
+    return RUNNER_SCRIPT_FAMILIES.get(basename);
   }
   return null;
 }
