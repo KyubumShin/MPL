@@ -476,6 +476,35 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
   }
 });
 
+test('#236 A1 codex r21 [security]: normalizeShellCommand collapses /./ and /X/../ in Bash interpreter args', () => {
+  // Codex r21: `node -e 'fs.writeFileSync(".mpl/./state.json", ...)'`
+  // bypassed the substring check because normalizeShellCommand only
+  // collapsed `/+` but not `/./` or `/X/../`. Fix: extend normalize
+  // to collapse those forms too.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      `node -e require("fs").writeFileSync(".mpl/./state.json","{}")`,
+      `python -c "open('.mpl/./state.json','w').write('{}')"`,
+      `node -e require("fs").writeFileSync(".mpl/foo/../state.json","{}")`,
+      `node -e require("fs").writeFileSync(".mpl/./mpl/decomposition.yaml","forged")`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected normalize block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r20 [security]: Bash state.json forgery while MPL deactivated is blocked', () => {
   // Codex r20: pre-r20 the Bash state.json guard ran AFTER isMplActive.
   // In an inactive workspace (current_phase=completed) a Bash redirect

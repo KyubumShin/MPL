@@ -275,7 +275,15 @@ function normalizeShellCommand(command) {
     .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
     .replace(/\\([\s\S])/g, '$1')
     .replace(/["'`]/g, '')
-    .replace(/\/+/g, '/');
+    .replace(/\/+/g, '/')
+    // Codex r21 [security]: collapse `/./` segments. POSIX collapses
+    // these at path-resolution time, so `.mpl/./state.json` and
+    // `.mpl/./mpl/decomposition.yaml` are equivalent to the canonical
+    // form. Iterate until no more match (handles `/././`).
+    .replace(/\/(?:\.\/)+/g, '/')
+    // Collapse `/X/../` traversal forms once (covers .mpl/foo/../state.json).
+    // This is a heuristic — full traversal resolution is out of scope.
+    .replace(/\/[^/]+\/\.\.\//g, '/');
   normalized = expandShellBraces(normalized);
   normalized = expandSimpleVars(normalized);
   return normalized;
