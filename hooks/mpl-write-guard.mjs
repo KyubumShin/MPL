@@ -72,7 +72,12 @@ const HOOK_ID = 'mpl-write-guard';
 // (commands/mpl-run-decompose.md:16). We detect the writer identity
 // via a state-based dispatch flag set when the orchestrator dispatches
 // Agent(subagent_type='mpl-decomposer') and cleared on Stop.
-const DECOMPOSITION_FILE_REGEX = /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/;
+// Claude r21 [security]: macOS APFS / Windows NTFS are case-insensitive
+// by default. `.MPL/MPL/decomposition.yaml` opens the same inode as
+// the lowercase form. Use case-insensitive regex so the orchestrator
+// can't bypass via uppercase. All regex literals are lowercase ASCII
+// so the `i` flag is structurally safe.
+const DECOMPOSITION_FILE_REGEX = /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/i;
 
 // Claude r9 on PR #249 [security]: the orchestrator can Write
 // `.mpl/state.json` (it sits inside the `/\.mpl\//` allowlist), and
@@ -82,7 +87,7 @@ const DECOMPOSITION_FILE_REGEX = /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/;
 // its own transcript`, then write decomposition.yaml. Reject any
 // Write/Edit to .mpl/state.json whose payload introduces or mutates
 // `decomposer_dispatch.*` — only the hook itself may set those keys.
-const STATE_FILE_REGEX = /(^|\/)\.mpl\/state\.json$/;
+const STATE_FILE_REGEX = /(^|\/)\.mpl\/state\.json$/i;
 const DECOMPOSER_DISPATCH_FIELD_REGEX = /"decomposer_dispatch"\s*:/;
 // Codex r12 + Claude r12 [security]: also protect first_transcript_seen
 // from forgery — that key is the bootstrap of the dispatcher-identity
@@ -280,10 +285,15 @@ function normalizeShellCommand(command) {
     // these at path-resolution time, so `.mpl/./state.json` and
     // `.mpl/./mpl/decomposition.yaml` are equivalent to the canonical
     // form. Iterate until no more match (handles `/././`).
-    .replace(/\/(?:\.\/)+/g, '/')
-    // Collapse `/X/../` traversal forms once (covers .mpl/foo/../state.json).
-    // This is a heuristic — full traversal resolution is out of scope.
-    .replace(/\/[^/]+\/\.\.\//g, '/');
+    .replace(/\/(?:\.\/)+/g, '/');
+  // Claude r22 [security]: iterate `/X/../` collapse until no more
+  // matches. Multi-level traversal `.mpl/a/b/../../state.json` was
+  // depth-only-one with the single-pass r21 fix.
+  let prevNormalized;
+  do {
+    prevNormalized = normalized;
+    normalized = normalized.replace(/\/[^/]+\/\.\.(?:\/|$)/g, '/');
+  } while (normalized !== prevNormalized);
   normalized = expandShellBraces(normalized);
   normalized = expandSimpleVars(normalized);
   return normalized;
@@ -326,6 +336,11 @@ function matchesProtectedDelete(command, cwd) {
     // their source operand after the copy completes.
     /\btar\b.*--remove-files\b/.test(normalized) ||
     /\brsync\b.*--remove-source-files\b/.test(normalized) ||
+    // Codex r22 [security]: `rsync --delete` (and variants
+    // --delete-before/-during/-delay/-after) prunes the destination
+    // tree, removing files not in the source. Same destructive shape
+    // as --remove-source-files but against the destination operand.
+    /\brsync\b.*--delete(?:-before|-during|-delay|-after)?\b/.test(normalized) ||
     // Codex r10 on PR #249 [data-integrity]: interpreter one-liners
     // (`node -e "require('fs').rmSync('.mpl/mpl')"`, `python -c
     // "shutil.rmtree('.mpl/mpl')"`) can destroy protected paths
@@ -707,8 +722,12 @@ async function main() {
   if (isBashTool && process.env.MPL_FORCE_PURGE !== '1') {
     const earlyCommand = (data.tool_input || data.toolInput || {}).command || '';
     if (earlyCommand && existsSync(join(cwd, '.mpl'))) {
-      const normalizedEarly = normalizeShellCommand(earlyCommand);
-      let decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/.test(normalizedEarly);
+      // Claude r21 [security]: lowercase for case-insensitive filesystem
+      // protection. macOS APFS / Windows NTFS open `.MPL/...` against
+      // the same inode as `.mpl/...`. All subsequent regexes match
+      // lowercase ASCII so lowercasing the input is structurally safe.
+      const normalizedEarly = normalizeShellCommand(earlyCommand).toLowerCase();
+      let decompMention = /\.mpl\/mpl\/decomposition\.ya?ml/i.test(normalizedEarly);
       // Claude r17 [security]: also resolve redirect/tee/dd-of target
       // paths through symlinks. A pre-existing symlink whose target
       // resolves to `.mpl/mpl/...` defeats the literal substring check.
@@ -735,7 +754,7 @@ async function main() {
             try { candidate = join(realpathSync(dirname(targetAbs)), basename(targetAbs)); }
             catch { /* parent doesn't exist — skip */ }
           }
-          if (candidate && /\.mpl\/mpl\/decomposition\.ya?ml$/.test(candidate)) {
+          if (candidate && /\.mpl\/mpl\/decomposition\.ya?ml$/i.test(candidate)) {
             decompMention = true;
             symlinkWritesToDecomp = true;
             break;
@@ -802,7 +821,11 @@ async function main() {
   if (isBashTool && process.env.MPL_FORCE_PURGE !== '1') {
     const earlyCommand = (data.tool_input || data.toolInput || {}).command || '';
     if (earlyCommand && existsSync(join(cwd, '.mpl'))) {
-      const normalizedEarly = normalizeShellCommand(earlyCommand);
+      // Claude r21 [security]: lowercase for case-insensitive filesystem
+      // protection. macOS APFS / Windows NTFS open `.MPL/...` against
+      // the same inode as `.mpl/...`. All subsequent regexes match
+      // lowercase ASCII so lowercasing the input is structurally safe.
+      const normalizedEarly = normalizeShellCommand(earlyCommand).toLowerCase();
       const SAFE_READS_EARLY = new Set([
         'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
         'grep', 'rg', 'ag', 'ack', 'jq', 'yq',
@@ -822,7 +845,7 @@ async function main() {
             try { candidate = join(realpathSync(dirname(targetAbs)), basename(targetAbs)); }
             catch { /* skip */ }
           }
-          if (candidate && /\.mpl\/state\.json$/.test(candidate)) {
+          if (candidate && /\.mpl\/state\.json$/i.test(candidate)) {
             stateMention = true;
             symlinkWritesToState = true;
             break;
@@ -931,7 +954,9 @@ async function main() {
     // layered shell decode as matchesProtectedDelete BEFORE the
     // substring check, so quote-concat / backslash-escape / ANSI-C /
     // slash-collapse forms of `.mpl/state.json` can't bypass.
-    const normalizedCommand = normalizeShellCommand(command);
+    // Claude r21 [security]: lowercase for case-insensitive filesystem
+    // protection (macOS APFS / Windows NTFS).
+    const normalizedCommand = normalizeShellCommand(command).toLowerCase();
     // Codex r13 on PR #249 [security]: an encoded write (e.g. base64
     // -d > .mpl/state.json) can plant decomposer_dispatch without the
     // literal field name appearing in the Bash command. The right
@@ -1000,7 +1025,7 @@ async function main() {
           try { candidate = join(realpathSync(dirname(targetAbs)), basename(targetAbs)); }
           catch { /* skip */ }
         }
-        if (candidate && /\.mpl\/state\.json$/.test(candidate)) {
+        if (candidate && /\.mpl\/state\.json$/i.test(candidate)) {
           symlinkWritesToStateJson = true;
           writesToStateJson = true;
           break;

@@ -476,6 +476,90 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
   }
 });
 
+test('#236 A1 claude r21 [security]: case-insensitive filesystem protection', () => {
+  // macOS APFS / Windows NTFS open `.MPL/MPL/...` against the same
+  // inode as `.mpl/mpl/...`. Fix: apply /i flag to protected-file
+  // regexes + lowercase normalized command before substring matches.
+  const cwd = freshWorkspace();
+  try {
+    // Write/Edit uppercase path.
+    const writeUpper = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: { file_path: '.MPL/MPL/decomposition.yaml', content: 'forged' },
+    });
+    assert.equal(writeUpper.decision, 'block');
+    // Bash uppercase path.
+    const bashUpper = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'printf forged > .MPL/MPL/decomposition.yaml' },
+    });
+    assert.equal(bashUpper.decision, 'block');
+    // state.json uppercase.
+    const stateUpper = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: { file_path: '.MPL/STATE.json', content: '{}' },
+    });
+    assert.equal(stateUpper.decision, 'block');
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 claude r22 [security]: multi-level /X/../ traversal collapse', () => {
+  // Claude r22: r21 only collapsed ONE level. `.mpl/a/b/../../state.json`
+  // at depth 2 bypassed. Fix: iterate the regex until no more matches.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'node -e require("fs").writeFileSync(".mpl/a/b/../../state.json","{}")',
+      'node -e require("fs").writeFileSync(".mpl/x/y/z/../../../state.json","{}")',
+      'node -e require("fs").writeFileSync(".mpl/a/b/c/../../../mpl/decomposition.yaml","forged")',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected multi-level traversal block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A3 codex r22 [security]: rsync --delete variants are blocked', () => {
+  // Codex r22: `rsync --delete` prunes destination tree. Adding to
+  // destructive entry gate.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'rsync -a --delete /tmp/empty/ .mpl/mpl/',
+      'rsync -av --delete-before /tmp/empty/ .mpl/contracts/',
+      'rsync --delete-after /tmp/empty/ .mpl/memory/',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected rsync --delete block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r21 [security]: normalizeShellCommand collapses /./ and /X/../ in Bash interpreter args', () => {
   // Codex r21: `node -e 'fs.writeFileSync(".mpl/./state.json", ...)'`
   // bypassed the substring check because normalizeShellCommand only
