@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
-function graph(phase1Name = 'Completed', phase2Name = 'Pending') {
+function graph(phase1Name = 'Completed', phase2Name = 'Pending', phase1Produces = 'completed_output') {
   return `
 graph_version: 1
 generated_by: mpl-decomposer
@@ -51,7 +51,7 @@ phases:
       requires: []
       produces:
         - type: artifact
-          name: completed_output
+          name: ${phase1Produces}
   - id: phase-2
     name: ${phase2Name}
     evidence_required: [command, goal_trace]
@@ -115,14 +115,42 @@ describe('completed phase immutability helpers', () => {
     assert.equal(verdict.valid, true, verdict.issues.join(', '));
   });
 
-  it('detects completed phase block mutations', () => {
+  it('detects completed phase block mutations on load-bearing fields', () => {
+    // #241 B1: only load-bearing fields trip immutability. Mutate
+    // `interface_contract.produces[].name` (load-bearing) — the
+    // `name:` change alone is allowed (presentation-only).
     const verdict = validateCompletedPhaseImmutability({
       oldText: graph(),
-      newText: graph('Changed Completed', 'Pending'),
+      newText: graph('Completed', 'Pending', 'renamed_output'),
       completedIds: ['phase-1'],
     });
     assert.equal(verdict.valid, false);
     assert.ok(verdict.issues.includes('phase-1:contract:modified'));
+  });
+
+  it('#241 B1: name-only change in a completed phase is allowed (presentation, not contract)', () => {
+    const verdict = validateCompletedPhaseImmutability({
+      oldText: graph(),
+      newText: graph('Renamed Completed', 'Pending'),
+      completedIds: ['phase-1'],
+    });
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
+  });
+
+  it('#241 B1: comment / trailing-whitespace / notes additions in a completed phase are allowed', () => {
+    const oldText = graph();
+    // Inject a comment, a notes block, and trailing whitespace into the
+    // completed phase-1 block.
+    const newText = oldText.replace(
+      'change_policy: append_delta_only\n    interface_contract:',
+      'change_policy: append_delta_only   \n    # comment added later\n    notes: |\n      free-form notes that should not trigger immutability\n    interface_contract:',
+    );
+    const verdict = validateCompletedPhaseImmutability({
+      oldText,
+      newText,
+      completedIds: ['phase-1'],
+    });
+    assert.equal(verdict.valid, true, verdict.issues.join(', '));
   });
 });
 
@@ -136,10 +164,15 @@ describe('mpl-require-completed-phase-immutability hook integration', () => {
     assert.equal(r.continue, true);
   });
 
-  it('blocks changes to completed phase blocks', () => {
-    const r = runHook(graph('Changed Completed', 'Pending'));
+  it('blocks changes to load-bearing fields in completed phase blocks', () => {
+    const r = runHook(graph('Completed', 'Pending', 'renamed_output'));
     assert.equal(r.decision, 'block');
     assert.match(r.reason, /phase-1:contract:modified/);
+  });
+
+  it('#241 B1: allows name-only changes in completed phase blocks (presentation, not contract)', () => {
+    const r = runHook(graph('Renamed Completed', 'Pending'));
+    assert.equal(r.continue, true);
   });
 
   it('blocks removing a completed phase from the graph', () => {
@@ -161,7 +194,7 @@ describe('mpl-require-completed-phase-immutability hook integration', () => {
   });
 
   it('allows migration opt-out', () => {
-    const r = runHook(graph('Changed Completed', 'Pending'), {
+    const r = runHook(graph('Completed', 'Pending', 'renamed_output'), {
       config: { completed_phase_immutability_required: false },
     });
     assert.equal(r.continue, true);
