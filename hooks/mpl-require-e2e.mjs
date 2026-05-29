@@ -48,6 +48,9 @@ const { readStdin } = isMain
 const { emitBlockedHook, emitClearedOk } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
 );
+const { clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
 
 const HOOK_ID = 'mpl-require-e2e';
 const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
@@ -418,6 +421,10 @@ async function runHook() {
         });
         return;
       }
+      // Codex r3 on PR #246: warn downgrade also clears any stale
+      // envelope so mpl-recover doesn't dispatch on a no-longer-applicable
+      // block.
+      clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
       console.log(JSON.stringify({
         continue: true,
         suppressOutput: false,
@@ -496,6 +503,8 @@ async function runHook() {
         });
         return;
       }
+      // Codex r3 on PR #246: warn downgrade clears any stale envelope.
+      clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
       console.log(
         JSON.stringify({
           continue: true,
@@ -509,7 +518,8 @@ async function runHook() {
     }
   }
 
-  ok();
+  // Codex r3 on PR #246: final success path also clears stale envelope.
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {

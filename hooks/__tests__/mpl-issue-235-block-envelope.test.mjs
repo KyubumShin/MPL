@@ -303,6 +303,61 @@ test('#235 codex r1: config opt-out (X_required:false) on previously-blocked hoo
   }
 });
 
+test('#235 codex r3: mpl-require-e2e warn-downgrade paths clear stale envelope', () => {
+  // Codex r3 repro shape: hook records envelope on strict block.
+  // Operator follows the remediation hint and sets
+  // e2e_contract_strict:false (or no real_runtime). Next finalize
+  // attempt takes the warning path. Per r3 fix, that path must
+  // clear the prior envelope.
+  const cwd = freshWorkspace();
+  try {
+    const sourceFile = '.mpl/state.json';
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify(
+        {
+          current_phase: 'phase-finalize',
+          execution: { phases: { completed: 0 } },
+          session_status: 'blocked_hook',
+          blocked_by_hook: 'mpl-require-e2e',
+          blocked_phase: 'phase-finalize',
+          blocked_artifact: '.mpl/state.json#finalize_done',
+          block_code: 'e2e_uc_coverage_missing',
+          block_reason: 'stale',
+          resume_instruction: 'stale',
+          blocked_at: new Date(0).toISOString(),
+          retry_context: { uncovered_ucs: ['UC-01'] },
+        },
+        null,
+        2,
+      ),
+    );
+    // Default config — e2e_contract_strict NOT set → strict=false
+    // (the hook reads it directly; absence is non-strict).
+    writeConfig(cwd, { e2e_contract_strict: false });
+
+    const decision = runHook('mpl-require-e2e.mjs', cwd, {
+      cwd,
+      tool_name: 'Edit',
+      tool_input: {
+        file_path: '.mpl/state.json',
+        old_string: '"phase-finalize"',
+        new_string: '"phase-finalize",\n  "finalize_done": true',
+      },
+    });
+    // Hook may return ok (no scenarios declared = no required check)
+    // OR systemMessage (warn-downgrade). Either way the envelope must
+    // be cleared if we reached the success or warn-downgrade path.
+    const env = readEnvelope(cwd);
+    if (decision.continue === true) {
+      assert.ok(env.session_status == null,
+        `Expected envelope cleared on ok/warn path; got session_status=${env.session_status}`);
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#235 codex r2: mpl-write-guard direct_source_edit=off clears stale envelope', () => {
   // Codex r2 repro shape: write-guard records envelope for source
   // file at filePath. Operator flips direct_source_edit to off and
