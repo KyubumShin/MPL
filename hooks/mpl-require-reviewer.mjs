@@ -102,32 +102,79 @@ function extractScalar(raw) {
 /**
  * Minimal per-phase parse: scan for `- id: phase-…` blocks, then
  * within each block look for `reviewer_required:` and
- * `reviewer_rationale:` at any indent (they're per-phase fields).
+ * `reviewer_rationale:` at any indent.
+ *
+ * Codex r3 [logic] fix: `reviewer_rationale:` may use a YAML block
+ * scalar opener (`|` or `>`, optionally with chomping indicator
+ * `+`/`-` and explicit indentation digit). The body lives on deeper-
+ * indented lines; the marker itself is not content. For these forms
+ * we collect every line strictly deeper than the `reviewer_rationale:`
+ * line until indent returns to that level or shallower, then join
+ * and trim. An empty body → empty rationale.
+ *
+ * Inline scalar form (`reviewer_rationale: "real text"`) keeps the
+ * existing path through `extractScalar`.
+ *
  * Returns [{ id, reviewer_required, reviewer_rationale }, ...].
  */
 function parsePhases(text) {
   const phases = [];
-  const lines = String(text || '').split('\n');
+  const lines = String(text || '').split('\n').map((l) => l.replace(/\r$/, ''));
   let cur = null;
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\r$/, '');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
     const idMatch = line.match(/^\s*-\s+id\s*:\s*["']?(phase-[\w.-]+)["']?/);
     if (idMatch) {
       if (cur) phases.push(cur);
       cur = { id: idMatch[1], reviewer_required: null, reviewer_rationale: null };
+      i++;
       continue;
     }
-    if (!cur) continue;
+    if (!cur) {
+      i++;
+      continue;
+    }
     const reqMatch = line.match(/^\s+reviewer_required\s*:\s*(.+)$/);
     if (reqMatch) {
       cur.reviewer_required = parseYamlBoolean(reqMatch[1]);
+      i++;
       continue;
     }
-    const ratMatch = line.match(/^\s+reviewer_rationale\s*:\s*(.+)$/);
+    const ratMatch = line.match(/^(\s+)reviewer_rationale\s*:\s*(.+)$/);
     if (ratMatch) {
-      cur.reviewer_rationale = extractScalar(ratMatch[1]);
+      const headerIndent = ratMatch[1].length;
+      const rest = ratMatch[2];
+      // Strip inline `# comment` before classifying the scalar form.
+      const noComment = rest.replace(/\s+#.*$/, '').trim();
+      // Block-scalar opener? `|`, `>`, with optional chomping and indent
+      // digit. The opener itself is NOT content — collect deeper-indented
+      // lines until indent backs up to headerIndent or shallower.
+      if (/^[|>][+-]?\d?$/.test(noComment)) {
+        const bodyLines = [];
+        let j = i + 1;
+        while (j < lines.length) {
+          const next = lines[j];
+          if (!next.trim()) {
+            bodyLines.push('');
+            j++;
+            continue;
+          }
+          const indentMatch = next.match(/^(\s*)/);
+          const indent = indentMatch ? indentMatch[1].length : 0;
+          if (indent <= headerIndent) break;
+          bodyLines.push(next.slice(headerIndent + 1));
+          j++;
+        }
+        cur.reviewer_rationale = bodyLines.join('\n');
+        i = j;
+        continue;
+      }
+      cur.reviewer_rationale = extractScalar(rest);
+      i++;
       continue;
     }
+    i++;
   }
   if (cur) phases.push(cur);
   return phases;

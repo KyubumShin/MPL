@@ -170,15 +170,31 @@ for each { cmd, name } in build_commands:
 // "tooling requested" — the default decomposer mode demands
 // lint/type/build.
 NON_TOOLING_EVIDENCE = ["goal_trace", "manual", "external_audit", "documentation"]
-completed_phases = state.execution.phase_details
+
+// **Source of truth (codex r3 fix)**: `evidence_required` lives on the
+// decomposition's per-phase block, NOT on `state.execution.phase_details`
+// (which only stores id/name/status/pp/retry/result). An earlier draft
+// read `phase.evidence_required` off phase_details — that read always
+// returned undefined, so `phase_evidence = []`, `all_non_tooling = false`,
+// and the skip path was dead code on every real run. Fix: re-read
+// `.mpl/mpl/decomposition.yaml` at Hard 1 time and JOIN completed phase
+// ids back to the decomposition entry to extract `evidence_required`.
+decomposition = readDecompositionYaml(cwd)  // `.mpl/mpl/decomposition.yaml`
+decomp_phase_by_id = Map(decomposition.phases.map(p => [p.id, p]))
+completed_phase_ids = state.execution.phase_details
   .filter(p => p.status == "completed")
-all_non_tooling = completed_phases.every(phase => {
+  .map(p => p.id)
+completed_decomp_phases = completed_phase_ids
+  .map(id => decomp_phase_by_id.get(id))
+  .filter(p => p != null)  // drop phases missing from decomposition (shouldn't happen)
+
+all_non_tooling = completed_decomp_phases.every(phase => {
   phase_evidence = phase.evidence_required or []
   return phase_evidence.length > 0 and
          phase_evidence.every(e => NON_TOOLING_EVIDENCE.includes(e))
 })
-requests_tooling = not all_non_tooling
-skip_justifying_phases = completed_phases
+requests_tooling = not all_non_tooling or completed_decomp_phases.length == 0
+skip_justifying_phases = completed_decomp_phases
   .filter(phase => (phase.evidence_required or []).every(e => NON_TOOLING_EVIDENCE.includes(e)) and (phase.evidence_required or []).length > 0)
   .map(phase => phase.id)
 

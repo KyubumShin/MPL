@@ -197,6 +197,112 @@ test('#251 C2 codex r2: executor skip path checks rationale presence (defense-in
   assert.match(skipBlock[0], /codex r2|defense-in-depth/i);
 });
 
+test('#251 C2 codex r3 [logic]: YAML block-scalar rationale (|, >) requires deeper non-blank body', () => {
+  // Codex r3: `reviewer_rationale: |` followed by a sibling key (or
+  // EOF, or whitespace-only body) made `extractScalar` return the
+  // literal `|` marker. After trim that was non-empty, so the gate
+  // passed even though the author intent was absent. Fix: detect
+  // block-scalar opener and collect deeper-indented content; empty
+  // body → empty rationale.
+  const empties = [
+    // EOF after opener
+    `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: |`,
+    // Sibling at same indent → no body
+    `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: |
+  - id: phase-2
+    reviewer_required: true
+`,
+    // Whitespace-only deeper body
+    `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: |
+
+
+`,
+    // Folded > marker, empty
+    `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: >`,
+    // With chomping indicators
+    `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: |-
+  - id: phase-2`,
+  ];
+  for (const yaml of empties) {
+    const { offenders } = findReviewerRationaleGaps(yaml);
+    assert.ok(
+      offenders.includes('phase-1'),
+      `expected block-scalar empty rationale to be flagged:\n${yaml}`,
+    );
+  }
+
+  // Sanity: real multi-line block-scalar body → not flagged.
+  const populated = `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: |
+      Boundary unclear; operator must confirm.
+      Multi-line rationale spans multiple lines.
+  - id: phase-2
+    reviewer_required: true
+`;
+  assert.deepEqual(findReviewerRationaleGaps(populated).offenders, []);
+
+  // Sanity: folded > with content → not flagged.
+  const populatedFolded = `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: >
+      folded rationale across
+      multiple lines becomes one paragraph
+`;
+  assert.deepEqual(findReviewerRationaleGaps(populatedFolded).offenders, []);
+});
+
+test('#251 C6 codex r3 [logic]: Hard 1 reads evidence_required from decomposition.yaml, not phase_details', () => {
+  // Codex r3: `evidence_required` lives on the decomposition per-phase
+  // entry, NOT on `state.execution.phase_details` (which only carries
+  // id/name/status/pp/retry/result). An earlier draft read it off
+  // phase_details — that read always returned undefined, so
+  // `phase_evidence = []`, `all_non_tooling = false`, and the skip
+  // path was dead code on every real run.
+  const text = readPrompt('commands/mpl-run-execute-gates.md');
+
+  // Must read decomposition.yaml at gate time.
+  assert.match(
+    text,
+    /readDecompositionYaml|decomposition\.yaml|decomposition\.phases/i,
+    'Hard 1 skip must read decomposition.yaml directly',
+  );
+
+  // Must JOIN completed phase ids back to the decomposition.
+  assert.match(
+    text,
+    /decomp_phase_by_id|join completed phase ids|join.*decomposition|completed_decomp_phases/i,
+    'Hard 1 must join completed phase ids back to decomposition entries',
+  );
+
+  // Stale read off phase_details.evidence_required must be gone.
+  assert.ok(
+    !/state\.execution\.phase_details[\s\S]{0,60}?\.evidence_required/.test(text),
+    'Hard 1 must not read evidence_required off state.execution.phase_details (codex r3)',
+  );
+
+  // The fix attribution must be in the comment so a future revert
+  // can be traced.
+  assert.match(text, /codex r3|dead code on every real run|source of truth/i);
+});
+
 test('#251 C6 codex r2 [logic]: Hard 1 aggregates across ALL completed phases', () => {
   // Codex r2: Hard 1 runs ONCE for the whole pipeline. The skip
   // logic must check that EVERY completed phase has non-tooling-only
