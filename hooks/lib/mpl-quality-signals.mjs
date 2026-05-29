@@ -243,14 +243,16 @@ function hasNonEmptyAmbiguityNotes(yamlText) {
       // Strip a possible inline `# comment` first — anything after a
       // whitespace-preceded `#` is a comment, not content.
       const noComment = rest.replace(/\s+#.*$/, '').trim();
-      // Codex r5 [logic]: empty placeholders such as `[]`, `{}`,
-      // `null`, `~`, `""`, `''` are YAML-valid "no value" markers.
-      // The escape-hatch field is syntactically present but
-      // semantically empty — treating it as populated lets the agent
-      // suppress the gap signal with a placeholder, which is exactly
-      // the inversion this telemetry is meant to surface.
-      const INLINE_EMPTY = new Set(['null', '~', '[]', '{}', '""', "''"]);
-      if (noComment.length > 0 && !INLINE_EMPTY.has(noComment)) return true;
+      // Codex r5 / Claude r6 [logic]: empty placeholders are YAML
+      // "no value" markers that must NOT count as populated.
+      // - YAML 1.2 canonical nulls: `null` / `Null` / `NULL` / `~`
+      // - empty flow sequence/mapping: `[]` / `[ ]` / `{}` / `{ }`
+      // - empty / whitespace-only quoted scalars: `""` / `" "` / `''` / `' '`
+      // Treating any of these as populated lets the agent suppress
+      // the gap signal with a placeholder — the exact inversion this
+      // telemetry is meant to surface.
+      const INLINE_EMPTY_RE = /^(?:null|~|\[\s*\]|\{\s*\}|"\s*"|'\s*')$/i;
+      if (noComment.length > 0 && !INLINE_EMPTY_RE.test(noComment)) return true;
     }
     // Form 2: block opener — scan forward for the first non-blank,
     // non-comment line. If its indent > headerIndent AND it begins

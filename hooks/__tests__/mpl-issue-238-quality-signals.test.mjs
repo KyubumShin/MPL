@@ -207,6 +207,53 @@ test('#238 [seed-ambiguity-notes]: presence of ambiguity_notes suppresses the si
   assert.equal(detectSeedAmbiguityNotesGap(yaml), null);
 });
 
+test('#238 claude r6 [logic]: YAML-canonical Null/NULL + whitespace variants do NOT suppress signal', () => {
+  // Claude r6 (generalizes Codex r5): YAML 1.2 canonical nulls are
+  // `null|Null|NULL|~`; empty flow forms accept whitespace inside
+  // (`[ ]`, `{ }`); quoted scalars with whitespace-only content
+  // (`" "`, `' '`) are also semantically empty. The r5 fix only
+  // covered the lowercase + zero-whitespace forms.
+  const placeholders = [
+    'null', 'Null', 'NULL', '~',
+    '[]', '[ ]', '[   ]',
+    '{}', '{ }', '{   }',
+    '""', '" "', '"   "',
+    "''", "' '", "'   '",
+  ];
+  for (const value of placeholders) {
+    const yaml = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: ${value}
+  acceptance_criteria:
+    - x
+`;
+    const result = detectSeedAmbiguityNotesGap(yaml);
+    assert.ok(result, `expected signal for ambiguity_notes: ${value}`);
+    assert.equal(result.matched, 'TBD');
+  }
+
+  // Sanity: real content (incl. YAML-non-null tokens) still suppresses.
+  for (const value of [
+    '"Boundary unclear"',
+    'Nil',          // YAML 1.2 does NOT treat `Nil` as null — it's a string
+    'unclear',
+    '[ a ]',
+    '{ foo: bar }',
+  ]) {
+    const yaml = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: ${value}
+  acceptance_criteria:
+    - x
+`;
+    assert.equal(
+      detectSeedAmbiguityNotesGap(yaml),
+      null,
+      `expected NO signal for real content ambiguity_notes: ${value}`,
+    );
+  }
+});
+
 test('#238 codex r5 [logic]: inline empty placeholders (null/~/[]/{}/empty quotes) do NOT suppress the signal', () => {
   // Codex r5: an agent can syntactically present the escape-hatch
   // field but semantically empty it — `ambiguity_notes: []`,
