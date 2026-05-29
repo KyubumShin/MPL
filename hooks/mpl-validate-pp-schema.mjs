@@ -76,11 +76,18 @@ if (isMain) {
   const { readStdin } = await import(
     pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
   );
+  const { emitBlockedHook, emitClearedOk } = await import(
+    pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+  );
+  const { readState, isMplActive } = await import(
+    pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
+  );
+
+  const HOOK_ID = 'mpl-validate-pp-schema';
+  const BLOCKED_ARTIFACT = '.mpl/pivot-points.md';
 
   const ok = () =>
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-  const block = (reason) =>
-    console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 
   try {
     const raw = await readStdin();
@@ -105,8 +112,35 @@ if (isMain) {
           if (!content) ok();
           else {
             const hits = detectUcLeakage(content);
-            if (hits.length === 0) ok();
-            else block(formatBlockReason(hits));
+            const cwd = input.cwd || input.directory || process.cwd();
+            if (hits.length === 0) {
+              if (isMplActive(cwd)) {
+                emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+              } else {
+                ok();
+              }
+            } else {
+              if (!isMplActive(cwd)) {
+                // Pre-MPL workspaces — preserve original behavior.
+                console.log(JSON.stringify({
+                  continue: false,
+                  decision: 'block',
+                  reason: formatBlockReason(hits),
+                }));
+              } else {
+                const state = readState(cwd) || {};
+                emitBlockedHook(cwd, state, {
+                  hookId: HOOK_ID,
+                  ruleId: 'pp_schema_invalid',
+                  code: 'pp_schema_uc_leakage',
+                  artifact: BLOCKED_ARTIFACT,
+                  reason: formatBlockReason(hits),
+                  resumeInstruction:
+                    'Move every UC-scoped schema key out of .mpl/pivot-points.md into .mpl/requirements/user-contract.md, then retry the write.',
+                  retryContext: { markers: hits.map((h) => h.name) },
+                });
+              }
+            }
           }
         }
       }

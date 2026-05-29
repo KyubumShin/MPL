@@ -27,21 +27,22 @@ import { existsSync, readFileSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const { isMplActive } = await import(
+const { isMplActive, readState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
 
 const SEED_SUBAGENTS = new Set(['mpl-seed-generator', 'mpl:mpl-seed-generator']);
+const HOOK_ID = 'mpl-require-chain-assignment';
+const BLOCKED_ARTIFACT = '.mpl/mpl/chain-assignment.yaml';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-}
-
-function deny(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 /**
@@ -107,19 +108,31 @@ async function main() {
   }
 
   if (chainAssignmentExists(cwd)) {
-    ok();
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
     return;
   }
 
-  deny(
-    '[MPL AP-CHAIN-01] ⛔ Seed Generator BLOCKED: chain_seed.enabled=true but ' +
+  const state = readState(cwd) || {};
+  emitBlockedHook(cwd, state, {
+    hookId: HOOK_ID,
+    ruleId: 'missing_chain_assignment',
+    code: 'chain_assignment_missing',
+    artifact: BLOCKED_ARTIFACT,
+    reason:
+      '[MPL AP-CHAIN-01] Seed Generator BLOCKED: chain_seed.enabled=true but ' +
       '.mpl/mpl/chain-assignment.yaml is missing. Step 3-G (Chain Derivation) ' +
       'must run before mpl-seed-generator dispatch — silent fallback to chains/no-chain/ ' +
-      'would discard the user\'s explicit chain-mode activation and break baton-pass/cache reuse. ' +
+      "would discard the user's explicit chain-mode activation and break baton-pass/cache reuse. " +
       'Fix: return to commands/mpl-run-decompose.md Step 3-G, derive chains from decomposition.yaml ' +
       'phase edges, and write .mpl/mpl/chain-assignment.yaml (schema: docs/schemas/chain-assignment.md). ' +
-      'Opt-out: set chain_seed.enabled=false in .mpl/config.json for inline mode (AP-SEED-01 exempt per #58).'
-  );
+      'Opt-out: set chain_seed.enabled=false in .mpl/config.json for inline mode (AP-SEED-01 exempt per #58).',
+    resumeInstruction:
+      'Run Step 3-G (Chain Derivation) and write .mpl/mpl/chain-assignment.yaml, then retry the mpl-seed-generator dispatch.',
+    retryContext: {
+      schema_reference: 'docs/schemas/chain-assignment.md',
+      opt_out: 'chain_seed.enabled = false',
+    },
+  });
 }
 
 main().catch(() => {

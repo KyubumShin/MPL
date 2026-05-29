@@ -40,12 +40,18 @@ const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
 
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+const { readState } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-decomposition-delta';
+const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition-deltas/';
+
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-}
-
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 function isFullWriteTool(toolName) {
@@ -158,7 +164,11 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.decomposition_delta_required === false) return ok();
+  if (cfg.decomposition_delta_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const toolInput = data.tool_input || data.toolInput || {};
   const issues = [];
@@ -173,14 +183,23 @@ async function main() {
   if (issues.length > 0) {
     const shown = issues.slice(0, 12).join(', ');
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
-    block(
-      `[MPL Decomposition Delta] Existing decomposition changes must go through ` +
-        `.mpl/mpl/decomposition-deltas/recompose-N.yaml before the full graph rewrite: ${shown}${more}.`
-    );
+    const state = readState(cwd) || {};
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'missing_decomposition_delta',
+      code: 'decomposition_delta_missing',
+      artifact: BLOCKED_ARTIFACT,
+      reason:
+        `[MPL Decomposition Delta] Existing decomposition changes must go through ` +
+        `.mpl/mpl/decomposition-deltas/recompose-N.yaml before the full graph rewrite: ${shown}${more}.`,
+      resumeInstruction:
+        'Write the recompose delta artifact .mpl/mpl/decomposition-deltas/recompose-N.yaml first, then retry the decomposition rewrite.',
+      retryContext: { issues: issues.slice(0, 50) },
+    });
     return;
   }
 
-  ok();
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {

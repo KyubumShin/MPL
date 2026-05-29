@@ -32,13 +32,15 @@ const { collectFileWrites, isFileWriteTool } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-completed-phase-immutability';
+const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition.yaml';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-}
-
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 export function targetsDecompositionFile(filePath) {
@@ -68,7 +70,11 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.completed_phase_immutability_required === false) return ok();
+  if (cfg.completed_phase_immutability_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const existingPath = currentDecompositionPath(cwd);
   if (!existsSync(existingPath)) return ok();
@@ -101,14 +107,22 @@ async function main() {
   if (issues.length > 0) {
     const shown = issues.slice(0, 12).join(', ');
     const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
-    block(
-      `[MPL Completed Phase Immutability] Completed phase contract blocks are immutable during recomposition: ` +
-        `${shown}${more}. Append new phases or modify only incomplete phases.`
-    );
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'missing_completed_phase_immutability',
+      code: 'completed_phase_mutation',
+      artifact: BLOCKED_ARTIFACT,
+      reason:
+        `[MPL Completed Phase Immutability] Completed phase contract blocks are immutable during recomposition: ` +
+        `${shown}${more}. Append new phases or modify only incomplete phases.`,
+      resumeInstruction:
+        'Rewrite decomposition.yaml so completed phase blocks are unchanged; only append or modify incomplete phases, then retry the write.',
+      retryContext: { issues: issues.slice(0, 50), completed_ids: completedIds },
+    });
     return;
   }
 
-  ok();
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {

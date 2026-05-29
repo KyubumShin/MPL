@@ -42,6 +42,13 @@ const { resolveRuleAction } = await import(
 const { loadConfig } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
 );
+// #235: record envelope on `decision: block` so mpl-recover can
+// dispatch and BLOCKED_HOOK_STALE doesn't fire.
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+
+const HOOK_ID = 'mpl-write-guard';
 
 // Dogfood mode (P0-3, #111): when developing the MPL plugin against itself,
 // `/MPL/` paths must be treated like ordinary source — orchestrator should
@@ -208,6 +215,9 @@ ensure you have the correct target path. The command will proceed, but please ve
   if (isSourceFile(filePath)) {
     const action = resolveRuleAction(cwd, state, 'direct_source_edit');
     if (action === 'off') {
+      // Codex r2 on PR #246: explicit opt-out must clear any stale
+      // envelope from a prior block for the same (hookId, filePath).
+      clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -218,6 +228,16 @@ Source files should be edited by mpl-phase-runner agents, not the orchestrator.
 Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} to ...")`;
 
     if (action === 'block') {
+      recordBlockedHook(cwd, {
+        hookId: HOOK_ID,
+        phaseId: state?.current_phase,
+        artifact: filePath,
+        code: 'direct_source_edit',
+        reason: message,
+        resumeInstruction:
+          'Delegate the source-file edit to an mpl-phase-runner agent (Agent(subagent_type=mpl-phase-runner, ...)), then retry.',
+        retryContext: { file_path: filePath, tool: toolName },
+      });
       console.log(JSON.stringify({
         decision: 'block',
         reason: message,
@@ -225,6 +245,7 @@ Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} t
       return;
     }
     // warn (transitional default)
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
     console.log(JSON.stringify({
       continue: true,
       hookSpecificOutput: {
@@ -248,6 +269,9 @@ Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} t
         if (!inScope) {
           const action = resolveRuleAction(cwd, state, 'phase_scope_violation');
           if (action === 'off') {
+            // Codex r2 on PR #246: explicit opt-out must clear any
+            // stale envelope from a prior phase_scope_violation block.
+            clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
             console.log(JSON.stringify({ continue: true, suppressOutput: true }));
             return;
           }
@@ -257,6 +281,20 @@ Declared scope files: ${scope.allowed.slice(0, 5).join(', ')}${scope.allowed.len
 This may cause cross-phase side effects. Verify this modification belongs in the current phase.`;
 
           if (action === 'block') {
+            recordBlockedHook(cwd, {
+              hookId: HOOK_ID,
+              phaseId: currentPhase,
+              artifact: filePath,
+              code: 'phase_scope_violation',
+              reason: message,
+              resumeInstruction:
+                `Restrict this write to files inside phase "${currentPhase}" declared scope, or move the work into the appropriate phase, then retry.`,
+              retryContext: {
+                file_path: filePath,
+                phase: currentPhase,
+                allowed_sample: scope.allowed.slice(0, 5),
+              },
+            });
             console.log(JSON.stringify({
               decision: 'block',
               reason: message,
@@ -264,6 +302,7 @@ This may cause cross-phase side effects. Verify this modification belongs in the
             return;
           }
           // warn
+          clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
           console.log(JSON.stringify({
             continue: true,
             hookSpecificOutput: {
@@ -279,7 +318,14 @@ This may cause cross-phase side effects. Verify this modification belongs in the
     // Phase scope check failure: fail-open (don't block on parser errors)
   }
 
-  // All checks passed: allow
+  // All checks passed: allow. Codex r2 on PR #246: a write that
+  // passes both direct_source_edit AND phase_scope_violation means
+  // any envelope previously recorded for THIS (HOOK_ID, filePath) is
+  // resolved — clear it so mpl-recover/BLOCKED_HOOK_STALE see the
+  // unblocked state.
+  if (filePath) {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: filePath });
+  }
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 

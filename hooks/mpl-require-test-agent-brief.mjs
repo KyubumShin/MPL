@@ -41,6 +41,14 @@ const { writeTestAgentBriefs } = await import(
 const { loadConfig } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
 );
+// #235: the hook's own enforcement.json mode resolves to off/warn/block,
+// but the block path previously bypassed recordBlockedHook. Wire envelope.
+const { recordBlockedHook, clearBlockedHook } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+// readState is already imported above with isMplActive.
+
+const HOOK_ID = 'mpl-require-test-agent-brief';
 
 function silent() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -77,9 +85,31 @@ function resolveEnforcementMode(cwd) {
   return 'block';
 }
 
-function surface(mode, reason) {
-  if (mode === 'off') return silent();
-  if (mode === 'block') return block(reason);
+function surface(cwd, mode, { reason, phaseId, code, retryContext = {} }) {
+  // Codex r1 on PR #246: clear any stale envelope on off/warn/silent
+  // paths; record envelope on block before printing the response.
+  const artifact = phaseId
+    ? `.mpl/mpl/phases/${phaseId}/test-agent-brief.yaml`
+    : 'test-agent-brief';
+  if (mode === 'off') {
+    clearBlockedHook(cwd, { hookId: HOOK_ID, artifact });
+    return silent();
+  }
+  if (mode === 'block') {
+    const state = readState(cwd) || {};
+    recordBlockedHook(cwd, {
+      hookId: HOOK_ID,
+      phaseId,
+      artifact,
+      code,
+      reason,
+      resumeInstruction:
+        `Generate a valid ${artifact} (or fix its schema validation), then retry the mpl-test-agent dispatch.`,
+      retryContext,
+    });
+    return block(reason);
+  }
+  clearBlockedHook(cwd, { hookId: HOOK_ID, artifact });
   warn(reason);
 }
 
@@ -165,13 +195,26 @@ async function main() {
   if (!phaseId) return silent(); // non-phase task, conservative allow
 
   const required = readTestAgentRequired(cwd, phaseId);
-  if (required === false) return silent(); // explicit opt-out path
+  if (required === false) {
+    // Explicit opt-out — clear any stale envelope.
+    clearBlockedHook(cwd, {
+      hookId: HOOK_ID,
+      artifact: `.mpl/mpl/phases/${phaseId}/test-agent-brief.yaml`,
+    });
+    return silent();
+  }
   // null (decomposition not yet available) also passes — defer to
   // existing require-test-agent hook to handle that case.
   if (required === null) return silent();
 
   const mode = resolveEnforcementMode(cwd);
-  if (mode === 'off') return silent();
+  if (mode === 'off') {
+    clearBlockedHook(cwd, {
+      hookId: HOOK_ID,
+      artifact: `.mpl/mpl/phases/${phaseId}/test-agent-brief.yaml`,
+    });
+    return silent();
+  }
 
   const path = briefPath(cwd, phaseId);
   if (!existsSync(path)) {
@@ -183,20 +226,40 @@ async function main() {
     // phase, the gate proceeds. Failure paths still surface the diagnostic.
     try { writeTestAgentBriefs(cwd); } catch { /* fall through to missing diagnostic */ }
     if (!existsSync(path)) {
-      surface(mode, buildReason(phaseId, 'brief artifact missing'));
+      surface(cwd, mode, {
+        reason: buildReason(phaseId, 'brief artifact missing'),
+        phaseId,
+        code: 'test_agent_brief_missing',
+        retryContext: { brief_path: `.mpl/mpl/phases/${phaseId}/test-agent-brief.yaml` },
+      });
       return;
     }
   }
   let text;
   try { text = readFileSync(path, 'utf-8'); } catch (e) {
-    surface(mode, buildReason(phaseId, `brief artifact unreadable: ${e?.message || 'unknown'}`));
+    surface(cwd, mode, {
+      reason: buildReason(phaseId, `brief artifact unreadable: ${e?.message || 'unknown'}`),
+      phaseId,
+      code: 'test_agent_brief_unreadable',
+      retryContext: { error: e?.message || 'unknown' },
+    });
     return;
   }
   const { valid, errors } = validateBrief(text, { phaseId });
   if (!valid) {
-    surface(mode, buildReason(phaseId, 'brief failed schema validation', errors));
+    surface(cwd, mode, {
+      reason: buildReason(phaseId, 'brief failed schema validation', errors),
+      phaseId,
+      code: 'test_agent_brief_invalid',
+      retryContext: { errors: (errors || []).slice(0, 20) },
+    });
     return;
   }
+  // Success — clear any stale envelope tagged to this brief artifact.
+  clearBlockedHook(cwd, {
+    hookId: HOOK_ID,
+    artifact: `.mpl/mpl/phases/${phaseId}/test-agent-brief.yaml`,
+  });
   silent();
 }
 

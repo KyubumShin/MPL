@@ -31,13 +31,15 @@ const { collectFileWrites, isFileWriteTool } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
+
+const HOOK_ID = 'mpl-require-whole-goal-closure';
+const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-}
-
-function block(reason) {
-  console.log(JSON.stringify({ continue: false, decision: 'block', reason }));
 }
 
 function isFinalizeDoneStateWrite(toolInput) {
@@ -65,15 +67,28 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.whole_goal_closure_required === false) return ok();
-
-  const goal = readGoalContract(cwd);
-  if (cfg.goal_contract_required !== false && (!goal.exists || !goal.valid)) {
-    block(`[MPL Whole Goal Closure] Cannot set finalize_done=true — goal contract missing or invalid: ${goal.missing.join(', ')}.`);
+  if (cfg.whole_goal_closure_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
     return;
   }
 
+  const goal = readGoalContract(cwd);
   const state = readState(cwd) || {};
+  if (cfg.goal_contract_required !== false && (!goal.exists || !goal.valid)) {
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'missing_whole_goal_closure',
+      code: 'goal_contract_invalid',
+      artifact: BLOCKED_ARTIFACT,
+      reason: `[MPL Whole Goal Closure] Cannot set finalize_done=true — goal contract missing or invalid: ${goal.missing.join(', ')}.`,
+      resumeInstruction:
+        'Restore a valid .mpl/goal-contract.yaml (Phase 0 renewal) before re-attempting finalize.',
+      retryContext: { missing: goal.missing },
+    });
+    return;
+  }
+
   const verdict = validateWholeGoalClosure({
     cwd,
     state,
@@ -83,14 +98,22 @@ async function main() {
   if (!verdict.valid) {
     const shown = verdict.issues.slice(0, 12).join(', ');
     const more = verdict.issues.length > 12 ? ` (+${verdict.issues.length - 12} more)` : '';
-    block(
-      `[MPL Whole Goal Closure] Cannot set finalize_done=true — completed phase evidence does not close the Goal Contract: ` +
-        `${shown}${more}. Complete every decomposition phase and ensure verification.md Evidence Latch covers all AC/AX ids.`
-    );
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'missing_whole_goal_closure',
+      code: 'whole_goal_closure_missing',
+      artifact: BLOCKED_ARTIFACT,
+      reason:
+        `[MPL Whole Goal Closure] Cannot set finalize_done=true — completed phase evidence does not close the Goal Contract: ` +
+        `${shown}${more}. Complete every decomposition phase and ensure verification.md Evidence Latch covers all AC/AX ids.`,
+      resumeInstruction:
+        'Complete every decomposition phase and latch every Goal Contract AC/AX id in verification.md Evidence Latch sections, then retry finalize.',
+      retryContext: { issues: verdict.issues.slice(0, 50) },
+    });
     return;
   }
 
-  ok();
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {
