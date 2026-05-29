@@ -400,6 +400,36 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A3 codex r8 [data-integrity]: no-space and fd-prefix redirects are blocked', () => {
+  // Codex r8: POSIX shell redirection doesn't require whitespace
+  // after `>`/`>>`/`&>`. Pre-fix entry gate required `\s` after `>`.
+  // Also fd-prefixed forms (`2>`, `1>>`) must trigger.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      'echo x >.mpl/mpl/decomposition.yaml',
+      ': >.mpl/contracts/foo.json',
+      'cat /dev/null >.mpl/memory/state',
+      'echo y 2>.mpl/mpl/err.log',
+      'echo z >>.mpl/mpl/log',
+      'echo a &>.mpl/mpl/all',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected no-space redirect block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r7 [data-integrity]: parameter-expansion `${var}` after same-line assignment is blocked', () => {
   // Codex r7: `p=.mpl; rm -rf ${p}/mpl` reaches the shell as
   // `rm -rf .mpl/mpl`. Pre-fix the tokenizer saw `${p}/mpl` and

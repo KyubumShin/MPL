@@ -253,8 +253,12 @@ function matchesProtectedDelete(command, cwd) {
     /\bunlink\b/.test(normalized) ||
     /\btruncate\b/.test(normalized) ||
     /\bcp\b.*\/dev\/null/.test(normalized) ||
-    /(^|[\s;|&])>{1,2}\s/.test(normalized) ||
-    /(^|[\s;|&])&>{1}\s/.test(normalized)
+    // Codex r8 on PR #249 [data-integrity]: POSIX shell redirection
+    // does not require whitespace after `>`/`>>`/`&>`. `echo x
+    // >.mpl/mpl/foo` truncates the protected file. Allow optional
+    // fd-prefix (`2>`, `1>>`) and tolerate adjacent operand.
+    /(?:^|[\s;|&])\d?>{1,2}/.test(normalized) ||
+    /(?:^|[\s;|&])&>{1,2}/.test(normalized)
   );
   if (!isDestructive) return null;
 
@@ -317,7 +321,10 @@ function matchesProtectedDelete(command, cwd) {
   // Tokenize on whitespace AND `;`/`&&`/`||`/`|`/`(`/`)` so a
   // multi-command line + subshell surfaces every operand.
   const tokens = normalized
-    .split(/[\s;|&()]+/)
+    // Codex r8: also split on `>` / `<` so redirect operators with
+    // no whitespace before the operand (`echo x >.mpl/mpl/foo`) split
+    // off the path token cleanly.
+    .split(/[\s;|&()<>]+/)
     .map((t) => t.replace(/^[\\$]+/, '').replace(/[\\)]+$/, ''))
     .filter(Boolean);
 
