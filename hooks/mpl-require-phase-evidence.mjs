@@ -122,7 +122,14 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.phase_evidence_latch_required === false) return ok();
+  if (cfg.phase_evidence_latch_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out must clear any
+    // envelope left behind by an earlier block. Otherwise
+    // mpl-recover and BLOCKED_HOOK_STALE see stale state after the
+    // user has unblocked the path.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const state = readState(cwd) || {};
   const toolInput = data.tool_input || data.toolInput || {};

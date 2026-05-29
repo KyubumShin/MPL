@@ -318,8 +318,15 @@ async function main() {
   if (!isFinalizeDoneWrite(toolInput)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.e2e_authenticity_required === false) return ok();
-  if (loadOverride(cwd)) return ok();
+  if (cfg.e2e_authenticity_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
+  if (loadOverride(cwd)) {
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const goal = readGoalContract(cwd);
   const policy = goal.valid

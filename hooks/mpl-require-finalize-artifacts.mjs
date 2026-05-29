@@ -394,10 +394,18 @@ async function main() {
   if (!isFinalizeDoneWrite(toolInput)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.finalize_artifacts_required === false) return ok();
+  if (cfg.finalize_artifacts_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears any stale
+    // envelope from a prior block. Same for user-approved override.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const override = loadOverride(cwd);
-  if (override) return ok();
+  if (override) {
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const state = readState(cwd) || {};
   const text = incomingText(toolInput);

@@ -70,7 +70,11 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.completed_phase_immutability_required === false) return ok();
+  if (cfg.completed_phase_immutability_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const existingPath = currentDecompositionPath(cwd);
   if (!existsSync(existingPath)) return ok();

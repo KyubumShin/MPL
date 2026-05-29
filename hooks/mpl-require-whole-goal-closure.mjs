@@ -67,7 +67,11 @@ async function main() {
   if (!isMplActive(cwd)) return ok();
 
   const cfg = loadConfig(cwd);
-  if (cfg.whole_goal_closure_required === false) return ok();
+  if (cfg.whole_goal_closure_required === false) {
+    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+    return;
+  }
 
   const goal = readGoalContract(cwd);
   const state = readState(cwd) || {};

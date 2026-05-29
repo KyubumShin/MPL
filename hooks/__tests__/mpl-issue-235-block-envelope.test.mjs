@@ -254,6 +254,55 @@ test('#235 mpl-state-invariant: success path clears any pre-existing envelope', 
   }
 });
 
+test('#235 codex r1: config opt-out (X_required:false) on previously-blocked hook clears stale envelope before allowing the write', () => {
+  // Repro shape: block path records envelope; user then sets the
+  // hook's config opt-out (e.g. phase_evidence_latch_required:false)
+  // and retries. The opt-out early-return must clear the envelope.
+  const cwd = freshWorkspace();
+  try {
+    // Seed a stale envelope as if mpl-require-phase-evidence had blocked.
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify(
+        {
+          current_phase: 'phase-3',
+          execution: { phases: { completed: 0 } },
+          session_status: 'blocked_hook',
+          blocked_by_hook: 'mpl-require-phase-evidence',
+          blocked_phase: 'phase-3',
+          blocked_artifact: 'phase-evidence-latch',
+          block_code: 'phase_evidence_latch_missing',
+          block_reason: 'stale',
+          resume_instruction: 'stale',
+          blocked_at: new Date(0).toISOString(),
+          retry_context: { issues: [] },
+        },
+        null,
+        2,
+      ),
+    );
+    writeConfig(cwd, { phase_evidence_latch_required: false });
+
+    const decision = runHook('mpl-require-phase-evidence.mjs', cwd, {
+      cwd,
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '.mpl/mpl/phases/phase-3/verification.md',
+        content: 'placeholder',
+      },
+    });
+    assert.equal(decision.continue, true);
+    assert.equal(decision.suppressOutput, true);
+
+    const env = readEnvelope(cwd);
+    assert.ok(env.session_status == null);
+    assert.ok(env.blocked_by_hook == null);
+    assert.ok(env.block_code == null);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#235 surfaceBlockedHook helper: envelope written + block payload returned on block; off clears stale envelope', async () => {
   // Direct exercise of the lib for tighter coverage of off/warn/block tiers
   // without needing each hook's pre-conditions.
