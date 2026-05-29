@@ -133,6 +133,18 @@ function recoveryPatch(state, { status, reason, instruction, details = {} }) {
         attempts: (Number.isFinite(prev.attempts) ? prev.attempts : 0) + 1,
         last_status: status,
         last_attempt_at: nowIso(),
+        // Codex r9 on PR #242 [security]: writeState's deepMerge
+        // preserves nested keys that aren't in the patch. A prior
+        // approved-or-r7 recovery write may have stashed
+        // `awaiting_instruction: "Re-dispatch Task(...)"`; without an
+        // explicit tombstone, deepMerge would keep that string in
+        // state even after r8's safe-mode handler omitted it. Always
+        // null it here so safe-mode writes structurally cannot leak
+        // gated dispatch text. The approved branch (which sets
+        // `details: { ... }` not including awaiting_instruction)
+        // surfaces the actual dispatch via state.resume_instruction
+        // and the buildResult dispatch_instruction field instead.
+        awaiting_instruction: null,
         ...details,
       },
     },

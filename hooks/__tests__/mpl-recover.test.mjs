@@ -777,6 +777,40 @@ phases:
     assert.match(result.dispatch_instruction, /legacy-style finding/);
   });
 
+  it('#234 [security] codex r9: pre-existing awaiting_instruction in state is TOMBSTONED on safe-mode write', () => {
+    // Codex r9 [security]: writeState's deepMerge preserves nested
+    // keys that aren't in the patch. If prior recovery state stashed
+    // `recovery.awaiting_instruction = "Re-dispatch Task(...)"` (the
+    // r7-era leak), simply omitting the field in the r8 patch would
+    // leave the stale value on disk. Must explicitly tombstone.
+    //
+    // Repro: seed state with r7-style retry_context.recovery
+    // containing awaiting_instruction, then run --apply-safe. The
+    // persisted state must no longer contain the Re-dispatch text.
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: {
+        issues: ['phase-1.covers[0]:UC-99'],
+        recovery: {
+          // Pre-existing leaked value from a prior r7 write.
+          awaiting_instruction: 'Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt="...")',
+          attempts: 1,
+          last_status: 'awaiting_decomposer',
+        },
+      },
+    }));
+
+    recoverBlockedHook(tmp); // --apply-safe
+
+    const state = readState();
+    assert.equal(state.retry_context.recovery.awaiting_instruction, null,
+      'safe-mode write must tombstone the leaked awaiting_instruction');
+
+    const stateJson = JSON.stringify(state);
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/,
+      'persisted state must not contain the gated Task text after safe-mode write');
+  });
+
   it('#234 [contract-break] codex r8: safe mode does NOT persist gated dispatch text in state', () => {
     // Codex r8 [contract-break]: r7 stashed the gated Re-dispatch
     // Task(...) string in details.awaiting_instruction, which spread
@@ -798,7 +832,8 @@ phases:
     const stateJson = JSON.stringify(state);
     assert.doesNotMatch(stateJson, /Re-dispatch Task\(/, 'persisted state must not contain the gated Task text');
     assert.doesNotMatch(stateJson, /subagent_type="mpl-decomposer"/, 'persisted state must not contain subagent_type=mpl-decomposer');
-    assert.equal(rec.awaiting_instruction, undefined, 'awaiting_instruction must not be persisted in safe mode');
+    // Codex r9 follow-up: tombstoned (null) rather than absent.
+    assert.equal(rec.awaiting_instruction, null, 'awaiting_instruction must be explicitly tombstoned in safe mode');
   });
 
   it('#234 [contract-break] codex r8: phase_runner_anomaly safe mode does not persist gated Task text', () => {
