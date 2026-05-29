@@ -308,6 +308,35 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
   });
 
+  it('codex r7 + claude r7 [contract-break]: stripAtEvalFlag must strip ANSI-C / locale / backslash-escaped quote prefixes too', () => {
+    // r6 stripped leading/trailing `"`/`'`/backtick but left:
+    //   - bash/zsh ANSI-C quoting (`$'...'`)  ← codex r7
+    //   - locale translation (`$"..."`)
+    //   - backslash-escaped quotes (`\"...\"`, `\'...\'`)  ← claude r7
+    // intact. Concrete pre-fix repros (both reproduced empirically):
+    //   classifyGateCommand("npx $'--call=echo playwright'") === 'hard3_resilience'
+    //   classifyGateCommand(String.raw`npx \"--call=echo playwright\"`) === 'hard3_resilience'
+    // Fix: leading char class `^[\\$"'`]+`, trailing `[\\"'`]+$` — any
+    // combination of shell-quote glyphs peels off the token wrapper.
+
+    // ANSI-C `$'...'`
+    assert.equal(classifyGateCommand("npx $'--call=echo playwright'", { cwd: tmp }), null);
+    assert.equal(classifyGateCommand("npx $'--call' $'echo playwright'", { cwd: tmp }), null);
+    assert.equal(classifyGateCommand("npx $'--eval=playwright test'", { cwd: tmp }), null);
+    assert.equal(classifyGateCommand("npx $'-c=echo playwright'", { cwd: tmp }), null);
+    assert.equal(classifyGateCommand("npx $'-c' 'echo playwright'", { cwd: tmp }), null);
+    // Locale `$"..."`
+    assert.equal(classifyGateCommand('npx $"--call=echo playwright"', { cwd: tmp }), null);
+    // Backslash-escaped (`\"`, `\'`)
+    assert.equal(classifyGateCommand(String.raw`npx \"--call=echo playwright\"`, { cwd: tmp }), null);
+    assert.equal(classifyGateCommand(String.raw`npx \"--call\" \"echo playwright\"`, { cwd: tmp }), null);
+    assert.equal(classifyGateCommand(String.raw`npx \'--call=echo playwright\'`, { cwd: tmp }), null);
+    // No-cwd path.
+    assert.equal(classifyGateCommand("npx $'--call=echo playwright'"), null);
+    // Legitimate `npx playwright test` (no eval flag) still hard3.
+    assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
+  });
+
   it('codex r6 [contract-break]: stripAtEvalFlag must also handle shell-quoted attached/standalone eval flags', () => {
     // r5 only handled bare attached forms (`--call=value`). Shell-
     // quoted tokens like `"--call=echo playwright"` (one token after

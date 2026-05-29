@@ -422,11 +422,32 @@ export function classifyGateCommand(command, { cwd } = {}) {
 // from each token before the eval-flag comparison so the cut catches
 // all single-token quoting patterns: `"--call=v`, `--call="`,
 // `"--call"`, `'--call'`.
+//
+// Codex r7 [contract-break] on PR #244: also strip ANSI-C / locale
+// quote prefixes — bash/zsh `$'...'` (ANSI-C) and `$"..."` (locale
+// translation) evaluate to the unquoted argv at execution time, so
+// `npx $'--call=echo playwright'` is the same attached `--call=...`
+// eval flag at argv level.
+//
+// Claude r7 [contract-break] on PR #244 (same surface, different
+// quoting form): backslash-escaped quotes (`\"`, `\'`) common in
+// JSON-encoded state.json entries also survived the r6 strip.
+// `npx \"--call=echo playwright\"` token `\"--call=echo` was never
+// trimmed.
+//
+// Unified strip: leading and trailing character class covers every
+// shell-quote glyph that can wrap a flag token at the literal-text
+// level: backslash, `$`, `"`, `'`, backtick. Each is independent of
+// the others; the char class lets any combination peel off
+// (`\"--call=...` → `\"`, `$'--call=...` → `$'`, `\'--call=...` →
+// `\'`). A bare flag with no quoting is untouched.
 function stripAtEvalFlag(canonical) {
   const tokens = String(canonical || '').split(/\s+/);
   const evalFlags = ['-c', '--call', '-e', '--eval', '-x', '--exec', '--run-script'];
   const cutAt = tokens.findIndex((t) => {
-    const low = t.toLowerCase().replace(/^["'`]+/, '').replace(/["'`]+$/, '');
+    const low = t.toLowerCase()
+      .replace(/^[\\$"'`]+/, '')
+      .replace(/[\\"'`]+$/, '');
     for (const flag of evalFlags) {
       if (low === flag) return true;
       if (low.startsWith(flag + '=')) return true;
