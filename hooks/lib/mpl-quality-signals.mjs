@@ -240,10 +240,17 @@ function hasNonEmptyAmbiguityNotes(yamlText) {
     const rest = m[2];
     // Form 1: inline scalar.
     if (rest.trim().length > 0) {
-      // Strip a possible inline `# comment` — any non-whitespace token
-      // before `#` counts as a value.
+      // Strip a possible inline `# comment` first — anything after a
+      // whitespace-preceded `#` is a comment, not content.
       const noComment = rest.replace(/\s+#.*$/, '').trim();
-      if (noComment.length > 0) return true;
+      // Codex r5 [logic]: empty placeholders such as `[]`, `{}`,
+      // `null`, `~`, `""`, `''` are YAML-valid "no value" markers.
+      // The escape-hatch field is syntactically present but
+      // semantically empty — treating it as populated lets the agent
+      // suppress the gap signal with a placeholder, which is exactly
+      // the inversion this telemetry is meant to surface.
+      const INLINE_EMPTY = new Set(['null', '~', '[]', '{}', '""', "''"]);
+      if (noComment.length > 0 && !INLINE_EMPTY.has(noComment)) return true;
     }
     // Form 2: block opener — scan forward for the first non-blank,
     // non-comment line. If its indent > headerIndent AND it begins

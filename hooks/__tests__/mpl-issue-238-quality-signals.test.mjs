@@ -207,6 +207,43 @@ test('#238 [seed-ambiguity-notes]: presence of ambiguity_notes suppresses the si
   assert.equal(detectSeedAmbiguityNotesGap(yaml), null);
 });
 
+test('#238 codex r5 [logic]: inline empty placeholders (null/~/[]/{}/empty quotes) do NOT suppress the signal', () => {
+  // Codex r5: an agent can syntactically present the escape-hatch
+  // field but semantically empty it — `ambiguity_notes: []`,
+  // `: null`, `: ~`, `: ""`, `: ''`, `: {}` — and the previous Form-1
+  // check treated any inline non-whitespace as populated, silently
+  // hiding the very invention pattern the rule was meant to surface.
+  for (const value of ['[]', 'null', '~', '""', "''", '{}']) {
+    const yaml = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: ${value}
+  acceptance_criteria:
+    - returns 200
+`;
+    const result = detectSeedAmbiguityNotesGap(yaml);
+    assert.ok(result, `expected signal for ambiguity_notes: ${value}`);
+    assert.equal(result.matched, 'TBD');
+  }
+
+  // Sanity: a real inline scalar still suppresses.
+  const inlineScalar = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: "Boundary unclear"
+  acceptance_criteria:
+    - x
+`;
+  assert.equal(detectSeedAmbiguityNotesGap(inlineScalar), null);
+
+  // Sanity: empty placeholder followed by inline comment still empty.
+  const placeholderWithComment = `phase_seed:
+  goal: TBD endpoint
+  ambiguity_notes: null # explicitly empty
+  acceptance_criteria:
+    - x
+`;
+  assert.ok(detectSeedAmbiguityNotesGap(placeholderWithComment));
+});
+
 test('#238 codex r3 [logic]: empty ambiguity_notes block followed by sibling key still emits the signal', () => {
   // Codex r3 [logic]: the previous regex `\s+[-\w]` could swallow the
   // newline before the SIBLING key (same indent) and treat it as the
