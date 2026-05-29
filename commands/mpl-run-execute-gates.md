@@ -138,26 +138,35 @@ for each { cmd, name } in build_commands:
 // Defensive check: if NO verification ran at all, fail rather than auto-pass.
 // Same principle as AD-02 for Hard 3 — missing precondition ≠ free pass.
 //
-// #239 C6 / #251: when the phase's `evidence_required` list excludes
-// every tooling-based evidence type — i.e., it requests ONLY
-// non-tooling evidence such as `[goal_trace]` — Hard 1 skips the
-// tooling demand and reports PASS via `[goal_trace]` evidence instead.
-// This unblocks docs-only / prompt-only / pure-evidence phases that
-// legitimately have no lint/type/build surface.
+// #239 C6 / #251: when the phase's `evidence_required` list contains
+// ONLY non-tooling evidence types (`goal_trace`, `manual`, etc.),
+// Hard 1 skips the tooling demand and reports PASS via those evidence
+// types instead. This unblocks docs-only / prompt-only / pure-evidence
+// phases that legitimately have no lint/type/build surface.
 //
-// Tooling evidence types (Hard 1 honors): `lint`, `type_check`, `build`,
-// `lsp_diagnostics`, `tooling`.
-// Non-tooling evidence types (Hard 1 skips when ONLY these requested):
-// `goal_trace`, `manual`, `external_audit`, `documentation`.
+// CLOSED LIST of non-tooling evidence types (Hard 1 skips when the
+// `evidence_required` list contains ONLY these):
+//   `goal_trace`, `manual`, `external_audit`, `documentation`.
+//
+// EVERYTHING ELSE counts as tooling — including `command` (Bash with
+// `exit_code: 0`), `test_agent`, `lint`, `type_check`, `build`,
+// `lsp_diagnostics`, `tooling`, and any other token a future
+// decomposer might add. The classifier is intentionally a non-tooling
+// allowlist (codex r1 fix), NOT a tooling allowlist, so a newly-added
+// machine-backed evidence token does not silently slip through Hard 1
+// just because the executor prompt forgot to list it.
+//
+// An empty `evidence_required` array is treated as "tooling requested"
+// — the default decomposer mode demands lint/type/build.
 phase_evidence = phase.evidence_required or []
-TOOLING_EVIDENCE = ["lint", "type_check", "build", "lsp_diagnostics", "tooling"]
+NON_TOOLING_EVIDENCE = ["goal_trace", "manual", "external_audit", "documentation"]
 requests_tooling = phase_evidence.length == 0 or
-                   phase_evidence.some(e => TOOLING_EVIDENCE.includes(e))
+                   phase_evidence.some(e => not NON_TOOLING_EVIDENCE.includes(e))
 
 total_checks = lint_commands.length + build_commands.length + (diagnostics ? 1 : 0)
 if total_checks == 0:
   if not requests_tooling:
-    announce: "[MPL] Hard 1 SKIPPED: phase.evidence_required={phase_evidence} excludes tooling-based evidence. Tracking evidence via {phase_evidence} types instead."
+    announce: "[MPL] Hard 1 SKIPPED: phase.evidence_required={phase_evidence} contains only non-tooling evidence. Tracking evidence via {phase_evidence} types instead."
     → mark Hard 1 PASS with `evidence_required` reason; proceed to Hard 2
   else:
     announce: "[MPL] Hard 1 FAIL: No lint, type check, or build tool profile detected. Cannot verify code quality with zero tools."

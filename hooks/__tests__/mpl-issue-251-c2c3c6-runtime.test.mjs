@@ -144,6 +144,71 @@ test('#251 C2 e2e: hook lets a valid rationale through', () => {
   }
 });
 
+test('#251 C2 codex r1 [contract-break]: hook reads post-write disk state, not pre-write content', () => {
+  // Codex r1: original hook was registered as PreToolUse but read
+  // disk — the disk file is the PRE-write version, so a write that
+  // would introduce a rationale-less skip slipped through. Fix:
+  // register as PostToolUse (disk now reflects the post-write merged
+  // result). Regression test simulates the real PostToolUse path —
+  // disk has the post-write content, hook reads it, and blocks.
+  const cwd = freshWorkspace();
+  try {
+    const decompPath = join(cwd, '.mpl', 'mpl', 'decomposition.yaml');
+    // Pre-write state: VALID decomposition. Mirrors a baseline where
+    // the prior write put a non-empty rationale.
+    writeFileSync(
+      decompPath,
+      `phases:
+  - id: phase-1
+    reviewer_required: false
+    reviewer_rationale: "Pure docs phase, no code change"
+`,
+    );
+    // Now simulate the PostToolUse delivery — the write already
+    // committed to disk, and the on-disk content NOW has the bad
+    // shape (rationale removed). We materialize this by writing the
+    // bad bytes to disk BEFORE invoking the hook — that's what
+    // PostToolUse semantics actually deliver.
+    const badYaml = `phases:
+  - id: phase-1
+    reviewer_required: false
+`;
+    writeFileSync(decompPath, badYaml);
+    const decision = runReviewerHook(cwd, {
+      cwd,
+      tool_name: 'Edit',
+      tool_input: {
+        file_path: decompPath,
+        old_string: 'reviewer_rationale: "Pure docs phase, no code change"',
+        new_string: '',
+      },
+    });
+    assert.equal(decision.continue, false);
+    assert.equal(decision.decision, 'block');
+    assert.match(decision.reason, /phase-1/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#251 C2 codex r1: hook is registered as PostToolUse in hooks.json', () => {
+  // Lifecycle correctness: the hook semantics (re-read disk) match
+  // its registration. A future revert that moves it back to
+  // PreToolUse would silently regress the codex r1 finding.
+  const text = readPrompt('hooks/hooks.json');
+  // The hook must appear under PostToolUse, not PreToolUse.
+  const postToolUseBlock = text.match(/"PostToolUse"\s*:\s*\[([\s\S]*?)\n\s*\]\s*,?\s*\n\s*"Stop"/);
+  assert.ok(postToolUseBlock, 'PostToolUse block must exist in hooks.json');
+  assert.match(postToolUseBlock[1], /mpl-require-reviewer\.mjs/);
+  // And must NOT appear under PreToolUse.
+  const preToolUseBlock = text.match(/"PreToolUse"\s*:\s*\[([\s\S]*?)\n\s*\]\s*,\s*\n\s*"PostToolUse"/);
+  assert.ok(preToolUseBlock, 'PreToolUse block must exist in hooks.json');
+  assert.ok(
+    !/mpl-require-reviewer\.mjs/.test(preToolUseBlock[1]),
+    'mpl-require-reviewer must NOT be registered under PreToolUse',
+  );
+});
+
 test('#251 C2 e2e: hook is silent on non-decomposition writes', () => {
   const cwd = freshWorkspace();
   try {
@@ -251,8 +316,48 @@ test('#251 C6 wire: Hard 1 skips tooling demand when evidence_required excludes 
   // The gate logic must name the field and the skip path.
   assert.match(text, /phase\.evidence_required|evidence_required/);
   assert.match(text, /Hard 1 SKIPPED.*evidence_required|evidence_required.*Hard 1 SKIPPED|#239 C6/i);
-  // The tooling vs non-tooling distinction must be explicit.
-  assert.match(text, /TOOLING_EVIDENCE|tooling.based evidence/i);
+  // The non-tooling allowlist must be present.
+  assert.match(text, /NON_TOOLING_EVIDENCE|non.tooling allowlist/i);
+});
+
+test('#251 C6 codex r1 [contract-break]: Hard 1 classifier is a non-tooling allowlist (so `command` counts as tooling)', () => {
+  // Codex r1: an early draft used a tooling allowlist
+  // (lint/type_check/build/lsp_diagnostics/tooling). That gave a free
+  // pass to phases with `evidence_required: [command]` — a machine-
+  // backed Bash exit-code-0 token that IS tooling but wasn't in the
+  // list. Fix: inverted to a non-tooling allowlist
+  // (goal_trace / manual / external_audit / documentation). Anything
+  // outside that closed list — including `command`, `test_agent`,
+  // future-added tokens — counts as tooling and Hard 1 demands tools.
+  const text = readPrompt('commands/mpl-run-execute-gates.md');
+
+  // 1. The allowlist itself must be the non-tooling form, not the
+  //    tooling form. Reject the stale shape that listed `lint` etc.
+  assert.ok(
+    !/TOOLING_EVIDENCE\s*=\s*\[\s*["']lint["']/i.test(text),
+    'Hard 1 must NOT define a tooling allowlist (the codex r1 [contract-break] regression)',
+  );
+  assert.match(text, /NON_TOOLING_EVIDENCE\s*=\s*\[\s*["']goal_trace["']/i);
+
+  // 2. The closed list must NOT contain `command` (command IS tooling).
+  const allowlistMatch = text.match(
+    /NON_TOOLING_EVIDENCE\s*=\s*\[([^\]]*)\]/i,
+  );
+  assert.ok(allowlistMatch, 'NON_TOOLING_EVIDENCE allowlist must exist');
+  const allowlistBody = allowlistMatch[1];
+  for (const toolingToken of ['command', 'test_agent', 'lint', 'type_check', 'build']) {
+    assert.ok(
+      !new RegExp(`["']${toolingToken}["']`).test(allowlistBody),
+      `non-tooling allowlist must NOT contain "${toolingToken}" (it counts as tooling)`,
+    );
+  }
+
+  // 3. The classifier must explicitly call out that anything outside
+  //    the closed list counts as tooling.
+  assert.match(
+    text,
+    /EVERYTHING ELSE counts as tooling|anything outside.*counts as tooling|\bcommand\b.*counts as tooling/i,
+  );
 });
 
 test('#251 C6 wire: Hard 1 still fails when tooling is requested but no tools are present', () => {

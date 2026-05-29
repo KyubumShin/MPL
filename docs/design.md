@@ -469,7 +469,6 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-require-phase-contract-graph` | PreToolUse: Edit/Write/MultiEdit | Enforce graph metadata, evidence policy, resource locks, and valid phase dependencies in `decomposition.yaml`. | v0.18.3 guard stream; resource locks v0.18.5 |
 | `mpl-require-decomposition-delta` | PreToolUse: Edit/Write/MultiEdit | Require recomposition deltas for existing decomposition graph rewrites. | v0.18.3 guard stream |
 | `mpl-require-completed-phase-immutability` | PreToolUse: Edit/Write/MultiEdit | Prevent completed phase blocks from being mutated or removed during recomposition. | v0.18.3 guard stream |
-| `mpl-require-reviewer` | PreToolUse: Edit/Write/MultiEdit | Enforce non-empty `reviewer_rationale` when a phase declares `reviewer_required: false`. | #239 C2 / #251 |
 | `mpl-require-phase-evidence` | PreToolUse: Edit/Write/MultiEdit | Require phase Evidence Latches before completion artifacts or completion state writes. | v0.18.3 guard stream |
 | `mpl-baseline-guard` | PreToolUse: Edit/Write/MultiEdit | Protect `.mpl/mpl/baseline.yaml` after creation unless an explicit renewal sentinel exists. | v0.17.0 P2 stream (#59) |
 | `mpl-ambiguity-gate` | PreToolUse: Task/Agent | Block decomposer dispatch until ambiguity and user-contract readiness gates pass. | v0.11.2; UC readiness v0.16.0 |
@@ -480,6 +479,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-fallback-grep` | PostToolUse: Edit/Write/MultiEdit | Run anti-pattern registry checks against edited files as a fallback static guard. | v0.18.1 |
 | `mpl-artifact-schema` | PostToolUse: Edit/Write/MultiEdit/mcp__.*__write.* | Validate MPL artifacts against required markdown headings and YAML key schemas. | v0.18.1 |
 | `mpl-decomposition-postprocess` | PostToolUse: Edit/Write/MultiEdit | Regenerate `.mpl/mpl/decomposition-derived.json` immediately after derived source artifacts change. | v0.18 Phase 5 diet |
+| `mpl-require-reviewer` | PostToolUse: Edit/Write/MultiEdit | Enforce non-empty `reviewer_rationale` when a phase declares `reviewer_required: false`. | #239 C2 / #251 |
 | `mpl-require-test-agent` | PostToolUse: Task/Agent | Block phase-runner completion until required test-agent PASS evidence or override exists. | v0.15.1; structured PASS hardening v0.18.3 |
 | `mpl-require-test-agent-brief` | PreToolUse: Task/Agent | Block `mpl-test-agent` dispatch when `test_agent_required: true` phase has no valid `test-agent-brief.yaml` runbook artifact. | #212 |
 | `mpl-quality-gate` | PostToolUse: Task/Agent | Consume adversarial reviewer quality scores and trigger retry/escalation decisions. | v0.18.1 |

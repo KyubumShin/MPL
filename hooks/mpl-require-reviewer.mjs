@@ -3,13 +3,26 @@
  * #239 C2 / #251 — `reviewer_required: false` requires a
  * non-empty `reviewer_rationale` on the same phase.
  *
- * PostToolUse on Edit|Write|MultiEdit. Activates only when the
- * tool wrote `.mpl/mpl/decomposition.yaml`. Parses each phase
- * block. If any phase declares `reviewer_required: false` AND
- * `reviewer_rationale` is missing OR an empty string, blocks
- * the write with a structured reason naming every offending
- * phase id. Pass-through in every other case (no MPL active,
- * other files, `reviewer_required: true` or absent).
+ * **PostToolUse** on Edit|Write|MultiEdit (codex r1
+ * [contract-break] fix). Activates only when the tool wrote
+ * `.mpl/mpl/decomposition.yaml`. After the write commits to disk,
+ * re-reads the file (disk is authoritative for PostToolUse),
+ * parses each phase block, and if any phase declares
+ * `reviewer_required: false` AND `reviewer_rationale` is missing
+ * OR an empty string, blocks the write with a structured reason
+ * naming every offending phase id. Pass-through in every other
+ * case (no MPL active, other files, `reviewer_required: true` or
+ * absent).
+ *
+ * Why PostToolUse and not PreToolUse: PreToolUse fires before the
+ * write commits. Edit/MultiEdit deliver only a patch fragment in
+ * `tool_input`, not the post-edit file content — validating the
+ * patch alone would either miss neighboring phase blocks (false
+ * negative) or require reconstructing the full post-edit text
+ * (brittle). PostToolUse on the disk state side-steps both
+ * problems: the merged result is exactly what the rest of the
+ * pipeline will read, so we validate the same bytes a downstream
+ * consumer would.
  *
  * Mirrors the contract shape already established for
  * `test_agent_required` / `test_agent_rationale` (#212 brief
