@@ -73,6 +73,11 @@ const DECOMPOSITION_FILE_REGEX = /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/;
 // `decomposer_dispatch.*` — only the hook itself may set those keys.
 const STATE_FILE_REGEX = /(^|\/)\.mpl\/state\.json$/;
 const DECOMPOSER_DISPATCH_FIELD_REGEX = /"decomposer_dispatch"\s*:/;
+// Codex r12 + Claude r12 [security]: also protect first_transcript_seen
+// from forgery — that key is the bootstrap of the dispatcher-identity
+// chain. If the orchestrator plants this field, the codex r12
+// mitigation falls. Same guard shape as decomposer_dispatch.
+const FIRST_TRANSCRIPT_FIELD_REGEX = /"first_transcript_seen"\s*:/;
 const DECOMPOSER_SUBAGENT_TYPES = new Set([
   'mpl-decomposer',
   'mpl:mpl-decomposer',
@@ -240,6 +245,29 @@ function expandShellBraces(text) {
     if (!changed) break;
   }
   return tokens.join(' ');
+}
+
+// Claude r12 on PR #249 [security]: extract the shell-normalization
+// chain so other Bash defenses (decomposer_dispatch forgery) can
+// reuse it. Without normalization, quote-concat / backslash-escape /
+// ANSI-C / slash-collapse forms of `.mpl/state.json` bypassed the
+// raw substring check at the dispatch-forgery guard.
+function normalizeShellCommand(command) {
+  let normalized = command.replace(/^\s*(sudo|time|nice|env)\s+/, '').trim();
+  normalized = normalized
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\U([0-9a-fA-F]{8})/g, (_, h) => {
+      const cp = parseInt(h, 16);
+      try { return String.fromCodePoint(cp); } catch { return ''; }
+    })
+    .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
+    .replace(/\\([\s\S])/g, '$1')
+    .replace(/["'`]/g, '')
+    .replace(/\/+/g, '/');
+  normalized = expandShellBraces(normalized);
+  normalized = expandSimpleVars(normalized);
+  return normalized;
 }
 
 function matchesProtectedDelete(command, cwd) {
@@ -443,6 +471,26 @@ function recordDecomposerDispatch(cwd, parentTranscriptPath) {
   } catch { /* best-effort */ }
 }
 
+// Codex r12 on PR #249 [security]: the A1 dispatch gate trusted any
+// Task caller as the dispatch parent. A non-orchestrator agent
+// (phase-runner, etc.) could dispatch mpl-decomposer and the
+// orchestrator could then become the first "child" writer.
+//
+// Mitigation: bind the dispatcher-role to the FIRST transcript
+// observed in the session. The first tool call records
+// state.first_transcript_seen; subsequent Task(subagent_type=
+// 'mpl-decomposer') calls only record dispatch when the caller's
+// transcript matches that first observed transcript. Nested
+// dispatchers fail the match and are refused.
+function recordFirstTranscript(cwd, transcriptPath) {
+  if (!transcriptPath || typeof transcriptPath !== 'string') return;
+  try {
+    const state = readState(cwd) || {};
+    if (typeof state.first_transcript_seen === 'string' && state.first_transcript_seen) return;
+    writeState(cwd, { first_transcript_seen: transcriptPath });
+  } catch { /* best-effort */ }
+}
+
 // #236 A1: is the current write coming from the decomposer subagent?
 //   - dispatch flag must be set,
 //   - within the TTL,
@@ -553,6 +601,17 @@ async function main() {
   }
 
   const toolInput = data.tool_input || data.toolInput || {};
+  const callerTranscriptPath = typeof data.transcript_path === 'string'
+    ? data.transcript_path
+    : (typeof data.transcriptPath === 'string' ? data.transcriptPath : null);
+
+  // Codex r12 on PR #249 [security]: record the FIRST transcript
+  // observed in the session on EVERY tool call (Bash / Write / Task /
+  // etc.) — this binds the dispatcher-role to whichever transcript
+  // appears first, which is typically the orchestrator. Subsequent
+  // mpl-decomposer dispatches from OTHER transcripts (nested
+  // phase-runner, etc.) are then refused.
+  recordFirstTranscript(cwd, callerTranscriptPath);
 
   // --- #236 A1 part 1: record decomposer dispatch when the orchestrator
   // calls Agent(subagent_type='mpl-decomposer'). The state flag is
@@ -561,14 +620,17 @@ async function main() {
   if (isTaskTool) {
     const sub = String(toolInput.subagent_type || toolInput.subagentType || '');
     if (DECOMPOSER_SUBAGENT_TYPES.has(sub)) {
-      // The transcript_path on a PreToolUse Task dispatch is the
-      // DISPATCHING agent's transcript (the orchestrator's). Pin it
-      // so the writer-identity check can reject any future write
-      // arriving with the same transcript_path.
-      const parentTranscript = typeof data.transcript_path === 'string'
-        ? data.transcript_path
-        : (typeof data.transcriptPath === 'string' ? data.transcriptPath : null);
-      recordDecomposerDispatch(cwd, parentTranscript);
+      const sessState = readState(cwd) || {};
+      const firstSeen = typeof sessState.first_transcript_seen === 'string'
+        ? sessState.first_transcript_seen
+        : null;
+      // Codex r12 [security]: only the first-seen (orchestrator-role)
+      // transcript may dispatch mpl-decomposer. Any other caller's
+      // dispatch is refused (no dispatch flag recorded → no
+      // decomposition.yaml write window opens).
+      if (firstSeen && callerTranscriptPath && firstSeen === callerTranscriptPath) {
+        recordDecomposerDispatch(cwd, callerTranscriptPath);
+      }
     }
     console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     return;
@@ -589,7 +651,14 @@ async function main() {
     // AND `decomposer_dispatch`. The MPL hook is the only legitimate
     // writer of that key — no shell command should ever co-mention
     // them.
-    if (/\.mpl\/state\.json/.test(command) && /decomposer_dispatch/.test(command)) {
+    // Claude r12 [security]: normalize the command through the same
+    // layered shell decode as matchesProtectedDelete BEFORE the
+    // substring check, so quote-concat / backslash-escape / ANSI-C /
+    // slash-collapse forms of `.mpl/state.json` can't bypass.
+    const normalizedCommand = normalizeShellCommand(command);
+    if (/\.mpl\/state\.json/.test(normalizedCommand) &&
+        (/decomposer_dispatch/.test(normalizedCommand) ||
+         /first_transcript_seen/.test(normalizedCommand))) {
       const reason =
         `[MPL #236 A1] Refused Bash that mentions both .mpl/state.json AND ` +
         `decomposer_dispatch — only mpl-write-guard itself may plant that flag. ` +
@@ -694,7 +763,7 @@ ensure you have the correct target path. The command will proceed, but please ve
       }
       return parts.join('\n');
     })();
-    if (DECOMPOSER_DISPATCH_FIELD_REGEX.test(payload)) {
+    if (DECOMPOSER_DISPATCH_FIELD_REGEX.test(payload) || FIRST_TRANSCRIPT_FIELD_REGEX.test(payload)) {
       const reason =
         `[MPL #236 A1] Refused to Write/Edit decomposer_dispatch into ` +
         `.mpl/state.json: only mpl-write-guard itself may set that key. ` +

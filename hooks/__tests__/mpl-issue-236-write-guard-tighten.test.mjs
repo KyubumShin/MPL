@@ -400,6 +400,113 @@ test('#236 A3 claude r2 [security]: ancestors of protected roots are blocked too
   }
 });
 
+test('#236 A1 codex r12 [security]: only the first-seen (orchestrator-role) transcript may dispatch mpl-decomposer', () => {
+  // Codex r12: the dispatch flag was recorded for ANY Task caller
+  // claiming `subagent_type='mpl-decomposer'`. A non-orchestrator
+  // subagent (phase-runner) could dispatch and the orchestrator
+  // could then walk through the resulting window. Fix: bind the
+  // dispatcher-role to the FIRST transcript observed in the session.
+  const cwd = freshWorkspace();
+  try {
+    const orchestratorTranscript = '/tmp/orch.jsonl';
+    const phaseRunnerTranscript = '/tmp/phase-runner.jsonl';
+
+    // 1) Orchestrator's first call (any tool) records first_transcript_seen.
+    runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      transcript_path: orchestratorTranscript,
+      tool_input: { command: 'ls' },
+    });
+
+    // 2) Phase-runner (different transcript) tries to dispatch
+    // mpl-decomposer. Hook does NOT record dispatch.
+    runHook(cwd, {
+      cwd,
+      tool_name: 'Task',
+      transcript_path: phaseRunnerTranscript,
+      tool_input: { subagent_type: 'mpl-decomposer' },
+    });
+    const attackState = readState(cwd);
+    assert.ok(!attackState.decomposer_dispatch,
+      'nested-dispatcher dispatch must NOT be recorded');
+
+    // 3) Orchestrator's Write to decomposition.yaml is rejected
+    // because no dispatch is active.
+    const writeAttempt = runHook(cwd, {
+      cwd,
+      tool_name: 'Write',
+      transcript_path: orchestratorTranscript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'forged' },
+    });
+    assert.equal(writeAttempt.decision, 'block');
+    assert.match(writeAttempt.reason, /#236 A1/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 codex r12 [security]: legit orchestrator → decomposer flow still works', () => {
+  const cwd = freshWorkspace();
+  try {
+    const orchestratorTranscript = '/tmp/orch.jsonl';
+    const decomposerTranscript = '/tmp/decomposer.jsonl';
+
+    // Orchestrator establishes first_transcript_seen.
+    runHook(cwd, {
+      cwd, tool_name: 'Bash', transcript_path: orchestratorTranscript,
+      tool_input: { command: 'ls' },
+    });
+    // Orchestrator dispatches decomposer.
+    runHook(cwd, {
+      cwd, tool_name: 'Task', transcript_path: orchestratorTranscript,
+      tool_input: { subagent_type: 'mpl-decomposer' },
+    });
+    const dispatchState = readState(cwd);
+    assert.ok(dispatchState.decomposer_dispatch,
+      'orchestrator dispatch SHOULD be recorded');
+    // Decomposer writes — allowed.
+    const decomposerWrite = runHook(cwd, {
+      cwd, tool_name: 'Write', transcript_path: decomposerTranscript,
+      tool_input: { file_path: '.mpl/mpl/decomposition.yaml', content: 'legit' },
+    });
+    assert.equal(decomposerWrite.continue, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 claude r12 [security]: shell-normalization bypasses on Bash dispatch-forgery guard are closed', () => {
+  // Claude r12: the Bash guard used a raw substring check. Quote-concat,
+  // backslash-escape, ANSI-C escape, slash-collapse forms of
+  // `.mpl/state.json` and `decomposer_dispatch` all bypassed. Fix:
+  // normalize via the shared `normalizeShellCommand` helper before
+  // the substring test.
+  const cwd = freshWorkspace();
+  try {
+    for (const command of [
+      `echo decomposer_dispatch > .mpl"/"state.json`,
+      `echo decomposer_dispatch > .mpl\\/state.json`,
+      `echo decomposer_dispatch > .mpl//state.json`,
+      String.raw`echo decomposer_dispatch > $'.mpl\x2fstate.json'`,
+      String.raw`echo decomposer_dispatch > .mpl/state.json`,
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected shell-normalize bypass to be blocked: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 claude r11 [security]: Bash that mentions both .mpl/state.json AND decomposer_dispatch is blocked', () => {
   // Claude r11 [security]: the r9 Write/Edit guard only covered the
   // Write/Edit tool surface. The orchestrator could still forge the
