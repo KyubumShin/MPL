@@ -777,6 +777,56 @@ phases:
     assert.match(result.dispatch_instruction, /legacy-style finding/);
   });
 
+  it('#234 [security] codex r10: pre-existing recovery.awaiting_instruction is TOMBSTONED on hook-envelope write', async () => {
+    // Codex r10 [security] defense-in-depth: r9 tombstoned the field
+    // inside recoveryPatch (recover writes), but a NEW hook block can
+    // fire BEFORE recovery runs. If state contains a stale
+    // recovery.awaiting_instruction, recordBlockedHook's writeState
+    // deep-merge would preserve the leaked text under the fresh
+    // envelope — visible to any external state watcher before the
+    // recover skill even runs.
+    //
+    // Repro: seed state with stale recovery.awaiting_instruction,
+    // then call recordBlockedHook with a fresh retryContext. The
+    // persisted state must not contain the leaked Task text.
+    const { recordBlockedHook } = await import('../lib/mpl-blocked-hook.mjs');
+    writeState({
+      session_status: 'blocked_hook',
+      blocked_by_hook: 'mpl-prior-hook',
+      blocked_phase: 'phase-0',
+      blocked_artifact: '.mpl/x',
+      block_code: 'prior_code',
+      block_reason: 'prior',
+      resume_instruction: 'prior',
+      blocked_at: '2026-01-01T00:00:00Z',
+      retry_context: {
+        recovery: {
+          awaiting_instruction: 'Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt="...")',
+          attempts: 1,
+          last_status: 'awaiting_decomposer',
+        },
+      },
+    });
+
+    recordBlockedHook(tmp, {
+      hookId: 'mpl-new-hook',
+      phaseId: 'phase-1',
+      artifact: '.mpl/y',
+      code: 'new_block_code',
+      reason: 'new block',
+      resumeInstruction: 'new instruction',
+      retryContext: { issues: ['x'] },
+      blockedAt: '2026-06-01T12:00:00Z',
+    });
+
+    const state = readState();
+    const stateJson = JSON.stringify(state);
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/,
+      'persisted state must not contain the gated Task text after hook envelope write');
+    assert.equal(state.retry_context.recovery.awaiting_instruction, null,
+      'hook-envelope write must tombstone recovery.awaiting_instruction');
+  });
+
   it('#234 [security] codex r9: pre-existing awaiting_instruction in state is TOMBSTONED on safe-mode write', () => {
     // Codex r9 [security]: writeState's deepMerge preserves nested
     // keys that aren't in the patch. If prior recovery state stashed
