@@ -137,13 +137,96 @@ for each { cmd, name } in build_commands:
 
 // Defensive check: if NO verification ran at all, fail rather than auto-pass.
 // Same principle as AD-02 for Hard 3 — missing precondition ≠ free pass.
+//
+// #239 C6 / #251: when EVERY completed phase's `evidence_required`
+// list contains ONLY non-tooling evidence types (`goal_trace`,
+// `manual`, etc.), Hard 1 skips the tooling demand and reports PASS
+// via those evidence types instead. This unblocks docs-only /
+// prompt-only / pure-evidence runs that legitimately have no
+// lint/type/build surface anywhere.
+//
+// CLOSED LIST of non-tooling evidence types:
+//   `goal_trace`, `manual`, `external_audit`, `documentation`.
+//
+// EVERYTHING ELSE counts as tooling — including `command` (Bash with
+// `exit_code: 0`), `test_agent`, `lint`, `type_check`, `build`,
+// `lsp_diagnostics`, `tooling`, and any other token a future
+// decomposer might add. The classifier is intentionally a non-tooling
+// allowlist (codex r1 fix), NOT a tooling allowlist, so a newly-added
+// machine-backed evidence token does not silently slip through Hard 1
+// just because the executor prompt forgot to list it.
+//
+// **Aggregation rule (codex r2 fix)**: Hard 1 runs ONCE for the whole
+// pipeline after every phase completes. A single docs phase declaring
+// `evidence_required: [goal_trace]` MUST NOT suppress the tooling
+// demand when other completed phases changed code. So the skip path
+// requires that **every** completed phase whose impact actually
+// touched code (i.e., not the pure-Phase 0 readme phases) is
+// non-tooling-only. If ANY code-bearing completed phase requests
+// tooling (or has an empty/absent `evidence_required`, which defaults
+// to tooling-requested), Hard 1 demands tools.
+//
+// An empty `evidence_required` on a phase is treated as
+// "tooling requested" — the default decomposer mode demands
+// lint/type/build.
+NON_TOOLING_EVIDENCE = ["goal_trace", "manual", "external_audit", "documentation"]
+
+// **Source of truth (codex r3 fix)**: `evidence_required` lives on the
+// decomposition's per-phase block, NOT on `state.execution.phase_details`
+// (which only stores id/name/status/pp/retry/result). An earlier draft
+// read `phase.evidence_required` off phase_details — that read always
+// returned undefined, so `phase_evidence = []`, `all_non_tooling = false`,
+// and the skip path was dead code on every real run. Fix: re-read
+// `.mpl/mpl/decomposition.yaml` at Hard 1 time and JOIN completed phase
+// ids back to the decomposition entry to extract `evidence_required`.
+decomposition = readDecompositionYaml(cwd)  // `.mpl/mpl/decomposition.yaml`
+decomp_phase_by_id = Map(decomposition.phases.map(p => [p.id, p]))
+completed_phase_ids = state.execution.phase_details
+  .filter(p => p.status == "completed")
+  .map(p => p.id)
+
+// **Fail-closed on resolution mismatch (codex r4 fix)**: a stale or
+// partially-rewritten decomposition.yaml can be missing some completed
+// phase ids (e.g., a recomposition removed a code-bearing phase while
+// retaining a docs/manual phase with non-tooling evidence). Silently
+// filtering out the missing ids would let `all_non_tooling` resolve
+// to true purely because the remaining resolvable entries happened to
+// be docs/manual — a fail-OPEN path at the exact source-of-truth
+// boundary this gate is meant to harden. Detect the mismatch BEFORE
+// the every() check; if any completed phase id has no decomposition
+// entry, FAIL Hard 1 with the unresolved id list and do not enter
+// the skip path.
+missing_completed_phase_ids = completed_phase_ids
+  .filter(id => not decomp_phase_by_id.has(id))
+if missing_completed_phase_ids.length > 0:
+  announce: "[MPL] Hard 1 FAIL: {missing_completed_phase_ids.length} completed phase(s) absent from decomposition.yaml: {missing_completed_phase_ids.join(', ')}. Re-sync the decomposition before retrying Hard 1; cannot determine evidence_required for the missing phases (failing closed)."
+  → enter fix loop (target: restore the missing phase entries in decomposition.yaml)
+  // STOP — do NOT evaluate all_non_tooling on a partial set.
+
+completed_decomp_phases = completed_phase_ids
+  .map(id => decomp_phase_by_id.get(id))
+
+all_non_tooling = completed_decomp_phases.every(phase => {
+  phase_evidence = phase.evidence_required or []
+  return phase_evidence.length > 0 and
+         phase_evidence.every(e => NON_TOOLING_EVIDENCE.includes(e))
+})
+requests_tooling = not all_non_tooling or completed_decomp_phases.length == 0
+skip_justifying_phases = completed_decomp_phases
+  .filter(phase => (phase.evidence_required or []).every(e => NON_TOOLING_EVIDENCE.includes(e)) and (phase.evidence_required or []).length > 0)
+  .map(phase => phase.id)
+
 total_checks = lint_commands.length + build_commands.length + (diagnostics ? 1 : 0)
 if total_checks == 0:
-  announce: "[MPL] Hard 1 FAIL: No lint, type check, or build tool profile detected. Cannot verify code quality with zero tools."
-  → enter fix loop (target: add build/lint configuration)
-
-Hard 1 passes when: all lint tools + type check + all build tools succeed AND at least one check ran.
-Report: `[MPL] Hard 1: Build + Lint + Type PASSED ({total_checks} checks).`
+  if not requests_tooling:
+    announce: "[MPL] Hard 1 SKIPPED: phase.evidence_required={phase_evidence} contains only non-tooling evidence. Tracking evidence via {phase_evidence} types instead."
+    → mark Hard 1 PASS with `evidence_required` reason; proceed to Hard 2
+  else:
+    announce: "[MPL] Hard 1 FAIL: No lint, type check, or build tool profile detected. Cannot verify code quality with zero tools."
+    → enter fix loop (target: add build/lint configuration)
+else:
+  Hard 1 passes when: all lint tools + type check + all build tools succeed AND at least one check ran.
+  Report: `[MPL] Hard 1: Build + Lint + Type PASSED ({total_checks} checks).`
 
 #### Hard 2: Full Test Suite + Regression + Intent Invariants ($0, mechanical, binary)
 

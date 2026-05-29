@@ -559,6 +559,38 @@ disallowedTools: Bash,Task,WebFetch,WebSearch,NotebookEdit
           # When test_agent_required is true, this can be omitted OR used to pre-brief
           # the test-agent dispatch (e.g., "focus on boundary invariants of X").
 
+        # #239 C2 / #251: F-40 dispatch mirror for adversarial reviewer.
+        # OPTIONAL per phase (default: true). When false, the executor
+        # skips `mpl-adversarial-reviewer` dispatch for the phase.
+        # `hooks/mpl-require-reviewer.mjs` enforces that
+        # `reviewer_rationale` is non-empty whenever `reviewer_required`
+        # is false — same shape as `test_agent_required` /
+        # `test_agent_rationale`.
+        reviewer_required: boolean
+          # Default: true. Only set false for phases where independent
+          # adversarial review adds no signal:
+          #   - pure documentation edits (docs/*.md only, no src changes)
+          #   - infra/config phases with no code path
+          #   - schema-migration phases that are mechanical regenerations
+          # The skip is logged as a `reviewer-skipped` record in
+          # `.mpl/mpl/quality-signals.jsonl` (#238) so over-use is measurable.
+        reviewer_rationale: string
+          # REQUIRED when reviewer_required is false. Explain why
+          # adversarial review is unnecessary. Anti-patterns (blanket
+          # "trivial" / "no time") accepted by the hook but counted
+          # toward over-use telemetry.
+
+        # #239 C3 / #251: per-phase batch-test opt-in.
+        # OPTIONAL (default: false). When true, Phase Runner Rule 4
+        # allows batched implement-then-verify across TODOs in the
+        # phase instead of the strict per-TODO-test cadence. Set true
+        # automatically when `phase_domain` ∈ {refactor, schema_migration}
+        # where TODOs are co-dependent (rename + update callers + fix
+        # interface) and per-TODO isolation is impractical.
+        # Propagates to `phase_seed.batch_test` at seed generation time
+        # so the Phase Runner sees it in the seed YAML.
+        batch_test: boolean
+
     execution_tiers:
       # REQUIRED scheduler contract (v0.18.5). Executor consumes this directly.
       # Sort by tier ascending. Every phase id must appear exactly once.

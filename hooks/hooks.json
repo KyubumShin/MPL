@@ -264,6 +264,16 @@
         ]
       },
       {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/mpl-require-reviewer.mjs\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": "Task|Agent",
         "hooks": [
           {

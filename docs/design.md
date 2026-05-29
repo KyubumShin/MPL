@@ -450,7 +450,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 40 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 41 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -479,6 +479,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-fallback-grep` | PostToolUse: Edit/Write/MultiEdit | Run anti-pattern registry checks against edited files as a fallback static guard. | v0.18.1 |
 | `mpl-artifact-schema` | PostToolUse: Edit/Write/MultiEdit/mcp__.*__write.* | Validate MPL artifacts against required markdown headings and YAML key schemas. | v0.18.1 |
 | `mpl-decomposition-postprocess` | PostToolUse: Edit/Write/MultiEdit | Regenerate `.mpl/mpl/decomposition-derived.json` immediately after derived source artifacts change. | v0.18 Phase 5 diet |
+| `mpl-require-reviewer` | PostToolUse: Edit/Write/MultiEdit | Enforce non-empty `reviewer_rationale` when a phase declares `reviewer_required: false`. | #239 C2 / #251 |
 | `mpl-require-test-agent` | PostToolUse: Task/Agent | Block phase-runner completion until required test-agent PASS evidence or override exists. | v0.15.1; structured PASS hardening v0.18.3 |
 | `mpl-require-test-agent-brief` | PreToolUse: Task/Agent | Block `mpl-test-agent` dispatch when `test_agent_required: true` phase has no valid `test-agent-brief.yaml` runbook artifact. | #212 |
 | `mpl-quality-gate` | PostToolUse: Task/Agent | Consume adversarial reviewer quality scores and trigger retry/escalation decisions. | v0.18.1 |
