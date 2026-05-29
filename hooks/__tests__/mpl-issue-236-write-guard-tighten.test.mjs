@@ -448,6 +448,39 @@ test('#236 A1 claude r13 [security]: 2-step deactivation chain via Write/Edit is
   }
 });
 
+test('#236 A1 codex r14 [security]: structural safe-read-allowlist closes unbounded writer-verb gap', () => {
+  // Codex r14: the verb allowlist (rm/mv/tee/dd/install/...) is
+  // unbounded — every round another writer utility surfaces. The
+  // structural rule: only known-safe-read heads may mention
+  // .mpl/state.json. Any other command (writer utility the hook
+  // hasn't heard of yet) is presumed-write and blocked.
+  const cwd = freshWorkspace();
+  try {
+    // Writer utilities the hook never explicitly enumerated.
+    for (const command of [
+      'install -m 0644 /tmp/forged .mpl/state.json',
+      'pax -rw /tmp .mpl/state.json',
+      'cpio -i .mpl/state.json',
+      'mktemp .mpl/state.json',
+      'touch .mpl/state.json',
+      'xxd -r .mpl/state.json',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected structural state.json write block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r13 [security]: ANY Bash write to .mpl/state.json is blocked (base64/heredoc/etc. forgery)', () => {
   // Codex r13: a literal-keyword check (decomposer_dispatch /
   // first_transcript_seen) can't catch base64-decoded payloads. The

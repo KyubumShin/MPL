@@ -713,24 +713,34 @@ async function main() {
     // uses). Read-only operations against state.json (`cat .mpl/
     // state.json`, `ls .mpl/state.json`) still pass.
     const stateJsonMention = /\.mpl\/state\.json/.test(normalizedCommand);
-    const hasWriteVerb = (
-      /\brm\b/.test(normalizedCommand) ||
-      /\bfind\b.*-delete\b/.test(normalizedCommand) ||
-      /\bmv\b/.test(normalizedCommand) ||
-      /\bshred\b/.test(normalizedCommand) ||
-      /\bunlink\b/.test(normalizedCommand) ||
-      /\btruncate\b/.test(normalizedCommand) ||
-      /\bcp\b/.test(normalizedCommand) ||
-      /\btee\b/.test(normalizedCommand) ||
-      /\bdd\b.*\bof=/.test(normalizedCommand) ||
-      /\btar\b.*--remove-files\b/.test(normalizedCommand) ||
-      /\brsync\b.*--remove-source-files\b/.test(normalizedCommand) ||
-      /\b(node|deno|bun|python\d?|ruby|perl|php|lua|tclsh|osascript|awk|sed)\b/.test(normalizedCommand) ||
-      /(?:^|[\s;|&])\d?>{1,2}/.test(normalizedCommand) ||
-      /(?:^|[\s;|&])&>{1,2}/.test(normalizedCommand) ||
-      /\bbase64\b/.test(normalizedCommand) // codex r13: catches the base64 decode path explicitly
+    // Codex r14 on PR #249 [security]: a verb allowlist is unbounded.
+    // Structural rule: state.json is presumed-write UNLESS the head
+    // verb is in SAFE_READ_HEADS AND the command does not redirect /
+    // tee / dd-of into state.json. This catches pipeline forms like
+    // `printf X | base64 -d > .mpl/state.json` (head safe but redirect
+    // target is state.json) AND novel writer utilities (install / pax /
+    // cpio / touch / mktemp / etc., head not safe-read).
+    const SAFE_READ_HEADS = new Set([
+      'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
+      'grep', 'rg', 'ag', 'ack',
+      'jq', 'yq',
+      'find', // -delete is already rejected upstream as destructive
+      'less', 'more',
+      'sort', 'uniq', 'tac', 'nl',
+      'diff', 'comm', 'sdiff',
+      'echo', 'printf', 'pwd', 'type', 'which',
+    ]);
+    const headVerbMatch = normalizedCommand.match(/^(\w+)/);
+    const headVerb = headVerbMatch ? headVerbMatch[1].toLowerCase() : '';
+    const isSafeRead = SAFE_READ_HEADS.has(headVerb);
+    // Detect redirect/tee/dd targeting state.json anywhere in the
+    // command (catches pipe-then-redirect forms).
+    const writesToStateJson = (
+      /[\d&]?>{1,2}[^|;&\n]*\.mpl\/state\.json/.test(normalizedCommand) ||
+      /\btee\b[^|;&]*\.mpl\/state\.json/.test(normalizedCommand) ||
+      /\bdd\b[^|;&]*\bof=[^|;&]*\.mpl\/state\.json/.test(normalizedCommand)
     );
-    if (stateJsonMention && hasWriteVerb && process.env.MPL_FORCE_PURGE !== '1') {
+    if (stateJsonMention && (!isSafeRead || writesToStateJson) && process.env.MPL_FORCE_PURGE !== '1') {
       const reason =
         `[MPL #236 A1] Refused Bash write to .mpl/state.json: only ` +
         `mpl-write-guard's internal writeState may modify the orchestrator ` +
