@@ -380,26 +380,24 @@ export function classifyGateCommand(command, { cwd } = {}) {
   const allowed = cwd ? allowedGateHeads(cwd) : STRICT_GATE_HEAD_ALLOWLIST;
   if (!allowed.has(head)) return null;
   const isBuiltIn = STRICT_GATE_HEAD_ALLOWLIST.has(head);
+  // Codex r3/r4 on PR #244 [contract-break]: built-in heads like
+  // `npx`/`pnpx` accept eval-style flags (`-c`, `--call`) whose
+  // string argument the family regex would otherwise match. Strip
+  // the canonical at the first eval-shaped flag before ANY regex
+  // fallback so `npx -c "echo playwright"` does NOT classify as
+  // hard3 via the string-literal keyword — regardless of whether
+  // structured config is present.
+  const safeCanonical = stripAtEvalFlag(canonical);
   if (structured?.has(head)) {
     const configured = classifyConfiguredHead(head, canonical, structured);
     if (configured !== null) return configured;
-    // r2: for built-in heads, fall back to the regex. For non-built-in
-    // heads, structured-only — the regex is unsafe (matches keywords
-    // in string literals; the interpreter denylist already excludes
-    // string-form interpreter heads, but structured entries may
-    // legitimately target interpreters like deno/bun with token-level
-    // matching).
-    //
-    // Codex r3 on PR #244 [contract-break]: even built-in heads like
-    // `npx` / `pnpx` accept eval-style flags (`-c`, `--call`) whose
-    // string argument the family regex would happily match. Strip
-    // the canonical at the first eval-shaped flag before fallback
-    // so `npx -c "echo playwright"` does NOT classify as hard3 via
-    // the string-literal keyword.
-    if (isBuiltIn) return matchFamilyRegex(stripAtEvalFlag(canonical));
+    // For built-in heads, fall back to the (stripped) regex.
+    // For non-built-in heads, structured-only — regex against
+    // arbitrary text is unsafe.
+    if (isBuiltIn) return matchFamilyRegex(safeCanonical);
     return null;
   }
-  return matchFamilyRegex(canonical);
+  return matchFamilyRegex(safeCanonical);
 }
 
 // Codex r3 on PR #244: cut the canonical command at the first

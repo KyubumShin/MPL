@@ -292,6 +292,22 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npm run test:e2e', { cwd: tmp }), 'hard3_resilience');
   });
 
+  it('codex r4 [contract-break]: eval-flag stripping applies on the DEFAULT path (no structured config)', () => {
+    // codex r4: r3 only applied stripAtEvalFlag inside the structured
+    // branch. The default no-config path still ran matchFamilyRegex
+    // on the full canonical, so `npx -c "echo playwright"` classified
+    // as hard3 even with no .mpl/config.json present. Must strip
+    // before EVERY fallback regex call.
+    // No writeConfig() — default workspace.
+    assert.equal(classifyGateCommand('npx -c "echo playwright"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx --call "playwright test"', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm run -c "echo playwright"', { cwd: tmp }), null);
+    // Without cwd at all (built-in only, no config read) — same fix applies.
+    assert.equal(classifyGateCommand('npx -c "echo playwright"'), null);
+    // Legitimate `npx playwright test` still classifies (no eval flag).
+    assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
+  });
+
   it('codex r3 [contract-break]: built-in head with eval flag (`npx -c`) does NOT forge gate evidence', () => {
     // codex r3 on PR #244: r2 fallback to matchFamilyRegex for
     // built-in heads re-opened forgery. `npx -c "echo playwright"`
