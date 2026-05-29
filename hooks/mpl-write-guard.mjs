@@ -301,9 +301,20 @@ function normalizeShellCommand(command) {
 
 function matchesProtectedDelete(command, cwd) {
   if (!command || typeof command !== 'string') return null;
-  // Strip leading wrapper before checking the head — `sudo rm -rf …`
-  // must still trip.
-  let normalized = command.replace(/^\s*(sudo|time|nice|env)\s+/, '').trim();
+  // Codex r27 on PR #249 [data-integrity]: full shell normalization
+  // must run BEFORE the destructive-verb gate, otherwise quote- /
+  // backslash-concatenated command words bypass the literal `\brm\b` /
+  // `\bgzip\b` etc. regex even though the shell strips the quotes and
+  // executes the destructive verb. Examples:
+  //   `r"m" -rf .mpl/mpl`     → shell executes `rm -rf .mpl/mpl`
+  //   `g"zip" .mpl/mpl/foo`   → shell executes `gzip .mpl/mpl/foo` (delete-by-default)
+  //   `g\zip .mpl/mpl/foo`    → shell executes `gzip …` (backslash-strip)
+  // `normalizeShellCommand` already performs sudo/time/nice/env strip,
+  // ANSI-C decode, backslash strip, quote strip, slash collapse,
+  // `/./` collapse, iterated `/X/../` collapse, brace expand, and
+  // simple var expand — exactly the transforms the destructive-verb
+  // regexes need to see.
+  let normalized = normalizeShellCommand(command);
   // Identify destructive operations against the protected paths. Each
   // of these is a way to remove or wipe a path that the mpl-cancel
   // SKILL forbids — `rm` is the obvious one, but `mv` away,
@@ -382,46 +393,12 @@ function matchesProtectedDelete(command, cwd) {
   );
   if (!isDestructive) return null;
 
-  // Pre-normalize the command to the form a real shell would execute,
-  // so substring + token checks see the same path the OS sees.
-  // Layered from "most decoded" to "least decoded":
-  //   - Codex r5 on PR #249 [data-integrity]: Bash ANSI-C quoting
-  //     ($'…') decodes hex (\xHH), octal (\OOO), and Unicode (\uHHHH /
-  //     \UHHHHHHHH) escapes. `rm -rf $'.mpl\x2fmpl'` deletes `.mpl/mpl`.
-  //     Decode these escapes to characters BEFORE the generic
-  //     backslash strip so they don't get clobbered to `x2f`.
-  //   - Codex r4 on PR #249 [data-integrity]: POSIX shells remove
-  //     generic backslash escapes — `rm -rf .mpl\/mpl` deletes
-  //     `.mpl/mpl`. After ANSI-C decoding, strip every remaining
-  //     `\X` → `X`.
-  //   - Codex r3 on PR #249 [data-integrity]: shells concatenate
-  //     adjacent quote fragments — `.mpl/""mpl` and `.mpl"/"mpl`
-  //     resolve to `.mpl/mpl`. Strip every `"`, `'`, backtick.
-  //   - Codex r2 on PR #249 [logic]: shells normalize runs of `/`
-  //     after expansion (`$PWD/.mpl//mpl` deletes `.mpl/mpl`).
-  //     Collapse repeated slashes to one.
-  // All transforms preserve token-boundary whitespace.
-  normalized = normalized
-    .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/\\U([0-9a-fA-F]{8})/g, (_, h) => {
-      const cp = parseInt(h, 16);
-      try { return String.fromCodePoint(cp); } catch { return ''; }
-    })
-    .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
-    .replace(/\\([\s\S])/g, '$1')
-    .replace(/["'`]/g, '')
-    .replace(/\/+/g, '/');
-
-  // Claude r5 on PR #249 [data-integrity]: Bash brace expansion
-  // (`.mpl/{mpl,contracts}` → `.mpl/mpl .mpl/contracts`, cartesian
-  // `{a,b}{c,d}` → `ac ad bc bd`) was a new class outside the
-  // previously-closed list. Expand braces here so the literal target
-  // appears in one of the expanded tokens and the substring + token
-  // checks fire normally. Iterative leftmost-brace expansion handles
-  // nested + cartesian forms; we cap at 10 iterations as a backstop.
-  normalized = expandShellBraces(normalized);
-  normalized = expandSimpleVars(normalized);
+  // (Codex r27 [data-integrity]: shell normalization already ran above
+  // before the destructive-verb gate — `normalizeShellCommand`
+  // performs ANSI-C decode, backslash strip, quote strip, slash
+  // collapse, `/./` + `/X/../` collapse, brace + simple-var expand.
+  // The path-matching code below operates on the same normalized
+  // string the gate used.)
 
   // Claude r1 on PR #249 [logic] (concrete repros): shell-expansion
   // forms (`$PWD`, `$(pwd)`), parenthesized subshells, variable

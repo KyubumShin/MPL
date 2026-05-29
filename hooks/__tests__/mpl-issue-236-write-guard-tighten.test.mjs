@@ -590,6 +590,45 @@ test('#236 A3 claude r25 [security]: gzip per-segment scan — later -k does not
   }
 });
 
+test('#236 A3 codex r27 [data-integrity]: quote/backslash-concat destructive VERB tokens still trip the gate', () => {
+  // Codex r27: before the fix, `isDestructive` matched `\brm\b` /
+  // `\bgzip\b` on the partially-stripped command (only sudo/time/nice/
+  // env removed). Quote- and backslash-fragmented verbs (`r"m"`,
+  // `g"zip"`, `g\zip`) bypassed the gate because the literal token
+  // wasn't present until after the inline quote/backslash normalization
+  // that ran LATER in matchesProtectedDelete. Fix: hoist the full
+  // `normalizeShellCommand` call to the top of matchesProtectedDelete
+  // so the destructive-verb regexes see the shell-equivalent form.
+  const cwd = freshWorkspace();
+  try {
+    writeFileSync(join(cwd, '.mpl', 'mpl', 'foo'), 'data');
+    for (const command of [
+      'r"m" -rf .mpl/mpl',
+      'r""m -rf .mpl/mpl',
+      "r'm' -rf .mpl/mpl",
+      'r\\m -rf .mpl/mpl',
+      'g"zip" .mpl/mpl/foo',
+      'g\\zip .mpl/mpl/foo',
+      'g""zip .mpl/mpl/foo',
+      'sh"red" -u .mpl/mpl/foo',
+      't"e"e .mpl/mpl/foo > /dev/null',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Bash',
+        tool_input: { command },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected codex r27 verb-concat block for: ${command}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A3 codex r26 [security]: -k / --keep AFTER `--` is a filename, not a flag', () => {
   // Codex r26: `gzip -- .mpl/mpl/-k`. The pre-fix per-segment regex saw
   // `-k` anywhere in the segment and incorrectly suppressed
