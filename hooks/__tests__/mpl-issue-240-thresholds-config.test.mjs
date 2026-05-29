@@ -308,6 +308,49 @@ describe('#240 A4: gate_classify.allowed_heads config knob', () => {
     assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
   });
 
+  it('codex r8 [contract-break]: package-runner heads must gate on the first positional script, not the whole-command regex', () => {
+    // Genuinely new class: not a shell-quote bypass. The family regex
+    // scans the WHOLE command, so `\bplaywright\b` matched arbitrary
+    // arguments to non-test commands. Concrete pre-fix repro:
+    //   classifyGateCommand('npx cowsay playwright') === 'hard3_resilience'
+    //   classifyGateCommand('npm install playwright') === 'hard3_resilience'
+    // Fix: for npx / pnpx / npm exec / pnpm exec / yarn exec, the
+    // first positional token after the head IS the script. Only accept
+    // when that script is in RUNNER_SCRIPT_FAMILIES. `npm install …`
+    // and similar non-test subcommands reject outright.
+
+    // Argument-injected keyword (cowsay is unknown script)
+    assert.equal(classifyGateCommand('npx cowsay playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx cowsay e2e', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm exec cowsay playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('pnpx cowsay playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npx http-server --reload playwright', { cwd: tmp }), null);
+
+    // Install / add subcommands (never gate evidence, even with the keyword)
+    assert.equal(classifyGateCommand('npm install playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm i playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('npm add playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('yarn add playwright', { cwd: tmp }), null);
+    assert.equal(classifyGateCommand('pnpm add playwright', { cwd: tmp }), null);
+
+    // Legitimate runner invocations still classify
+    assert.equal(classifyGateCommand('npx playwright test', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('npx cypress run', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('npm exec playwright test', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('npm exec -- playwright test', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('npx -p some-pkg playwright test', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('npx --package=some-pkg playwright test', { cwd: tmp }), 'hard3_resilience');
+    assert.equal(classifyGateCommand('npx -y playwright test', { cwd: tmp }), 'hard3_resilience');
+
+    // npm test / npm run lint still flow through the regex unchanged
+    assert.equal(classifyGateCommand('npm test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('npm run test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('npm run lint', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('npm run build', { cwd: tmp }), 'hard1_baseline');
+    assert.equal(classifyGateCommand('yarn test', { cwd: tmp }), 'hard2_coverage');
+    assert.equal(classifyGateCommand('pnpm test', { cwd: tmp }), 'hard2_coverage');
+  });
+
   it('codex r7 + claude r7 [contract-break]: stripAtEvalFlag must strip ANSI-C / locale / backslash-escaped quote prefixes too', () => {
     // r6 stripped leading/trailing `"`/`'`/backtick but left:
     //   - bash/zsh ANSI-C quoting (`$'...'`)  ← codex r7

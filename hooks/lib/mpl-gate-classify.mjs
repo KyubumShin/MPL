@@ -275,6 +275,95 @@ export function allowedGateHeads(cwd) {
   return merged;
 }
 
+// Codex r8 on PR #244 [contract-break]: runner-head argument forgery.
+// `npx`/`pnpx`/`npm exec` allow arbitrary scripts after the head; the
+// family regex naively scanned the whole command, so `npx cowsay
+// playwright` matched `\bplaywright\b` and forged hard3 evidence.
+//
+// Fix: for these runner heads, the FIRST positional (non-flag) token
+// after the head IS the script. Only accept the command as gate
+// evidence if that script is itself a known gate runner. Anything
+// else (cowsay, http-server, install args, etc.) → null.
+//
+// Recognized runner scripts and their gate family:
+const RUNNER_SCRIPT_FAMILIES = new Map([
+  ['playwright', 'hard3_resilience'],
+  ['cypress', 'hard3_resilience'],
+  ['wdio', 'hard3_resilience'],
+  ['vitest', 'hard2_coverage'],
+  ['jest', 'hard2_coverage'],
+  ['mocha', 'hard2_coverage'],
+  ['pytest', 'hard2_coverage'],
+  ['tsc', 'hard1_baseline'],
+  ['eslint', 'hard1_baseline'],
+  ['ruff', 'hard1_baseline'],
+  ['mypy', 'hard1_baseline'],
+  ['biome', 'hard1_baseline'],
+]);
+
+// npm/pnpm/yarn subcommands that are NEVER gate evidence even when
+// the keyword appears in their args (`npm install playwright` etc.).
+const NPM_SUBCOMMANDS_NOT_TEST = new Set([
+  'install', 'i', 'add', 'uninstall', 'remove', 'rm', 'un',
+  'ci', 'audit', 'view', 'info', 'init', 'publish', 'pack',
+  'link', 'unlink', 'outdated', 'update', 'upgrade', 'up',
+  'config', 'help', 'doctor', 'whoami', 'token', 'org', 'team',
+  'access', 'search', 'fund', 'login', 'logout', 'set',
+]);
+
+// npm/pnpm/yarn subcommands that DO execute an arbitrary script — the
+// script-name gate applies after consuming the subcommand.
+const NPM_EXEC_SUBCOMMANDS = new Set(['exec', 'dlx', 'x']);
+
+// npx flags that take a value (so the next token is NOT the script).
+// `-c`/`--call`/`-e`/`--eval`/`-x`/`--exec`/`--run-script` are already
+// removed at canonical level by stripAtEvalFlag — no need to repeat.
+const NPX_FLAGS_WITH_VALUE = new Set([
+  '-p', '--package', '--shell',
+  '-w', '--workspace', '--workspaces',
+]);
+
+// Returns:
+//   string    → recognized runner family (definitive verdict)
+//   null      → runner head with unrecognized script → reject (NO regex fallback)
+//   undefined → not a runner-style invocation; caller falls through
+function classifyRunnerHead(head, canonical) {
+  const tokens = String(canonical || '').trim().split(/\s+/);
+  let i = 1; // skip the head itself
+
+  if (head === 'npm' || head === 'pnpm' || head === 'yarn') {
+    if (i >= tokens.length) return undefined;
+    const sub = tokens[i].toLowerCase();
+    if (NPM_SUBCOMMANDS_NOT_TEST.has(sub)) return null;
+    if (!NPM_EXEC_SUBCOMMANDS.has(sub)) return undefined;
+    i++; // consumed exec/dlx/x
+  } else if (head !== 'npx' && head !== 'pnpx') {
+    return undefined;
+  }
+
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (!t) { i++; continue; }
+    if (t === '--') { i++; continue; }
+    if (t.startsWith('-')) {
+      const flagKey = t.toLowerCase().split('=')[0];
+      if (t.includes('=')) { i++; continue; }
+      if (NPX_FLAGS_WITH_VALUE.has(flagKey)) { i += 2; continue; }
+      i++;
+      continue;
+    }
+    const stripped = t.toLowerCase()
+      .replace(/^[\\$"'`]+/, '')
+      .replace(/[\\"'`]+$/, '');
+    const basename = stripped.split('/').pop();
+    if (RUNNER_SCRIPT_FAMILIES.has(basename)) {
+      return RUNNER_SCRIPT_FAMILIES.get(basename);
+    }
+    return null;
+  }
+  return null;
+}
+
 // #240 A4: classify a (head, canonical_command) against a structured
 // configured-head entry. Returns the gate family key (one of
 // hard1_baseline / hard2_coverage / hard3_resilience) when a
@@ -388,16 +477,26 @@ export function classifyGateCommand(command, { cwd } = {}) {
   // hard3 via the string-literal keyword — regardless of whether
   // structured config is present.
   const safeCanonical = stripAtEvalFlag(canonical);
+  // Codex r8 on PR #244 [contract-break]: for package-runner heads,
+  // gate on the FIRST positional script token, not on whole-command
+  // regex. `npx cowsay playwright` etc. is rejected because cowsay
+  // is not a known gate runner. Structured config still takes
+  // precedence (operators can opt-in to non-standard invocations).
+  const familyFallback = () => {
+    const runnerVerdict = classifyRunnerHead(head, safeCanonical);
+    if (runnerVerdict !== undefined) return runnerVerdict;
+    return matchFamilyRegex(safeCanonical);
+  };
   if (structured?.has(head)) {
     const configured = classifyConfiguredHead(head, canonical, structured);
     if (configured !== null) return configured;
-    // For built-in heads, fall back to the (stripped) regex.
+    // For built-in heads, fall back to the runner-gate / regex.
     // For non-built-in heads, structured-only — regex against
     // arbitrary text is unsafe.
-    if (isBuiltIn) return matchFamilyRegex(safeCanonical);
+    if (isBuiltIn) return familyFallback();
     return null;
   }
-  return matchFamilyRegex(safeCanonical);
+  return familyFallback();
 }
 
 // Codex r3 on PR #244: cut the canonical command at the first
