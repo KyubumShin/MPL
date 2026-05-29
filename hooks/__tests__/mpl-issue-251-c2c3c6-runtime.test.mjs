@@ -269,6 +269,30 @@ test('#251 C2 codex r3 [logic]: YAML block-scalar rationale (|, >) requires deep
   assert.deepEqual(findReviewerRationaleGaps(populatedFolded).offenders, []);
 });
 
+test('#251 C6 codex r4 [logic]: Hard 1 fails closed when completed phase id missing from decomposition', () => {
+  // Codex r4: silently filtering out completed phase ids that have
+  // no decomposition entry let `all_non_tooling` resolve to true
+  // purely because the remaining resolvable phases happened to be
+  // docs/manual. Fail-OPEN at the source-of-truth boundary. Fix:
+  // detect missing ids BEFORE the every() check and Hard 1 FAIL
+  // when the lists don't match.
+  const text = readPrompt('commands/mpl-run-execute-gates.md');
+  assert.match(
+    text,
+    /missing_completed_phase_ids|Hard 1 FAIL.*absent from decomposition\.yaml/i,
+    'Hard 1 must fail closed when completed phase id missing from decomposition',
+  );
+  // Stale silent-filter shape must be gone.
+  assert.ok(
+    !/\.filter\(p\s*=>\s*p\s*!=\s*null\)\s*\/\/\s*drop phases missing/i.test(text),
+    'silent drop of missing decomposition entries must be gone',
+  );
+  // The check must run BEFORE the all_non_tooling every() call.
+  const flow = text.match(/missing_completed_phase_ids[\s\S]*?all_non_tooling/);
+  assert.ok(flow, 'missing-id check must run before all_non_tooling evaluation');
+  assert.match(flow[0], /STOP[\s\S]*?do NOT evaluate all_non_tooling|enter fix loop/i);
+});
+
 test('#251 C6 codex r3 [logic]: Hard 1 reads evidence_required from decomposition.yaml, not phase_details', () => {
   // Codex r3: `evidence_required` lives on the decomposition per-phase
   // entry, NOT on `state.execution.phase_details` (which only carries

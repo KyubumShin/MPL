@@ -184,9 +184,27 @@ decomp_phase_by_id = Map(decomposition.phases.map(p => [p.id, p]))
 completed_phase_ids = state.execution.phase_details
   .filter(p => p.status == "completed")
   .map(p => p.id)
+
+// **Fail-closed on resolution mismatch (codex r4 fix)**: a stale or
+// partially-rewritten decomposition.yaml can be missing some completed
+// phase ids (e.g., a recomposition removed a code-bearing phase while
+// retaining a docs/manual phase with non-tooling evidence). Silently
+// filtering out the missing ids would let `all_non_tooling` resolve
+// to true purely because the remaining resolvable entries happened to
+// be docs/manual — a fail-OPEN path at the exact source-of-truth
+// boundary this gate is meant to harden. Detect the mismatch BEFORE
+// the every() check; if any completed phase id has no decomposition
+// entry, FAIL Hard 1 with the unresolved id list and do not enter
+// the skip path.
+missing_completed_phase_ids = completed_phase_ids
+  .filter(id => not decomp_phase_by_id.has(id))
+if missing_completed_phase_ids.length > 0:
+  announce: "[MPL] Hard 1 FAIL: {missing_completed_phase_ids.length} completed phase(s) absent from decomposition.yaml: {missing_completed_phase_ids.join(', ')}. Re-sync the decomposition before retrying Hard 1; cannot determine evidence_required for the missing phases (failing closed)."
+  → enter fix loop (target: restore the missing phase entries in decomposition.yaml)
+  // STOP — do NOT evaluate all_non_tooling on a partial set.
+
 completed_decomp_phases = completed_phase_ids
   .map(id => decomp_phase_by_id.get(id))
-  .filter(p => p != null)  // drop phases missing from decomposition (shouldn't happen)
 
 all_non_tooling = completed_decomp_phases.every(phase => {
   phase_evidence = phase.evidence_required or []
