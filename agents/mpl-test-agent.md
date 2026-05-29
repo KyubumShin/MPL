@@ -56,14 +56,33 @@ disallowedTools: Task
       - Use S-item's test_file path if provided
       - Use S-item's test_command for execution
       - If S-item lacks test_file/test_command: report as INVALID and create test anyway
-    - Domain-specific minimum test counts:
-      | phase_domain | Minimum Tests |
+    - Contract-derived test floor (#239 C1): the number of required
+      tests is derived from the phase's `interface_contract`, not a
+      fixed per-domain count. **Both** floors below apply — the
+      effective minimum is the larger of the two when both yield a
+      positive count, and meeting one does not waive the other.
+      - **Per-symbol floor** — one assertion per
+        `interface_contract.produces[*]` entry (per produced symbol).
+        A phase with 2 `produces` entries requires ≥2 assertions.
+      - **Per-boundary-tuple floor** — when
+        `interface_contract.contract_files[*]` is non-empty, every
+        `(params_key, returns_key)` tuple summed across all
+        contract_files must also be covered by an assertion. A single
+        contract_file with 1 `params` key × 2 `returns` keys
+        contributes 2 tuples. (The decomposer Output_Schema defines
+        `params` / `returns` only under `contract_files[]` — do NOT
+        look for them on `produces[*]`.)
+      - **Property-based / generator-based tests** count as N
+        assertions where N = `cases_generated` in the evidence shape.
+      - The per-domain rows below are **guidance**, not minimums —
+        use them as starting templates when the contract is sparse:
+      | phase_domain | Guidance starting set (override with contract derivation) |
       |-------------|--------------|
       | ui          | Component (RTL) + Store + Hook + a11y 1 per component |
-      | api         | Happy path + Error path + Auth per endpoint (min 3) |
-      | algorithm   | Normal + Boundary 2 + Edge 2 per function (min 5) |
-      | db          | CRUD 4 + Migration 1 per model (min 5) |
-      | ai          | Schema validation + Retry logic + Fallback + API key non-exposure (min 4) |
+      | api         | Happy path + Error path + Auth per endpoint |
+      | algorithm   | Normal + Boundary 2 + Edge 2 per function |
+      | db          | CRUD 4 + Migration 1 per model |
+      | ai          | Schema validation + Retry logic + Fallback + API key non-exposure |
       | infra       | Only if affected_tests is non-empty |
       | general     | Only if source code files (.ts, .py, .rs) are created/modified |
     - Add edge cases derived from the interface contract
@@ -189,7 +208,13 @@ disallowedTools: Task
     - Ignoring verification plan: writing tests that don't map to A/S-items.
     - Brittle tests: testing internal implementation details that may change.
     - Missing edge cases: only testing the happy path from the interface contract.
-    - Returning 0 tests for mandatory domains: ui, api, algorithm, db, ai domains MUST produce tests. Returning 0 tests for these domains causes the phase to FAIL.
+    - Returning 0 tests for a phase whose `interface_contract.produces`
+      lists ANY callable surface: every produces entry MUST have at
+      least one assertion. When `contract_files[*]` is also non-empty,
+      every `(params_key, returns_key)` tuple summed across
+      contract_files must be covered by an assertion too. A domain
+      label alone no longer mandates a minimum count — the contract
+      does (#239 C1).
     - Skipping S-items: every S-item MUST have a corresponding test. "Where feasible" is NOT an acceptable escape — if a scenario cannot be tested, explain WHY and reclassify as H-item.
     - Self-rationalization (AP-VERIFY-01): praising the implementation instead of testing it rigorously. See the AP-VERIFY-01 block above for the evidence-replacement protocol.
   </Failure_Modes_To_Avoid>
