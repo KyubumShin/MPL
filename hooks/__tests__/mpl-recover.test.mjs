@@ -777,6 +777,109 @@ phases:
     assert.match(result.dispatch_instruction, /legacy-style finding/);
   });
 
+  it('#234 [contract-break] codex r8: safe mode does NOT persist gated dispatch text in state', () => {
+    // Codex r8 [contract-break]: r7 stashed the gated Re-dispatch
+    // Task(...) string in details.awaiting_instruction, which spread
+    // into state.retry_context.recovery.awaiting_instruction. Any
+    // automation reading state could extract and dispatch the Task
+    // call without approval.
+    writeState(blocked({
+      block_code: 'covers_schema_violation',
+      retry_context: { issues: ['phase-1.covers[0]:UC-99'] },
+    }));
+
+    const result = recoverBlockedHook(tmp); // --apply-safe
+    assert.equal(result.status, 'requires_approval');
+    assert.equal(result.dispatch_instruction, undefined);
+
+    const state = readState();
+    const rec = state.retry_context.recovery;
+    // Must not contain dispatch text anywhere in persisted state.
+    const stateJson = JSON.stringify(state);
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/, 'persisted state must not contain the gated Task text');
+    assert.doesNotMatch(stateJson, /subagent_type="mpl-decomposer"/, 'persisted state must not contain subagent_type=mpl-decomposer');
+    assert.equal(rec.awaiting_instruction, undefined, 'awaiting_instruction must not be persisted in safe mode');
+  });
+
+  it('#234 [contract-break] codex r8: phase_runner_anomaly safe mode does not persist gated Task text', () => {
+    writeState(blocked({
+      block_code: 'phase_runner_empty_response',
+      blocked_phase: 'phase-1',
+    }));
+    recoverBlockedHook(tmp); // --apply-safe
+    const stateJson = JSON.stringify(readState());
+    assert.doesNotMatch(stateJson, /Re-dispatch Task\(/);
+    assert.doesNotMatch(stateJson, /subagent_type="mpl-phase-runner"/);
+    assert.doesNotMatch(stateJson, /stronger framing/);
+  });
+
+  it('#234 [logic] codex r8: safe-then-approve preserves original resume_instruction (goal_contract_invalid)', () => {
+    // Codex r8 [logic]: r7 wrote the approval prompt as `instruction`
+    // into keepBlocked, which became state.resume_instruction. On the
+    // next --approve-unsafe call, the handler read state.resume_instruction
+    // and echoed back the approval prompt instead of the original
+    // restore instruction.
+    //
+    // Repro: --apply-safe then --approve-unsafe → user_instruction
+    // MUST contain the original "Restore a valid .mpl/goal-contract.yaml"
+    // text, not "Run /mpl:mpl-recover with --approve-unsafe".
+    const originalInstruction = 'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.';
+    writeState(blocked({
+      block_code: 'goal_contract_invalid',
+      resume_instruction: originalInstruction,
+      retry_context: { missing: ['mission.goal'] },
+    }));
+
+    // Step 1: safe mode (--apply-safe).
+    const safeResult = recoverBlockedHook(tmp);
+    assert.equal(safeResult.status, 'requires_approval');
+    // Original resume_instruction must still be intact on disk.
+    assert.equal(readState().resume_instruction, originalInstruction);
+
+    // Step 2: approved (--approve-unsafe). Must echo the original.
+    const approvedResult = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(approvedResult.status, 'requires_user_action');
+    assert.match(approvedResult.user_instruction, /Restore a valid \.mpl\/goal-contract\.yaml/);
+    assert.match(approvedResult.user_instruction, /mission\.goal/);
+    assert.doesNotMatch(approvedResult.user_instruction, /--approve-unsafe/);
+  });
+
+  it('#234 [logic] codex r8: safe-then-approve preserves baseline_immutable resume_instruction', () => {
+    const originalInstruction = 'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.';
+    writeState(blocked({
+      block_code: 'baseline_immutable',
+      resume_instruction: originalInstruction,
+    }));
+
+    recoverBlockedHook(tmp); // safe
+    assert.equal(readState().resume_instruction, originalInstruction);
+
+    const approved = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(approved.status, 'requires_user_action');
+    assert.match(approved.user_instruction, /baseline-renewal/);
+    assert.doesNotMatch(approved.user_instruction, /--approve-unsafe/);
+  });
+
+  it('#234 [logic] codex r8: safe-then-approve preserves phase_runner_anomaly fallback for unknown anomaly', () => {
+    // For unknown anomaly type, the handler falls back to
+    // state.resume_instruction. If safe mode clobbered it, the
+    // fallback would emit the approval prompt instead of the actual
+    // re-dispatch text.
+    const originalInstruction = 'Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt="...") for phase-1.';
+    writeState(blocked({
+      block_code: 'phase_runner_some_new_anomaly',
+      resume_instruction: originalInstruction,
+    }));
+
+    recoverBlockedHook(tmp); // safe
+    assert.equal(readState().resume_instruction, originalInstruction);
+
+    const approved = recoverBlockedHook(tmp, { approveUnsafe: true });
+    assert.equal(approved.status, 'awaiting_phase_runner');
+    assert.match(approved.dispatch_instruction, /mpl-phase-runner/);
+    assert.doesNotMatch(approved.dispatch_instruction, /--approve-unsafe/);
+  });
+
   it('#234 [contract-break] codex r7: redispatch_decomposer route requires --approve-unsafe; --apply-safe keeps requires_approval', () => {
     // Codex r7: SKILL.md categorizes redispatch_decomposer as "Step 3
     // Explicit Approval Recovery". --apply-safe (approveUnsafe=false)

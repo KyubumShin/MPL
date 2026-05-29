@@ -794,18 +794,30 @@ function recoverRedispatchDecomposer(cwd, state, { approveUnsafe = false } = {})
     `Re-dispatch Task(subagent_type="mpl-decomposer", model="sonnet", prompt=...) to fix ${code}. ${failureSummary}`.trim();
 
   if (!approveUnsafe) {
+    // Codex r8 [contract-break] + [logic]: must NOT persist the gated
+    // dispatch text in state.retry_context.recovery (any reader could
+    // dispatch without approval), AND must NOT overwrite the original
+    // state.resume_instruction with the "run --approve-unsafe" prompt
+    // (the next approved run reads resume_instruction and would echo
+    // the approval prompt instead of the original recovery instruction).
+    //
+    // Pass `instruction: undefined` so recoveryPatch falls back to the
+    // existing state.resume_instruction. Surface the approval prompt
+    // only at the buildResult layer (user-visible JSON output) — not
+    // in state.
     const reason = `[MPL Recover] ${code} requires explicit approval to surface the mpl-decomposer dispatch instruction.`;
     keepBlocked(cwd, state, {
       status: 'requires_approval',
       reason,
-      instruction:
-        'Run /mpl:mpl-recover with --approve-unsafe (or rerun the recovery handler explicitly) to receive the decomposer re-dispatch Task call.',
-      details: { handler: 'redispatch_decomposer', code, findings: diagnostics, awaiting_instruction: instruction },
+      instruction: undefined,
+      details: { handler: 'redispatch_decomposer', code, findings: diagnostics },
     });
     return buildResult(state, {
       status: 'requires_approval',
       message: reason,
       requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe (or rerun the recovery handler explicitly) to receive the decomposer re-dispatch Task call.',
       findings: diagnostics,
     });
   }
@@ -847,18 +859,22 @@ function recoverGoalContractInvalid(cwd, state, { approveUnsafe = false } = {}) 
     'Restore a valid .mpl/goal-contract.yaml, then retry the decomposition write.';
 
   if (!approveUnsafe) {
+    // Codex r8: same anti-clobber pattern — preserve the original
+    // resume_instruction in state, surface the approval prompt only
+    // in the returned JSON.
     const approvalReason = '[MPL Recover] goal_contract_invalid requires explicit approval to surface the restoration instruction.';
     keepBlocked(cwd, state, {
       status: 'requires_approval',
       reason: approvalReason,
-      instruction:
-        'Run /mpl:mpl-recover with --approve-unsafe to receive the goal-contract restoration instruction.',
+      instruction: undefined,
       details: { handler: 'goal_contract_invalid', findings: diagnostics },
     });
     return buildResult(state, {
       status: 'requires_approval',
       message: approvalReason,
       requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the goal-contract restoration instruction.',
       findings: diagnostics,
     });
   }
@@ -904,24 +920,27 @@ function recoverPhaseRunnerAnomaly(cwd, state, { approveUnsafe = false } = {}) {
     `Re-dispatch Task(subagent_type="mpl-phase-runner", model="sonnet", prompt=...) for ${phaseId || 'the blocked phase'} after addressing the recorded ${anomalyType || 'anomaly'}.`;
 
   if (!approveUnsafe) {
+    // Codex r8: do NOT persist `awaiting_instruction` in state, do NOT
+    // overwrite resume_instruction with the approval prompt. Approval
+    // prompt lives only in the returned JSON.
     const approvalReason = `[MPL Recover] ${code} requires explicit approval to surface the mpl-phase-runner dispatch instruction (anomaly=${anomalyType || 'unknown'}).`;
     keepBlocked(cwd, state, {
       status: 'requires_approval',
       reason: approvalReason,
-      instruction:
-        'Run /mpl:mpl-recover with --approve-unsafe to receive the phase-runner re-dispatch Task call.',
+      instruction: undefined,
       details: {
         handler: 'phase_runner_anomaly',
         code,
         anomaly: anomalyType,
         phase_id: phaseId,
-        awaiting_instruction: instruction,
       },
     });
     return buildResult(state, {
       status: 'requires_approval',
       message: approvalReason,
       requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the phase-runner re-dispatch Task call.',
       anomaly: anomalyType,
       phase_id: phaseId,
     });
@@ -953,18 +972,20 @@ function recoverBaselineImmutable(cwd, state, { approveUnsafe = false } = {}) {
     'Touch .mpl/mpl/.baseline-renewal to authorize a new baseline write, then retry.';
 
   if (!approveUnsafe) {
+    // Codex r8: same anti-clobber pattern.
     const approvalReason = '[MPL Recover] baseline_immutable requires explicit approval to surface the renewal-sentinel instruction.';
     keepBlocked(cwd, state, {
       status: 'requires_approval',
       reason: approvalReason,
-      instruction:
-        'Run /mpl:mpl-recover with --approve-unsafe to receive the baseline renewal instruction.',
+      instruction: undefined,
       details: { handler: 'baseline_immutable' },
     });
     return buildResult(state, {
       status: 'requires_approval',
       message: approvalReason,
       requires_approval: true,
+      approval_prompt:
+        'Run /mpl:mpl-recover with --approve-unsafe to receive the baseline renewal instruction.',
     });
   }
 
