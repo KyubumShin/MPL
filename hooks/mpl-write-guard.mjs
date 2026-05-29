@@ -13,7 +13,17 @@
  * When MPL is active: guards Edit/Write on source files + warns on dangerous Bash
  */
 
-import { dirname, join, extname, resolve as resolvePath, basename } from 'path';
+import { dirname, join, extname, resolve as resolvePath, basename, posix as posixPath } from 'path';
+
+// Claude r20 on PR #249 [security]: POSIX path resolution collapses
+// `//` and `/./` segments at write time. The orchestrator can plant
+// `.mpl//mpl/decomposition.yaml` or `.mpl/./state.json` and the
+// protected-file regex (which requires single slashes) misses it.
+// Normalize the file_path before every protected-file regex check.
+function normalizeFilePath(p) {
+  if (typeof p !== 'string' || !p) return p;
+  return posixPath.normalize(p);
+}
 import { existsSync, realpathSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -623,7 +633,7 @@ async function main() {
     // direct-Write decomposition.yaml — the post-isMplActive
     // writer-identity check never runs. Apply the same pre-active
     // guard shape used by the state.json early-return.
-    if (earlyFilePath && DECOMPOSITION_FILE_REGEX.test(earlyFilePath) && isMplDir) {
+    if (earlyFilePath && DECOMPOSITION_FILE_REGEX.test(normalizeFilePath(earlyFilePath)) && isMplDir) {
       const earlyState = readState(cwd) || {};
       const earlyCallerTranscript = typeof data.transcript_path === 'string'
         ? data.transcript_path
@@ -653,7 +663,7 @@ async function main() {
       }
     }
 
-    if (earlyFilePath && STATE_FILE_REGEX.test(earlyFilePath) && isMplDir) {
+    if (earlyFilePath && STATE_FILE_REGEX.test(normalizeFilePath(earlyFilePath)) && isMplDir) {
       const reason =
         `[MPL #236 A1] Refused direct ${toolName} of .mpl/state.json: only ` +
         `mpl-write-guard's internal writeState may modify the orchestrator ` +
@@ -762,6 +772,82 @@ async function main() {
             reason,
             resumeInstruction:
               `Dispatch Agent(subagent_type='mpl-decomposer'); do not write decomposition.yaml from Bash.`,
+            retryContext: { command: earlyCommand },
+          });
+          console.log(JSON.stringify({
+            continue: false,
+            decision: 'block',
+            reason,
+          }));
+          return;
+        }
+      }
+    }
+  }
+
+  // Codex r20 on PR #249 [security]: also gate Bash writes to
+  // .mpl/state.json BEFORE the isMplActive short-circuit. Without
+  // this, the deactivation-chain class re-opens for Bash:
+  // current_phase=completed lets a Bash redirect write a forged
+  // decomposer_dispatch into state.json. Mirrors the decomp guard
+  // above and the r13 state.json Write/Edit guard.
+  if (isBashTool && process.env.MPL_FORCE_PURGE !== '1') {
+    const earlyCommand = (data.tool_input || data.toolInput || {}).command || '';
+    if (earlyCommand && existsSync(join(cwd, '.mpl'))) {
+      const normalizedEarly = normalizeShellCommand(earlyCommand);
+      const SAFE_READS_EARLY = new Set([
+        'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
+        'grep', 'rg', 'ag', 'ack', 'jq', 'yq',
+        'less', 'more', 'sort', 'uniq', 'tac', 'nl',
+        'diff', 'comm', 'sdiff',
+        'echo', 'printf', 'pwd', 'type', 'which',
+      ]);
+      let stateMention = /\.mpl\/state\.json/.test(normalizedEarly);
+      let symlinkWritesToState = false;
+      if (!stateMention) {
+        const stateTargetReEarly = /(?:[\d&]?>{1,2}\s*|\btee\b(?:\s+-\S+)*\s+|\bdd\b[^|;&]*\bof=\s*)([^\s|;&]+)/g;
+        for (const m of normalizedEarly.matchAll(stateTargetReEarly)) {
+          const targetAbs = resolvePath(cwd, m[1]);
+          let candidate = null;
+          try { candidate = realpathSync(targetAbs); }
+          catch {
+            try { candidate = join(realpathSync(dirname(targetAbs)), basename(targetAbs)); }
+            catch { /* skip */ }
+          }
+          if (candidate && /\.mpl\/state\.json$/.test(candidate)) {
+            stateMention = true;
+            symlinkWritesToState = true;
+            break;
+          }
+        }
+      }
+      if (stateMention) {
+        const segmentsEarly = normalizedEarly.split(/[|;&]+/).map((s) => s.trim()).filter(Boolean);
+        const allSafeEarly = segmentsEarly.length > 0 && segmentsEarly.every((seg) => {
+          const h = (seg.match(/^(\w+)/) || ['', ''])[1].toLowerCase();
+          return SAFE_READS_EARLY.has(h);
+        });
+        const writesEarly = (
+          /[\d&]?>{1,2}[^|;&\n]*\.mpl\/state\.json/.test(normalizedEarly) ||
+          /\btee\b[^|;&]*\.mpl\/state\.json/.test(normalizedEarly) ||
+          /\bdd\b[^|;&]*\bof=[^|;&]*\.mpl\/state\.json/.test(normalizedEarly)
+        );
+        if (!allSafeEarly || writesEarly || symlinkWritesToState) {
+          const reason =
+            `[MPL #236 A1] Refused Bash write to .mpl/state.json: only ` +
+            `mpl-write-guard's internal writeState may modify the orchestrator ` +
+            `state file. Bash writes (including those allowed by a deactivated ` +
+            `MPL state) bypass the writer-identity gate and would let any caller ` +
+            `forge decomposer_dispatch / first_transcript_seen / other capability ` +
+            `fields. Set MPL_FORCE_PURGE=1 for a one-shot manual reset.`;
+          recordBlockedHook(cwd, {
+            hookId: HOOK_ID,
+            phaseId: (readState(cwd) || {}).current_phase,
+            artifact: '.mpl/state.json',
+            code: 'state_json_bash_write',
+            reason,
+            resumeInstruction:
+              `Route the change through writeState(); set MPL_FORCE_PURGE=1 only for a one-shot manual reset.`,
             retryContext: { command: earlyCommand },
           });
           console.log(JSON.stringify({
@@ -1017,7 +1103,7 @@ ensure you have the correct target path. The command will proceed, but please ve
   // inside another subagent — is blocked. The block precedes the
   // generic `isAllowedPath` (.mpl/* is otherwise an allowlisted
   // orchestrator path) so the writer identity wins.
-  if (DECOMPOSITION_FILE_REGEX.test(filePath)) {
+  if (DECOMPOSITION_FILE_REGEX.test(normalizeFilePath(filePath))) {
     const callerTranscript = typeof data.transcript_path === 'string'
       ? data.transcript_path
       : (typeof data.transcriptPath === 'string' ? data.transcriptPath : null);

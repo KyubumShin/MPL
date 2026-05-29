@@ -476,6 +476,60 @@ test('#236 A1 claude r14 [security]: decomposition.yaml writer-identity check ru
   }
 });
 
+test('#236 A1 codex r20 [security]: Bash state.json forgery while MPL deactivated is blocked', () => {
+  // Codex r20: pre-r20 the Bash state.json guard ran AFTER isMplActive.
+  // In an inactive workspace (current_phase=completed) a Bash redirect
+  // could plant a forged decomposer_dispatch. Fix: move the Bash
+  // state.json guard BEFORE the isMplActive short-circuit, same shape
+  // as the r13 Write/Edit guard.
+  const cwd = freshWorkspace();
+  try {
+    writeFileSync(
+      join(cwd, '.mpl', 'state.json'),
+      JSON.stringify({ current_phase: 'completed' }),
+    );
+    const decision = runHook(cwd, {
+      cwd,
+      tool_name: 'Bash',
+      tool_input: { command: 'printf forged > .mpl/state.json' },
+    });
+    assert.equal(decision.decision, 'block');
+    assert.match(decision.reason, /decomposer_dispatch|state\.json/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('#236 A1 claude r20 [security]: filePath POSIX-normalize before protected-file regex', () => {
+  // Claude r20: `.mpl//mpl/decomposition.yaml`, `.mpl/./state.json`,
+  // and other path-redundancy forms bypassed the regex which required
+  // single slashes. Fix: posix.normalize the file_path before each
+  // DECOMPOSITION_FILE_REGEX / STATE_FILE_REGEX test.
+  const cwd = freshWorkspace();
+  try {
+    for (const filePath of [
+      '.mpl//mpl/decomposition.yaml',
+      '.mpl/./mpl/decomposition.yaml',
+      '.mpl//state.json',
+      '.mpl/./state.json',
+      '.mpl/foo/../mpl/decomposition.yaml',
+    ]) {
+      const decision = runHook(cwd, {
+        cwd,
+        tool_name: 'Write',
+        tool_input: { file_path: filePath, content: 'forged' },
+      });
+      assert.equal(
+        decision.decision,
+        'block',
+        `expected path-normalize block for: ${filePath}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('#236 A1 codex r19 [security]: pipeline writer downstream of safe-read head is blocked', () => {
   // Codex r19: `printf forged | sponge .mpl/mpl/decomposition.yaml`
   // has a safe-read head (`printf`) but a downstream writer (`sponge`)
