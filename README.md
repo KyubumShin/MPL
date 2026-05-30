@@ -4,7 +4,7 @@
 
 An agent workflow plugin for Claude Code and Codex CLI that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-eight-minds) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-agent-roster) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -278,20 +278,42 @@ Keyword hints still work as manual overrides: `"mpl bugfix"` → light, `"mpl sm
 
 ---
 
-## The Eight Minds
+## The Agent Roster
 
-Eight agents, each with a single purpose. Loaded on-demand, never preloaded:
+Eleven agents, each with a single purpose. Loaded on-demand, never preloaded. Grouped by lifecycle stage:
 
-| Agent | Role | Core Principle |
-|-------|------|---------------|
-| **Interviewer** | Socratic questioning for Pivot Points + Ambiguity Resolution | "What are you NOT willing to compromise on?" |
-| **Codebase Analyzer** | Project structure analysis (haiku) | "What exists before we plan?" |
-| **Decomposer** | Break into ordered micro-phases + Phase Seed generation | "What depends on what?" |
-| **Phase Runner** | Execute a single phase end-to-end + test writing | "Plan, implement, verify, summarize" |
-| **Code Reviewer** | Quality gate + PP compliance | "Would I approve this PR?" |
-| **Scout** | Lightweight codebase exploration (haiku) | "Find it fast, spend nothing" |
-| **Compound** | Learning extraction and distillation | "What did we learn that future runs should know?" |
-| **Doctor** | Installation diagnostics | "Is everything wired correctly?" |
+**Interview & Analysis**
+| Agent | Role | Model |
+|-------|------|-------|
+| **Interviewer** | Stage 1 PP discovery + Stage 2 ambiguity resolution. "What are you NOT willing to compromise on?" | opus |
+| **Codebase Analyzer** | 6-module structural scan → `codebase-analysis.json` | haiku |
+| **Phase 0 Analyzer** | Mechanical raw scan (boundaries, signatures, tests, type/error sites) → `raw-scan.md`. Pure extraction; synthesis moved to Decomposer per #57 | haiku |
+
+**Decomposition & Seed**
+| Agent | Role | Model |
+|-------|------|-------|
+| **Decomposer** | Breaks request into ordered micro-phases, synthesizes per-phase type policy + error spec + verification plan. Sole writer of `decomposition.yaml` | opus |
+| **Seed Generator** | Designs per-phase execution specs (chain or inline mode, #58) → `chain-seed.yaml` / `phase-seed.yaml` | opus |
+
+**Execute & Verify**
+| Agent | Role | Model |
+|-------|------|-------|
+| **Phase Runner** | Executes one phase: resolves TODOs, implements directly, verifies, emits State Summary | sonnet |
+| **Test Agent** | Independent test writer — code author ≠ test author (AD-0004) | sonnet |
+| **Adversarial Reviewer** | Post-phase intent-vs-implementation audit, scores quality, surfaces hidden gaps (#103). Consumed by `mpl-quality-gate.mjs` | sonnet |
+
+**Finalize**
+| Agent | Role | Model |
+|-------|------|-------|
+| **Codex Auditor** | Tier 4 finalize-time intent-vs-impl diff (F6, #117) → `audit-report.json` | haiku |
+| **Git Master** | Atomic commit specialist — style detection, semantic splitting (3+ files = 2+ commits) | haiku |
+
+**Diagnostics**
+| Agent | Role | Model |
+|-------|------|-------|
+| **Doctor** | 12-category installation diagnostics. Read-only | haiku |
+
+> The original "Eight Minds" framing predated v0.17/v0.18. Phase 0 was split (Analyzer + Decomposer synthesis per #57) and a dedicated Seed Generator (#58) was carved out; Tier 4 verification added the Adversarial Reviewer (#103) and Codex Auditor (#117, F6); Git Master separates commit hygiene from phase execution. Scout (lightweight search) and Compound (learning distillation) were absorbed into the orchestrator's grep-based loop and the 4-Tier Memory subsystem respectively.
 
 ### Agent Separation Principle
 
@@ -337,11 +359,11 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>8 agents · 8 hooks · 10 skills · 5 protocol files</strong></summary>
+<summary><strong>11 agents · 46 hooks · 10 skills · 11 protocol files</strong></summary>
 
 ```
 MPL/
-├── agents/                 # 8 agent definitions (YAML frontmatter)
+├── agents/                 # 11 agent definitions (YAML frontmatter)
 │   └── mpl-interviewer.md   # PP Interview + ambiguity resolution (opus)
 ├── commands/               # Orchestration protocols (split for token efficiency)
 │   ├── mpl-run.md          # Router: which protocol file to load
