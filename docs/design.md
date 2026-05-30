@@ -450,7 +450,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 41 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 38 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -459,10 +459,7 @@ All Discoveries are recorded in `.mpl/discoveries.md`.
 | `mpl-write-guard` | PreToolUse: Edit/Write/MultiEdit/Bash/Task/Agent | Warn or block unsafe direct source edits and dangerous shell commands; #236: protect mpl-cancel SKILL paths from `rm -rf` and require mpl-decomposer subagent identity for decomposition.yaml writes. | v0.13.x baseline; MultiEdit/MCP hardening v0.18.1; protected-path + decomposition-writer v0.18.5 |
 | `mpl-bash-timeout` | PreToolUse: Bash | Enforce timeout budgets on build, lint, test, and verification commands. | v0.18.1 |
 | `mpl-state-invariant` | PreToolUse: Task/Agent/Edit/Write/MultiEdit; Stop | Validate state schema, gate evidence, pause/block status, and completion invariants before state can drift. | v0.18.1; I10/I11 recovery v0.18.4 |
-| `mpl-require-e2e` | PreToolUse: Edit/Write/MultiEdit | Block finalize when required E2E scenarios or UC coverage are missing, failing, or explicitly uncovered. | v0.15.2; UC coverage v0.16.0 |
-| `mpl-require-e2e-authenticity` | PreToolUse: Edit/Write/MultiEdit | Reject mock, placeholder, or absent real-runtime E2E evidence before finalize. | v0.18.3 |
-| `mpl-require-finalize-artifacts` | PreToolUse: Edit/Write/MultiEdit | Require goal-contract completion artifacts, RUNBOOK final section, security evidence, and optional commit evidence before `finalize_done=true`. | v0.18.3 guard stream |
-| `mpl-require-whole-goal-closure` | PreToolUse: Edit/Write/MultiEdit | Require completed phase evidence and goal traces to cover every Goal Contract AC/AX before finalize. | v0.18.3 guard stream |
+| `mpl-finalize-gate` | PreToolUse: Edit/Write/MultiEdit | Coalesced finalize_done=true gate. Delegates to the four finalize validators (E2E scenarios, E2E authenticity, declared artifacts, AC/AX closure) as subprocesses, aggregates every failure into a single `finalize_gate_failures` envelope (`retry_context.failures[]` preserves each validator's hookId+code+reason), and emits one block instead of cascading retries. | #257 |
 | `mpl-validate-pp-schema` | PreToolUse: Edit/Write/MultiEdit | Keep mutable User Contract fields out of immutable `pivot-points.md`. | v0.16.0 |
 | `mpl-require-covers` | PreToolUse: Edit/Write/MultiEdit | Require decomposition phases to declare valid `covers` mappings to UC ids or `internal`. | v0.16.0 |
 | `mpl-require-goal-trace` | PreToolUse: Edit/Write/MultiEdit | Ensure decomposition goal traces cover the frozen Goal Contract hash and AC/AX ids. | v0.18.3 guard stream |

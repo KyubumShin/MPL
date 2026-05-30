@@ -72,6 +72,12 @@ const ENFORCEMENT_DEFAULTS = {
   missing_e2e_evidence: 'block',
   e2e_authenticity_invalid: 'block',
   missing_whole_goal_closure: 'block',
+  // #257: coalesced finalize gate. Default 'block' preserves the union of the
+  // four delegate validators' 'block' defaults — if any delegate would have
+  // blocked individually, the coalesced gate must also block. Workspaces can
+  // opt the whole gate to 'off' or 'warn' via .mpl/config.json; per-delegate
+  // opt-outs (missing_e2e_evidence: off etc.) still apply inside the gate.
+  finalize_gate_failures: 'block',
   pp_schema_invalid: 'block',
   small_plan_scope_conflict: 'block',
   fast_track_phase0_artifacts_missing: 'block',

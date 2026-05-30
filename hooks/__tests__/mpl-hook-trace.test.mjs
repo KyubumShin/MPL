@@ -474,10 +474,12 @@ describe('mpl-hook-trace', () => {
       // evaluation, it would be silently dropped.
       assert.equal(ids.includes('mpl-gate-recorder'), true,
         'mpl-gate-recorder must appear in state trace regardless of matcher');
-      // Codex r1: mpl-require-e2e reads state.e2e_results before
-      // blocking finalize_done=true. Must appear in state traces.
-      assert.equal(ids.includes('mpl-require-e2e'), true,
-        'mpl-require-e2e must appear in state trace');
+      // #257: the coalesced mpl-finalize-gate now reads state.e2e_results
+      // (via its e2e delegate) and rewrites the blocked_hook envelope on
+      // finalize_done=true writes — it replaces mpl-require-e2e and the
+      // other three individual finalize PreToolUse hooks in hooks.json.
+      assert.equal(ids.includes('mpl-finalize-gate'), true,
+        'mpl-finalize-gate must appear in state trace');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -701,8 +703,11 @@ describe('mpl-hook-trace', () => {
       assert.equal(trace.category, 'file');
       const ids = trace.hooks.map((h) => h.hook_id);
       // file-category should include the broader set of file-write
-      // PreToolUse hooks.
-      assert.equal(ids.includes('mpl-require-e2e-authenticity'), true);
+      // PreToolUse hooks. #257: the four individual finalize hooks
+      // (mpl-require-e2e-authenticity included) are no longer registered;
+      // they are delegated by mpl-finalize-gate which is registered on the
+      // same Edit|Write|MultiEdit matcher.
+      assert.equal(ids.includes('mpl-finalize-gate'), true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

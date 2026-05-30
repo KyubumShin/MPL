@@ -83,6 +83,7 @@ const PURPOSES = {
   // #237 D1: hooks added after the original map was authored. Verified
   // by comparing hooks.json registered ids against PURPOSES keys.
   'mpl-require-test-agent-brief': 'test-agent brief validation gate (PreToolUse on Task)',
+  'mpl-finalize-gate': 'coalesced finalize_done=true gate — batch-reports e2e / authenticity / artifacts / closure violations in one envelope (#257)',
 };
 
 const DECOMPOSITION_PATH = '.mpl/mpl/decomposition.yaml';
@@ -125,6 +126,9 @@ const STATE_FOCUS = new Set([
   'mpl-require-e2e',
   // Codex r1: reads state.e2e_results / state.security_results for authenticity check.
   'mpl-require-e2e-authenticity',
+  // #257: coalesced finalize gate; spawns the four delegates on a single PreToolUse
+  //   and reads state.json to capture / clear / rewrite the blocked-hook envelope.
+  'mpl-finalize-gate',
 ]);
 
 function readHooksConfig(pluginRoot = DEFAULT_PLUGIN_ROOT) {

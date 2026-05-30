@@ -83,6 +83,8 @@ Approval-required handlers:
   the recover skill returns an anomaly-specific `Task(subagent_type="mpl-phase-runner", ...)` dispatch instruction. Anomaly types include `empty_response`, `truncated_response`, `invalid_json`, `no_evidence`. Each has a tailored framing (stronger prompt / reduced context / explicit schema reminder / evidence emphasis). **Requires `--approve-unsafe` (codex r7 #242)**.
 - `baseline_immutable` (#234):
   no agent dispatch. Returns the recorded `resume_instruction` (touch `.mpl/mpl/.baseline-renewal`) as `user_instruction`. **Requires `--approve-unsafe` (codex r7 #242)**.
+- `finalize_gate_failures` (#257):
+  no agent dispatch. The coalesced finalize gate (`mpl-finalize-gate`) batches every per-validator failure on a single `finalize_done=true` write into one envelope. `retry_context.failures[]` preserves each originating validator's `hookId`, `code`, `reason`, and `resume_instruction`. The orchestrator must resolve every entry — they are independent concerns (E2E execution, E2E authenticity, declared artifacts, AC/AX closure) and there is no shortcut. After resolving all entries, retry the finalize write; the gate re-runs every validator from scratch on the new write. Returns `requires_user_action` (no `--approve-unsafe` path).
 
 If revalidation still fails, recovery must leave `session_status:"blocked_hook"`
 intact and update `block_reason`, `resume_instruction`, and
