@@ -687,19 +687,45 @@ can_pipeline_verification =
   AND next scheduler tier does not read phase_id contract_files
   AND phase_id is not immediately entering phase3-gate or phase5-finalize
 
-// Dispatch Test Agent (required by decomposition field)
+// Dispatch Test Agent (required by decomposition field).
+//
+// #225 dispatch contract: pre-load the BRIEF PATH and let mpl-test-agent
+// drive itself from `.mpl/mpl/phases/{phase_id}/test-agent-brief.yaml`.
+// The brief is the deterministically-generated runbook the
+// mpl-decomposition-postprocess hook produces from decomposition.yaml,
+// and the brief gate (mpl-require-test-agent-brief) defaults to `block`
+// — so by the time we reach this dispatch, the file is guaranteed to
+// exist and to have passed the placeholder/coverage validator.
+//
+// Do NOT pre-stuff the prompt with phase_verification_plan,
+// phase_definition.interface_contract, or the domain_test_requirements
+// table — those fields all live inside the brief, the agent reads them
+// once from a single canonical source, and re-asserting them inline
+// invites the brief and the prompt to drift. Carry only what the brief
+// does NOT cover: the impact-file list (so the agent can anchor its
+// tests without re-parsing the decomposition).
 test_handle_or_result = Task(subagent_type="mpl-test-agent", model="sonnet",
      prompt="""
      ## Phase: {phase_id} - {phase_name}
-     ## Phase Domain: {phase_definition.phase_domain}
-     ### Verification Plan (A/S-items for this phase)
-     {phase_verification_plan}
-     ### Interface Contract
-     {phase_definition.interface_contract}
-     ### Implemented Code
+
+     ### Primary execution contract (#225)
+     Read `.mpl/mpl/phases/{phase_id}/test-agent-brief.yaml` first. It is
+     the canonical runbook for this phase: `target_implementation_files`,
+     `interface_contracts`, `a_item_coverage`, `s_item_coverage`,
+     `required_test_commands`, `forbidden_conditions`, `probing_targets`,
+     `expected_evidence_shape`. Use those fields verbatim — the producer
+     already extracted them from decomposition.yaml and the brief gate
+     already rejected placeholder shapes.
+
+     ### Implemented Code (this phase)
      {list of files created/modified by the Phase Runner}
-     ### Domain-Specific Test Requirements
-     {domain_test_requirements[domain]}
+
+     ### Transitional fallback
+     If the brief file is genuinely missing (gate set to `warn`/`off` in
+     `.mpl/config/test-agent-brief-enforcement.json`), fall back to
+     `decomposition.yaml.phases[{phase_id}]`: `verification_plan`,
+     `interface_contract`, `phase_domain`, `probing_hints`. Coverage
+     requirements (every A/S item, every produces symbol) are unchanged.
 
      Write and run tests for this phase's implementation.
      ALL S-items MUST have corresponding executable tests.
