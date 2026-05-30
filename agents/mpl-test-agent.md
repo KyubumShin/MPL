@@ -38,17 +38,62 @@ disallowedTools: Task
 
   <Execution_Flow>
     ### Step 1: Understand Context
-    - Read the phase's verification_plan (A/S-items for this phase)
-    - Read the interface_contract (what this phase produces/requires)
-    - Read the implemented code to understand the public API (but test the contract, not internals)
-    - Identify the project's test framework and conventions
+
+    **PRIMARY EXECUTION CONTRACT (#225)** — read `.mpl/mpl/phases/{phase_id}/test-agent-brief.yaml`
+    FIRST. The brief is the canonical, deterministically-generated runbook for
+    this phase. It carries every input you need, already de-duplicated and
+    placeholder-rejected by the producer (`hooks/lib/mpl-decomposition-postprocess.mjs`)
+    and validated by the gate (`hooks/mpl-require-test-agent-brief.mjs`):
+
+    - `target_implementation_files` — files the Phase Runner just modified;
+      anchor your test files against these.
+    - `interface_contracts[]` — the `{symbol, path}` surface you must verify.
+      Test the contract, NOT internal implementation details.
+    - `a_item_coverage[]` / `s_item_coverage[]` — every A/S item the phase
+      committed to in decomposition. Each entry has an `id` and a
+      `test_target` description; you owe one assertion per entry.
+    - `required_test_commands[]` — the exact commands you must execute (the
+      producer pulls these from the decomposer's `s_items[].test_command`
+      / `a_items[].command` when present, and from the language default
+      otherwise). Use these verbatim in `commands_run[]`.
+    - `forbidden_conditions[]` — patterns your tests MUST NOT contain
+      (mocks of the unit under test, placeholder assertions like
+      `expect(true).toBe(true)`, etc.). These trip the gate at PostToolUse
+      if you violate them.
+    - `probing_targets[]` (optional) — adversarial test targets pulled from
+      `decomposition.yaml.phase.probing_hints`. Treat as mandatory test
+      targets per HA-03 below, not as suggestions.
+    - `expected_evidence_shape` — the JSON shape you MUST emit in your
+      final message. The Output_Schema block below mirrors this — use the
+      brief's shape as the authoritative reference.
+
+    Read the brief ONCE at the start of the phase. Do not re-infer these
+    fields from `decomposition.yaml` — the producer has already extracted
+    them and the brief gate has already rejected placeholder shapes. If the
+    brief and the decomposition disagree, the brief wins (the brief is the
+    derived runbook; the decomposition is the source the producer
+    interpreted).
+
+    **TRANSITIONAL FALLBACK** — the brief gate's `block` mode (default
+    since #225 cutover) guarantees the file exists before you are dispatched.
+    If the file is genuinely missing (gate set to `warn` / `off` in
+    `.mpl/config/test-agent-brief-enforcement.json`), fall back to reading
+    the decomposition fields named in the dispatch prompt: `verification_plan`
+    (A/S items), `interface_contract`, and the modified-files list. Do not
+    skip A/S items in this path — the brief omission does not relax the
+    coverage requirement.
+
+    After the brief (or fallback fields):
+    - Read the implemented code to understand the public API. Test the
+      contract, not internals.
+    - Identify the project's test framework and conventions.
 
     #### F-26 Gherkin AC Input (Optional)
 
     If `.mpl/pm/requirements-{hash}.md` exists, use Gherkin AC as pre-seeded test scenarios:
     1. Extract `gherkin` field from the `acceptance_criteria` section
     2. Convert Given-When-Then to test function skeletons
-    3. If file does not exist, maintain existing behavior (based on A/S-items from verification_plan)
+    3. If file does not exist, maintain existing behavior (based on A/S-items from the brief / verification_plan)
 
     ### Step 2: Design Tests
     - For each A-item: translate the command/criterion into a test case

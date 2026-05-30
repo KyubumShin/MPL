@@ -152,16 +152,19 @@ History: PR #224 (Codex r2 [contract-break]) introduced the config
 with a `warn` default because the brief producer was deferred. PR for
 #225 ships the producer and flips the default to `block`.
 
-## Still-deferred follow-ups
+## Consumption side (#225 follow-up — shipped)
 
-The #225 cutover delivers the producer + flips to block-mode. Still
-deferred (separate issues):
+Both items previously listed under "Still-deferred follow-ups" are now in tree:
 
-- Updates to `mpl-test-agent`'s system prompt to declare the brief as
-  its primary execution contract.
-- Executor dispatch path changes that pre-load the brief into the
-  test-agent prompt instead of assembling scattered decomposition
-  fields ad hoc.
-
-These are consumption-side changes — the brief itself is now
-guaranteed to exist for every required phase.
+- `agents/mpl-test-agent.md` Step 1 declares the brief path as the agent's
+  PRIMARY EXECUTION CONTRACT. The agent reads the brief once and uses its
+  fields (`target_implementation_files`, `interface_contracts`,
+  `a_item_coverage`, `s_item_coverage`, `required_test_commands`,
+  `forbidden_conditions`, `probing_targets`, `expected_evidence_shape`)
+  verbatim. Decomposition re-inference is the transitional-fallback path
+  only (gate set to `warn`/`off`).
+- `commands/mpl-run-execute.md` Step 4 dispatch pre-loads the brief path
+  into the test-agent prompt and removes the ad-hoc inline assembly of
+  `phase_verification_plan` / `interface_contract` /
+  `domain_test_requirements`. The orchestrator carries only the impact-
+  file list inline; everything else lives in the brief.
