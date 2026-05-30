@@ -55,7 +55,7 @@ const {
 const { buildBlockedHookPatch } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
 );
-const { classifyRecordedCommand } = await import(
+const { classifyRecordedCommand, compositeRejectReason } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-gate-classify.mjs')).href
 );
 
@@ -254,6 +254,22 @@ try {
       }
     }
 
+    // #232 (1) [data-integrity]: refuse to record evidence when the
+    // command shape would let a misleading shell exit code stamp a
+    // passing entry. The classifier still strips and returns the
+    // leading family (so legitimate consumers like manual gate-evidence
+    // writes that include a redirect are unaffected — PR #220), but the
+    // recorder cannot trust the shell exit when the gate command's
+    // failure does not propagate (`npm test || true`, `npm test ; true`,
+    // `npx playwright test | tee log`, `npm test &`). Drop the event;
+    // `&&` and pure redirects (`>` / `>>` / `&>` / `#` comment) remain
+    // safe and are allowed through.
+    const maskReason = compositeRejectReason(command);
+    if (maskReason !== null) {
+      ok();
+      process.exit(0);
+    }
+
     const gateName = classifyGate(command);
     if (!gateName) {
       ok();
@@ -291,6 +307,18 @@ try {
       exit_code: recordedExit,
       stdout_tail: tailOf(stdout, 500),
       timestamp: new Date().toISOString(),
+      // #232 (2) [contract-break]: tag every recorder-produced entry
+      // with its provenance. The strict / recorder allowlists are
+      // deliberately asymmetric (strict rejects wrapper heads like
+      // `docker`/`kubectl`/`bash`; recorder accepts them because real
+      // execution wrappers are legitimate gate evidence). Without this
+      // marker, a recorder write of `docker compose run app npm test`
+      // would re-classify as `null` under strict at the next I12
+      // STATE_WRITE check (manual-write rules wrongly applied to
+      // recorder evidence). I12 now skips strict re-validation for
+      // entries carrying `source: 'recorder'`; the recorder is
+      // authoritative for what it observed.
+      source: 'recorder',
     };
 
     function buildPatch(updatedGate) {

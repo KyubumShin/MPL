@@ -754,8 +754,191 @@ function stripNonExecutedSuffix(command) {
   return command.slice(0, cut);
 }
 
+// #232 (1) [data-integrity]: composite shapes that mask the leading
+// command's exit code in the overall shell exit. The recorder reads
+// the shell's exit code, so any composite where the gate command's
+// failure does NOT propagate to the shell exit is a false-PASS
+// surface:
+//   - `npm test || true`   — `||` swallows the failure (right side runs
+//                            on left's failure and its exit becomes the
+//                            shell exit)
+//   - `npm test ; true`    — `;` runs both, shell exit = `true` (0)
+//   - `npm test | tee log` — pipe exit = rightmost (tee's exit)
+//   - `npm test &`         — background; shell returns 0 immediately
+//   - newline / carriage return — multi-command shape, shell exit = last
+//
+// `&&` is genuinely safe (short-circuits on failure → leading
+// command's exit propagates). Redirects `>`, `>>`, `<`, `<<`, `&>`
+// move bytes/file descriptors, not exit codes. Comments `#` are
+// discarded by the shell.
+//
+// Detection runs on the ORIGINAL command, not on the
+// stripNonExecutedSuffix output (the suffix-strip would have already
+// hidden the offending operator). Returning `null` here drops the
+// recorder event entirely — better than letting a false-PASS row land
+// in `state.gate_results`.
+//
+// The walker is quote-aware at the level of single / double quotes so
+// operators inside `pytest -k 'a || b'` are ignored. Backticks and
+// `$(...)` are subshell openers — stripNonExecutedSuffix already cuts
+// at them on the strict side, but here we treat them as quotes during
+// the scan so the operator inside the subshell does not double-count.
+function scanForMaskingOperator(command) {
+  let inSingle = false;
+  let inDouble = false;
+  // Track the most recent non-whitespace significant character so the
+  // `&` branch can distinguish bare background-`&` from fd-duplication
+  // forms like `2>&1`, `1>&2`, `>&-`, `<&-`, `n<&m`. In all those
+  // cases the `&` is preceded by `>` or `<` (possibly across a digit),
+  // never bare. Quotes are not significant here; they're consumed
+  // above before this update.
+  let prevSig = '';
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+    if (inSingle || inDouble) continue;
+    if (ch === '|') {
+      // `||` — exit-code-masking (left's failure runs the right; shell
+      // exit becomes the right side's exit).
+      // bare `|` — pipe; exit = rightmost segment.
+      return command[i + 1] === '|' ? 'or_or' : 'pipe';
+    }
+    if (ch === ';') return 'semicolon';
+    if (ch === '\n' || ch === '\r') return 'newline';
+    if (ch === '&') {
+      const next = command[i + 1];
+      if (next === '&') { i++; prevSig = '&'; continue; }   // `&&` safe — skip both chars
+      if (next === '>') { i++; prevSig = '>'; continue; }   // `&>` redirect safe
+      // Hermes r4 on PR #265: fd duplication `n>&m` / `n<&m` /
+      // `>&-` / `<&-` puts `&` AFTER a redirect operator. The
+      // preceding significant char is `>` or `<` (possibly with a
+      // digit between, which we treat as still-redirect because
+      // `2>` is one logical token). Detect by walking backward
+      // past digits to the operator.
+      let j = i - 1;
+      while (j >= 0 && command[j] >= '0' && command[j] <= '9') j--;
+      if (j >= 0 && (command[j] === '>' || command[j] === '<')) {
+        // fd duplication — the `&` is part of the redirect token,
+        // not a background marker. Skip the next token target too
+        // (`-`, a digit, or a word) but lazy: just continue, the
+        // following chars will be re-classified by the loop.
+        prevSig = '&';
+        continue;
+      }
+      return 'background';                                   // bare `&` — background
+    }
+    if (ch !== ' ' && ch !== '\t') prevSig = ch;
+  }
+  return null;
+}
+
+// #232 follow-up (Hermes review on PR #265): shell wrappers conceal
+// the payload from the outer quote-aware scan. `bash -lc "npm test
+// || true"` passes the outer scan because the `||` lives inside the
+// double-quoted argument, but the shell DOES evaluate the `||`
+// internally — the wrapper executes the composite as one shell
+// session and emits the bypass-shaped exit code. Detect the wrapper
+// shape and re-scan the unwrapped payload so the masking operator
+// surfaces.
+//
+// Recognized wrappers: posix shells (bash/sh/zsh/dash/ksh/csh/tcsh/
+// fish) with a `-c` family flag (`-c`, `-lc`, `-ic`, `-ilc`, etc. —
+// any `-` flag whose final character is `c`).
+const SHELL_WRAPPER_HEADS = new Set([
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
+]);
+
+// Shell-wrapper flags that take a SEPARATE value token, so the loop
+// must consume two tokens instead of one when it sees them. The canon
+// list (from `man bash` SHELL INVOCATION + Hermes review iterations
+// on PR #265):
+//   `-o <option>` / `+o <option>` — set/unset shell option
+//                                   (pipefail, errexit, …)
+//   `-O <shopt>`  / `+O <shopt>`  — set/unset shopt option
+//                                   (extglob, nullglob, …)
+//   `--rcfile <path>` / `--init-file <path>` — bash startup file
+//   `--noediting` is single-token, NOT here; `--login` ditto.
+// GNU-style `--flag=value` is single-token: it doesn't appear in this
+// set and naturally falls through the "single-token, advance by 1"
+// branch in extractShellWrapperPayload below.
+const SHELL_WRAPPER_FLAGS_WITH_VALUE = new Set([
+  '-o', '+o', '-O', '+O', '--rcfile', '--init-file',
+]);
+
+function extractShellWrapperPayload(command) {
+  const tokens = command.trim().split(/\s+/);
+  if (tokens.length < 3) return null;
+  const head = tokens[0].toLowerCase();
+  // Reduce path-qualified head to basename so /bin/bash matches.
+  const baseHead = head.includes('/') ? head.slice(head.lastIndexOf('/') + 1) : head;
+  if (!SHELL_WRAPPER_HEADS.has(baseHead)) return null;
+  // Walk past leading flags until we find one whose final char is `c`
+  // (`-c`, `-lc`, `-ic`, ...). Consume value tokens for flags that
+  // take a value (`-o pipefail`); skip GNU-style `--flag=value`
+  // single-token. If we hit the end without a `-c`-family flag, bail
+  // out (this isn't a `-c` invocation).
+  let i = 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    // Bash accepts both `-`-prefixed and `+`-prefixed option flags
+    // (`-o option` enables, `+o option` disables). Either kind sits
+    // between the head and `-c`; treat them the same way.
+    if (!t.startsWith('-') && !t.startsWith('+')) break;
+    if (/^-[a-z]*c$/i.test(t)) { i++; break; }
+    if (SHELL_WRAPPER_FLAGS_WITH_VALUE.has(t)) { i += 2; continue; }
+    // Single-token forms: `--rcfile=path`, `--noprofile`, `-p`, `-i`,
+    // etc. Treat as flag-only and continue.
+    i++;
+  }
+  if (i >= tokens.length) return null;
+  // Re-join the remainder so a multi-token quoted payload survives the
+  // initial whitespace split, then peel one wrapping pair of single
+  // or double quotes if present. The recursive scan will run on the
+  // peeled text; nested quotes inside the payload behave normally
+  // because the recursive call uses scanForMaskingOperator unchanged.
+  const rest = tokens.slice(i).join(' ');
+  const m = rest.match(/^(['"])([\s\S]*)\1$/);
+  return m ? m[2] : rest;
+}
+
+// Bounded loop count: a pathological nested wrapper
+// (`bash -c "bash -c \"bash -c ...\""`) would otherwise run away.
+// Five levels covers any real-world wrapper composition; past that,
+// the helper falls open and the recorder records (no false-block
+// surface). Convergence: every iteration either reports a masking
+// operator (exit) or strips a wrapper level (i shrinks until the
+// non-wrapper base command is reached).
+const COMPOSITE_REJECT_MAX_PEEL_DEPTH = 5;
+
+export function compositeRejectReason(command) {
+  // Iteratively peel shell-wrapper layers, scanning each layer for a
+  // masking operator. The outer scan handles plain composites; the
+  // peel handles wrappers; nested wrappers (Hermes follow-up:
+  // `bash -lc "bash -c 'npm test || true'"`) are exposed level by
+  // level so the inner `||` surfaces correctly.
+  let current = command;
+  for (let depth = 0; depth < COMPOSITE_REJECT_MAX_PEEL_DEPTH; depth++) {
+    const reason = scanForMaskingOperator(current);
+    if (reason !== null) return reason;
+    const payload = extractShellWrapperPayload(current);
+    if (payload === null) return null;
+    current = payload;
+  }
+  return null;
+}
+
 export function classifyRecordedCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
+  // #232 (1) [data-integrity]: the recorder hook (not this classifier)
+  // is responsible for refusing to record evidence when the command
+  // shape would let a misleading shell exit code stamp a passing
+  // entry. The classifier preserves PR #220's leading-command family
+  // assignment so legitimate consumers (manual gate-evidence writes
+  // that include a redirect, structured-write tests that pass a
+  // composite for family probing) still resolve. See
+  // `compositeRejectReason` — exported above for the recorder hook
+  // to consume at write time.
   const trimmed = stripNonExecutedSuffix(command);
   if (!trimmed.trim()) return null;
   return matchFamilyRegex(trimmed);
