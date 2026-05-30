@@ -322,6 +322,23 @@ function schedulerExplanationMissing(cwd, state) {
     }
   }
 
+  // #230 axis 1b — canonical failure_code per parallel_failed wave.
+  // Free-form `failure_reason` is no longer unioned into rejection_reasons
+  // (see mpl-scheduler-aggregate.mjs), so a wave with a runtime failure
+  // surfaces a canonical token in `computed.failure_codes` instead.
+  // EACH code must appear in the explanation independently — naming the
+  // pre-attempt rejection token (e.g. `file_overlap`) is not enough when
+  // the wave also failed at runtime. Use `every`, not `some`, so a mixed
+  // batch of failure codes cannot be satisfied by mentioning only one.
+  const computedFailureCodes = Array.isArray(computed?.failure_codes)
+    ? computed.failure_codes.filter((c) => typeof c === 'string' && c)
+    : [];
+  for (const code of computedFailureCodes) {
+    if (!containsToken(code)) {
+      return `scheduler:no_parallel_explanation_missing_failure_code:expected=${code}`;
+    }
+  }
+
   // #214 + codex r1/r2 [logic]: degraded-telemetry axis is INDEPENDENT
   // of the rejection-reasons axis. Codex r2 showed a mixed run (one
   // missing-telemetry tier + one tier with file_overlap) bypassed the
@@ -355,7 +372,20 @@ function schedulerExplanationMissing(cwd, state) {
     // Catch-all: aggregate still requires an explanation but no
     // specific degraded shape was identified (and no concrete reasons
     // were recorded).
-    if (requiredDegraded.length === 0 && computedReasons.length === 0) {
+    //
+    // #230: a canonical failure_code IS a recorded reason — when
+    // computed.failure_codes is non-empty, the runtime cause is
+    // already required as an independent axis (axis 1b above). Adding
+    // `no_recorded_reason` on top would force the operator to say both
+    // `worker_dispatch_error` AND `no_recorded_reason`, which is
+    // contradictory. Skip the fallback when failure_codes is non-empty.
+    const hasFailureCode = Array.isArray(computed?.failure_codes)
+      && computed.failure_codes.length > 0;
+    if (
+      requiredDegraded.length === 0 &&
+      computedReasons.length === 0 &&
+      !hasFailureCode
+    ) {
       requiredDegraded.push('no_recorded_reason');
     }
   }

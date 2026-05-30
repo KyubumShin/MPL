@@ -16,6 +16,8 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
+import { isCanonicalFailureCode } from './mpl-scheduler-failure-codes.mjs';
+
 /**
  * Minimal YAML peek over `execution_tiers:` and top-level
  * `recompose_count:` in decomposition.yaml. We only need the parallel
@@ -330,6 +332,17 @@ export function aggregateScheduler(cwd, state) {
   const tiersWithRejectedEvent = new Set();
   const tiersSeen = new Set();
   const rejectionReasonSet = new Set();
+  // #230: canonical failure_code tokens from parallel_failed events.
+  // Collected SEPARATELY from rejection_reasons because (1) free-form
+  // failure_reason values were paraphrase-bypassing the canonical
+  // vocabulary gate, and (2) a wave with both pre-attempt
+  // rejection_reasons_by_phase and a runtime failure_code was being
+  // explained by the planning token alone, hiding the runtime cause.
+  // Only allowlisted codes (mpl-scheduler-failure-codes.mjs) are
+  // surfaced; anything else is dropped at this boundary so the
+  // finalize gate cannot be tricked by an executor emitting an
+  // arbitrary string in `failure_code`.
+  const failureCodeSet = new Set();
   let wavesParallelRejected = 0;
   let wavesParallelFailed = 0;
   // Codex r4 on PR #229 [logic]: per-event reasonless counters so the
@@ -350,9 +363,16 @@ export function aggregateScheduler(cwd, state) {
         else if (Array.isArray(v)) for (const r of v) if (typeof r === 'string' && r) rejectionReasonSet.add(r);
       }
     }
-    if (typeof e?.failure_reason === 'string' && e.failure_reason) {
-      rejectionReasonSet.add(e.failure_reason);
-    }
+    // #230: do NOT union event.failure_reason into rejection_reasons.
+    // That free-form prose message was the paraphrase-bypass surface
+    // (codex r6 on PR #229). It stays alongside the canonical
+    // failure_code for operator readability but no longer feeds the
+    // gate's required-token set.
+  }
+
+  function collectFailureCode(e) {
+    if (e?.selected_mode !== 'parallel_failed') return;
+    if (isCanonicalFailureCode(e?.failure_code)) failureCodeSet.add(e.failure_code);
   }
 
   // Codex r5 on PR #229 [logic]: the reasonless check must be
@@ -375,7 +395,18 @@ export function aggregateScheduler(cwd, state) {
     return false;
   }
   function failedEventHasReason(e) {
-    return typeof e?.failure_reason === 'string' && e.failure_reason.length > 0;
+    // #230: a parallel_failed wave is "reasoned" when EITHER the
+    // free-form failure_reason carries a message OR a canonical
+    // failure_code is present. Codex r6 on PR #229 originally counted
+    // only failure_reason, which made `parallel_failed_without_reason`
+    // a load-bearing degraded token. With #230, canonical
+    // failure_codes carry the runtime cause and the gate requires
+    // each code in the explanation independently — so a wave with a
+    // canonical code is no longer "reasonless".
+    const reasoned =
+      (typeof e?.failure_reason === 'string' && e.failure_reason.length > 0) ||
+      isCanonicalFailureCode(e?.failure_code);
+    return reasoned;
   }
   for (const e of events) {
     tiersSeen.add(Number(e.tier));
@@ -395,6 +426,10 @@ export function aggregateScheduler(cwd, state) {
     // deferred phases. Limiting this to non-parallel events would wedge a
     // correctly generated summary that mentions wave-split block reasons.
     collectRejectionReasons(e);
+    // #230: canonical failure_code is only emitted on parallel_failed
+    // events. Collected separately so the gate can require it as an
+    // independent axis from rejection_reasons.
+    collectFailureCode(e);
   }
 
   const tiersParallelExecuted = [...expectedParallel].filter((t) =>
@@ -431,6 +466,13 @@ export function aggregateScheduler(cwd, state) {
     waves_parallel_failed_without_reason: wavesParallelFailedWithoutReason,
     tiers_with_partial_rejection: tiersWithPartialRejection,
     rejection_reasons: [...rejectionReasonSet].sort(),
+    // #230: canonical failure_code tokens — surfaced separately from
+    // rejection_reasons so the finalize gate can require each one
+    // independently. Empty when no parallel_failed event carried a
+    // canonical code (the executor will set 'unknown_runtime_error'
+    // when it cannot classify, so this is empty only when no wave
+    // failed at all).
+    failure_codes: [...failureCodeSet].sort(),
     affected_tier_ids,
   };
 }
