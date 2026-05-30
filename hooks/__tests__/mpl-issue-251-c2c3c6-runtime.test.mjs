@@ -594,7 +594,10 @@ test('#251 C6 wire: Hard 1 still fails when tooling is requested but no tools ar
 test('#251: docs/design.md Hook System table includes mpl-require-reviewer', () => {
   const text = readPrompt('docs/design.md');
   assert.match(text, /`mpl-require-reviewer`/);
-  assert.match(text, /41 registered hook commands/);
+  // #257 reduced the count from 41 to 38 by folding mpl-require-e2e,
+  // mpl-require-e2e-authenticity, mpl-require-finalize-artifacts, and
+  // mpl-require-whole-goal-closure into the coalesced mpl-finalize-gate.
+  assert.match(text, /38 registered hook commands/);
 });
 
 test('#251: PURPOSES map (hooks/lib/mpl-hook-trace.mjs) has entry for mpl-require-reviewer', () => {
