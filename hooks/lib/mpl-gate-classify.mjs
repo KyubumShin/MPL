@@ -826,13 +826,19 @@ const SHELL_WRAPPER_HEADS = new Set([
 ]);
 
 // Shell-wrapper flags that take a SEPARATE value token, so the loop
-// must consume two tokens instead of one when it sees them. `-o <opt>`
-// (e.g. `bash -o pipefail -c ...`) is the canonical Hermes-found case;
-// `--rcfile <path>` and `--init-file <path>` are the documented bash
-// long-form equivalents. GNU-style `--flag=value` is single-token and
-// handled by the `includes('=')` branch in the main loop.
+// must consume two tokens instead of one when it sees them. The canon
+// list (from `man bash` SHELL INVOCATION + Hermes review iterations
+// on PR #265):
+//   `-o <option>` / `+o <option>` — set/unset shell option
+//                                   (pipefail, errexit, …)
+//   `-O <shopt>`  / `+O <shopt>`  — set/unset shopt option
+//                                   (extglob, nullglob, …)
+//   `--rcfile <path>` / `--init-file <path>` — bash startup file
+//   `--noediting` is single-token, NOT here; `--login` ditto.
+// GNU-style `--flag=value` is single-token and handled by the
+// includes('=') branch in the main loop.
 const SHELL_WRAPPER_FLAGS_WITH_VALUE = new Set([
-  '-o', '+o', '--rcfile', '--init-file',
+  '-o', '+o', '-O', '+O', '--rcfile', '--init-file',
 ]);
 
 function extractShellWrapperPayload(command) {

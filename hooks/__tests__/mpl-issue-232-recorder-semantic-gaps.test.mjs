@@ -134,6 +134,12 @@ describe('#232 (1) compositeRejectReason detection — unit', () => {
   it('flags `+o errexit -c` style (off-option flag) too', () => {
     assert.equal(compositeRejectReason('bash +o errexit -c "npm test || true"'), 'or_or');
   });
+  it('flags `-O extglob -c` style (shopt option flag with value)', () => {
+    // Hermes r3 on PR #265: bash also exposes shopt via -O / +O,
+    // structurally identical to -o / +o.
+    assert.equal(compositeRejectReason('bash -O extglob -c "npm test || true"'), 'or_or');
+    assert.equal(compositeRejectReason('bash +O nullglob -c "npm test ; true"'), 'semicolon');
+  });
   it('flags `--rcfile <path> -c` (rcfile flag takes value)', () => {
     assert.equal(compositeRejectReason('bash --rcfile /tmp/rc -c "npm test ; true"'), 'semicolon');
   });
