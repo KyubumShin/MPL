@@ -793,7 +793,14 @@ phases:
     writeArtifacts();
     writeDecompositionWithParallelTier();
     writeSchedulerEvents([
-      { tier: 1, selected_mode: 'parallel_failed', timestamp: '2026-05-27T00:00:02Z', failure_reason: 'worker_dispatch_error' },
+      // #230: parallel_failed events now carry a canonical
+      // `failure_code` (allowlisted) alongside the free-form
+      // `failure_reason`. The aggregator no longer unions
+      // failure_reason into rejection_reasons, so the runtime cause
+      // must be expressed via failure_code.
+      { tier: 1, selected_mode: 'parallel_failed', timestamp: '2026-05-27T00:00:02Z',
+        failure_code: 'worker_dispatch_error',
+        failure_reason: 'spawn ENOSPC under pool pressure' },
     ]);
     writeSummaryScheduler({
       tiers_total: 1,
@@ -804,11 +811,11 @@ phases:
       waves_parallel_rejected: 0,
       waves_parallel_failed: 1,
       tiers_with_partial_rejection: [],
-      rejection_reasons: ['worker_dispatch_error'],
-      // #214: explanation must use the canonical reason token
-      // (worker_dispatch_error / worker-dispatch-error / worker dispatch error),
-      // not a paraphrase. Updated from the original "worker dispatch failed"
-      // wording to satisfy the new content-strength check.
+      rejection_reasons: [],
+      // #230: failure_codes carries the canonical runtime cause
+      // separately from rejection_reasons. EACH code must appear in
+      // the explanation verbatim (snake_case / hyphen / space).
+      failure_codes: ['worker_dispatch_error'],
       no_parallel_explanation: 'tier 1 hit worker_dispatch_error during parallel execution; fell back to sequential retry',
     });
     const r = runHook();
