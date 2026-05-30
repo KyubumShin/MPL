@@ -275,6 +275,34 @@ export function allowedGateHeads(cwd) {
   return merged;
 }
 
+// #256: built-in non-runner heads whose BINARY NAME is itself the
+// family signal — `tsc`/`eslint`/`vitest`/`jest`/`mocha`/`ruff`/`mypy`/
+// `playwright`/`cypress`/`wdio`. Before this set, the fallback
+// `matchFamilyRegex(safeCanonical)` scanned the WHOLE canonical for
+// HARD3 keywords first, so a trailing positional arg containing an e2e
+// keyword (`tsc playwright`, `eslint cypress`, `vitest playwright`,
+// `mocha e2e`, etc.) promoted the entry to hard3 even though the head
+// already determined the family. ANSI-C `$'...'` and parameter
+// expansion `${VAR}...` wrap arbitrary text into the same shape
+// (`tsc $'playwright'`, `tsc ${FOO}playwright`) and bypassed the
+// classifier the same way. Synthesizing a canonical of just the head
+// before matchFamilyRegex closes both shapes: positional args no longer
+// leak into the keyword scan, and quoting/expansion is irrelevant
+// because the text after the head never reaches the regex.
+//
+// Members are exactly the strict allowlist minus runner heads (which
+// are routed through classifyRunnerHead instead). Each binary appears
+// as a `\b<head>\b` literal in one of HARD1/HARD2/HARD3_PATTERNS, so
+// matchFamilyRegex(head) is unambiguous.
+const STRICT_HEAD_AS_FAMILY_SIGNAL = Object.freeze(new Set([
+  // Hard 1
+  'tsc', 'eslint', 'ruff', 'mypy',
+  // Hard 2
+  'vitest', 'jest', 'pytest', 'mocha',
+  // Hard 3
+  'playwright', 'cypress', 'wdio',
+]));
+
 // Codex r8 on PR #244 [contract-break]: runner-head argument forgery.
 // `npx`/`pnpx`/`npm exec` allow arbitrary scripts after the head; the
 // family regex naively scanned the whole command, so `npx cowsay
@@ -582,6 +610,14 @@ export function classifyGateCommand(command, { cwd } = {}) {
   const familyFallback = () => {
     const runnerVerdict = classifyRunnerHead(head, safeCanonical);
     if (runnerVerdict !== undefined) return runnerVerdict;
+    // #256: head-as-signal binaries — synthesize a canonical of just the
+    // head before the family regex so trailing positional args (e.g.
+    // `tsc playwright`, `vitest cypress`) and quote/expansion wrappers
+    // (`tsc $'playwright'`, `tsc ${FOO}playwright`) cannot leak HARD3
+    // keywords into the keyword scan and forge a family promotion.
+    if (STRICT_HEAD_AS_FAMILY_SIGNAL.has(head)) {
+      return matchFamilyRegex(head);
+    }
     return matchFamilyRegex(safeCanonical);
   };
   if (structured?.has(head)) {
