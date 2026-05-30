@@ -859,8 +859,9 @@ const SHELL_WRAPPER_HEADS = new Set([
 //                                   (extglob, nullglob, …)
 //   `--rcfile <path>` / `--init-file <path>` — bash startup file
 //   `--noediting` is single-token, NOT here; `--login` ditto.
-// GNU-style `--flag=value` is single-token and handled by the
-// includes('=') branch in the main loop.
+// GNU-style `--flag=value` is single-token: it doesn't appear in this
+// set and naturally falls through the "single-token, advance by 1"
+// branch in extractShellWrapperPayload below.
 const SHELL_WRAPPER_FLAGS_WITH_VALUE = new Set([
   '-o', '+o', '-O', '+O', '--rcfile', '--init-file',
 ]);
