@@ -783,7 +783,7 @@ function stripNonExecutedSuffix(command) {
 // `$(...)` are subshell openers — stripNonExecutedSuffix already cuts
 // at them on the strict side, but here we treat them as quotes during
 // the scan so the operator inside the subshell does not double-count.
-export function compositeRejectReason(command) {
+function scanForMaskingOperator(command) {
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < command.length; i++) {
@@ -805,6 +805,71 @@ export function compositeRejectReason(command) {
       if (next === '>') { i++; continue; }    // `&>` redirect safe
       return 'background';                     // bare `&` — background
     }
+  }
+  return null;
+}
+
+// #232 follow-up (Hermes review on PR #265): shell wrappers conceal
+// the payload from the outer quote-aware scan. `bash -lc "npm test
+// || true"` passes the outer scan because the `||` lives inside the
+// double-quoted argument, but the shell DOES evaluate the `||`
+// internally — the wrapper executes the composite as one shell
+// session and emits the bypass-shaped exit code. Detect the wrapper
+// shape and re-scan the unwrapped payload so the masking operator
+// surfaces.
+//
+// Recognized wrappers: posix shells (bash/sh/zsh/dash/ksh/csh/tcsh/
+// fish) with a `-c` family flag (`-c`, `-lc`, `-ic`, `-ilc`, etc. —
+// any `-` flag whose final character is `c`).
+const SHELL_WRAPPER_HEADS = new Set([
+  'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
+]);
+
+function extractShellWrapperPayload(command) {
+  const tokens = command.trim().split(/\s+/);
+  if (tokens.length < 3) return null;
+  const head = tokens[0].toLowerCase();
+  // Reduce path-qualified head to basename so /bin/bash matches.
+  const baseHead = head.includes('/') ? head.slice(head.lastIndexOf('/') + 1) : head;
+  if (!SHELL_WRAPPER_HEADS.has(baseHead)) return null;
+  // Walk past leading flags until we find one whose final char is `c`
+  // (`-c`, `-lc`, `-ic`, ...). Skip plain flags that take a value
+  // conservatively; if we hit the end without a `-c`-family flag,
+  // bail out (this isn't a `-c` invocation).
+  let i = 1;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (!t.startsWith('-')) break;
+    if (/^-[a-z]*c$/i.test(t)) { i++; break; }
+    i++;
+  }
+  if (i >= tokens.length) return null;
+  // Re-join the remainder so a multi-token quoted payload survives the
+  // initial whitespace split, then peel one wrapping pair of single
+  // or double quotes if present. The recursive scan will run on the
+  // peeled text; nested quotes inside the payload behave normally
+  // because the recursive call uses scanForMaskingOperator unchanged.
+  const rest = tokens.slice(i).join(' ');
+  const m = rest.match(/^(['"])([\s\S]*)\1$/);
+  return m ? m[2] : rest;
+}
+
+export function compositeRejectReason(command) {
+  // First, scan the command as-is. Operators outside of quotes are
+  // legitimate composites and surface immediately.
+  const outer = scanForMaskingOperator(command);
+  if (outer !== null) return outer;
+  // Second pass — if the command is a shell wrapper, the payload was
+  // hidden inside the wrapper's quoted argument. Re-scan that payload
+  // so `bash -lc "npm test || true"` no longer slips through. One
+  // level of unwrapping is sufficient: a nested wrapper
+  // (`bash -lc "bash -c 'npm test || true'"`) would itself contain
+  // the outer wrapper's quotes, and a payload-level scan inside the
+  // first peel reaches the inner `||` directly.
+  const payload = extractShellWrapperPayload(command);
+  if (payload !== null) {
+    const inner = scanForMaskingOperator(payload);
+    if (inner !== null) return inner;
   }
   return null;
 }

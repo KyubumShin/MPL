@@ -97,6 +97,30 @@ describe('#232 (1) compositeRejectReason detection — unit', () => {
     assert.equal(compositeRejectReason('pytest -k "login || logout"'), null);
   });
 
+  // Hermes review on PR #265: shell wrappers (`bash -c`, `sh -c`,
+  // `bash -lc`, ...) hide the payload from the outer quote-aware
+  // scan. The wrapper itself evaluates the masking operator
+  // internally, so the bypass surface must extend into the wrapped
+  // payload.
+  it('flags `bash -lc "npm test || true"` — masking inside shell wrapper payload', () => {
+    assert.equal(compositeRejectReason('bash -lc "npm test || true"'), 'or_or');
+  });
+  it('flags `sh -c "npx playwright test | tee out.log"` — pipe inside wrapped payload', () => {
+    assert.equal(compositeRejectReason('sh -c "npx playwright test | tee out.log"'), 'pipe');
+  });
+  it('flags `bash -c \'npm test ; true\'` — semicolon inside wrapped payload', () => {
+    assert.equal(compositeRejectReason("bash -c 'npm test ; true'"), 'semicolon');
+  });
+  it('flags `/usr/local/bin/bash -lc "npm test || true"` — path-qualified shell head', () => {
+    assert.equal(compositeRejectReason('/usr/local/bin/bash -lc "npm test || true"'), 'or_or');
+  });
+  it('keeps `bash -lc "npm test && echo done"` — `&&` in payload still safe', () => {
+    assert.equal(compositeRejectReason('bash -lc "npm test && echo done"'), null);
+  });
+  it('keeps `bash -lc "npm test"` — no composite in payload', () => {
+    assert.equal(compositeRejectReason('bash -lc "npm test"'), null);
+  });
+
   it('classifier still resolves leading family on composite shapes — PR #220 contract preserved', () => {
     // The classifier is unchanged for these shapes (the recorder is
     // where rejection happens). Asserting here so a future refactor
@@ -321,5 +345,26 @@ describe('#232 (1) recorder integration — masking composites do not produce ga
     const state = postToolUse('docker compose run app npm test', { exit_code: 0 });
     assert.equal(state.gate_results?.hard2_coverage?.source, 'recorder',
       'recorder must tag every entry with source: \'recorder\' so I12 can skip strict re-validation');
+  });
+
+  // Hermes review on PR #265 found this bypass: the masking
+  // operator is hidden inside the shell wrapper's quoted payload, so
+  // the outer compositeRejectReason scan let it through. The
+  // wrapper-payload re-scan now catches it.
+  it('`bash -lc "npm test || true"` (shell-wrapper masking) does NOT produce a hard2_coverage entry', () => {
+    const state = postToolUse('bash -lc "npm test || true"', { exit_code: 0 });
+    assert.equal(state.gate_results?.hard2_coverage, undefined,
+      `recorder must drop wrapper-hidden masking composites, got: ${JSON.stringify(state.gate_results)}`);
+  });
+
+  it('`sh -c "npx playwright test | tee out.log"` (wrapped pipe) does NOT produce a hard3_resilience entry', () => {
+    const state = postToolUse('sh -c "npx playwright test | tee out.log"', { exit_code: 0 });
+    assert.equal(state.gate_results?.hard3_resilience, undefined,
+      `recorder must drop wrapper-hidden pipes, got: ${JSON.stringify(state.gate_results)}`);
+  });
+
+  it('`bash -lc "npm test"` (no payload composite) DOES still record', () => {
+    const state = postToolUse('bash -lc "npm test"', { exit_code: 0 });
+    assert.equal(state.gate_results?.hard2_coverage?.command, 'bash -lc "npm test"');
   });
 });
