@@ -819,8 +819,19 @@ scheduler = {
   tiers_with_partial_rejection: <list of tier ids>,
   rejection_reasons: union of event.rejection_reasons and the values of
                      event.rejection_reasons_by_phase across all events
-                     (deduplicated), plus event.failure_reason values for
-                     parallel_failed waves,
+                     (deduplicated). #230: event.failure_reason free-form
+                     prose is NO LONGER unioned here — the runtime cause
+                     of a parallel_failed wave is now carried by the
+                     canonical `failure_codes` field below.
+  failure_codes:     sorted list of canonical `event.failure_code` values
+                     from `parallel_failed` events (allowlist:
+                     `worker_dispatch_error`, `worktree_setup_error`,
+                     `wave_execution_error`, `merge_error`,
+                     `unknown_runtime_error`). Each code MUST appear
+                     verbatim in `no_parallel_explanation` independently
+                     of `rejection_reasons` — a wave with both a
+                     pre-attempt planning token and a runtime failure
+                     must name both.
   affected_tier_ids: sorted list of expected_parallel_tiers that did not
                      reach selected_mode == "parallel", that the
                      no_parallel_explanation MUST reference by id,
@@ -879,6 +890,21 @@ scheduler = {
     `waves_parallel_rejected_without_reason`, and
     `waves_parallel_failed_without_reason` counters to decide which
     degraded tokens to include.
+
+    **Canonical failure_codes (#230) — required per code:** EVERY token
+    in `failure_codes` MUST appear verbatim in the explanation
+    (snake_case / hyphen / space variants accepted, case-insensitive).
+    This is an independent axis from `rejection_reasons` — a wave with
+    a pre-attempt planning rejection AND a runtime failure must name
+    both. Examples:
+
+      OK:    "tier 2 lost parallelism: file_overlap deferred phase-3 then
+             the wave hit worker_dispatch_error"
+      OK:    "tier 1 worktree-setup-error before any worker dispatched"
+      BLOCK: "tier 2 had file_overlap"   (computed failure_codes named
+                                          worker_dispatch_error — missing)
+      BLOCK: "tier 1 worker dispatch failed"  (paraphrase; needs the
+                                               canonical worker_dispatch_error)
 }
 ```
 

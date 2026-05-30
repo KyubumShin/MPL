@@ -157,6 +157,26 @@ for each (wave, wave_index) in enumerate(waves):
     // Pool setup, worker dispatch, or per-phase execution failed before the
     // wave completed. Emit a distinct mode so finalize does not count this
     // as parallel execution.
+    //
+    // #230: emit a canonical `failure_code` alongside the free-form
+    // `failure_reason` message. The aggregator surfaces `failure_codes`
+    // as an independent axis from `rejection_reasons`, and the finalize
+    // gate requires each code to appear verbatim in `no_parallel_explanation`.
+    // Free-form `failure_reason` no longer feeds the gate's required-
+    // token set (paraphrase-bypass), it stays only for operator
+    // readability. Allowlisted codes (hooks/lib/mpl-scheduler-failure-codes.mjs):
+    //   - 'worktree_setup_error'  — pool / worktree creation failed BEFORE
+    //                               any worker dispatch
+    //   - 'worker_dispatch_error' — worker spawn / dispatch failed
+    //   - 'wave_execution_error'  — one or more workers failed inside the wave
+    //   - 'merge_error'           — sequential merge after workers completed failed
+    //   - 'unknown_runtime_error' — catch-all; use only when the error
+    //                               cannot be classified
+    // Codes outside the allowlist are silently dropped by the aggregator
+    // and the gate will surface
+    // `scheduler:no_parallel_explanation_missing_failure_code:expected=<code>`
+    // until a recognized code is recorded.
+    failure_code = classify_wave_failure(err)  // one of the canonical codes above
     record_scheduler_event({
       pipeline_id: state.pipeline_id,
       run_started_at: state.started_at,
@@ -171,6 +191,7 @@ for each (wave, wave_index) in enumerate(waves):
       worker_cap: max_phase_workers,
       rejection_reasons_by_phase: ready_but_blocked_reason,
       worktree_slots: [],
+      failure_code: failure_code,
       failure_reason: err.message
     })
     raise
