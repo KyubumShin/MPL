@@ -754,8 +754,72 @@ function stripNonExecutedSuffix(command) {
   return command.slice(0, cut);
 }
 
+// #232 (1) [data-integrity]: composite shapes that mask the leading
+// command's exit code in the overall shell exit. The recorder reads
+// the shell's exit code, so any composite where the gate command's
+// failure does NOT propagate to the shell exit is a false-PASS
+// surface:
+//   - `npm test || true`   — `||` swallows the failure (right side runs
+//                            on left's failure and its exit becomes the
+//                            shell exit)
+//   - `npm test ; true`    — `;` runs both, shell exit = `true` (0)
+//   - `npm test | tee log` — pipe exit = rightmost (tee's exit)
+//   - `npm test &`         — background; shell returns 0 immediately
+//   - newline / carriage return — multi-command shape, shell exit = last
+//
+// `&&` is genuinely safe (short-circuits on failure → leading
+// command's exit propagates). Redirects `>`, `>>`, `<`, `<<`, `&>`
+// move bytes/file descriptors, not exit codes. Comments `#` are
+// discarded by the shell.
+//
+// Detection runs on the ORIGINAL command, not on the
+// stripNonExecutedSuffix output (the suffix-strip would have already
+// hidden the offending operator). Returning `null` here drops the
+// recorder event entirely — better than letting a false-PASS row land
+// in `state.gate_results`.
+//
+// The walker is quote-aware at the level of single / double quotes so
+// operators inside `pytest -k 'a || b'` are ignored. Backticks and
+// `$(...)` are subshell openers — stripNonExecutedSuffix already cuts
+// at them on the strict side, but here we treat them as quotes during
+// the scan so the operator inside the subshell does not double-count.
+export function compositeRejectReason(command) {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+    if (inSingle || inDouble) continue;
+    if (ch === '|') {
+      // `||` — exit-code-masking (left's failure runs the right; shell
+      // exit becomes the right side's exit).
+      // bare `|` — pipe; exit = rightmost segment.
+      return command[i + 1] === '|' ? 'or_or' : 'pipe';
+    }
+    if (ch === ';') return 'semicolon';
+    if (ch === '\n' || ch === '\r') return 'newline';
+    if (ch === '&') {
+      const next = command[i + 1];
+      if (next === '&') { i++; continue; }    // `&&` safe — skip both chars
+      if (next === '>') { i++; continue; }    // `&>` redirect safe
+      return 'background';                     // bare `&` — background
+    }
+  }
+  return null;
+}
+
 export function classifyRecordedCommand(command) {
   if (typeof command !== 'string' || !command.trim()) return null;
+  // #232 (1) [data-integrity]: the recorder hook (not this classifier)
+  // is responsible for refusing to record evidence when the command
+  // shape would let a misleading shell exit code stamp a passing
+  // entry. The classifier preserves PR #220's leading-command family
+  // assignment so legitimate consumers (manual gate-evidence writes
+  // that include a redirect, structured-write tests that pass a
+  // composite for family probing) still resolve. See
+  // `compositeRejectReason` — exported above for the recorder hook
+  // to consume at write time.
   const trimmed = stripNonExecutedSuffix(command);
   if (!trimmed.trim()) return null;
   return matchFamilyRegex(trimmed);

@@ -392,6 +392,20 @@ function checkGateFamilyForBlock(block, label, cwd) {
       });
       continue;
     }
+    // #232 (2) [contract-break]: strict re-classification is for
+    // MANUAL state.gate_results writes — it deliberately rejects
+    // execution wrappers (`docker`, `kubectl exec`, `bash -lc`) because
+    // a hand-typed wrapper command is not credible gate evidence.
+    // But the recorder LEGITIMATELY accepts those wrappers; without
+    // this carve-out, every recorder write of a wrapper-shaped command
+    // would re-classify as `null` here and fire I12 family mismatch.
+    // `source: 'recorder'` is the entry's own attestation; recorder
+    // writes are authoritative for what they observed at execution
+    // time. Manual writes that try to forge `source: 'recorder'` are
+    // out of scope — the broader anti-forgery layer is upstream
+    // (mpl-write-guard rejects direct edits to state.gate_results
+    // outside the gate-recorder).
+    if (entry.source === 'recorder') continue;
     const family = classifyGateCommand(command, { cwd });
     if (family !== expectedFamily) {
       issues.push({
