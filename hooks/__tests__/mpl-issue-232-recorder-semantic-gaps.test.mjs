@@ -121,6 +121,35 @@ describe('#232 (1) compositeRejectReason detection — unit', () => {
     assert.equal(compositeRejectReason('bash -lc "npm test"'), null);
   });
 
+  // Hermes follow-up review on PR #265 (HEAD 4caf885): two more
+  // wrapper bypasses surfaced. The flag-with-value `-o pipefail`
+  // consumed the loop's `-c` skip; nested wrappers needed iterative
+  // peeling instead of one-shot.
+  it('flags `bash -o pipefail -c "npm test || true"` — option flag with value precedes -c', () => {
+    assert.equal(compositeRejectReason('bash -o pipefail -c "npm test || true"'), 'or_or');
+  });
+  it("flags `bash -lc \"bash -c 'npm test || true'\"` — nested shell wrapper", () => {
+    assert.equal(compositeRejectReason(`bash -lc "bash -c 'npm test || true'"`), 'or_or');
+  });
+  it('flags `+o errexit -c` style (off-option flag) too', () => {
+    assert.equal(compositeRejectReason('bash +o errexit -c "npm test || true"'), 'or_or');
+  });
+  it('flags `--rcfile <path> -c` (rcfile flag takes value)', () => {
+    assert.equal(compositeRejectReason('bash --rcfile /tmp/rc -c "npm test ; true"'), 'semicolon');
+  });
+  it('keeps `bash -o pipefail -c "npm test"` — no payload composite', () => {
+    assert.equal(compositeRejectReason('bash -o pipefail -c "npm test"'), null);
+  });
+  it('bounded depth: pathological nesting eventually falls open, recorder records', () => {
+    // Past the bound, the helper falls open. This is documented behavior:
+    // the bound is a runaway-loop backstop, not a real bypass surface (any
+    // realistic command is well under 5 levels of wrapping).
+    let nested = 'npm test || true';
+    for (let i = 0; i < 10; i++) nested = `bash -c "${nested.replace(/"/g, '\\"')}"`;
+    // No assertion that this returns null — only that it doesn't throw or hang.
+    assert.doesNotThrow(() => compositeRejectReason(nested));
+  });
+
   it('classifier still resolves leading family on composite shapes — PR #220 contract preserved', () => {
     // The classifier is unchanged for these shapes (the recorder is
     // where rejection happens). Asserting here so a future refactor

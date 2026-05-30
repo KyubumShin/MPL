@@ -825,6 +825,16 @@ const SHELL_WRAPPER_HEADS = new Set([
   'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh',
 ]);
 
+// Shell-wrapper flags that take a SEPARATE value token, so the loop
+// must consume two tokens instead of one when it sees them. `-o <opt>`
+// (e.g. `bash -o pipefail -c ...`) is the canonical Hermes-found case;
+// `--rcfile <path>` and `--init-file <path>` are the documented bash
+// long-form equivalents. GNU-style `--flag=value` is single-token and
+// handled by the `includes('=')` branch in the main loop.
+const SHELL_WRAPPER_FLAGS_WITH_VALUE = new Set([
+  '-o', '+o', '--rcfile', '--init-file',
+]);
+
 function extractShellWrapperPayload(command) {
   const tokens = command.trim().split(/\s+/);
   if (tokens.length < 3) return null;
@@ -833,14 +843,21 @@ function extractShellWrapperPayload(command) {
   const baseHead = head.includes('/') ? head.slice(head.lastIndexOf('/') + 1) : head;
   if (!SHELL_WRAPPER_HEADS.has(baseHead)) return null;
   // Walk past leading flags until we find one whose final char is `c`
-  // (`-c`, `-lc`, `-ic`, ...). Skip plain flags that take a value
-  // conservatively; if we hit the end without a `-c`-family flag,
-  // bail out (this isn't a `-c` invocation).
+  // (`-c`, `-lc`, `-ic`, ...). Consume value tokens for flags that
+  // take a value (`-o pipefail`); skip GNU-style `--flag=value`
+  // single-token. If we hit the end without a `-c`-family flag, bail
+  // out (this isn't a `-c` invocation).
   let i = 1;
   while (i < tokens.length) {
     const t = tokens[i];
-    if (!t.startsWith('-')) break;
+    // Bash accepts both `-`-prefixed and `+`-prefixed option flags
+    // (`-o option` enables, `+o option` disables). Either kind sits
+    // between the head and `-c`; treat them the same way.
+    if (!t.startsWith('-') && !t.startsWith('+')) break;
     if (/^-[a-z]*c$/i.test(t)) { i++; break; }
+    if (SHELL_WRAPPER_FLAGS_WITH_VALUE.has(t)) { i += 2; continue; }
+    // Single-token forms: `--rcfile=path`, `--noprofile`, `-p`, `-i`,
+    // etc. Treat as flag-only and continue.
     i++;
   }
   if (i >= tokens.length) return null;
@@ -854,22 +871,28 @@ function extractShellWrapperPayload(command) {
   return m ? m[2] : rest;
 }
 
+// Bounded loop count: a pathological nested wrapper
+// (`bash -c "bash -c \"bash -c ...\""`) would otherwise run away.
+// Five levels covers any real-world wrapper composition; past that,
+// the helper falls open and the recorder records (no false-block
+// surface). Convergence: every iteration either reports a masking
+// operator (exit) or strips a wrapper level (i shrinks until the
+// non-wrapper base command is reached).
+const COMPOSITE_REJECT_MAX_PEEL_DEPTH = 5;
+
 export function compositeRejectReason(command) {
-  // First, scan the command as-is. Operators outside of quotes are
-  // legitimate composites and surface immediately.
-  const outer = scanForMaskingOperator(command);
-  if (outer !== null) return outer;
-  // Second pass — if the command is a shell wrapper, the payload was
-  // hidden inside the wrapper's quoted argument. Re-scan that payload
-  // so `bash -lc "npm test || true"` no longer slips through. One
-  // level of unwrapping is sufficient: a nested wrapper
-  // (`bash -lc "bash -c 'npm test || true'"`) would itself contain
-  // the outer wrapper's quotes, and a payload-level scan inside the
-  // first peel reaches the inner `||` directly.
-  const payload = extractShellWrapperPayload(command);
-  if (payload !== null) {
-    const inner = scanForMaskingOperator(payload);
-    if (inner !== null) return inner;
+  // Iteratively peel shell-wrapper layers, scanning each layer for a
+  // masking operator. The outer scan handles plain composites; the
+  // peel handles wrappers; nested wrappers (Hermes follow-up:
+  // `bash -lc "bash -c 'npm test || true'"`) are exposed level by
+  // level so the inner `||` surfaces correctly.
+  let current = command;
+  for (let depth = 0; depth < COMPOSITE_REJECT_MAX_PEEL_DEPTH; depth++) {
+    const reason = scanForMaskingOperator(current);
+    if (reason !== null) return reason;
+    const payload = extractShellWrapperPayload(current);
+    if (payload === null) return null;
+    current = payload;
   }
   return null;
 }
