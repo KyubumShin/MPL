@@ -1117,6 +1117,25 @@ export function inspectRecovery(cwd = process.cwd()) {
       message: 'Baseline renewal sentinel (.mpl/mpl/.baseline-renewal) must be touched manually to authorize the write.',
     });
   }
+  if (code === 'finalize_gate_failures') {
+    // #257: the coalesced finalize gate aggregates per-validator findings under
+    // retry_context.failures[]. Recovery is not a single mechanical fix — each
+    // failure carries its own resume_instruction and the user must resolve each
+    // before retrying the finalize_done=true write. Echo the structured list
+    // back so the orchestrator can present it without re-parsing block_reason.
+    const failures = Array.isArray(state.retry_context?.failures)
+      ? state.retry_context.failures
+      : [];
+    return buildResult(state, {
+      status: 'requires_user_action',
+      handler: 'finalize_gate_failures',
+      safe: false,
+      failures,
+      message: failures.length > 0
+        ? `Finalize gate batched ${failures.length} validator failure(s); resolve each entry in retry_context.failures[] (originating hookId + code + reason) and retry the finalize_done=true write.`
+        : 'Finalize gate blocked the finalize_done=true write; resolve the recorded failure(s) and retry.',
+    });
+  }
 
   return buildResult(state, {
     status: 'unsupported',
