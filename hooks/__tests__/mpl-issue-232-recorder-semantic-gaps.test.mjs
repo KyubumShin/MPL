@@ -88,6 +88,27 @@ describe('#232 (1) compositeRejectReason detection — unit', () => {
     assert.equal(compositeRejectReason('npm test &> log.txt'), null);
   });
 
+  // Hermes r4 on PR #265: fd duplication (`n>&m`, `n<&m`, `>&-`)
+  // is a redirect operator, not a background-`&`. `2>&1` is the
+  // canonical "merge stderr into stdout" pattern, and the recorder
+  // must NOT drop legitimate logging shapes.
+  it('keeps `2>&1` and other fd-duplication forms (NOT background)', () => {
+    assert.equal(compositeRejectReason('npm test 2>&1'), null);
+    assert.equal(compositeRejectReason('npm test > log.txt 2>&1'), null);
+    assert.equal(compositeRejectReason('npm test 1>&2'), null);
+    assert.equal(compositeRejectReason('npm test 3>&1'), null);
+    assert.equal(compositeRejectReason('npm test >&-'), null);
+    assert.equal(compositeRejectReason('npm test <&3'), null);
+  });
+  it('keeps `bash -lc "npm test 2>&1"` — fd dup inside wrapper payload', () => {
+    assert.equal(compositeRejectReason('bash -lc "npm test 2>&1"'), null);
+  });
+  it('still flags bare `&` background even when redirect operators are also present', () => {
+    // `&` between redirects-and-command is still background.
+    assert.equal(compositeRejectReason('npm test > log.txt &'), 'background');
+    assert.equal(compositeRejectReason('npm test 2>&1 &'), 'background');
+  });
+
   it('keeps trailing comment shapes — `#` is shell-discarded', () => {
     assert.equal(compositeRejectReason('npm test # smoke'), null);
   });

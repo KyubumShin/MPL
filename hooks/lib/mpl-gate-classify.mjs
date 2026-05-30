@@ -786,6 +786,13 @@ function stripNonExecutedSuffix(command) {
 function scanForMaskingOperator(command) {
   let inSingle = false;
   let inDouble = false;
+  // Track the most recent non-whitespace significant character so the
+  // `&` branch can distinguish bare background-`&` from fd-duplication
+  // forms like `2>&1`, `1>&2`, `>&-`, `<&-`, `n<&m`. In all those
+  // cases the `&` is preceded by `>` or `<` (possibly across a digit),
+  // never bare. Quotes are not significant here; they're consumed
+  // above before this update.
+  let prevSig = '';
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
     if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
@@ -801,10 +808,27 @@ function scanForMaskingOperator(command) {
     if (ch === '\n' || ch === '\r') return 'newline';
     if (ch === '&') {
       const next = command[i + 1];
-      if (next === '&') { i++; continue; }    // `&&` safe — skip both chars
-      if (next === '>') { i++; continue; }    // `&>` redirect safe
-      return 'background';                     // bare `&` — background
+      if (next === '&') { i++; prevSig = '&'; continue; }   // `&&` safe — skip both chars
+      if (next === '>') { i++; prevSig = '>'; continue; }   // `&>` redirect safe
+      // Hermes r4 on PR #265: fd duplication `n>&m` / `n<&m` /
+      // `>&-` / `<&-` puts `&` AFTER a redirect operator. The
+      // preceding significant char is `>` or `<` (possibly with a
+      // digit between, which we treat as still-redirect because
+      // `2>` is one logical token). Detect by walking backward
+      // past digits to the operator.
+      let j = i - 1;
+      while (j >= 0 && command[j] >= '0' && command[j] <= '9') j--;
+      if (j >= 0 && (command[j] === '>' || command[j] === '<')) {
+        // fd duplication — the `&` is part of the redirect token,
+        // not a background marker. Skip the next token target too
+        // (`-`, a digit, or a word) but lazy: just continue, the
+        // following chars will be re-classified by the loop.
+        prevSig = '&';
+        continue;
+      }
+      return 'background';                                   // bare `&` — background
     }
+    if (ch !== ' ' && ch !== '\t') prevSig = ch;
   }
   return null;
 }
