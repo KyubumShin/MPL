@@ -52,7 +52,45 @@
         "overrides": { "type": "array" }
       }
     },
-    "channels":  { "type": "object", "additionalProperties": true },
+    "channels": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allowed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path":         { "type": "string" },
+              "writers":      { "type": "array", "items": { "type": "string" } },
+              "category":     { "type": "string" },
+              "schema":       { "type": "string" },
+              "append_only":  { "type": "boolean" }
+            }
+          }
+        },
+        "immutable_when": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "match":       { "type": "string" },
+              "when":        { "type": "string", "enum": [
+                                "always",
+                                "always_after_first_write",
+                                "baseline_renewal_sentinel_absent",
+                                "phase_lifecycle.phase_id_completed",
+                                "completed_phase_block_unchanged"
+                              ]},
+              "applies_to":  { "type": "string", "enum": ["phase_id", "contract_phase_id"] }
+            }
+          }
+        },
+        "forbidden_patterns": { "type": "array", "items": { "type": "string" } },
+        "immutable_paths":    { "type": "array", "items": { "type": "string" } },
+        "writable_paths":     { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "contracts": { "type": "object", "additionalProperties": true },
     "evidence":  { "type": "object", "additionalProperties": true },
     "gates":     { "type": "object", "additionalProperties": true },

@@ -2,12 +2,17 @@
 /**
  * MPL Require Completed Phase Immutability Hook (PreToolUse Write|Edit|MultiEdit).
  *
- * Blocks recomposition from mutating phase blocks that already have completion
- * evidence. Later phases can still be appended or edited through the delta flow.
+ * Move #7: thin shim over `hooks/lib/policy/channel-registry.mjs`. This
+ * hook activates ONLY the `completed_phase_block_unchanged` slice of the
+ * registry; semantics are byte-equivalent to the pre-Move #7 hand-rolled
+ * gate, including the partial-edit special-case for Edit/MultiEdit on
+ * `.mpl/mpl/decomposition.yaml`. Routes through `emitBlockedHook` so the
+ * `enforcement.missing_completed_phase_immutability` warn/block/off
+ * tiering is preserved.
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,12 +25,6 @@ const { isMplActive, readState } = await import(
 const { loadConfig } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
 );
-const {
-  completedPhaseIds,
-  validateCompletedPhaseImmutability,
-} = await import(
-  pathToFileURL(join(__dirname, 'lib', 'mpl-completed-phase-immutability.mjs')).href
-);
 const { collectFileWrites, isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
@@ -35,9 +34,19 @@ const { readStdin } = await import(
 const { emitBlockedHook, emitClearedOk } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
 );
+const { evaluateChannelWrite } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'channel-registry.mjs')).href
+);
 
 const HOOK_ID = 'mpl-require-completed-phase-immutability';
+const HOOK_EVENT = 'PreToolUse';
 const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition.yaml';
+const FOCUS = {
+  runForbidden: false,
+  runAllowlist: false,
+  runSchema: false,
+  rules: ['completed_phase_block_unchanged'],
+};
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -48,8 +57,14 @@ export function targetsDecompositionFile(filePath) {
   return /(^|\/)\.mpl\/mpl\/decomposition\.ya?ml$/.test(filePath);
 }
 
-function isFullWriteTool(toolName) {
-  return ['Write', 'write'].includes(String(toolName || ''));
+function normalizeRel(cwd, filePath) {
+  if (!filePath) return '';
+  const abs = resolve(filePath);
+  const cwdAbs = resolve(cwd);
+  if (abs.startsWith(cwdAbs + '/')) {
+    return abs.slice(cwdAbs.length + 1);
+  }
+  return filePath.replace(/\\/g, '/');
 }
 
 function currentDecompositionPath(cwd) {
@@ -71,7 +86,7 @@ async function main() {
 
   const cfg = loadConfig(cwd);
   if (cfg.completed_phase_immutability_required === false) {
-    // Codex r1 on PR #246: explicit config opt-out clears stale envelope.
+    // Explicit config opt-out clears stale envelope.
     emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
     return;
   }
@@ -80,44 +95,43 @@ async function main() {
   if (!existsSync(existingPath)) return ok();
 
   const state = readState(cwd) || {};
-  const completedIds = completedPhaseIds(cwd, state);
-  if (completedIds.length === 0) return ok();
-
   const oldText = readFileSync(existingPath, 'utf-8');
-  const issues = [];
+
   const toolInput = data.tool_input || data.toolInput || {};
-  for (const entry of collectFileWrites(toolInput)) {
-    if (!targetsDecompositionFile(entry.filePath)) continue;
-    if (!isFullWriteTool(toolName)) {
-      issues.push('decomposition:partial_edit_not_allowed_with_completed_phases');
-      continue;
-    }
-    if (!entry.text || !String(entry.text).trim()) {
-      issues.push('decomposition:empty_write');
-      continue;
-    }
-    const verdict = validateCompletedPhaseImmutability({
+  const writes = collectFileWrites(toolInput);
+
+  let firstBlock = null;
+  for (const entry of writes) {
+    const relPath = normalizeRel(cwd, entry.filePath);
+    if (!targetsDecompositionFile(relPath)) continue;
+
+    const verdict = evaluateChannelWrite({
+      cwd,
+      state,
+      cfg,
+      relPath,
       oldText,
       newText: entry.text,
-      completedIds,
+      toolName,
+      hookEvent: HOOK_EVENT,
+      focus: FOCUS,
     });
-    issues.push(...verdict.issues);
+
+    if (verdict.action === 'block') {
+      firstBlock = verdict;
+      break;
+    }
   }
 
-  if (issues.length > 0) {
-    const shown = issues.slice(0, 12).join(', ');
-    const more = issues.length > 12 ? ` (+${issues.length - 12} more)` : '';
+  if (firstBlock) {
     emitBlockedHook(cwd, state, {
       hookId: HOOK_ID,
-      ruleId: 'missing_completed_phase_immutability',
-      code: 'completed_phase_mutation',
-      artifact: BLOCKED_ARTIFACT,
-      reason:
-        `[MPL Completed Phase Immutability] Completed phase contract blocks are immutable during recomposition: ` +
-        `${shown}${more}. Append new phases or modify only incomplete phases.`,
-      resumeInstruction:
-        'Rewrite decomposition.yaml so completed phase blocks are unchanged; only append or modify incomplete phases, then retry the write.',
-      retryContext: { issues: issues.slice(0, 50), completed_ids: completedIds },
+      ruleId: firstBlock.ruleId || 'missing_completed_phase_immutability',
+      code: firstBlock.code || 'completed_phase_mutation',
+      artifact: firstBlock.artifact || BLOCKED_ARTIFACT,
+      reason: firstBlock.reason,
+      resumeInstruction: firstBlock.resumeInstruction,
+      retryContext: firstBlock.retryContext || {},
     });
     return;
   }
