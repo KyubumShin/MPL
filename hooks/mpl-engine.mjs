@@ -64,6 +64,7 @@ const configV1Mod = await importOptional('lib/mpl-config.mjs');
 const stateMod = await importOptional('lib/state/reader.mjs');
 const dispatchMod = await importOptional('lib/dispatch.mjs');
 const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
+const envelopeBridgeMod = await importOptional('lib/policy/envelope-bridge.mjs');
 
 // --- Step 1: parseEvent ----------------------------------------------------
 
@@ -129,7 +130,8 @@ function aggregate(event, decisions) {
 
   // First 'block' wins — already enforced by the executor short-circuit,
   // but we re-detect it here so aggregate stays a pure function of its input.
-  const blocking = decisions.find((d) => d && d.action === 'block');
+  // Accept both `action` and legacy `decision` field (source-edit policy).
+  const blocking = decisions.find((d) => d && (d.action === 'block' || d.decision === 'block'));
   const dialect = dialectFor(event);
 
   if (blocking) {
@@ -299,6 +301,15 @@ async function main() {
   }
 
   // Step 6 — sequential execution; first 'block' wins.
+  //
+  // Step 6.5 (new — Move #14 Part 2): envelope bridge. After each decision is
+  // captured we mirror its envelope side-effects back into .mpl/state.json so
+  // mpl-recover / mpl-state-invariant / RUNBOOK rows see the same blocked_hook
+  // envelope they did when the per-hook wrappers were authoritative. Structured
+  // sideEffects[] entries are dispatched verbatim (port of the legacy
+  // mpl-write-guard switch); implicit action='block' / 'allow' / 'warn' values
+  // are synthesized into recordBlockedHook / clearBlockedHook calls using the
+  // route -> hookId SSOT table. Fail-open: every bridge call is best-effort.
   const decisions = [];
   for (const mod of modules) {
     let decision;
@@ -312,7 +323,28 @@ async function main() {
       decision = { action: 'noop' };
     }
     decisions.push(decision);
-    if (decision.action === 'block') break;
+
+    // Step 6.5 — envelope bridge. Wrapped in try/catch so a bridge failure
+    // never blocks the hook response (writes to state.json are best-effort
+    // — the hook's continue/decision envelope remains authoritative).
+    try {
+      if (envelopeBridgeMod && typeof envelopeBridgeMod.applyEnvelopeForDecision === 'function') {
+        envelopeBridgeMod.applyEnvelopeForDecision({
+          cwd: evt.cwd,
+          moduleId: mod.id,
+          decision,
+          state,
+        });
+      }
+    } catch {
+      /* fail-open per envelope-bridge contract */
+    }
+
+    // Normalize: source-edit and a few legacy-shaped policies return
+    // `decision: 'block'` rather than `action: 'block'`. Treat both as the
+    // short-circuit signal so the engine matches the per-hook wrapper.
+    const actionCode = decision.action || decision.decision;
+    if (actionCode === 'block') break;
   }
 
   // Step 7 — aggregate
@@ -323,7 +355,7 @@ async function main() {
     event: evt.event,
     toolName: evt.toolName,
     modules: modules.map((m) => m.id),
-    decisions: decisions.map((d) => d.action),
+    decisions: decisions.map((d) => d.action || d.decision || 'noop'),
   });
 
   // Step 9 — emit envelope and exit cleanly.
