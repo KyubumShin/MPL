@@ -24,6 +24,44 @@
         }
       }
     },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled":             { "type": "boolean" },
+        "mode":                { "type": "string", "enum": ["wave_batch", "continuous_frontier"] },
+        "tier_mutex_enabled":  { "type": "boolean" },
+        "dispatch_owner":      { "type": "string", "enum": ["single_orchestrator"] },
+        "route_to_phase":      { "type": "array", "items": { "type": "string", "enum": ["env_ctx", "cwd_match", "file_path_match", "current_phase_fallback"] } },
+        "fail_closed_when_running": { "type": "boolean" }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mode":             { "type": "string", "enum": ["pool", "single_tenant"] },
+        "pool_root":        { "type": ["string", "null"] },
+        "reject_high_risk": { "type": "boolean" },
+        "contract_freeze":  { "type": "array", "items": { "type": "string" } },
+        "impact_drift": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled":         { "type": "boolean" },
+            "block_on_drift":  { "type": "boolean" }
+          }
+        },
+        "heartbeat": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "refresh_ms":    { "type": "integer", "minimum": 1 },
+            "staleness_ms":  { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
     "enforcement": {
       "type": "object",
       "additionalProperties": true,

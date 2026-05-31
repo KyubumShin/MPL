@@ -115,6 +115,26 @@ const DEFAULT_STATE = {
   // pool: { tier, phase_id, slot_id, worktree_path, base_ref, started_at,
   // completed_at }.
   worktree_pool_history: [],
+  // Move #16 (additive — no migration needed because defaults are empty):
+  // wave-scoped scheduler state. Populated by `lib/policy/scheduler.mjs`
+  // when the future move flips dispatch to the Node scheduler. Until then
+  // these stay at their empty defaults and no reader sees a shape change.
+  //
+  //   phase_lifecycle  — { [phase_id]: { status, slot_id?, execution_context_id?,
+  //                        worktree_root?, wave_id?, reason?, terminated_at? } }
+  //                      status ∈ PENDING|CLAIMED|RUNNING|MERGING|COMPLETED|
+  //                               FAILED|ABANDONED. Mirrors PHASE_LIFECYCLE_STATES
+  //                               in policy/scheduler.mjs.
+  //   running          — ExecutionContext[] for every phase currently in
+  //                      CLAIMED|RUNNING|MERGING. Rows removed on terminal.
+  //                      route_to_phase resolution chain (3) reads this.
+  //   waves_in_flight  — [{ wave_id, tier, wave_index, max_phase_workers,
+  //                        tier_parallel, slots[], queue[], running_phase_ids[],
+  //                        completed[], failed[] }] — one entry per active wave.
+  //                      Drained on wave_end.
+  phase_lifecycle: {},
+  running: [],
+  waves_in_flight: [],
   // AD-0006: verification contract captured by Phase 0 Enhanced Step 4.
   // "verify_script" | "explicit" | "heuristic" | null (pre-Phase-0 default).
   verification_strategy: null,

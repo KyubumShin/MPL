@@ -57,6 +57,94 @@ parallelism:
   max_phase_workers: 2         # clamped to 1..3 at load time
 
 # -----------------------------------------------------------------------------
+# Scheduler (Move #16) — wave-scoped continuous-frontier dispatch
+# -----------------------------------------------------------------------------
+# Additive / dormant. Consumed by `hooks/lib/policy/scheduler.mjs` once the
+# Node scheduler owns dispatch. The prompt scheduler in
+# `commands/mpl-run-execute.md` Step 4.0 still drives every `/mpl run`.
+#
+# `enabled`              — master kill-switch. Even when true, dispatch only
+#                          activates if a future move populates wave_start /
+#                          wave_end routes in lib/dispatch.mjs.
+# `mode`                 — `wave_batch` (legacy) or `continuous_frontier`.
+#                          The Node scheduler always runs continuous-frontier
+#                          inside a wave; the field is here so the prompt
+#                          scheduler can declare its own mode in run summaries.
+# `tier_mutex_enabled`   — when true, tiers with `parallel: false` get a
+#                          virtual lock (`tier_mutex_{N}`) that serializes
+#                          their phase claims. Disabling defeats one of the
+#                          structural guarantees — don't.
+# `dispatch_owner`       — single-orchestrator (default). Reserved for a
+#                          future multi-orchestrator experiment.
+# `route_to_phase`       — front-door resolution chain. Empty → use the
+#                          built-in priority order (env → cwd → file_path →
+#                          state.current_phase). When set, overrides the
+#                          order. Values: env_ctx | cwd_match |
+#                          file_path_match | current_phase_fallback.
+# `fail_closed_when_running` — fail-closed contract for the engine
+#                          front-door. When state.running[].length > 0 AND
+#                          the resolution falls through to current_phase
+#                          fallback, the engine DENIES non-read tools.
+#                          Default true.
+scheduler:
+  enabled: false
+  mode: continuous_frontier
+  tier_mutex_enabled: true
+  dispatch_owner: single_orchestrator
+  route_to_phase:
+    - env_ctx
+    - cwd_match
+    - file_path_match
+    - current_phase_fallback
+  fail_closed_when_running: true
+
+# -----------------------------------------------------------------------------
+# Isolation (Move #16) — per-phase, per-slot worktree pool
+# -----------------------------------------------------------------------------
+# Additive / dormant. Consumed by `hooks/lib/policy/isolation.mjs` once the
+# Node scheduler drives dispatch.
+#
+# `mode`                 — `pool` (slot-keyed parallel pool) or
+#                          `single_tenant` (legacy F-15 path). HIGH-risk
+#                          phases ALWAYS use single_tenant regardless of
+#                          this setting.
+# `pool_root`            — null = derive from `tmpdir()/mpl-wt-<run_id>`.
+#                          Set to an absolute path to pin (e.g. a fast
+#                          SSD scratch dir). Must live outside `/etc`,
+#                          `/usr`, `/var`, and `/`.
+# `reject_high_risk`     — composer veto. true keeps the v6→v7 structural
+#                          distinction between worktree_history (single
+#                          tenant) and worktree_pool_history (pool).
+#                          Disabling lets the composer pack HIGH-risk
+#                          phases into parallel waves — STRONGLY NOT
+#                          RECOMMENDED.
+# `contract_freeze`      — paths hardlinked into each slot's `.mpl/` and
+#                          chmod a-w. Empty list = use built-in defaults
+#                          (decomposition.yaml + phase0/** + contracts/**).
+# `impact_drift`         — post-execution `git diff` vs declared
+#                          impact.create / impact.modify / affected_tests.
+#                          When `block_on_drift: true`, any undeclared
+#                          path causes the phase to fail.
+# `heartbeat`            — staleness window for slot.heartbeat. The
+#                          dispatcher refreshes every refresh_ms; a slot
+#                          whose heartbeat is older than staleness_ms is
+#                          treated as ABANDONED on resume.
+isolation:
+  mode: pool
+  pool_root: null
+  reject_high_risk: true
+  contract_freeze:
+    - .mpl/mpl/decomposition.yaml
+    - .mpl/mpl/phase0
+    - .mpl/contracts
+  impact_drift:
+    enabled: true
+    block_on_drift: false
+  heartbeat:
+    refresh_ms: 10000
+    staleness_ms: 30000
+
+# -----------------------------------------------------------------------------
 # Convergence Detection
 # -----------------------------------------------------------------------------
 convergence:

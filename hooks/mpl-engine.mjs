@@ -65,6 +65,9 @@ const stateMod = await importOptional('lib/state/reader.mjs');
 const dispatchMod = await importOptional('lib/dispatch.mjs');
 const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
 const envelopeBridgeMod = await importOptional('lib/policy/envelope-bridge.mjs');
+// Move #16 — scheduler front-door (route_to_phase). Optional: when absent,
+// `executionContext` is null and the engine behaves exactly as before.
+const schedulerMod = await importOptional('lib/policy/scheduler.mjs');
 
 // --- Step 1: parseEvent ----------------------------------------------------
 
@@ -266,6 +269,64 @@ async function main() {
     mplActive = false;
   }
 
+  // Step 4.5 (Move #16) — execution-context resolution. The route_to_phase
+  // resolver returns a stable ExecutionContext tuple (run_id, wave_id,
+  // phase_id, slot_id, execution_context_id, worktree_root) so phase-scoped
+  // route conditions can branch on `ctx.executionContext.phase_id` without
+  // re-reading state. Fail-open: resolver throws → null. The fail-closed
+  // half (deny non-read tools when state.running[].length > 0 and we
+  // fell through to current_phase) is enforced BELOW, before installRoutes
+  // / dispatch, so a stray prompt-side edit cannot pollute another slot's
+  // worktree.
+  let executionContext = null;
+  try {
+    if (schedulerMod && typeof schedulerMod.route_to_phase === 'function') {
+      executionContext = schedulerMod.route_to_phase({
+        event: evt,
+        state,
+        config,
+        env: process.env,
+      });
+    }
+  } catch {
+    executionContext = null;
+  }
+
+  // Step 4.5 — fail-closed envelope for unresolved context during a
+  // parallel wave. When state.running[].length > 0 AND resolution fell
+  // through to (4) state.current_phase (marked by `_legacy: true`) AND the
+  // current tool is a write surface, we DENY. Read-only tools pass through.
+  const runningCount = Array.isArray(state?.running) ? state.running.length : 0;
+  const failClosedEnabled =
+    (config?.scheduler && typeof config.scheduler === 'object')
+      ? config.scheduler.fail_closed_when_running !== false
+      : true; // default-on
+  const WRITE_TOOLS = /^(Edit|Write|MultiEdit|NotebookEdit|Bash|Task|Agent)$/i;
+  if (
+    failClosedEnabled &&
+    runningCount > 0 &&
+    (executionContext === null || executionContext?._legacy === true) &&
+    typeof evt.toolName === 'string' &&
+    WRITE_TOOLS.test(evt.toolName) &&
+    // Only enforce on PreToolUse — PostToolUse / Stop / etc. have no deny
+    // permissionDecision dialect, so blocking there is meaningless.
+    evt.event === 'PreToolUse'
+  ) {
+    try {
+      console.log(JSON.stringify({
+        continue: false,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'execution_context_unresolved_during_parallel_wave',
+        },
+      }));
+    } catch {
+      return silent();
+    }
+    process.exit(0);
+  }
+
   // Step 5 — dispatch. If lib/dispatch.mjs failed to import, the matched
   // list is empty and aggregate() emits the inert envelope.
   const ctx = {
@@ -277,6 +338,7 @@ async function main() {
     state,
     config,
     mplActive,
+    executionContext,
     raw: evt.raw,
   };
 
