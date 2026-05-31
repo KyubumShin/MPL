@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mpl.config.yaml/v2",
+  "title": "MPL v2 Config Schema",
+  "description": "Validates the v2-specific sections of mpl.config.yaml. Legacy-only fields pass through (additionalProperties: true) — this YAML is an explicit superset of the legacy JSON DEFAULTS, not a stricter schema.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [2]
+    },
+    "legacy_json_compat": {
+      "type": "boolean"
+    },
+    "parallelism": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "max_phase_workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "strict": { "type": "boolean" },
+        "direct_source_edit":              { "$ref": "#/definitions/ruleAction" },
+        "phase_scope_violation":           { "$ref": "#/definitions/ruleAction" },
+        "missing_gate_evidence":           { "$ref": "#/definitions/ruleAction" },
+        "missing_artifact_schema":         { "$ref": "#/definitions/ruleAction" },
+        "anti_pattern_match":              { "$ref": "#/definitions/ruleAction" },
+        "state_invariant_violation":       { "$ref": "#/definitions/ruleAction" },
+        "bash_timeout_violation":          { "$ref": "#/definitions/ruleAction" },
+        "audit_residual":                  { "$ref": "#/definitions/ruleAction" },
+        "missing_phase_evidence":          { "$ref": "#/definitions/ruleAction" },
+        "missing_finalize_artifacts":      { "$ref": "#/definitions/ruleAction" },
+        "missing_completed_phase_immutability": { "$ref": "#/definitions/ruleAction" },
+        "missing_decomposition_delta":     { "$ref": "#/definitions/ruleAction" },
+        "missing_chain_assignment":        { "$ref": "#/definitions/ruleAction" },
+        "missing_e2e_evidence":            { "$ref": "#/definitions/ruleAction" },
+        "e2e_authenticity_invalid":        { "$ref": "#/definitions/ruleAction" },
+        "missing_whole_goal_closure":      { "$ref": "#/definitions/ruleAction" },
+        "finalize_gate_failures":          { "$ref": "#/definitions/ruleAction" },
+        "pp_schema_invalid":               { "$ref": "#/definitions/ruleAction" },
+        "small_plan_scope_conflict":       { "$ref": "#/definitions/ruleAction" },
+        "fast_track_phase0_artifacts_missing": { "$ref": "#/definitions/ruleAction" },
+        "overrides": { "type": "array" }
+      }
+    },
+    "channels":  { "type": "object", "additionalProperties": true },
+    "contracts": { "type": "object", "additionalProperties": true },
+    "evidence":  { "type": "object", "additionalProperties": true },
+    "gates":     { "type": "object", "additionalProperties": true },
+    "permit":    { "type": "object", "additionalProperties": true },
+    "schemas":   { "type": "object", "additionalProperties": true },
+    "audit":     { "type": "object", "additionalProperties": true }
+  },
+  "definitions": {
+    "ruleAction": {
+      "type": "string",
+      "enum": ["warn", "block", "off"]
+    }
+  }
+}

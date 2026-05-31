@@ -1,0 +1,252 @@
+# =============================================================================
+# MPL Configuration — v2 SSOT (Single Source of Truth)
+# =============================================================================
+#
+# This file is the v2 single-source-of-truth for MPL configuration.
+# Read by `hooks/lib/config.mjs` (v2 loader).
+#
+# COEXISTENCE WITH LEGACY:
+#   - Legacy `hooks/lib/mpl-config.mjs` is still active and read by every
+#     existing hook. It loads `.mpl/config.json` and uses its own DEFAULTS.
+#   - This YAML is ADDITIVE — it does NOT replace the legacy loader.
+#   - Every key in the legacy DEFAULTS appears here with the IDENTICAL
+#     default value (true superset). Doc-only knobs from
+#     `docs/config-schema.md` (tool_mode, context_rotation, mcp_server,
+#     context_monitor, phase_seed, chain_seed, discovery) are also
+#     included so an eventual single-file migration is lossless.
+#   - v2-only sections (`channels`, `contracts`, `evidence`, `gates`,
+#     `permit`, `schemas`, `audit`) are present as empty-but-shaped
+#     containers so future policy modules can register against a known
+#     structure without further schema work.
+#
+# RESOLUTION ORDER (when v2 loader is wired into hooks — NOT YET):
+#   workspace `<cwd>/mpl.config.yaml`  >  repo-root `mpl.config.yaml`
+#
+# Legacy-compat markers — `lib/config.mjs` uses these to detect
+# missing sections and fill from the legacy DEFAULTS at runtime.
+# =============================================================================
+
+version: 2
+legacy_json_compat: true
+
+# -----------------------------------------------------------------------------
+# Core Settings (legacy DEFAULTS — mirrors mpl-config.mjs)
+# -----------------------------------------------------------------------------
+max_fix_loops: 10
+gate1_strategy: auto           # auto | docker | native | skip
+hitl_timeout_seconds: 30
+
+# Doc-only knob (not in legacy DEFAULTS; legacy loader passes through
+# unchanged when present in .mpl/config.json). See docs/config-schema.md.
+tool_mode: standalone          # standalone | full | partial
+
+# -----------------------------------------------------------------------------
+# Context & Memory
+# -----------------------------------------------------------------------------
+context_cleanup_window: 3
+
+# Doc-only knob — terminal backend for session rotation. Auto-detect when
+# omitted; explicit value pins the backend.
+context_rotation:
+  backend: null                # kitty | tmux | osascript | null=auto
+
+# -----------------------------------------------------------------------------
+# Phase Parallelism
+# -----------------------------------------------------------------------------
+parallelism:
+  max_phase_workers: 2         # clamped to 1..3 at load time
+
+# -----------------------------------------------------------------------------
+# Convergence Detection
+# -----------------------------------------------------------------------------
+convergence:
+  stagnation_window: 3
+  min_improvement: 0.05
+  regression_threshold: -0.1
+
+# -----------------------------------------------------------------------------
+# Phase Seed (D-01, v0.6.0) — doc-only knobs
+# -----------------------------------------------------------------------------
+phase_seed:
+  enabled: true
+
+# -----------------------------------------------------------------------------
+# Chain-Scoped Seed (#34, Stage 1) — doc-only knobs
+# -----------------------------------------------------------------------------
+chain_seed:
+  enabled: false
+  max_chain_size: 5
+  discovery_regen_enabled: true
+
+# -----------------------------------------------------------------------------
+# Context Monitor (#34, Stage 1) — doc-only knobs
+# -----------------------------------------------------------------------------
+context_monitor:
+  enabled: true
+  mode: measure                # measure | enforce
+  context_window_tokens: 1000000
+  baton_threshold_pct: 60
+  force_threshold_pct: 80
+  dispatch_warn: 30
+
+# -----------------------------------------------------------------------------
+# Test Wait Policy (#34, Stage 2)
+# -----------------------------------------------------------------------------
+test_wait:
+  cache_mode: default          # default | extended
+  threshold_default_sec: 270
+  threshold_extended_sec: 3300
+  pipelining_enabled: true
+
+# -----------------------------------------------------------------------------
+# Discovery Pipeline (#34, Stage 2) — doc-only knobs
+# -----------------------------------------------------------------------------
+discovery:
+  scanner_enabled: true
+  agent_enabled: false
+  false_positive_threshold_pct: 30
+
+# -----------------------------------------------------------------------------
+# Ambiguity Gate (#240)
+# -----------------------------------------------------------------------------
+ambiguity:
+  threshold: 0.2
+  force_proceed_after_rounds: null
+
+# -----------------------------------------------------------------------------
+# Gate Classification (#240) — extends STRICT_GATE_HEAD_ALLOWLIST
+# -----------------------------------------------------------------------------
+gate_classify:
+  allowed_heads: []
+
+# -----------------------------------------------------------------------------
+# Bash Timeout Categories (#240) — per-category ceiling overrides
+# -----------------------------------------------------------------------------
+# Shape (per-category override):
+#   bash_timeout:
+#     <category_name>:
+#       max_ms: <int>
+bash_timeout: {}
+
+# -----------------------------------------------------------------------------
+# Test Agent (AD-0007)
+# -----------------------------------------------------------------------------
+test_agent:
+  default_required: true
+
+# -----------------------------------------------------------------------------
+# Required-flag booleans (legacy)
+# -----------------------------------------------------------------------------
+goal_contract_required: true
+goal_trace_required: true
+phase_contract_graph_required: true
+decomposition_delta_required: true
+phase_evidence_latch_required: true
+completed_phase_immutability_required: true
+whole_goal_closure_required: true
+e2e_authenticity_required: true
+finalize_artifacts_required: true
+phase0_artifacts_required: true
+
+# -----------------------------------------------------------------------------
+# Enforcement (P0-2, #110) — strict toggle + per-rule policy
+# Values: warn | block | off
+# Precedence (legacy): state.json > .mpl/config.json > DEFAULTS
+# -----------------------------------------------------------------------------
+enforcement:
+  strict: false
+  # Default 'warn' rules (transitional per #110).
+  direct_source_edit: warn
+  phase_scope_violation: warn
+  missing_gate_evidence: warn
+  missing_artifact_schema: warn
+  anti_pattern_match: warn
+  state_invariant_violation: warn
+  bash_timeout_violation: warn
+  audit_residual: warn
+  # Default 'block' rules (#235 B-category — state-corruption guards).
+  missing_phase_evidence: block
+  missing_finalize_artifacts: block
+  missing_completed_phase_immutability: block
+  missing_decomposition_delta: block
+  missing_chain_assignment: block
+  missing_e2e_evidence: block
+  e2e_authenticity_invalid: block
+  missing_whole_goal_closure: block
+  finalize_gate_failures: block        # #257 coalesced finalize gate
+  pp_schema_invalid: block
+  small_plan_scope_conflict: block
+  fast_track_phase0_artifacts_missing: block
+  # Audit-trail entries: {rule, value, reason, timestamp, source}
+  overrides: []
+
+# Top-level overrides[] (legacy DEFAULTS surface). Identical purpose to
+# `enforcement.overrides` — kept for byte-level parity with the legacy JSON.
+overrides: []
+
+# =============================================================================
+# v2-ONLY SECTIONS — empty-but-shaped policy registries
+# =============================================================================
+# These mirror the proposal §3 / §5 module taxonomy:
+#   channels | contracts | evidence | gates | permit | schemas | audit
+#
+# Each is a registry hash keyed by rule-id. Empty today; future policy
+# modules read from here. The v2 loader treats absence as "no rules
+# registered" — never as an error.
+# =============================================================================
+
+channels:
+  # Channel-registry rules — `.mpl/` path whitelist + immutability.
+  # Shape (planned):
+  #   immutable_paths: [glob, ...]
+  #   writable_paths: [glob, ...]
+  immutable_paths: []
+  writable_paths: []
+
+contracts:
+  # Phase contract declarative rules.
+  chain_assignment:
+    required: true
+  coverage:
+    required: true
+  decomposition:
+    require_delta: true
+  goal_trace:
+    required: true
+  test_agent:
+    brief_required: true
+  reviewer:
+    required: true
+  e2e:
+    required: true
+
+evidence:
+  # Structural evidence-check rules. Replaces legacy Evidence Latch.
+  rules: []
+
+gates:
+  # Finalize / quality / ambiguity / phase-transition gate rules.
+  finalize:
+    enabled: true
+  quality:
+    threshold: 0.7
+    max_retries: 3
+  ambiguity:
+    enabled: true
+
+permit:
+  # Auto-permit + bash-timeout + resource-risk rules.
+  auto_permit:
+    fail_closed: true
+  bash_timeout:
+    categories: {}
+  resource_risk:
+    rules: []
+
+schemas:
+  # validate-* + property-check rules.
+  rules: []
+
+audit:
+  # Finalize-time global audit (Tier 4 + drift). Empty registry today.
+  rules: []

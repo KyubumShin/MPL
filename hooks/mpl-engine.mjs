@@ -1,0 +1,305 @@
+#!/usr/bin/env node
+/**
+ * MPL v2 Engine — single-entry hook dispatcher (proposal §4.2).
+ *
+ * STATE AT THIS COMMIT (Move #5): dormant. The dispatch registry in
+ * `lib/dispatch.mjs` is empty and `hooks.json` does NOT route any event
+ * here yet. The engine is intentionally importable + invokable as a
+ * script (`node hooks/mpl-engine.mjs`) so smoke tests can prove the
+ * end-to-end wiring is sound before Move #6 lands policy modules.
+ *
+ * Sequence (verbatim from §4.2):
+ *   1. parseEvent(stdin)  — defensive snake/camel-case normalization
+ *   2. loadConfig(cwd)    — resilient: {} on import failure
+ *   3. readState(cwd)     — resilient: null on import failure
+ *   4. isMplActive(cwd)   — short-circuit; per-module opt-out via
+ *                           moduleSpec.requireMplActive=false
+ *   5. dispatch(ctx)      — declarative routing scan (lib/dispatch.mjs)
+ *   6. sequential exec    — first 'block' decision short-circuits
+ *   7. aggregate          — picks Dialect A (Stop, SessionStart systemMessage)
+ *                           or Dialect B (PreToolUse permissionDecision,
+ *                           PostToolUse / UserPromptSubmit / SessionStart
+ *                           additionalContext) per a constant table
+ *   8. signal emit        — placeholder no-op until lib/observability/signals.mjs
+ *   9. envelope + exit 0  — universal fail-open on any throw
+ */
+
+import { dirname, join } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// --- Resilient lib imports -------------------------------------------------
+// Move #5 ships before Moves #6+; some lib paths referenced by §4.2 may not
+// exist yet. Every import is wrapped so a missing dep degrades to a safe
+// no-op rather than crashing the hook.
+
+async function importOptional(relPath) {
+  try {
+    return await import(pathToFileURL(join(__dirname, relPath)).href);
+  } catch {
+    return null;
+  }
+}
+
+const stdinMod = await importOptional('lib/stdin.mjs');
+// Prefer the v2 config module (`lib/config.mjs` → `loadConfigV2`) that the
+// proposal §4.2 names; fall back to the established v1 (`lib/mpl-config.mjs`
+// → `loadConfig`) when the v2 module has not yet shipped. Either resolves to
+// `{}` on failure — config wiring is resilient by design.
+const configV2Mod = await importOptional('lib/config.mjs');
+const configV1Mod = await importOptional('lib/mpl-config.mjs');
+const stateMod = await importOptional('lib/state/reader.mjs');
+const dispatchMod = await importOptional('lib/dispatch.mjs');
+const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
+
+// --- Step 1: parseEvent ----------------------------------------------------
+
+async function parseEvent() {
+  const readStdin = stdinMod?.readStdin;
+  if (typeof readStdin !== 'function') return {};
+  let raw;
+  try {
+    raw = await readStdin(5000);
+  } catch {
+    return {};
+  }
+  if (!raw) return {};
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!data || typeof data !== 'object') return {};
+  return {
+    event: data.hook_event_name || data.hookEventName || '',
+    toolName: data.tool_name || data.toolName || '',
+    toolInput: data.tool_input || data.toolInput || {},
+    toolResponse: data.tool_response || data.toolResponse || undefined,
+    cwd: data.cwd || data.directory || process.cwd(),
+    raw: data,
+  };
+}
+
+// --- Step 7: dialect picker ------------------------------------------------
+// Dialect A = top-level `systemMessage` / `decision` envelope (legacy events).
+// Dialect B = `hookSpecificOutput.{permissionDecision|additionalContext}`.
+//
+// Per Claude Code hook spec:
+//   - PreToolUse                  -> Dialect B (permissionDecision: allow|deny|ask)
+//   - PostToolUse                 -> Dialect B (additionalContext)
+//   - UserPromptSubmit            -> Dialect B (additionalContext)
+//   - SessionStart                -> Dialect B (additionalContext) + Dialect A (systemMessage)
+//   - Stop / SubagentStop         -> Dialect A (decision: block/allow + reason)
+//   - Notification                -> Dialect A (passthrough)
+const DIALECT_TABLE = {
+  PreToolUse: 'B',
+  PostToolUse: 'B',
+  UserPromptSubmit: 'B',
+  SessionStart: 'AB',
+  Stop: 'A',
+  SubagentStop: 'A',
+  Notification: 'A',
+};
+
+function dialectFor(event) {
+  return DIALECT_TABLE[event] || 'B';
+}
+
+// --- Step 7: aggregate decisions -> envelope -------------------------------
+
+function aggregate(event, decisions) {
+  // No decisions = perfectly inert pass-through.
+  if (!decisions || decisions.length === 0) {
+    return { continue: true, suppressOutput: true };
+  }
+
+  // First 'block' wins — already enforced by the executor short-circuit,
+  // but we re-detect it here so aggregate stays a pure function of its input.
+  const blocking = decisions.find((d) => d && d.action === 'block');
+  const dialect = dialectFor(event);
+
+  if (blocking) {
+    if (dialect === 'A' || dialect === 'AB') {
+      return {
+        continue: false,
+        decision: 'block',
+        reason: blocking.reason || 'blocked by MPL policy',
+      };
+    }
+    // Dialect B block envelope — PreToolUse uses permissionDecision deny.
+    if (event === 'PreToolUse') {
+      return {
+        continue: false,
+        hookSpecificOutput: {
+          hookEventName: event,
+          permissionDecision: 'deny',
+          permissionDecisionReason: blocking.reason || 'blocked by MPL policy',
+        },
+      };
+    }
+    return {
+      continue: false,
+      decision: 'block',
+      reason: blocking.reason || 'blocked by MPL policy',
+    };
+  }
+
+  // No block: collect additionalContext / systemMessage from warn/noop/allow.
+  const contextParts = decisions
+    .map((d) => (d && typeof d.additionalContext === 'string') ? d.additionalContext.trim() : '')
+    .filter(Boolean);
+  const systemMsgs = decisions
+    .map((d) => (d && typeof d.systemMessage === 'string') ? d.systemMessage.trim() : '')
+    .filter(Boolean);
+  const explicitAllow = decisions.find((d) => d && d.permissionDecision === 'allow');
+
+  const envelope = { continue: true };
+
+  if (dialect === 'A') {
+    if (systemMsgs.length) envelope.systemMessage = systemMsgs.join('\n\n');
+    if (!systemMsgs.length && !contextParts.length) envelope.suppressOutput = true;
+    return envelope;
+  }
+
+  // Dialect B (or AB).
+  const hso = { hookEventName: event };
+  if (event === 'PreToolUse' && explicitAllow) {
+    hso.permissionDecision = 'allow';
+    if (explicitAllow.reason) hso.permissionDecisionReason = explicitAllow.reason;
+  }
+  if (contextParts.length) hso.additionalContext = contextParts.join('\n\n');
+
+  const hasHsoPayload = hso.permissionDecision || hso.additionalContext;
+  if (hasHsoPayload) envelope.hookSpecificOutput = hso;
+  if (dialect === 'AB' && systemMsgs.length) envelope.systemMessage = systemMsgs.join('\n\n');
+  if (!hasHsoPayload && !envelope.systemMessage) envelope.suppressOutput = true;
+  return envelope;
+}
+
+// --- Step 8: signal emission placeholder -----------------------------------
+
+async function emitSignal(payload) {
+  try {
+    if (signalsMod && typeof signalsMod.emit === 'function') {
+      await signalsMod.emit(payload);
+    }
+  } catch {
+    /* fail-open: signals never break the hook */
+  }
+}
+
+// --- Universal fail-open exit ---------------------------------------------
+
+function silent() {
+  try {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+  } catch {
+    /* nothing */
+  }
+  process.exit(0);
+}
+
+// --- main ------------------------------------------------------------------
+
+async function main() {
+  // Step 1
+  const evt = await parseEvent();
+  if (!evt || !evt.event) return silent();
+
+  // Step 2 — resilient. Prefer v2 (`loadConfigV2`) when present, fall back
+  // to v1 (`loadConfig`). Either failure path → `{}`.
+  let config = {};
+  try {
+    if (configV2Mod && typeof configV2Mod.loadConfigV2 === 'function') {
+      config = configV2Mod.loadConfigV2(evt.cwd) || {};
+    } else if (configV1Mod && typeof configV1Mod.loadConfig === 'function') {
+      config = configV1Mod.loadConfig(evt.cwd) || {};
+    }
+  } catch {
+    config = {};
+  }
+
+  // Step 3 — resilient
+  let state = null;
+  try {
+    if (stateMod && typeof stateMod.readState === 'function') {
+      state = stateMod.readState(evt.cwd) || null;
+    }
+  } catch {
+    state = null;
+  }
+
+  // Step 4 — short-circuit gate. Per-module opt-out lives on the spec
+  // (`requireMplActive: false`); dispatch() consumes `ctx.mplActive`.
+  let mplActive = false;
+  try {
+    if (stateMod && typeof stateMod.isMplActive === 'function') {
+      mplActive = !!stateMod.isMplActive(evt.cwd);
+    }
+  } catch {
+    mplActive = false;
+  }
+
+  // Step 5 — dispatch. If lib/dispatch.mjs failed to import, the matched
+  // list is empty and aggregate() emits the inert envelope.
+  const ctx = {
+    event: evt.event,
+    toolName: evt.toolName,
+    toolInput: evt.toolInput,
+    toolResponse: evt.toolResponse,
+    cwd: evt.cwd,
+    state,
+    config,
+    mplActive,
+    raw: evt.raw,
+  };
+
+  let modules = [];
+  try {
+    if (dispatchMod && typeof dispatchMod.dispatch === 'function') {
+      modules = dispatchMod.dispatch(ctx) || [];
+    }
+  } catch {
+    modules = [];
+  }
+
+  // Step 6 — sequential execution; first 'block' wins.
+  const decisions = [];
+  for (const mod of modules) {
+    let decision;
+    try {
+      decision = await mod.handler(ctx);
+    } catch (err) {
+      // Module crash = fail-open for that module; record a noop.
+      decision = { action: 'noop', reason: `module ${mod.id} threw: ${err?.message || err}` };
+    }
+    if (!decision || typeof decision !== 'object') {
+      decision = { action: 'noop' };
+    }
+    decisions.push(decision);
+    if (decision.action === 'block') break;
+  }
+
+  // Step 7 — aggregate
+  const envelope = aggregate(evt.event, decisions);
+
+  // Step 8 — placeholder signal emission (no-op until signals.mjs lands).
+  await emitSignal({
+    event: evt.event,
+    toolName: evt.toolName,
+    modules: modules.map((m) => m.id),
+    decisions: decisions.map((d) => d.action),
+  });
+
+  // Step 9 — emit envelope and exit cleanly.
+  try {
+    console.log(JSON.stringify(envelope));
+  } catch {
+    return silent();
+  }
+  process.exit(0);
+}
+
+main().catch(() => silent());
