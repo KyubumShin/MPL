@@ -1,10 +1,10 @@
-# MPL (Micro-Phase Loop) v0.18.6
+# MPL (Micro-Phase Loop) v0.19.0
 
 **Prevention over cure. Specification over debugging.**
 
 An agent workflow plugin for Claude Code and Codex CLI that decomposes ambitious tasks into micro-phases — each independently planned, executed, and verified in isolation — so context never corrupts and failures never cascade.
 
-[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Router](#the-router) · [Agents](#the-agent-roster) · [Under the Hood](#under-the-hood)
+[Quick Start](#quick-start) · [Philosophy](#from-chaos-to-coherence) · [How](#the-loop) · [Pipeline Depth](#pipeline-depth-v017) · [Agents](#the-agent-roster) · [Under the Hood](#under-the-hood)
 
 ---
 
@@ -56,7 +56,7 @@ No Phase 0            38% → debugging hell
 
 **Law 2: The orchestrator must never write code.**
 
-The moment the orchestrator touches source files, it becomes invested in its own implementation. It defends its code instead of objectively verifying it. MPL enforces separation with a PreToolUse hook that warns the orchestrator when it attempts to edit source files directly. All code flows through `mpl-phase-runner` agents via Task delegation.
+The moment the orchestrator touches source files, it becomes invested in its own implementation. It defends its code instead of objectively verifying it. MPL enforces separation with a PreToolUse hook (`mpl-write-guard`) that BLOCKS unsafe direct source edits by default — including Bash redirect/tee/sed-i/dd-of/cp-mv/git-apply write paths (Move #6) — and downgrades to a warning only for in-scope edits. `mpl-cancel` SKILL paths and `decomposition.yaml` writer identity are hard-protected (#236). All code flows through `mpl-phase-runner` agents via Task delegation.
 
 ---
 
@@ -77,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | ba
 curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | bash -s -- --runtime both --scope user
 ```
 
-The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. Claude Code installs default to `--scope user`; pass `--scope ask` to choose interactively from Bash, where Enter selects `user`, or pass `--scope project`/`--scope local` for explicit non-interactive installs. `--scope ask` requires a real interactive TTY even when used with `curl | bash`; use an explicit scope in CI or other headless runs. For reproducible installs, pin a release tag by passing the env var to `bash`, for example `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.18.6 bash -s -- --runtime codex`. Set `MPL_INSTALL_ROOT=<path>` to choose another install root.
+The installer stores the downloaded MPL source under `~/.mpl/install/source/mpl` by default. Claude Code installs default to `--scope user`; pass `--scope ask` to choose interactively from Bash, where Enter selects `user`, or pass `--scope project`/`--scope local` for explicit non-interactive installs. `--scope ask` requires a real interactive TTY even when used with `curl | bash`; use an explicit scope in CI or other headless runs. For reproducible installs, pin a release tag by passing the env var to `bash`, for example `curl -fsSL https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh | MPL_REF=v0.19.0 bash -s -- --runtime codex`. Set `MPL_INSTALL_ROOT=<path>` to choose another install root.
 
 When `install.sh` is run from a local checkout, that local source takes precedence; `--ref`/`MPL_REF` will warn unless `MPL_FORCE_DOWNLOAD=1` is set. To inspect before running, download the script first: `curl -fsSLo /tmp/mpl-install.sh https://raw.githubusercontent.com/KyubumShin/MPL/main/install.sh && less /tmp/mpl-install.sh && bash /tmp/mpl-install.sh --runtime codex`.
 
@@ -129,14 +129,13 @@ mpl add user authentication with OAuth and role-based access
 <summary><strong>What just happened?</strong></summary>
 
 ```
-Quick Scope Scan  → 8 affected files, 4 test scenarios → pipeline_score 0.72
-Hat Selection     → PP-proximity scoring → appropriate pipeline depth
-PP Interview      → 6 Pivot Points extracted (3 CONFIRMED, 3 PROVISIONAL)
-Phase 0 Enhanced  → API contracts + type policy + error spec generated
-Decomposition     → 4 micro-phases with interface contracts
-Phase Execution   → 4 phases × (plan → execute → test → verify)
-3H+1A Gate        → Hard 1: build+types, Hard 2: tests, Hard 3: PP compliance, Advisory: cross-boundary
-RUNBOOK           → Full execution log for session continuity
+Goal Contract  → AC/AX frozen, real_runtime_required computed
+Phase 0        → API contracts + type policy + error spec + raw scan
+Decomposition  → ordered phases with execution_tiers + resource_locks + covers + reviewer_required
+Phase Execution → fresh session per phase, Phase Runner + Test Agent (independent author) + Adversarial Reviewer
+Gates          → Hard 1 build+types, Hard 2 tests, Hard 3 PP/H-item closure (no Advisory)
+Finalize       → E2E real-runtime, Codex Audit (Tier 4), Atomic Commit
+RUNBOOK        → resume-safe execution log
 ```
 
 Each phase saw only its own context. No pollution. No cascade.
@@ -168,11 +167,10 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
               └────────────────┬────────────────┘
                                │
                     ┌──────────▼──────────────┐
-                    │  3 Hard + 1 Advisory    │
+                    │  3 Hard Gates           │
                     │  Hard 1: Build+Types    │
                     │  Hard 2: Tests          │
                     │  Hard 3: PP Compliance  │
-                    │  Advisory: Cross-Boundary│
                     └──────────┬──────────────┘
                                │
                            Complete
@@ -180,12 +178,11 @@ MPL's core is a **decompose-execute-verify** loop where each iteration is a fres
 
 | Step | What Happens | Why It Matters |
 |------|-------------|----------------|
-| **Triage** | Analyze prompt density, scan scope | Right-size the pipeline |
 | **Pivot Points** | Socratic interview extracts immutable constraints | Prevent scope drift |
 | **Phase 0** | Pre-specification: contracts, types, errors | Eliminate debugging |
 | **Decompose** | Break into ordered phases with interface contracts | Each phase is independently verifiable |
 | **Execute** | Fresh session per phase, Phase Runner delegation, micro-test cycles | No context pollution |
-| **3H+1A Gate** | Tests (Hard) → Review (Hard) → PP (Hard) + Types (Advisory) | Evidence-based completion |
+| **3 Hard Gates** | Tests (Hard 2) → PP+H-items (Hard 3) + Build/Types (Hard 1) | Evidence-based completion |
 | **RUNBOOK** | Continuous audit log for human/agent session continuity | Pick up where you left off |
 
 ### State Summary: The Only Bridge
@@ -217,64 +214,20 @@ When a phase fails after 3 retries, it doesn't crash — it **circuit breaks**:
 
 1. Preserve PASS TODOs (verified work is never discarded)
 2. Rollback FAIL TODO files to pre-phase state
-3. Attempt tier escalation before giving up (see [The Router](#the-router))
-4. If all tiers exhausted, transition to `phase5-finalize` (partial completion)
+3. Transition to `phase5-finalize` (partial completion)
 
 Circuit break leads directly to pipeline failure. MPL reports what succeeded and what failed — partial progress is always preserved.
 
 ---
 
-## The Router
+## Pipeline Depth (v0.17+)
 
-> The user should never have to judge "is this a small task or a big one?"
-> The system should figure it out — and adapt when it's wrong.
-
-### The Hat Model (PP-Proximity)
-
-MPL uses **PP-proximity** (Pivot Point proximity) to determine pipeline depth. Each task is scored by how close it touches the project's immutable constraints (Pivot Points). Higher proximity means more pipeline rigor.
-
-One entry point. Auto-scoring. Dynamic escalation.
-
-```
-"mpl fix the login bug"              → Triage → Hat scores PP-proximity → lightweight pipeline
-"mpl add email validation"           → Triage → Hat scores PP-proximity → standard pipeline
-"mpl refactor the auth system"       → Triage → Hat scores PP-proximity → full pipeline
-```
-
-#### PP-Proximity Score
-
-Triage runs a Quick Scope Scan and computes PP-proximity — how much the task touches core constraints:
-
-```
-pp_proximity = (pp_impact × 0.40) + (file_scope × 0.25)
-             + (contract_change × 0.20) + (risk_signal × 0.15)
-
-pp_impact:        How many PPs are directly affected (0.0 ~ 1.0)
-file_scope:       min(affected_files / 10, 1.0)
-contract_change:  Whether interface contracts change (0.0 or 1.0)
-risk_signal:      prompt keyword analysis (0.0 ~ 1.0)
-```
-
-#### Hat + Floor
-
-| Hat | PP-Proximity | What Runs | Floor (minimum guarantee) | ~Tokens |
-|-----|-------------|-----------|--------------------------|---------|
-| **Light** | Low | Error Spec → Fix → Gate 1 → Commit | Gate 1 always runs | ~5-15K |
-| **Standard** | Medium | PP(light) → Error Spec → Single Phase → Gate 1+2 | Gate 1+2 always run | ~20-40K |
-| **Full** | High | Full pipeline with all gates | All 3 Hard Gates run | ~50-100K+ |
-
-#### Dynamic Escalation
-
-When a Hat level fails, it doesn't give up — it grows:
-
-```
-[Light] ──circuit break──→ [Standard] ──circuit break──→ [Full]
-                                │                              │
-                                ├─ Completed TODOs preserved   ├─ Completed phases preserved
-                                └─ Failed TODO → single phase  └─ Failed phase → phase5-finalize
-```
-
-Keyword hints still work as manual overrides: `"mpl bugfix"` → light, `"mpl small"` → standard.
+v0.17 removed the Hat/Triage front-door. Every prompt now enters at full
+depth: Phase 0 Enhanced → Decomposition → Phase Execution → 3 Hard Gates →
+Finalize. The decomposer decides scope (phase count, execution_tiers,
+resource_locks). Dynamic escalation, PP-proximity tiers, and keyword
+overrides ("mpl bugfix" / "mpl small") are gone — they are no longer
+recognized by mpl-keyword-detector.
 
 ---
 
@@ -313,7 +266,7 @@ Eleven agents, each with a single purpose. Loaded on-demand, never preloaded. Gr
 |-------|------|-------|
 | **Doctor** | 12-category installation diagnostics. Read-only | haiku |
 
-> The original "Eight Minds" framing predated v0.17/v0.18. Phase 0 was split (Analyzer + Decomposer synthesis per #57) and a dedicated Seed Generator (#58) was carved out; Tier 4 verification added the Adversarial Reviewer (#103) and Codex Auditor (#117, F6); Git Master separates commit hygiene from phase execution. Scout (lightweight search) and Compound (learning distillation) were absorbed into the orchestrator's grep-based loop and the 4-Tier Memory subsystem respectively.
+> The original "Eight Minds" framing predated v0.17/v0.18. Phase 0 was split (Analyzer + Decomposer synthesis per #57) and a dedicated Seed Generator (#58) was carved out; Tier 4 verification added the Adversarial Reviewer (#103) and Codex Auditor (#117, F6); Git Master separates commit hygiene from phase execution. Scout and Compound were absorbed into the orchestrator's grep-based loop and `.mpl/memory/learnings.md` (F-11) respectively.
 
 ### Agent Separation Principle
 
@@ -333,16 +286,15 @@ Not all verification is equal. MPL classifies every criterion:
 | **S-item** | Sandbox Testing | BDD scenarios, Given/When/Then | Integration test passes |
 | **H-item** | Human-Required | Side Interview with user | UX judgment, visual review |
 
-### 3 Hard Gates + 1 Advisory
+### 3 Hard Gates
 
-Three hard gates that block completion, plus one advisory gate:
+Three hard gates that block completion:
 
 | Gate | Type | Method | Pass Criteria |
 |------|------|--------|---------------|
 | **Hard 1** | **Hard** | Build + Type Check (project-wide) | 0 build errors, 0 type errors |
 | **Hard 2** | **Hard** | Automated tests (A + S items) | pass_rate >= 95% |
 | **Hard 3** | **Hard** | PP compliance + H-item resolution | No violations + all H-items resolved |
-| **Advisory** | Advisory | Cross-boundary contract check | Boundary contract consistency (warns, does not block) |
 
 ### Convergence Detection
 
@@ -363,88 +315,76 @@ Fix loops track pass rate history for automatic decisions:
 
 ```
 MPL/
-├── agents/                 # 11 agent definitions (YAML frontmatter)
-│   └── mpl-interviewer.md   # PP Interview + ambiguity resolution (opus)
-├── commands/               # Orchestration protocols (split for token efficiency)
-│   ├── mpl-run.md          # Router: which protocol file to load
-│   ├── mpl-run-phase0.md   # Steps -1 ~ 2.5: Triage, PP, Phase 0
-│   ├── mpl-run-decompose.md # Steps 3 ~ 3-F: Decomposition + feedback loop
-│   ├── mpl-run-execute.md  # Step 4: Execution loop, 3H+1A Gate, Fix loop
-│   └── mpl-run-finalize.md # Steps 5 ~ 6: Finalize, Resume
-├── prompts/                # 4-Layer template system (F-39)
-│   ├── domains/            # 8 domain templates (base layer)
-│   ├── subdomains/         # 19 tech-stack templates
-│   ├── tasks/              # 6 task-type overlays
-│   └── langs/              # 5 language templates
-├── hooks/                  # 8 hooks across 6 events
-│   ├── mpl-write-guard.mjs       # Warns orchestrator on source file edits
-│   ├── mpl-validate-output.mjs   # Validates agent output schemas
-│   ├── mpl-phase-controller.mjs  # Phase transitions + escalation (F-21)
-│   ├── mpl-keyword-detector.mjs  # "mpl" keyword → pipeline init
-│   ├── mpl-auto-permit.mjs       # Learned auto-permission (F-34)
-│   ├── mpl-permit-learner.mjs    # Permission pattern learning (F-34)
-│   ├── mpl-compaction-tracker.mjs # Compaction checkpoint (F-31)
-│   ├── mpl-session-init.mjs      # Context rotation init (F-38)
+├── agents/                # 11 agents (mpl-adversarial-reviewer, mpl-codebase-analyzer,
+│                          #   mpl-codex-auditor, mpl-decomposer, mpl-doctor, mpl-git-master,
+│                          #   mpl-interviewer, mpl-phase-runner, mpl-phase0-analyzer,
+│                          #   mpl-seed-generator, mpl-test-agent)
+├── commands/              # 11 protocol files (mpl-run + run-phase0/decompose/execute/finalize splits)
+├── prompts/               # 4-Layer template system (F-39)
+├── hooks/
+│   ├── hooks.json         # 6 events × 1 entrypoint (PreCompact / PreToolUse / PostToolUse
+│   │                      #   / Stop / SessionStart / UserPromptSubmit)
+│   ├── mpl-engine.mjs     # v2 dispatcher — single entrypoint for all 6 events
+│   ├── mpl-*.mjs          # 46 hook modules (36 with .legacy siblings during the v2 cutover,
+│   │                      #   routed through lib/dispatch.mjs ROUTES)
 │   └── lib/
-│       ├── mpl-state.mjs         # State management + escalation
-│       ├── mpl-scope-scan.mjs    # Pipeline score calculation (F-20)
-│       ├── mpl-cache.mjs         # Phase 0 caching
-│       ├── mpl-profile.mjs       # Token profiling
-│       └── mpl-routing-patterns.mjs # Routing pattern learning (F-22)
-├── skills/                 # 10 skills
-│   ├── mpl/                # Main pipeline (single entry point)
-│   ├── mpl-pivot/          # PP interview
-│   ├── mpl-status/         # Dashboard
-│   ├── mpl-cancel/         # Clean cancellation
-│   ├── mpl-resume/         # Resume from checkpoint
-│   ├── mpl-recover/        # Hook-block recovery
-│   ├── mpl-gap-analysis/   # Standalone gap analysis
-│   ├── mpl-version-bump/   # Version bump checklist
-│   ├── mpl-doctor/         # Diagnostics
-│   └── mpl-setup/          # Setup wizard
+│       ├── dispatch.mjs              # ROUTES table per event
+│       ├── state/                    # reader / writer / writer-cli / shard-writer / wave-reducer (schema v7)
+│       ├── policy/                   # 12 v2 policy modules: audit, channel-registry, contracts,
+│       │                             #   envelope-bridge, evidence, gates, isolation, permit,
+│       │                             #   scheduler, schemas, session-init, source-edit
+│       │                             #   + reconcile/ (4 modules)
+│       ├── observability/            # bootstrap / signals / trackers
+│       └── migrations/               # v1→v7 schema migration chain
+├── skills/                # 10 skills (mpl, mpl-pivot, mpl-status, mpl-cancel, mpl-resume,
+│                          #   mpl-recover, mpl-gap-analysis, mpl-version-bump, mpl-doctor, mpl-setup)
 └── docs/
-    ├── design.md           # Full specification
-    ├── standalone.md       # Standalone mode fallback matrix (F-04)
-    └── roadmap/            # Evolution history + future plans
+    ├── design.md
+    ├── redesign-proposal.html   # v2 architecture rationale + Stage A move log
+    ├── standalone.md
+    ├── config-schema.md
+    └── roadmap/
 ```
 
 **Key internals:**
 
-- **Hat Model (PP-proximity)** — Quick Scope Scan + PP-proximity score → Hat-based pipeline depth selection
-- **Dynamic Escalation (F-21)** — light → standard → full on circuit break, preserving completed work
-- **RUNBOOK (F-10)** — Integrated execution log, auto-updated at 9 pipeline points, enables session resume
-- **Session Persistence (F-12)** — `<remember priority>` tags at phase transitions + RUNBOOK dual safety net
-- **Run-to-Run Learning (F-11)** — Orchestrator distills RUNBOOK → `.mpl/memory/learnings.md`
-- **Routing Pattern Learning (F-22)** — Jaccard similarity matching on past execution patterns
-- **Self-Directed Context (F-24)** — Phase Runner can Read/Grep within scope-bounded impact files
-- **Task-based TODO (F-23)** — TaskCreate/TaskUpdate as primary TODO state manager during execution
-- **Background Execution (F-13)** — Independent TODOs dispatched with `run_in_background: true`
-- **Hard 1 Build+Type Check** — Project-wide build and type checking (consolidates previous Gate 0.5)
-- **4-Layer Templates (F-39)** — Domain + Subdomain + Task Type + Language prompt composition
-- **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable
-- **Phase 0 Caching** — Hash-based cache key, skip entire Phase 0 on cache hit (~8-25K tokens saved)
-- **2-Tier PD** — Phase Decisions classified Active/Summary per phase for bounded token budget
-- **Convergence Detection** — Stagnation (variance < 5%), regression (delta < -10%), strategy suggestions
-- **Dangerous Command Detection (T-01, v3.8)** — Bash safety guard for rm -rf, DROP TABLE, git push --force, etc.
-- **Core-First Phase Ordering (T-12, v3.8)** — CORE → EXTENSION → SUPPORT sort within dependency tiers
-- **Compaction Recovery (F-31, v3.8)** — Read-side checkpoint loading after context compression
-- **Post-Execution Review (T-10, v3.9)** — H-item severity routing: HIGH blocks, MED/LOW defer to Step 5.5
-- **Phase-Scoped File Lock (T-01 P2, v3.9)** — Warn on writes outside current phase's declared scope
-- **Budget Pause & Resume (F-33, v3.9)** — Auto-pause on context exhaustion, handoff signal for watcher
-- **Feasibility 2-Layer Defense (T-11, v4.0)** — INFEASIBLE detection in Stage 2 + RE_INTERVIEW in Decomposer
-- **Browser QA Gate (T-03, v4.0)** — Claude in Chrome MCP UI verification (Gate 1.7, non-blocking)
-- **PR Creation (T-04, v4.0)** — Auto PR with Gate evidence via `gh pr create`
-- **MCP Server Tier 1 (M-01, v0.5.1)** — Deterministic ambiguity scoring + active state read/write via MCP tools
-- **2-Pass Decomposition + Phase Seed (D-01, v0.6.0)** — JIT seed generation, deterministic TODOs, acceptance mapping
-- **2-Level Parallelism (D-01, v0.6.0)** — TODO parallel graph (within phase) + EXTENSION/SUPPORT phase parallel (between phases)
+- **Policy Engine (v2, #18)** — 12 policy modules under hooks/lib/policy/ replace 36 standalone hook decisions; .legacy.mjs siblings retained for one cycle as rollback tier.
+- **Single-Dispatcher Hook Surface (v2 #14)** — hooks.json shrinks from 39 entries to 6 (one per event); mpl-engine.mjs fans out via lib/dispatch.mjs ROUTES.
+- **State Sharding + Wave Reducer (v2 #17)** — concurrent phase workers write shard files; wave-reducer collapses them into .mpl/state.json (schema v7).
+- **Scheduler + Isolation (v2 #16)** — ExecutionContext threads scheduler decisions and isolation policy through the dispatch layer.
+- **Audit Policy + Tier 4 Drift Gating (v2 #13)** — Codex Auditor verdict gates finalize.
+- **RUNBOOK (F-10)** — Integrated execution log, auto-updated at pipeline transition points, enables session resume.
+- **Session Persistence (F-12)** — `<remember priority>` tags at phase transitions + RUNBOOK dual safety net.
+- **Run-to-Run Learning (F-11)** — Orchestrator distills RUNBOOK → `.mpl/memory/learnings.md`.
+- **Self-Directed Context (F-24)** — Phase Runner can Read/Grep within scope-bounded impact files.
+- **Task-based TODO (F-23)** — TaskCreate/TaskUpdate as primary TODO state manager during execution.
+- **Background Execution (F-13)** — Independent TODOs dispatched with `run_in_background: true`.
+- **Hard 1 Build+Type Check** — Project-wide build and type checking (consolidates previous Gate 0.5).
+- **4-Layer Templates (F-39)** — Domain + Subdomain + Task Type + Language prompt composition.
+- **Standalone Mode (F-04)** — Auto-detect tool availability, Grep/Glob fallbacks when LSP/AST unavailable.
+- **2-Tier PD** — Phase Decisions classified Active/Summary per phase for bounded token budget.
+- **Convergence Detection** — Stagnation (variance < 5%), regression (delta < -10%), strategy suggestions.
+- **MCP Server Tier 1 (M-01, v0.5.1)** — Deterministic ambiguity scoring + active state read/write via MCP tools.
+- **2-Pass Decomposition + Phase Seed (D-01, v0.6.0)** — JIT seed generation, deterministic TODOs, acceptance mapping.
+- **2-Level Parallelism (D-01, v0.6.0)** — TODO parallel graph (within phase) + EXTENSION/SUPPORT phase parallel (between phases).
 
 </details>
+
+## v2 Architecture
+
+The v0.19.0 release is the closing cut of the Stage A v2 redesign (moves
+#1–#18). The hook layer moved from 39 entries in hooks.json calling
+individual scripts to a single mpl-engine.mjs dispatcher routing 46
+modules through lib/dispatch.mjs ROUTES, with policy decisions
+consolidated into hooks/lib/policy/. Full rationale, before/after
+diagrams, and the per-move log live in
+[`docs/redesign-proposal.html`](./docs/redesign-proposal.html).
 
 ### State Directory: `.mpl/`
 
 | Path | Purpose |
 |------|---------|
-| `.mpl/state.json` | Unified pipeline + execution state (schema v2, P2-6). Contains `run_mode`, `current_phase`, `tool_mode`, and the `execution` subtree (task, phase_details, totals, cumulative_pass_rate) — formerly split across two files. |
+| `.mpl/state.json` | Unified pipeline + execution state (schema v7, v1→v7 migration chain in hooks/lib/migrations/). Contains `run_mode`, `current_phase`, `tool_mode`, and the `execution` subtree (task, phase_details, totals, cumulative_pass_rate) — formerly split across two files. |
 | `.mpl/pivot-points.md` | Immutable constraints (Pivot Points) |
 | `.mpl/config.json` | User configuration overrides |
 | `.mpl/mpl/RUNBOOK.md` | Integrated execution log for session continuity (F-10) |
@@ -472,7 +412,7 @@ MPL Full | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
 - Project folder, API rate limits (5-hour / 7-day from Anthropic OAuth API), context window %, session duration
 
 **Line 2 — Pipeline Status (MPL active only):**
-- Hat level (Light/Standard/Full), current phase
+- Current phase
 - TODO progress, Gate results (✓/✗/-), Fix loop count
 - Token usage vs budget, tool mode
 
@@ -492,14 +432,10 @@ MPL Full | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
 ## Usage
 
 ```bash
-# Just say what you want — the system figures out the rest
-mpl add user authentication with OAuth        # → Full (~80K tokens)
-mpl add input validation to signup form       # → Standard (~30K tokens)
-mpl fix null check in handleSubmit            # → Light (~8K tokens)
-
-# Keyword hints for manual override
-mpl bugfix missing error handler              # → forces Light
-mpl small add retry logic                     # → forces Standard
+# Just say what you want — the decomposer sizes the pipeline
+mpl add user authentication with OAuth
+mpl add input validation to signup form
+mpl fix null check in handleSubmit
 
 # Direct skill invocation
 /mpl:mpl

@@ -2,8 +2,8 @@
 
 All fields for `.mpl/config.json`. Single source of truth for configuration.
 
-> **Version**: v0.18.6 (dependency-frontier verification pipelining and TODO slot streaming)
-> **Last updated**: 2026-05-19
+> **Version**: v0.19.0 (v2 architecture cutover — single-dispatcher hooks.json, policy engine, schema v7)
+> **Last updated**: 2026-06-01
 
 ---
 

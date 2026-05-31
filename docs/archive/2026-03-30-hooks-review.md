@@ -1,3 +1,9 @@
+> ARCHIVED 2026-06-01. This review reflects the 13-hook, pre-v0.17 era and
+> is superseded by the v2 single-dispatcher architecture. Current hook
+> surface: 46 modules routed by hooks/mpl-engine.mjs through
+> hooks/lib/dispatch.mjs ROUTES across 6 events. See docs/design.md §7 and
+> docs/redesign-proposal.html §03 for the live design.
+
 # MPL Hooks 코드 리뷰 (2026-03-30)
 
 전체 품질: **8.2/10** — 성숙하고 일관성 있는 코드베이스. 소수의 수정 사항 존재.

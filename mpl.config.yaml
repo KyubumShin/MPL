@@ -207,10 +207,17 @@ discovery:
 observability:
   sentinels:
     subagent_type_filter:
-      s0: ['mpl-seed-generator', 'mpl:mpl-seed-generator',
-           'mpl-phase-runner',   'mpl:mpl-phase-runner']
-      s1: ['mpl-phase-runner',   'mpl:mpl-phase-runner']
-      s3: ['mpl-test-agent',     'mpl:mpl-test-agent']
+      s0:
+        - mpl-seed-generator
+        - mpl:mpl-seed-generator
+        - mpl-phase-runner
+        - mpl:mpl-phase-runner
+      s1:
+        - mpl-phase-runner
+        - mpl:mpl-phase-runner
+      s3:
+        - mpl-test-agent
+        - mpl:mpl-test-agent
 
 # -----------------------------------------------------------------------------
 # Ambiguity Gate (#240)

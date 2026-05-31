@@ -1,4 +1,4 @@
-# MPL (Micro-Phase Loop) v0.18.6 Design Document
+# MPL (Micro-Phase Loop) v0.19.0 Design Document
 
 ## 1. Overview
 
@@ -11,7 +11,7 @@ The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent stru
 | Area | Initial (v1.0) | Current |
 |------|------|------|
 | Pipeline Steps | 5 steps (Step 0~5) | 9+ steps (Step 0~6 + sub-steps) |
-| Agents | 5 | 7 |
+| Agents | 5 | 11 |
 | Pre-Analysis | None | Phase 0 Enhanced (Triage REMOVED in v0.17) |
 | Quality System | Simple verification | Build-Test-Fix + 3 Hard Gates + A/S/H classification + Convergence Detection |
 | Caching | None | Phase 0 artifact caching |
@@ -25,7 +25,7 @@ The current architecture (v0.3.0+) evolved from the initial 5-step·5-agent stru
 
 ### Principle 1: Orchestrator–Phase Runner Separation
 
-The orchestrator **never writes source code directly.** All code changes are executed by `mpl-phase-runner` agents dispatched via the Task tool. The `mpl-write-guard` PreToolUse hook provides advisory warnings for this.
+The orchestrator **never writes source code directly.** All code changes are executed by `mpl-phase-runner` agents dispatched via the Task tool. The `mpl-write-guard` PreToolUse hook provides advisory warnings for in-scope edits and BLOCKS unsafe direct source edits (Move #6 Bash bypass closure, #236 protected SKILL paths).
 
 ### Principle 2: Plan First
 
@@ -84,21 +84,23 @@ mpl-init → mpl-decompose → phase2-sprint → phase3-gate → phase5-finalize
 > are absorbed into Stage 1.9 Interview Snapshot. See `commands/mpl-run-phase0.md`
 > for the canonical v0.17 flow.
 
-| Step | Name | Core Agent | Artifact |
-|------|------|-------------|--------|
-| -1 | LSP Warm-up *(v0.17: hook)* | `hooks/mpl-lsp-warmup.mjs` (UserPromptSubmit) | `state.lsp_servers` |
-| 0.0.5 | Artifact Freshness + Field Classification *(v0.17: REMOVED)* | — | (was: `.mpl/manifest.json`) |
-| 0 | Triage *(v0.17: REMOVED)* | — | (was: interview_depth, pp_proximity) |
-| 1 | PP Interview | mpl-interviewer | `.mpl/pivot-points.md` |
-| 1-D | PP Confirmation *(v0.17: absorbed into Stage 1.9)* | (orchestrator) | PP final confirmation with user |
-| 1-E | Interview Snapshot Save *(v0.17: Stage 1.9)* | (orchestrator) | `.mpl/mpl/interview-snapshot.md` |
-| 2 | Codebase Analysis | (orchestrator) | `.mpl/mpl/codebase-analysis.json` |
-| 2.4 | Architecture Decision Checklist | (orchestrator) | Key architecture decisions documented |
-| 2.5 | Phase 0 Enhanced | (orchestrator) | `.mpl/mpl/phase0/*.md` |
-| 3 | Phase Decomposition | mpl-decomposer | `.mpl/mpl/decomposition.yaml` |
-| 4 | Phase Execution Loop | mpl-phase-runner (direct impl) | Per-phase artifacts |
-| 5 | E2E & Finalization | mpl-git-master | E2E (3-tier fallback v0.8.3), commits, metrics, **manifest.json (v0.8.5)** |
-| 6 | Resume Protocol | (orchestrator) | Resume from interrupted phase |
+| Step | Name | Core Agent | Artifact | Status |
+|------|------|-------------|--------|--------|
+| -1 | LSP Warm-up *(v0.17: hook)* | `hooks/mpl-lsp-warmup.mjs` (UserPromptSubmit) | `state.lsp_servers` | (REMOVED) |
+| 0.0.5 | Artifact Freshness + Field Classification *(v0.17: REMOVED)* | — | (was: `.mpl/manifest.json`) | (REMOVED) |
+| 0 | Triage *(v0.17: REMOVED)* | — | (was: interview_depth, pp_proximity) | (REMOVED) |
+| 1 | PP Interview | mpl-interviewer | `.mpl/pivot-points.md` | active |
+| 1-D | PP Confirmation *(v0.17: absorbed into Stage 1.9)* | (orchestrator) | PP final confirmation with user | (REMOVED) |
+| 1-E | Interview Snapshot Save *(v0.17: Stage 1.9)* | (orchestrator) | `.mpl/mpl/interview-snapshot.md` | (REMOVED) |
+| 2 | Codebase Analysis | (orchestrator) | `.mpl/mpl/codebase-analysis.json` | active |
+| 2.4 | Architecture Decision Checklist | (orchestrator) | Key architecture decisions documented | active |
+| 2.5 | Phase 0 Enhanced | (orchestrator) | `.mpl/mpl/phase0/*.md` | active |
+| 3 | Phase Decomposition | mpl-decomposer | `.mpl/mpl/decomposition.yaml` | active |
+| 4 | Phase Execution Loop | mpl-phase-runner (direct impl) | Per-phase artifacts | active |
+| 5 | E2E & Finalization | mpl-git-master | E2E (3-tier fallback v0.8.3), commits, metrics, **manifest.json (v0.8.5)** | active |
+| 6 | Resume Protocol | (orchestrator) | Resume from interrupted phase | active |
+
+> See §9 v0.17.0 entry for the full history of removed steps.
 
 ### 3.3 Step-by-Step Description
 
@@ -261,7 +263,7 @@ MPL supports natural resume through per-phase state persistence. When a session 
 
 ## 4. Agent Catalog
 
-MPL uses 9 specialized agents in the active catalog (v0.14.1: consolidated from 15 in v0.11.0, restored mpl-test-agent in AD-0003, added mpl-seed-generator in #34). Each agent has clear role boundaries and tool restrictions.
+MPL uses 11 specialized agents in the active catalog (v0.18.x additions: mpl-adversarial-reviewer #103, mpl-codex-auditor F6 #117, mpl-test-agent AD-0003 restoration, mpl-seed-generator #34). Each agent has clear role boundaries and tool restrictions.
 
 > **AD-0004 status (2026-04-16)**: `mpl-test-agent` is restored and catalogued (AD-0003). Its dispatch site exists at `mpl-run-execute.md:511` and `mpl-run-execute-gates.md:154` but runtime dispatch was 0 in both exp9 and exp10 — empirical measurement gap remains. `mpl-seed-generator` was added in #34 (v0.14.0) for chain-scoped seed; dispatch gated by `chain_seed.enabled` config which failed to activate in exp10 (#41).
 
@@ -273,17 +275,21 @@ MPL uses 9 specialized agents in the active catalog (v0.14.1: consolidated from 
 | `mpl-codebase-analyzer` | Codebase structure analysis — static analysis of directory structure, dependencies, interfaces | haiku | Edit, Task |
 | `mpl-phase0-analyzer` | Pre-Execution deep analysis — in-depth Phase 0 Enhanced analysis before execution | sonnet | Edit, Task |
 | `mpl-decomposer` | Phase decomposition + verification planning — decomposes request into ordered micro-phases with inline A/S/H classification (consolidates previous mpl-decomposer + mpl-verification-planner). v0.17.2: agent now owns the Write to `.mpl/mpl/decomposition.yaml` directly (orchestrator no longer authors). | opus | Bash, Task, WebFetch, WebSearch, NotebookEdit |
+| `mpl-seed-generator` | Per-phase chain/inline execution seed (#34, #58) | opus | Bash, Task |
 
 ### Execution Agents (Execution/Verification)
 
 | Agent | Role | Model | Disallowed Tools |
 |---------|------|------|-----------|
-| `mpl-phase-runner` | Phase execution — mini-plan, direct implementation, testing, verification, State Summary (absorbs previous mpl-test-agent + mpl-code-reviewer responsibilities) | sonnet | None (full tool access) |
+| `mpl-phase-runner` | Phase execution — mini-plan, direct implementation, testing, verification, State Summary | sonnet | None (full tool access) |
+| `mpl-test-agent` | Independent test author (AD-0004 separation) — code author ≠ test author | sonnet | Task |
+| `mpl-adversarial-reviewer` | Post-phase intent-vs-impl audit (#103) — surfaces hidden gaps, scores quality | sonnet | Task |
 
 ### Post-Execution Agents (Finalization)
 
 | Agent | Role | Model | Disallowed Tools |
 |---------|------|------|-----------|
+| `mpl-codex-auditor` | Tier 4 finalize-time intent diff (F6, #117) — anti-pattern residual + missing covers + drift | haiku | Write, Edit, Task |
 | `mpl-git-master` | Atomic commit — style detection, semantic splitting, 3+ files = 2+ commits | sonnet | Write, Edit, Task |
 
 ### Removed Agents (v0.11.0)
@@ -295,7 +301,6 @@ The following agents were removed and their responsibilities consolidated into r
 | `mpl-ambiguity-resolver` | `mpl-interviewer` | Single opus call handles PP discovery + ambiguity resolution |
 | `mpl-pre-execution-analyzer` | `mpl-interviewer` | Gap/tradeoff analysis integrated into interview |
 | `mpl-verification-planner` | `mpl-decomposer` | A/S/H classification done inline during decomposition |
-| `mpl-test-agent` | `mpl-phase-runner` | Testing integrated into Build-Test-Fix micro-cycle |
 | `mpl-code-reviewer` | `mpl-phase-runner` | Code review integrated into phase execution |
 | `mpl-compound` | (orchestrator) | Learning extraction handled by orchestrator at finalize |
 | `mpl-scout` | (orchestrator) | Search functionality handled by orchestrator directly |
@@ -383,47 +388,71 @@ Convergence settings are adjusted in the `convergence` section of `.mpl/config.j
 
 ```
 .mpl/
-├── state.json                    # Pipeline + execution state (P2-6 v0.17.0: schema v2 with `execution` subtree, was split with .mpl/mpl/state.json)
-├── config.json                   # Configuration (max_fix_loops, etc.) — pp_proximity REMOVED in v0.17
-├── pivot-points.md               # Pivot Points
+├── state.json                    # Pipeline + execution state (schema v7, v1→v7 migration chain in hooks/lib/migrations/)
+├── config.json                   # Configuration (max_fix_loops, etc.)
+├── pivot-points.md               # Pivot Points (immutable)
 ├── discoveries.md                # Discovery log
-├── archive/                      # P2-6 v0.17.0: legacy state archives (e.g. `{pipeline_id}-legacy-execution-state.json`)
+├── archive/                      # Legacy state + cancelled-run archives ({pipeline_id}/mpl/ deep copies)
+├── contracts/                    # Decomposer-emitted contract JSONs (channel #3 SSOT)
+├── e2e-traces/                   # Playwright trace dumps per scenario (Tier C scenario evidence)
+├── requirements/
+│   └── user-contract.md          # Tier A' UC scope (mutable; distinct from immutable pivot-points.md)
+├── memory/
+│   └── learnings.md              # Run-to-Run accumulated learnings (F-11)
 ├── cache/
 │   └── phase0/                   # Phase 0 cache
-│       ├── manifest.json         # Cache metadata (key, timestamp) — Phase 0 cache, distinct from the v0.8.5 manifest.json that was REMOVED in v0.17
-│       ├── api-contracts.md      # Cached API contracts
-│       ├── examples.md           # Cached example patterns
-│       ├── type-policy.md        # Cached type policy
-│       ├── error-spec.md         # Cached error specification
-│       ├── summary.md            # Cached Phase 0 summary
+│       ├── manifest.json         # Cache metadata (key, timestamp)
+│       ├── api-contracts.md
+│       ├── examples.md
+│       ├── type-policy.md
+│       ├── error-spec.md
+│       ├── summary.md
 │       └── complexity-report.json
 └── mpl/
-    ├── state.json                # (v0.17.0 / P2-6 REMOVED — auto-archived to .mpl/archive/ on first read; unified into .mpl/state.json `execution` subtree)
     ├── codebase-analysis.json    # Codebase analysis results
-    ├── decomposition.yaml        # Phase decomposition results
-    ├── phase-decisions.md        # Accumulated Phase Decisions
+    ├── decomposition.yaml        # Phase decomposition results (decomposer is sole writer, v0.17.2)
+    ├── decomposition-derived.json # Mechanical post-processing output (regenerated by mpl-decomposition-postprocess)
+    ├── baseline.yaml             # P2 stream (#59) — frozen pre-execution baseline; guarded by mpl-baseline-guard
+    ├── chain-assignment.yaml     # AP-CHAIN-01: chain groupings for seed-generator dispatch
+    ├── core-scenarios.yaml       # Phase 0 Enhanced Step 2.5.3 HITL-derived PP-anchored scenarios (immutable)
+    ├── e2e-scenarios.yaml        # Decomposer Step 7.5 composition of core scenarios into E2E
+    ├── quality-signals.jsonl     # mpl-soft-signal-emit telemetry (HA-01 vague delegation, etc.)
+    ├── phase-decisions.md        # Accumulated Phase Decisions (2-Tier Active/Summary)
+    ├── interview-snapshot.md     # Stage 1.9 PP confirmation snapshot
     ├── phase0/                   # Phase 0 Enhanced artifacts
     │   ├── api-contracts.md
     │   ├── examples.md
     │   ├── type-policy.md
     │   ├── error-spec.md
     │   ├── summary.md
+    │   ├── raw-scan.md           # mpl-phase0-analyzer mechanical scan output (#57)
+    │   ├── design-intent.yaml    # Phase 0 #34 Stage 1 output — feeds Seed Generator
     │   └── complexity-report.json
     ├── phases/                   # Per-phase artifacts
     │   └── phase-N/
     │       ├── mini-plan.md      # Phase TODO list
     │       ├── state-summary.md  # Completion summary (knowledge transfer)
-    │       └── verification.md   # Verification results (with evidence)
+    │       ├── verification.md   # Verification results (with evidence)
+    │       ├── phase-seed.yaml   # Inline-mode seed (mpl-seed-generator output)
+    │       └── test-agent-brief.yaml # Test agent runbook (#212)
+    ├── chains/
+    │   └── chain-N/
+    │       └── chain-seed.yaml   # Chain-mode seed (when chain_seed.enabled=true)
     ├── RUNBOOK.md                # Integrated execution log — current state, milestones, decisions, issues, resume info (F-10)
     ├── profile/                  # Token profiling
     │   ├── phases.jsonl          # Per-phase token/time (append-only)
     │   ├── run-summary.json      # Full execution profile
     │   └── telemetry-errors.jsonl # Non-blocking telemetry health channel
-    ├── metrics.json              # Final metrics
-    └── ../memory/                # Routing memory (F-22) — (v0.17 REMOVED: routing-patterns.jsonl no longer recorded or recalled; learnings.md still in use via F-11)
-        ├── routing-patterns.jsonl # (v0.17 REMOVED) Past execution patterns — Triage gone; no consumer
-        └── learnings.md          # Accumulated learnings across runs (F-11)
+    └── metrics.json              # Final metrics
 ```
+
+### 6.1b Removed Paths (historical)
+
+| Path | Removed | Reason |
+|------|---------|--------|
+| `.mpl/manifest.json` | v0.17 | Step 0.0.5 deleted; no downstream consumer (#55) |
+| `.mpl/mpl/state.json` | v0.17 / P2-6 | Unified into `.mpl/state.json` `execution` subtree; auto-archived on first read |
+| `.mpl/memory/routing-patterns.jsonl` | v0.17 | Triage removed; recall has no consumer (#55) |
 
 ### 6.2 Phase Decision 2-Tier Classification
 
@@ -436,21 +465,15 @@ Phase Decisions are classified into 2 tiers to balance context preservation with
 
 Total PD token cost: ~2K~5K tokens for a 10-phase project (well within 1M budget).
 
-### 6.3 Discovery Handling *(v0.17 PARTIAL: `pp_proximity` is no longer computed at the pipeline level; rules below that branch on `pp_proximity` collapse to "always HITL on conflict, always review on phase transition" — i.e. the most-conservative path. Per-phase `pp_proximity:` field on decompositions is retained as a tag but does not gate behavior.)*
+### 6.3 Discovery Handling
 
-Discoveries reported by Phase Runner are processed in the following order:
-
-1. **PP Conflict Check**: CONFIRMED PP conflict → auto-reject. PROVISIONAL → HITL or auto-approve based on pp_proximity.
-2. **PD Override Check**: Request to change past decisions → HITL or auto-approve based on pp_proximity.
-3. **General Discovery**: non_pp → apply immediately, pp_adjacent → review at phase transition, pp_core → HITL confirmation required.
-
-All Discoveries are recorded in `.mpl/discoveries.md`.
+Discoveries are reviewed at phase transition; CONFIRMED PP conflicts auto-reject, PD overrides require HITL. All Discoveries are recorded in `.mpl/discoveries.md`.
 
 ---
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. MPL maintains pipeline integrity with 38 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. As of the v2 cutover (Move #14), `hooks.json` itself shrinks to 6 entries — one per event — that all point at the single dispatcher `hooks/mpl-engine.mjs`. Per-module behavior is wired through `hooks/lib/dispatch.mjs` ROUTES, and the live list below is introspected from that registry. The repo currently ships 46 hook modules under `hooks/`, of which the 38 listed here are routed through ROUTES; the remainder are `.legacy.mjs` siblings retained for one release as the rollback tier. MPL maintains pipeline integrity with 38 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -502,7 +525,7 @@ The following options are supported in `.mpl/config.json`:
 | Option | Default | Description |
 |------|--------|------|
 | `max_fix_loops` | `10` | Maximum Fix Loop iterations |
-| `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0) |
+| `context_cleanup_window` | `3` | Sliding window size — number of recent phases to retain detailed data (v0.7.0, historical) |
 | `parallelism.max_phase_workers` | `2` | Maximum concurrent phase workers for `execution_tiers[].parallel: true`; runtime clamps to max 3 |
 | `test_wait.pipelining_enabled` | `true` | Allow Test Agent/reviewer background verification until a dependency frontier, Gate, or finalize join boundary |
 | `gate1_strategy` | `"auto"` | Gate 1 test strategy (auto/docker/native/skip) |
@@ -515,6 +538,42 @@ The following options are supported in `.mpl/config.json`:
 ---
 
 ## 9. Version History
+
+> **Note (v0.19.0):** Per-release history is now maintained in
+> [`docs/changelog.md`](./changelog.md) (Keep-a-Changelog format). The
+> entries below remain as the canonical in-design narrative reference for
+> v0.18.6 and earlier.
+
+### v0.19.0 — v2 Architecture Cutover (2026-06-01)
+
+Closing cut of the Stage A v2 redesign (moves #1–#18). The hook layer
+moved from 39 `hooks.json` entries calling individual scripts to a single
+`mpl-engine.mjs` dispatcher routing 46 modules through `lib/dispatch.mjs`
+ROUTES, with 36 policy decisions consolidated into `hooks/lib/policy/`.
+State sharding + wave-reducer (Move #17) bumps `.mpl/state.json` schema
+v6 → v7 with auto-migration. `.legacy.mjs` siblings are retained as a
+one-release rollback tier.
+
+| Change | Before | After | Type | Rationale |
+|--------|--------|-------|------|-----------|
+| Hook entry surface | 39 individual entries in `hooks.json` | 6 dispatcher entries (one per event) routing through `mpl-engine.mjs` + `lib/dispatch.mjs` ROUTES | Hook (Move #14) | Single observation point, lower fanout cost |
+| Policy decisions | Each `mpl-*.mjs` carried its own decision graph | 12 policy modules under `hooks/lib/policy/` (audit, channel-registry, contracts, envelope-bridge, evidence, gates, isolation, permit, scheduler, schemas, session-init, source-edit) consumed by hooks | Hook (Move #6–#13, #16) | One file per policy class; hooks become thin adapters |
+| State writer | Inline state writes per hook | `hooks/lib/state/writer.mjs` + `shard-writer.mjs` + `wave-reducer.mjs`; MCP `state_write` delegates via subprocess | Hook (Move #2/#3/#17) | Single writer; concurrent waves merge through reducer |
+| State schema | v6 | v7 (`hooks/lib/migrations/v6-to-v7.mjs`) | Schema | State shard + reducer envelope makes v6 incompatible |
+| Law 2 enforcement | Warn-only (advisory) | `mpl-write-guard` blocks unsafe direct edits by default + Bash redirect/tee/sed-i/dd-of/cp-mv/git-apply bypass closure (Move #6); `mpl-cancel` SKILL paths + `decomposition.yaml` writer identity hard-protected (#236) | Hook (Move #6) | Closes the Bash bypass class surfaced by exp scans |
+| Documentation | README/design.md drifted with v0.17 router removal + advisory gate removal | README §The Router replaced with §Pipeline Depth (v0.17+); 3 Hard Gates + Advisory → 3 Hard Gates; tree + agent catalog refreshed (9 → 11 agents) | Docs (Move #18) | Reconcile pre-v2 cosmetic drift; introduce `docs/redesign-proposal.html` + `docs/changelog.md` |
+
+**Affected files:**
+- Hooks: `hooks/hooks.json`, `hooks/mpl-engine.mjs`, `hooks/lib/dispatch.mjs`, `hooks/lib/state/{reader,writer,shard-writer,wave-reducer,writer-cli}.mjs`, `hooks/lib/policy/{audit,channel-registry,contracts,envelope-bridge,evidence,gates,isolation,permit,scheduler,schemas,session-init,source-edit}.mjs` + `hooks/lib/policy/reconcile/`, `hooks/lib/migrations/v6-to-v7.mjs`, plus 36 `.legacy.mjs` siblings.
+- Docs: `README.md`, `README_ko.md`, `docs/design.md` (this entry + §1/§2/§3.2/§3.3/§4/§6.1/§6.3/§7/§8), `docs/config-schema.md`, `docs/changelog.md` (new), `docs/archive/2026-03-30-hooks-review.md` (relocated).
+- Commands: `commands/mpl-run.md` (Hat Model section removed).
+- Skills: `skills/mpl-version-bump/SKILL.md` (added `package.json` checklist entry).
+- Config / metadata: `package.json` (new `version` field), `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json`, `mcp-server/package.json`, `mcp-server/package-lock.json`.
+- Config fix: `mpl.config.yaml` (`observability.sentinels.subagent_type_filter` rewritten from flow-style sequences to block-style; closes a `yaml-mini: expected 'key:' at line 211` stderr warning and a latent silent filter bug).
+
+**Breaking changes:** `.legacy.mjs` rollback siblings remain importable for one release; production paths consume the non-legacy modules through `lib/dispatch.mjs`. Existing `.mpl/state.json` files auto-migrate v1→v7 on first read.
+
+**Tests:** Added `hooks/__tests__/mpl-yaml-mini.test.mjs` regression coverage for block vs flow sequences and a round-trip parse of `mpl.config.yaml`.
 
 ### v0.18.6 — Pipeline Pipelining (2026-05-19)
 

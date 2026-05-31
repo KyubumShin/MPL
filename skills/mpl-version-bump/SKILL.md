@@ -36,6 +36,7 @@ Version Reference Checklist:
   ☐ .claude-plugin/plugin.json         → "version" field
   ☐ .claude-plugin/marketplace.json    → "version" field (top-level)
   ☐ .claude-plugin/marketplace.json    → plugins[0].version field
+  ☐ package.json                       → "version" field (added in v0.19.0)
   ☐ .codex-plugin/plugin.json          → "version" field
   ☐ install/codex.sh                   → generated marketplace entry path "./plugins/mpl"
   ☐ mcp-server/package.json            → "version" field
