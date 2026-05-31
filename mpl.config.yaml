@@ -469,5 +469,23 @@ schemas:
   rules: []
 
 audit:
-  # Finalize-time global audit (Tier 4 + drift). Empty registry today.
+  # Finalize-time global audit (Tier 4 + drift). Move #13 introduces a
+  # DECLARATIVE verdict expression — `verdict.required_clean[]` names the
+  # summary categories that MUST be zero for the audit to PASS. Closes the
+  # eval-finding gap where drift_undeclared + manifest_drift used to slip
+  # past the legacy 3-conjunct expression. Future categories added to the
+  # report summary auto-gate by listing them here.
+  verdict:
+    required_clean:
+      - anti_pattern_residual
+      - missing_covers
+      - dangling_covers
+      - drift_undeclared
+      - manifest_drift
+  # `drift.escalate_undeclared_to_anti_pattern` — when true (default), each
+  # drift_undeclared entry is injected into surfaces.anti_pattern_residual
+  # with synthetic id 'F6.drift_undeclared' so Tier 3+4 sinks see drift
+  # uniformly. Workspaces can disable by setting false.
+  drift:
+    escalate_undeclared_to_anti_pattern: true
   rules: []

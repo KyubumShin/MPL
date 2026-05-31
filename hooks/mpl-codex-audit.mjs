@@ -2,6 +2,12 @@
 /**
  * MPL Codex Auditor CLI (F6, #117) — finalize-time Tier 4 sweep.
  *
+ * Move #13: thin shim around `hooks/lib/policy/audit.mjs#handleFinalizeAudit`.
+ * The wrapper owns I/O (writeFileSync of audit-report.json + stdout +
+ * process.exit) and ctx assembly (state + config preloading); the policy
+ * module owns the verdict, the surface computation, and the exit-code
+ * resolution.
+ *
  * Invoked from `commands/mpl-run-finalize.md` Step 5.1.6:
  *
  *   node "${CLAUDE_PLUGIN_ROOT}/hooks/mpl-codex-audit.mjs" "$(pwd)"
@@ -9,17 +15,14 @@
  * Writes `<workspaceRoot>/.mpl/mpl/audit-report.json` and emits the same
  * JSON to stdout for the orchestrator to surface.
  *
- * Exit codes:
- *   0 — audit ran (verdict may be pass OR fail; orchestrator surfaces
- *       findings; finalize continues unless enforcement.audit_residual = 'block')
+ * Exit codes (preserved semantics):
+ *   0 — audit ran (verdict may be pass OR fail; finalize continues unless
+ *       enforcement.audit_residual = 'block')
  *   1 — verdict=fail AND enforcement.audit_residual === 'block'
- *       (strict mode — finalize halts; user must address residuals)
  *   2 — usage error (missing or invalid workspaceRoot)
  *
- * Enforcement is read via P0-2 `resolveRuleAction` so the same warn/block/off
- * tri-state pattern as the other Tier-policy hooks applies. Default 'warn'
- * keeps the audit informational unless a project explicitly opts into strict
- * blocking.
+ * Pre-Move-#13 byte-identical implementation is preserved at
+ * `hooks/mpl-codex-audit.legacy.mjs` for rollback safety.
  */
 
 import { dirname, join, resolve } from 'path';
@@ -31,19 +34,17 @@ const __dirname = dirname(__filename);
 
 const PLUGIN_ROOT = resolve(__dirname, '..');
 
-const { runCodexAudit } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'mpl-codex-audit.mjs')).href
+const { handleFinalizeAudit } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'audit.mjs')).href
 );
 
-let resolveRuleAction;
+let loadConfig;
 try {
-  ({ resolveRuleAction } = await import(
-    pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
+  ({ loadConfig } = await import(
+    pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
   ));
 } catch {
-  // mpl-enforcement.mjs missing → default to 'warn' (graceful degrade so
-  // the CLI is still useful in standalone smoke runs).
-  resolveRuleAction = () => 'warn';
+  loadConfig = () => ({});
 }
 
 let readState;
@@ -63,27 +64,51 @@ if (!existsSync(cwd)) {
   process.exit(2);
 }
 
-const report = runCodexAudit(cwd, PLUGIN_ROOT);
+const state = safeReadState(cwd);
+const config = safeLoadConfig(cwd);
 
-// Persist alongside other phase artifacts. Directory is created lazily —
-// fresh workspaces (no `.mpl/mpl/`) shouldn't fail the audit just because
-// the artifact dir doesn't exist yet.
-const outDir = join(cwd, '.mpl', 'mpl');
-const outPath = join(outDir, 'audit-report.json');
-try {
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(outPath, JSON.stringify(report, null, 2) + '\n');
-} catch (err) {
-  // Disk write failed — surface but don't lose the JSON; stdout is the
-  // primary channel for the orchestrator.
-  console.error(JSON.stringify({ warn: `audit-report write failed: ${err.message}` }));
+const envelope = handleFinalizeAudit({
+  cwd,
+  pluginRoot: PLUGIN_ROOT,
+  state,
+  config,
+});
+
+// Apply sideEffects in declaration order. The envelope carries:
+//   { kind:'audit_report_write', path, payload }
+//   { kind:'audit_exit_code',    code }
+let outPath = null;
+let exitCode = 0;
+for (const fx of envelope.sideEffects || []) {
+  if (fx.kind === 'audit_report_write') {
+    const abs = join(cwd, fx.path);
+    outPath = abs;
+    try {
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, JSON.stringify(fx.payload, null, 2) + '\n');
+    } catch (err) {
+      // Disk write failed — surface but don't lose the JSON; stdout is the
+      // primary channel for the orchestrator.
+      console.error(JSON.stringify({ warn: `audit-report write failed: ${err.message}` }));
+    }
+  } else if (fx.kind === 'audit_exit_code') {
+    exitCode = fx.code;
+  }
 }
 
+// Stream the report to stdout for orchestrator surfacing.
+const report = envelope.report ?? {
+  verdict: envelope.verdict,
+  summary: envelope.summary,
+  surfaces: envelope.surfaces,
+};
 process.stdout.write(JSON.stringify(report, null, 2) + '\n');
 
-const state = readState(cwd);
-const action = resolveRuleAction(cwd, state, 'audit_residual');
-if (report.verdict === 'fail' && action === 'block') {
-  process.exit(1);
+process.exit(exitCode);
+
+function safeReadState(root) {
+  try { return readState(root); } catch { return null; }
 }
-process.exit(0);
+function safeLoadConfig(root) {
+  try { return loadConfig(root); } catch { return {}; }
+}
