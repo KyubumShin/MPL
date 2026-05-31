@@ -407,22 +407,23 @@ test('#251 C2 codex r1 [contract-break]: hook reads post-write disk state, not p
   }
 });
 
-test('#251 C2 codex r1: hook is registered as PostToolUse in hooks.json', () => {
+test('#251 C2 codex r1: hook is registered as PostToolUse via dispatch.mjs ROUTES', async () => {
   // Lifecycle correctness: the hook semantics (re-read disk) match
   // its registration. A future revert that moves it back to
   // PreToolUse would silently regress the codex r1 finding.
-  const text = readPrompt('hooks/hooks.json');
-  // The hook must appear under PostToolUse, not PreToolUse.
-  const postToolUseBlock = text.match(/"PostToolUse"\s*:\s*\[([\s\S]*?)\n\s*\]\s*,?\s*\n\s*"Stop"/);
-  assert.ok(postToolUseBlock, 'PostToolUse block must exist in hooks.json');
-  assert.match(postToolUseBlock[1], /mpl-require-reviewer\.mjs/);
-  // And must NOT appear under PreToolUse.
-  const preToolUseBlock = text.match(/"PreToolUse"\s*:\s*\[([\s\S]*?)\n\s*\]\s*,\s*\n\s*"PostToolUse"/);
-  assert.ok(preToolUseBlock, 'PreToolUse block must exist in hooks.json');
-  assert.ok(
-    !/mpl-require-reviewer\.mjs/.test(preToolUseBlock[1]),
-    'mpl-require-reviewer must NOT be registered under PreToolUse',
-  );
+  //
+  // Move #15: hooks.json was collapsed to a single mpl-engine entry per
+  // event — the SSOT for "which lifecycle is each hook id on" is now the
+  // dispatch.mjs ROUTES table (introspected via lib/route-introspection.mjs).
+  const { lifecycleFor } = await import('../lib/route-introspection.mjs');
+  const lifecycle = await lifecycleFor('mpl-require-reviewer');
+  assert.ok(lifecycle.length > 0,
+    'mpl-require-reviewer must be registered somewhere');
+  const events = lifecycle.map((l) => l.event);
+  assert.ok(events.includes('PostToolUse'),
+    'mpl-require-reviewer must be registered under PostToolUse');
+  assert.ok(!events.includes('PreToolUse'),
+    'mpl-require-reviewer must NOT be registered under PreToolUse');
 });
 
 test('#251 C2 e2e: hook is silent on non-decomposition writes', () => {

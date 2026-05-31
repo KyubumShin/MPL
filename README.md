@@ -484,7 +484,7 @@ MPL Full | Sprint | TODO:3/7 | Gate:✓-- | Fix:2/10 | tok:45.2K/500.0K
 **Activate:** Run `/mpl:mpl-setup` → enable HUD, or manually:
 ```json
 // ~/.claude/settings.json
-{ "statusLine": { "type": "command", "command": "node <MPL_ROOT>/hooks/mpl-hud.mjs" } }
+{ "statusLine": { "type": "command", "command": "node <MPL_ROOT>/cli/mpl-hud.mjs" } }
 ```
 
 ---

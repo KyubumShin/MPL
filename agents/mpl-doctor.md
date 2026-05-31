@@ -327,7 +327,7 @@ disallowedTools: Write, Edit, Task
 
     **Procedure**: invoke the meta-self CLI and parse its JSON output:
     ```
-    Bash("node ${CLAUDE_PLUGIN_ROOT}/hooks/mpl-doctor-meta-self.mjs ${CLAUDE_PLUGIN_ROOT}", timeout: 10_000)
+    Bash("node ${CLAUDE_PLUGIN_ROOT}/cli/mpl-doctor-meta-self.mjs ${CLAUDE_PLUGIN_ROOT}", timeout: 10_000)
     ```
 
     The CLI returns four arrays:

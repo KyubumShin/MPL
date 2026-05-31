@@ -621,7 +621,7 @@ Coherence-recovery release closing the v3.10 §3.1 retrofit findings. Where v0.1
 
 **Affected files:**
 
-Hooks: `mpl-bash-timeout.mjs`, `mpl-codex-audit.mjs`, `mpl-fallback-grep.mjs`, `mpl-hang-detector.mjs`, `mpl-doctor-meta-self.mjs`, `mpl-property-check.mjs`, `mpl-state-invariant.mjs`, `mpl-keyword-detector.mjs` (intervention counter), `mpl-write-guard.mjs` (MultiEdit + MCP matcher), `mpl-artifact-schema.mjs`, `mpl-compaction-tracker.mjs` (RUNBOOK in-flight snapshot), plus `lib/anti-pattern-registry.mjs`, `lib/migrations/{index,v1-to-v2,v2-to-v3,v3-to-v4.example}.mjs`, `lib/mpl-codex-audit.mjs`, `lib/mpl-enforcement.mjs`, `lib/mpl-meta-self.mjs`, `lib/mpl-property-check.mjs`, `lib/mpl-runbook.mjs`, `lib/mpl-state-merge.mjs`.
+Hooks: `mpl-bash-timeout.mjs`, `mpl-codex-audit.mjs`, `mpl-fallback-grep.mjs`, `mpl-hang-detector.mjs`, `cli/mpl-doctor-meta-self.mjs` (Move #15 relocated from hooks/), `mpl-property-check.mjs`, `mpl-state-invariant.mjs`, `mpl-keyword-detector.mjs` (intervention counter), `mpl-write-guard.mjs` (MultiEdit + MCP matcher), `mpl-artifact-schema.mjs`, `mpl-compaction-tracker.mjs` (RUNBOOK in-flight snapshot), plus `lib/anti-pattern-registry.mjs`, `lib/migrations/{index,v1-to-v2,v2-to-v3,v3-to-v4.example}.mjs`, `lib/mpl-codex-audit.mjs`, `lib/mpl-enforcement.mjs`, `lib/mpl-meta-self.mjs`, `lib/mpl-property-check.mjs`, `lib/mpl-runbook.mjs`, `lib/mpl-state-merge.mjs`.
 
 Agents: `mpl-adversarial-reviewer.md`, `mpl-codex-auditor.md` (new), `mpl-doctor.md` (Category 3 expected count 8 → 11, Category 8 enforcement subsection, Category 14 meta-self, Category 15 property check).
 

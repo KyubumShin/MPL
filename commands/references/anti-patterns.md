@@ -329,7 +329,7 @@ sets CSP.
   documented in an adjacent comment
 - **state-shape tolerance**: the LHS is a state read or null-safe rendering accessor (e.g. `state.foo ?? null` for
   schema migration or backward-compat), AND the enclosing function is documented as a state-comparator, state-shape
-  normalizer, or renderer (matches MPL's hooks/lib/mpl-state.mjs migration paths and hooks/mpl-hud.mjs renderer use)
+  normalizer, or renderer (matches MPL's hooks/lib/mpl-state.mjs migration paths and cli/mpl-hud.mjs renderer use)
 ```
 
 ### D1.b · Synthetic-ID literal masking absence

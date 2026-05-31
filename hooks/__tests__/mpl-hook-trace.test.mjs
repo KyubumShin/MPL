@@ -8,8 +8,8 @@ import { findPurposeGaps, formatHookTrace, traceHookChain } from '../lib/mpl-hoo
 import { CURRENT_SCHEMA_VERSION } from '../lib/mpl-state.mjs';
 
 describe('mpl-hook-trace', () => {
-  it('lists the decomposition hook chain without manual grep', () => {
-    const trace = traceHookChain({
+  it('lists the decomposition hook chain without manual grep', async () => {
+    const trace = await traceHookChain({
       targetPath: '.mpl/mpl/decomposition.yaml',
       cwd: process.cwd(),
     });
@@ -29,7 +29,7 @@ describe('mpl-hook-trace', () => {
     assert.match(formatHookTrace(trace), /registered/);
   });
 
-  it('does not mutate state.json (no migration, no archive) when tracing a legacy or unversioned state', () => {
+  it('does not mutate state.json (no migration, no archive) when tracing a legacy or unversioned state', async () => {
     // Codex r1 on PR #216: readState() persists schema migrations and can
     // archive .mpl/mpl/state.json — a diagnostic command must never do that.
     // Use a pre-v6 state with no schema_version to exercise the migration
@@ -55,7 +55,7 @@ describe('mpl-hook-trace', () => {
       const legacyPath = join(tmp, '.mpl', 'mpl', 'state.json');
       writeFileSync(legacyPath, '{"legacy":true}');
 
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -74,7 +74,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('surfaces incomplete blocked_hook envelopes as invalid instead of currently_blocking', () => {
+  it('surfaces incomplete blocked_hook envelopes as invalid instead of currently_blocking', async () => {
     // Codex r2/r3 on PR #216: any stale/zombie state missing a required
     // companion field (artifact, block_code, retry_context, etc.) must
     // not be reported as actively blocking — that would send the operator
@@ -90,7 +90,7 @@ describe('mpl-hook-trace', () => {
         blocked_by_hook: 'mpl-require-goal-trace',
         // blocked_artifact + block_code + retry_context all intentionally absent
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -104,7 +104,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('surfaces a blocked_hook missing block_code/retry_context as invalid (matches BLOCKED_HOOK_STALE invariant)', () => {
+  it('surfaces a blocked_hook missing block_code/retry_context as invalid (matches BLOCKED_HOOK_STALE invariant)', async () => {
     // Codex r3 on PR #216: blocked_artifact alone is not enough.
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-partial-'));
     try {
@@ -117,7 +117,7 @@ describe('mpl-hook-trace', () => {
         blocked_artifact: '.mpl/mpl/decomposition.yaml',
         // block_code, block_reason, resume_instruction, blocked_at, retry_context all absent
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -129,7 +129,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('surfaces a stale/invalid block on a non-decomposition path as invalid_blocked_envelope (does not silently filter)', () => {
+  it('surfaces a stale/invalid block on a non-decomposition path as invalid_blocked_envelope (does not silently filter)', async () => {
     // Codex r5 on PR #216: a stale envelope (missing retry_context etc.)
     // pointing at state.test_agent_dispatched.<phase> would otherwise be
     // filtered out by the category check and disappear from the trace.
@@ -146,7 +146,7 @@ describe('mpl-hook-trace', () => {
         blocked_artifact: 'state.test_agent_dispatched.phase-1',
         // retry_context, block_code, blocked_at intentionally absent
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'state.test_agent_dispatched.phase-1',
         cwd: tmp,
       });
@@ -159,7 +159,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#217: blocked_artifact missing entirely — active blocker still surfaces on an unrelated target', () => {
+  it('#217: blocked_artifact missing entirely — active blocker still surfaces on an unrelated target', async () => {
     // Codex r8 on PR #216 / #217: prior versions required activeBlockArtifact
     // to non-empty AND endsWith()-match the target before force-include.
     // A stale envelope with NO blocked_artifact at all (corrupt state.json
@@ -177,7 +177,7 @@ describe('mpl-hook-trace', () => {
         blocked_by_hook: 'mpl-require-test-agent',
         // blocked_artifact intentionally absent
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'state.test_agent_dispatched.phase-1',
         cwd: tmp,
       });
@@ -190,7 +190,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#217: synthetic row when active blocker not in hooks.json AND envelope missing artifact', () => {
+  it('#217: synthetic row when active blocker not in hooks.json AND envelope missing artifact', async () => {
     // The synthetic-row path also dropped the artifact-match precondition.
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-217-synthetic-'));
     try {
@@ -202,7 +202,7 @@ describe('mpl-hook-trace', () => {
         blocked_by_hook: 'mpl-imaginary-hook-not-registered',
         // blocked_artifact intentionally absent
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'state.test_agent_dispatched.phase-1',
         cwd: tmp,
       });
@@ -217,7 +217,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('always includes the blocked_by_hook entry for an active block, even when the path category would filter it out', () => {
+  it('always includes the blocked_by_hook entry for an active block, even when the path category would filter it out', async () => {
     // Codex r4 on PR #216: a valid mpl-require-test-agent block records
     // blocked_artifact as `state.test_agent_dispatched.<phase>`, which the
     // path category considers a generic file. shouldIncludeHook then drops
@@ -240,7 +240,7 @@ describe('mpl-hook-trace', () => {
         blocked_at: '2026-05-27T00:00:00.000Z',
         retry_context: { phase_id: 'phase-1' },
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'state.test_agent_dispatched.phase-1',
         cwd: tmp,
       });
@@ -253,7 +253,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('fail-closes on a future schema_version: no BLOCKING line, explicit unsupported_schema warning', () => {
+  it('fail-closes on a future schema_version: no BLOCKING line, explicit unsupported_schema warning', async () => {
     // Codex r6 on PR #216: a downgraded plugin must not classify a future
     // state.json envelope as actively blocking — that would point recovery
     // at the wrong artifact instead of surfacing the schema mismatch.
@@ -273,7 +273,7 @@ describe('mpl-hook-trace', () => {
         blocked_at: '2026-05-27T00:00:00.000Z',
         retry_context: { hook: 'mpl-require-goal-trace' },
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -287,12 +287,12 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('fail-closes on malformed JSON: explicit unparseable warning, no block status', () => {
+  it('fail-closes on malformed JSON: explicit unparseable warning, no block status', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-malformed-'));
     try {
       mkdirSync(join(tmp, '.mpl'), { recursive: true });
       writeFileSync(join(tmp, '.mpl', 'state.json'), '{ this is not valid json');
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -304,7 +304,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('emits a synthetic row when the active blocked_by_hook is no longer in hooks.json (registry skew)', () => {
+  it('emits a synthetic row when the active blocked_by_hook is no longer in hooks.json (registry skew)', async () => {
     // Codex r7 on PR #216: if the hook chain changed (rename, removal,
     // downgrade) and state.blocked_by_hook points at a hook id that no
     // longer exists in hooks.json, the iteration-based force-include
@@ -325,7 +325,7 @@ describe('mpl-hook-trace', () => {
         blocked_at: '2026-05-27T00:00:00.000Z',
         retry_context: { stale_hook: true },
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -339,7 +339,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('marks the active blocked_hook as currently_blocking', () => {
+  it('marks the active blocked_hook as currently_blocking', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-'));
     try {
       mkdirSync(join(tmp, '.mpl'), { recursive: true });
@@ -356,7 +356,7 @@ describe('mpl-hook-trace', () => {
         blocked_at: '2026-05-27T00:00:00.000Z',
         retry_context: { hook: 'mpl-require-goal-trace' },
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -370,12 +370,12 @@ describe('mpl-hook-trace', () => {
 
   /* ──────────────────── #237 D1 / D2 / D3 ──────────────────── */
 
-  it('#237 D1: every hook id registered in hooks.json has a PURPOSES entry', () => {
-    const gaps = findPurposeGaps();
+  it('#237 D1: every hook id registered via dispatch.mjs ROUTES has a PURPOSES entry', async () => {
+    const gaps = await findPurposeGaps();
     assert.deepEqual(gaps, [], `PURPOSES missing entries for: ${gaps.join(', ')}`);
   });
 
-  it('#237 D2: slash-boundary match — `state.json` does NOT match `state.test_agent_dispatched.phase-1.state.json`', () => {
+  it('#237 D2: slash-boundary match — `state.json` does NOT match `state.test_agent_dispatched.phase-1.state.json`', async () => {
     // Pre-D2: bidirectional endsWith treated artifact `state.json` and
     // target `barstate.json` as matching. Now requires `/` boundary.
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d2-'));
@@ -394,7 +394,7 @@ describe('mpl-hook-trace', () => {
         blocked_at: '2026-05-27T00:00:00.000Z',
         retry_context: { phase_id: 'phase-1' },
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'src/api/widgets.test.state.json', // shares suffix but different file
         cwd: tmp,
       });
@@ -410,7 +410,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#237 D2: slash-boundary match — `.mpl/state.json` artifact DOES match target `state.json`', () => {
+  it('#237 D2: slash-boundary match — `.mpl/state.json` artifact DOES match target `state.json`', async () => {
     // Sanity check: legitimate suffix match (artifact = path-prefixed
     // target with `/` boundary) still works.
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d2-ok-'));
@@ -429,7 +429,7 @@ describe('mpl-hook-trace', () => {
         blocked_at: '2026-05-27T00:00:00.000Z',
         retry_context: { phase_id: 'phase-1' },
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '/tmp/some/path/.mpl/state.json',
         cwd: tmp,
       });
@@ -440,7 +440,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#237 D3: state-category trace omits hooks that do not read state', () => {
+  it('#237 D3: state-category trace omits hooks that do not read state', async () => {
     // Pre-D3: trace on `.mpl/state.json` returned every Edit/Write
     // PreToolUse hook, including ones like mpl-require-e2e-authenticity
     // that don't read state — pure noise. Post-D3: only STATE_FOCUS
@@ -452,7 +452,7 @@ describe('mpl-hook-trace', () => {
         schema_version: CURRENT_SCHEMA_VERSION,
         current_phase: 'phase2-sprint',
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl/state.json',
         cwd: tmp,
       });
@@ -485,12 +485,12 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#237 codex r5 [logic]: pure-backslash POSIX filename does NOT fabricate path boundary', () => {
+  it('#237 codex r5 [logic]: pure-backslash POSIX filename does NOT fabricate path boundary', async () => {
     // Codex r5: previous r4 narrowing treated pure-backslash + no
     // forward slash as Windows. But on POSIX, `foo\state.json` is a
     // single literal basename. Falsely classifying as Windows
     // normalized to `foo/state.json` and matched `state.json` artifact.
-    const trace = traceHookChain({
+    const trace = await traceHookChain({
       targetPath: 'foo\\state.json',
       state: {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -510,7 +510,7 @@ describe('mpl-hook-trace', () => {
       'pure-backslash POSIX basename must not match a state.json artifact');
   });
 
-  it('#237 codex r5 [logic]: pure-backslash `.mpl\\state.json` target classifies as file (not state)', () => {
+  it('#237 codex r5 [logic]: pure-backslash `.mpl\\state.json` target classifies as file (not state)', async () => {
     // The pathCategory side of the same issue: `.mpl\state.json`
     // on POSIX is a single basename `.mpl\state.json`, NOT the
     // canonical state path. Must classify as file so the
@@ -522,7 +522,7 @@ describe('mpl-hook-trace', () => {
         schema_version: CURRENT_SCHEMA_VERSION,
         current_phase: 'phase2-sprint',
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: '.mpl\\state.json',
         cwd: tmp,
       });
@@ -532,14 +532,14 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#237 codex r4 [logic]: POSIX literal-backslash filename does NOT fabricate a path boundary', () => {
+  it('#237 codex r4 [logic]: POSIX literal-backslash filename does NOT fabricate a path boundary', async () => {
     // codex r4 on PR #243: r3 unconditional `\` → `/` normalization
     // broke a POSIX edge case. `src/foo\state.json` on POSIX is a
     // single basename `foo\state.json`, not a `state.json` segment.
     // Unconditional normalization let it falsely match a `state.json`
     // artifact. Narrowed normalization (drive-letter / UNC /
     // pure-backslash only) keeps POSIX semantics.
-    const trace = traceHookChain({
+    const trace = await traceHookChain({
       // Mixed `/\` path: backslash here is a literal filename character.
       targetPath: 'src/foo\\state.json',
       state: {
@@ -562,7 +562,7 @@ describe('mpl-hook-trace', () => {
       'POSIX literal-backslash filename must not fabricate a path boundary');
   });
 
-  it('#237 codex r3 [logic]: blockStatusFor normalizes backslash paths for active-blocker match', () => {
+  it('#237 codex r3 [logic]: blockStatusFor normalizes backslash paths for active-blocker match', async () => {
     // codex r3 on PR #243: pathCategory normalized backslash to
     // forward slash but blockStatusFor compared raw strings. A
     // Windows-style target `C:\repo\.mpl\state.json` with a normalized
@@ -570,7 +570,7 @@ describe('mpl-hook-trace', () => {
     // and reported as `registered_blocking_other_artifact` — active
     // blocker hidden from the trace despite the target being correctly
     // recognized as state category.
-    const trace = traceHookChain({
+    const trace = await traceHookChain({
       targetPath: 'C:\\repo\\.mpl\\state.json',
       state: {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -591,14 +591,14 @@ describe('mpl-hook-trace', () => {
       'backslash target must normalize and match forward-slash artifact');
   });
 
-  it('#237 codex r5 [logic]: POSIX pure-backslash artifact does NOT fabricate boundary against forward-slash target', () => {
+  it('#237 codex r5 [logic]: POSIX pure-backslash artifact does NOT fabricate boundary against forward-slash target', async () => {
     // Codex r5 on PR #243: previously pure-backslash (no `/`) was
     // treated as Windows-shaped and normalized. That broke the
     // POSIX semantics where backslash is a legal filename
     // character. New rule: only drive-letter / UNC paths are
     // normalized; pure-backslash relative strings are treated as
     // POSIX literal filenames.
-    const trace = traceHookChain({
+    const trace = await traceHookChain({
       targetPath: '/repo/.mpl/state.json',
       state: {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -620,9 +620,9 @@ describe('mpl-hook-trace', () => {
     assert.notEqual(row?.status, 'currently_blocking');
   });
 
-  it('#237 codex r5 [logic]: UNC-style artifact normalizes and matches a forward-slash target', () => {
+  it('#237 codex r5 [logic]: UNC-style artifact normalizes and matches a forward-slash target', async () => {
     // UNC path remains unambiguously Windows-shaped — normalize.
-    const trace = traceHookChain({
+    const trace = await traceHookChain({
       targetPath: '//server/share/.mpl/state.json',
       state: {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -641,7 +641,7 @@ describe('mpl-hook-trace', () => {
     assert.equal(row?.status, 'currently_blocking');
   });
 
-  it('#237 codex r2 [logic]: pathCategory requires slash-boundary — `src/foo.mpl/state.json` is `file`, not `state`', () => {
+  it('#237 codex r2 [logic]: pathCategory requires slash-boundary — `src/foo.mpl/state.json` is `file`, not `state`', async () => {
     // Codex r2 on PR #243: pathCategory used bare `endsWith('.mpl/state.json')`
     // which matched `src/foo.mpl/state.json` (a regular file in a
     // directory called `foo.mpl`). The state-focus filter then
@@ -654,7 +654,7 @@ describe('mpl-hook-trace', () => {
         schema_version: CURRENT_SCHEMA_VERSION,
         current_phase: 'phase2-sprint',
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'src/foo.mpl/state.json',
         cwd: tmp,
       });
@@ -668,7 +668,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#237 codex r2 [logic]: pathCategory requires slash-boundary for decomposition too', () => {
+  it('#237 codex r2 [logic]: pathCategory requires slash-boundary for decomposition too', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-r2-decomp-'));
     try {
       mkdirSync(join(tmp, '.mpl'), { recursive: true });
@@ -676,7 +676,7 @@ describe('mpl-hook-trace', () => {
         schema_version: CURRENT_SCHEMA_VERSION,
         current_phase: 'phase2-sprint',
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'foo.mpl/mpl/decomposition.yaml',
         cwd: tmp,
       });
@@ -686,7 +686,7 @@ describe('mpl-hook-trace', () => {
     }
   });
 
-  it('#237 D3: non-state category trace still includes the broader set', () => {
+  it('#237 D3: non-state category trace still includes the broader set', async () => {
     // Sanity check: tracing a code file path returns the full hook
     // chain (not the narrow state focus).
     const tmp = mkdtempSync(join(tmpdir(), 'mpl-hook-trace-d3-non-state-'));
@@ -696,7 +696,7 @@ describe('mpl-hook-trace', () => {
         schema_version: CURRENT_SCHEMA_VERSION,
         current_phase: 'phase2-sprint',
       }));
-      const trace = traceHookChain({
+      const trace = await traceHookChain({
         targetPath: 'src/api/widgets.ts',
         cwd: tmp,
       });
