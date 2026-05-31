@@ -425,8 +425,22 @@ gates:
 
 permit:
   # Auto-permit + bash-timeout + resource-risk rules.
+  #
+  # MOVE #10 (#1c fix): the legacy `mpl-auto-permit.mjs` ended its Bash branch
+  # with a verbatim `decision: 'approve'` fail-open. `policy/permit.mjs`
+  # replaces that with a layered veto pipeline (dangerous-union, protected
+  # delete, state/decomposition writes, source-target redirects) followed by
+  # this `unknown_bash` knob. Default `pass-through` lets Claude Code prompt
+  # the user — the legacy `auto_permit.fail_closed` boolean below is retained
+  # for additionalProperties:true back-compat but is DEPRECATED; consumers
+  # should configure `unknown_bash` instead.
+  #
+  #   pass-through (default): unknown bash → Claude Code prompts the user.
+  #   block-strict:           unknown bash → blocked with explicit reason.
+  #   allow-loose:            unknown bash → approved (legacy fail-open).
+  unknown_bash: pass-through
   auto_permit:
-    fail_closed: true
+    fail_closed: true        # DEPRECATED — use `permit.unknown_bash` instead.
   bash_timeout:
     categories: {}
   resource_risk:

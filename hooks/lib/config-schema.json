@@ -147,7 +147,13 @@
       }
     },
     "gates":     { "type": "object", "additionalProperties": true },
-    "permit":    { "type": "object", "additionalProperties": true },
+    "permit":    {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "unknown_bash": { "$ref": "#/definitions/permitAction" }
+      }
+    },
     "schemas":   { "type": "object", "additionalProperties": true },
     "audit":     { "type": "object", "additionalProperties": true }
   },
@@ -162,6 +168,10 @@
       "properties": {
         "required": { "type": "boolean" }
       }
+    },
+    "permitAction": {
+      "type": "string",
+      "enum": ["pass-through", "block-strict", "allow-loose"]
     }
   }
 }

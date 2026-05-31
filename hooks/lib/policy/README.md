@@ -29,6 +29,32 @@ MAY import the four finalize-child handlers from `policy/contracts.mjs`
 `handleWholeGoalClosure`) for use inside `handleFinalize`. Rationale:
 `contracts.mjs` is already the SSOT for those four rules; re-implementing
 them in `gates.mjs` would clone code with no compensating benefit. This is
-the ONLY permitted cross-policy import. `gates.mjs` MUST NOT import
+one of two permitted cross-policy imports. `gates.mjs` MUST NOT import
 `policy/evidence.mjs`, `policy/channel-registry.mjs`, or
 `policy/source-edit.mjs`. All other forbidden-import rules unchanged.
+
+### Narrow exception — `permit.mjs` → `source-edit.mjs` (pure helpers only)
+Move #10 introduces a second, equally narrow exception: `policy/permit.mjs`
+MAY import a small set of pure helpers and regex constants from
+`policy/source-edit.mjs` to fix the eval-finding-#1c fail-open default in
+`handleAutoPermit`'s Bash branch. The permitted symbols are limited to:
+
+- `normalizeShellCommand`
+- `extractBashWriteTargets`
+- `matchesProtectedDelete`
+- `isAllowedPath`
+- `isSourceFile`
+- `isDangerousBashCommand`
+- `isDogfoodMode`
+- `DANGEROUS_BASH_PATTERNS` (re-exported as `SOURCE_DANGEROUS_PATTERNS`)
+- `PROTECTED_DELETE_TARGETS`
+- `DECOMPOSITION_FILE_REGEX`
+- `STATE_FILE_REGEX`
+
+Rationale: these are pure functions / regex constants — no I/O, no mutable
+state, no event entrypoint. Re-implementing them in `permit.mjs` would clone
+Move #6's classifier (the root cause of the original asymmetry). `permit.mjs`
+MUST NOT import `handle` / `handleBash` from `source-edit.mjs`, nor any other
+non-source-edit policy module. The shared `classifyBashCommand()` SSOT inside
+`permit.mjs` is reused by both `handleAutoPermit` and `handlePermitLearner`
+so vetoes cannot drift between PreToolUse and PostToolUse.

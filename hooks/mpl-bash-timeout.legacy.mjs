@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+/**
+ * MPL Bash Timeout Hook (PreToolUse on Bash)
+ *
+ * G1 (#107). Verification-shape Bash commands (vitest, playwright, build, lint)
+ * get category-aware timeout bounds. Without enforcement the orchestrator either
+ * (a) omits timeout and Claude Code's 2-minute default kills legitimate longer
+ * runs, or (b) sets an overly-large timeout that lets infinite loops accumulate
+ * fix-loop wall time (exp15 phase-10 5h shape, v3.10 §6.6 G1).
+ *
+ * Decision matrix (see `lib/bash-timeout-categories.mjs#decideTimeout`):
+ *   - non-verification command → silent allow
+ *   - verification + missing timeout → strict block / non-strict warn (with recommended)
+ *   - verification + timeout < sanity floor → block/warn (typo guard)
+ *   - verification + timeout > ceiling → block/warn (per-call budget)
+ *   - verification + in range → silent allow
+ *
+ * Strict mode resolved by `lib/mpl-enforcement.mjs#isStrict` (#110 P0-2):
+ *   state.enforcement.strict  >  .mpl/config.json enforcement.strict  >  DEFAULT (false).
+ */
+
+import { dirname, join } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const { isMplActive, readState } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
+);
+const { readStdin } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+const { decideTimeout } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'bash-timeout-categories.mjs')).href
+);
+const { resolveRuleAction } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
+);
+// #240 A5: bash_timeout per-category overrides from .mpl/config.json.
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
+
+function silent() {
+  console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+}
+
+async function main() {
+  const input = await readStdin();
+
+  let data;
+  try { data = JSON.parse(input); } catch { return silent(); }
+
+  const toolName = data.tool_name || data.toolName || '';
+  if (!['Bash', 'bash'].includes(toolName)) return silent();
+
+  const cwd = data.cwd || data.directory || process.cwd();
+  if (!isMplActive(cwd)) return silent();
+
+  const toolInput = data.tool_input || data.toolInput || {};
+  const command = toolInput.command || '';
+  const timeoutMs = toolInput.timeout;
+
+  const state = readState(cwd) || {};
+  // Per-rule policy (P0-2, #110): `bash_timeout_violation` controls whether
+  // verification commands without acceptable timeouts are blocked or warned.
+  // 'off' = explicit opt-out (hook stays silent — logs intentionally absent
+  // since G1 has no signals.jsonl analogue yet).
+  const ruleAction = resolveRuleAction(cwd, state, 'bash_timeout_violation');
+  if (ruleAction === 'off') return silent();
+  const strict = ruleAction === 'block';
+
+  // #240 A5: thread the workspace's bash_timeout overrides into the
+  // category bounds so monorepo / cargo-release builds can raise the
+  // ceiling without disabling enforcement entirely.
+  const cfg = loadConfig(cwd);
+  const decision = decideTimeout(command, timeoutMs, {
+    strict,
+    configOverride: cfg?.bash_timeout,
+  });
+
+  if (decision.action === 'silent') return silent();
+
+  if (decision.action === 'block') {
+    console.log(JSON.stringify({
+      decision: 'block',
+      reason: decision.reason,
+    }));
+    return;
+  }
+
+  // warn: continue with a system-reminder
+  console.log(JSON.stringify({
+    continue: true,
+    systemMessage: decision.reason,
+  }));
+}
+
+await main().catch(() => silent());
