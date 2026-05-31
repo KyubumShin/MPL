@@ -1,10 +1,12 @@
 /**
  * MPL v2 Dispatch Registry — declarative routing brain for mpl-engine.mjs.
  *
- * Stage A foundation move (proposal §4.2). At this commit the registry is
- * intentionally **empty** — no policy modules import this file yet. The eight
- * `policy/*.mjs` modules from §3.1 will register against this contract in
- * Moves #6+ and `hooks.json` will repoint to `mpl-engine.mjs` later.
+ * MOVE #14: ROUTES table is now populated (lazy registration on first
+ * dispatch()), wiring all 10 policy/observability modules into the engine.
+ * `hooks.json` is intentionally NOT modified in this move (see CONSERVATIVE
+ * FALLBACK in the Move #14 plan): the engine is wired but Claude Code still
+ * routes events to the per-hook .mjs wrappers. The engine therefore stays
+ * dormant in production until a follow-up move flips hooks.json.
  *
  * Contract (v2):
  *   moduleSpec = {
@@ -37,9 +39,391 @@
  *
  * Execution order: ascending `order`, ties broken by `id` (stable lexical) so
  * the resulting list is deterministic across runs.
+ *
+ * Rollback contract — TIER 3 (per-module disable):
+ *   Set `MPL_DISABLE_MODULES=id1,id2,...` to silently no-op registration of
+ *   matching ids at dispatch time. Use when ONE module misbehaves and you
+ *   don't want to bounce the whole engine. Combine with TIER 1
+ *   (`MPL_ENGINE_BYPASS=1` in mpl-engine.mjs) for a full kill-switch.
  */
 
 const MODULES = [];
+
+// Lazy import cache — policy/observability modules are loaded ONCE on first
+// dispatch() call (or first registerRoutes() call from tests). The engine's
+// importOptional() resolves the URL but we want the ROUTES table inside this
+// module so dispatch() callers (engine + tests) get the same registry view.
+let _routesInstalled = false;
+
+import { dirname, join } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const __dispatch_dir = dirname(fileURLToPath(import.meta.url));
+
+async function _importPolicy(rel) {
+  try {
+    return await import(pathToFileURL(join(__dispatch_dir, rel)).href);
+  } catch {
+    return null;
+  }
+}
+
+function _disabledSet() {
+  const env = process.env.MPL_DISABLE_MODULES;
+  if (!env || typeof env !== 'string') return new Set();
+  return new Set(env.split(',').map((s) => s.trim()).filter(Boolean));
+}
+
+/**
+ * Build the canonical ROUTES table that maps the 10 policy/observability
+ * modules onto Claude Code hook events. Per the Move #14 plan, the order
+ * numbers below are deliberately ascending to preserve the legacy
+ * positional semantics of hooks.json (auto-permit before write-guard;
+ * tool-tracker first in PostToolUse; permit-learner last).
+ *
+ * This function is idempotent — second call replaces existing entries by id.
+ * It is invoked lazily from dispatch() so registering a module from a test
+ * (via register()) does not race with the route installer.
+ */
+export async function installRoutes() {
+  if (_routesInstalled) return getRegistry();
+
+  const [
+    sourceEditMod,
+    permitMod,
+    gatesMod,
+    contractsMod,
+    schemasMod,
+    channelRegistryMod,
+    signalsMod,
+    trackersMod,
+    sessionInitMod, // may be null — no policy module backing yet
+  ] = await Promise.all([
+    _importPolicy('policy/source-edit.mjs'),
+    _importPolicy('policy/permit.mjs'),
+    _importPolicy('policy/gates.mjs'),
+    _importPolicy('policy/contracts.mjs'),
+    _importPolicy('policy/schemas.mjs'),
+    _importPolicy('policy/channel-registry.mjs'),
+    _importPolicy('observability/signals.mjs'),
+    _importPolicy('observability/trackers.mjs'),
+    _importPolicy('policy/session-init.mjs'),
+  ]);
+
+  const disabled = _disabledSet();
+  const reg = (spec) => {
+    if (disabled.has(spec.id)) return; // TIER 3 rollback hook
+    register(spec);
+  };
+
+  // -------- Permit family (auto-permit MUST run first in PreToolUse) ------
+  if (permitMod?.handle) {
+    reg({
+      id: 'permit.auto-permit',
+      events: ['PreToolUse'],
+      // legacy mpl-auto-permit had NO matcher — gates ALL tools.
+      order: 5,
+      requireMplActive: false,
+      handler: (ctx) => permitMod.handle('auto_permit', ctx),
+    });
+    reg({
+      id: 'permit.bash-timeout',
+      events: ['PreToolUse'],
+      tools: /^Bash$/,
+      order: 20,
+      handler: (ctx) => permitMod.handle('bash_timeout', ctx),
+    });
+    reg({
+      id: 'permit.permit-learner',
+      events: ['PostToolUse'],
+      // matcher-less in legacy; gates ALL tools.
+      order: 900,
+      requireMplActive: false,
+      handler: (ctx) => permitMod.handle('permit_learner', ctx),
+    });
+    reg({
+      id: 'permit.fallback-grep',
+      events: ['PostToolUse'],
+      tools: /^(Edit|Write|MultiEdit)$/,
+      order: 30,
+      handler: (ctx) => permitMod.handle('fallback_grep', ctx),
+    });
+  }
+
+  // -------- Source edit (PreToolUse only, write-guard equivalent) ---------
+  if (sourceEditMod?.handle) {
+    reg({
+      id: 'source-edit',
+      events: ['PreToolUse'],
+      tools: /^(Edit|Write|MultiEdit|NotebookEdit|Bash|Task|Agent)$/i,
+      order: 10,
+      handler: (ctx) =>
+        sourceEditMod.handle({
+          event: 'PreToolUse',
+          toolName: ctx.toolName,
+          toolInput: ctx.toolInput,
+          cwd: ctx.cwd,
+          state: ctx.state,
+          data: ctx.raw,
+          isMplActive: ctx.mplActive === true,
+          callerTranscriptPath:
+            ctx.raw?.transcript_path || ctx.raw?.transcriptPath,
+        }),
+    });
+  }
+
+  // -------- Gates ---------------------------------------------------------
+  if (gatesMod?.handle) {
+    reg({
+      id: 'gates.finalize',
+      events: ['PreToolUse'],
+      tools: /^(Edit|Write|MultiEdit)$/,
+      order: 40,
+      conditions: (ctx) =>
+        /\.mpl\/state\.json$/.test(String(ctx.toolInput?.file_path || '')),
+      handler: (ctx) =>
+        gatesMod.handle('finalize', {
+          cwd: ctx.cwd,
+          state: ctx.state,
+          config: ctx.config,
+          toolName: ctx.toolName,
+          toolInput: ctx.toolInput,
+          hookEvent: 'PreToolUse',
+        }),
+    });
+    reg({
+      id: 'gates.quality',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 100,
+      conditions: (ctx) =>
+        ctx.toolInput?.subagent_type === 'mpl-adversarial-reviewer' ||
+        ctx.toolInput?.subagentType === 'mpl-adversarial-reviewer',
+      handler: (ctx) => gatesMod.handle('quality', ctx),
+    });
+    reg({
+      id: 'gates.ambiguity',
+      events: ['PreToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 200,
+      conditions: (ctx) =>
+        /mpl-decomposer/.test(
+          String(ctx.toolInput?.subagent_type || ctx.toolInput?.subagentType || ''),
+        ),
+      handler: (ctx) => gatesMod.handle('ambiguity', ctx),
+    });
+    reg({
+      id: 'gates.phase-transition',
+      events: ['Stop'],
+      order: 10,
+      requireMplActive: false,
+      handler: (ctx) => gatesMod.handle('phase_transition', ctx),
+    });
+  }
+
+  // -------- Contracts (collapsed: ONE pre + ONE post entry) ---------------
+  if (contractsMod?.handle) {
+    reg({
+      id: 'contracts.pre',
+      events: ['PreToolUse'],
+      tools: /^(Edit|Write|MultiEdit|Task|Agent)$/,
+      order: 50,
+      handler: (ctx) =>
+        contractsMod.handle('PreToolUse', { ...ctx, hookEvent: 'PreToolUse' }),
+    });
+    reg({
+      id: 'contracts.post',
+      events: ['PostToolUse'],
+      tools: /^(Edit|Write|MultiEdit|Task|Agent)$/,
+      order: 50,
+      handler: (ctx) =>
+        contractsMod.handle('PostToolUse', { ...ctx, hookEvent: 'PostToolUse' }),
+    });
+  }
+
+  // -------- Channel registry (direct hookups for baseline + schema) -------
+  if (channelRegistryMod?.evaluateChannelWrite) {
+    const channelHandler = (hookEvent) => async (ctx) => {
+      const filePath = String(ctx.toolInput?.file_path || '');
+      if (!filePath) return { action: 'noop' };
+      const relPath = channelRegistryMod.workspaceRelative
+        ? channelRegistryMod.workspaceRelative(ctx.cwd, filePath)
+        : filePath;
+      let r;
+      try {
+        r = channelRegistryMod.evaluateChannelWrite({
+          cwd: ctx.cwd,
+          state: ctx.state,
+          cfg: ctx.config,
+          relPath,
+          oldText: ctx.toolInput?.old_string || '',
+          newText:
+            ctx.toolInput?.new_string ||
+            ctx.toolInput?.content ||
+            '',
+          toolName: ctx.toolName,
+          hookEvent,
+        });
+      } catch {
+        return { action: 'noop' };
+      }
+      if (!r || typeof r !== 'object') return { action: 'noop' };
+      const out = { action: r.action || 'noop' };
+      if (r.reason) out.reason = r.reason;
+      if (r.code) out.code = r.code;
+      return out;
+    };
+    reg({
+      id: 'channel-registry.pre',
+      events: ['PreToolUse'],
+      tools: /^(Edit|Write|MultiEdit)$/,
+      order: 45,
+      handler: channelHandler('PreToolUse'),
+    });
+    reg({
+      id: 'channel-registry.post',
+      events: ['PostToolUse'],
+      tools: /^(Edit|Write|MultiEdit|mcp__.*__write.*)/,
+      order: 45,
+      handler: channelHandler('PostToolUse'),
+    });
+  }
+
+  // -------- Schemas -------------------------------------------------------
+  if (schemasMod?.handle) {
+    reg({
+      id: 'schemas.pivot-points',
+      events: ['PreToolUse'],
+      tools: /^(Write|Edit|MultiEdit)$/,
+      order: 60,
+      conditions: (ctx) =>
+        /\.mpl\/pivot-points\.md$/.test(String(ctx.toolInput?.file_path || '')),
+      handler: (ctx) => schemasMod.handle('pivot_points_schema', ctx),
+    });
+    reg({
+      id: 'schemas.agent-output',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 60,
+      handler: (ctx) => schemasMod.handle('agent_output_schema', ctx),
+    });
+    reg({
+      id: 'schemas.seed',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent|Write|Edit|MultiEdit)$/,
+      order: 70,
+      handler: (ctx) => schemasMod.handle('seed_schema', ctx),
+    });
+  }
+
+  // -------- Observability: signals ---------------------------------------
+  if (signalsMod?.handle) {
+    reg({
+      id: 'signals.s0',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent|Edit|Write|MultiEdit)$/,
+      order: 500,
+      handler: (ctx) => signalsMod.handle('s0', ctx),
+    });
+    reg({
+      id: 'signals.s1',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 510,
+      handler: (ctx) => signalsMod.handle('s1', ctx),
+    });
+    reg({
+      id: 'signals.s3',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 520,
+      handler: (ctx) => signalsMod.handle('s3', ctx),
+    });
+    reg({
+      id: 'signals.pp-file',
+      events: ['PostToolUse'],
+      tools: /^(Edit|Write|MultiEdit)$/,
+      order: 530,
+      handler: (ctx) => signalsMod.handle('pp_file', ctx),
+    });
+    reg({
+      id: 'signals.soft-signal-emit',
+      events: ['PreToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 250,
+      handler: (ctx) => signalsMod.handle('soft_signal_emit', ctx),
+    });
+    reg({
+      id: 'signals.gate-recorder',
+      events: ['PostToolUse'],
+      tools: /^(Bash|Task|Agent)$/,
+      order: 20,
+      handler: (ctx) => signalsMod.handle('gate_recorder', ctx),
+    });
+    reg({
+      id: 'signals.discovery-scanner',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 540,
+      conditions: (ctx) =>
+        ctx.toolInput?.subagent_type === 'mpl-phase-runner' ||
+        ctx.toolInput?.subagentType === 'mpl-phase-runner',
+      handler: (ctx) => signalsMod.handle('discovery_scanner', ctx),
+    });
+    reg({
+      id: 'signals.keyword-detector',
+      events: ['UserPromptSubmit'],
+      order: 10,
+      requireMplActive: false,
+      handler: (ctx) => signalsMod.handle('keyword_detector', ctx),
+    });
+  }
+
+  // -------- Observability: trackers --------------------------------------
+  if (trackersMod?.handle) {
+    reg({
+      id: 'trackers.tool-tracker',
+      events: ['PostToolUse'],
+      tools:
+        /^(Bash|Edit|Write|MultiEdit|NotebookEdit|Task|Agent|Read|Grep|Glob|TodoWrite|WebFetch|WebSearch|SlashCommand|BashOutput|KillShell|ExitPlanMode|mcp__.*)/,
+      order: 10,
+      requireMplActive: false,
+      handler: (ctx) => trackersMod.handle('tool_tracker', ctx),
+    });
+    reg({
+      id: 'trackers.context-monitor',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 600,
+      handler: (ctx) => trackersMod.handle('context_monitor', ctx),
+    });
+    reg({
+      id: 'trackers.compaction-tracker',
+      events: ['PreCompact'],
+      order: 10,
+      requireMplActive: false,
+      handler: (ctx) => trackersMod.handle('compaction_tracker', ctx),
+    });
+  }
+
+  // -------- Session init --------------------------------------------------
+  // policy/session-init.mjs does not yet exist (it remains as the thin
+  // wrapper hook mpl-session-init.mjs). If a future move extracts the
+  // body into policy/session-init.mjs with a `handle(ctx)` export, this
+  // block will wire it automatically.
+  if (sessionInitMod?.handle) {
+    reg({
+      id: 'session.init',
+      events: ['SessionStart'],
+      order: 10,
+      requireMplActive: false,
+      handler: (ctx) => sessionInitMod.handle(ctx),
+    });
+  }
+
+  _routesInstalled = true;
+  return getRegistry();
+}
 
 /**
  * Register a module spec. Idempotent: a second register with the same `id`
@@ -128,8 +512,11 @@ export function getRegistry() {
 }
 
 /**
- * Test isolation — clears the registry. Production code never calls this.
+ * Test isolation — clears the registry AND the lazy-install latch so a
+ * subsequent installRoutes() call re-populates from scratch. Production
+ * code never calls this.
  */
 export function clearRegistry() {
   MODULES.length = 0;
+  _routesInstalled = false;
 }

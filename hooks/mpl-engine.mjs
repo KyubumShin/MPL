@@ -2,11 +2,23 @@
 /**
  * MPL v2 Engine — single-entry hook dispatcher (proposal §4.2).
  *
- * STATE AT THIS COMMIT (Move #5): dormant. The dispatch registry in
- * `lib/dispatch.mjs` is empty and `hooks.json` does NOT route any event
- * here yet. The engine is intentionally importable + invokable as a
- * script (`node hooks/mpl-engine.mjs`) so smoke tests can prove the
- * end-to-end wiring is sound before Move #6 lands policy modules.
+ * STATE AT THIS COMMIT (Move #14): ROUTES table populated; hooks.json NOT
+ * repointed yet. The engine still works end-to-end via `node
+ * hooks/mpl-engine.mjs` (smoke tests + ad-hoc invocation) but Claude Code
+ * continues to call the per-hook .mjs wrappers in production. A follow-up
+ * move will swap hooks.json to route the 6 events through this single entry.
+ *
+ * ROLLBACK contract:
+ *   TIER 1 — `MPL_ENGINE_BYPASS=1` makes the engine an inert no-op
+ *            (emits `{continue:true, suppressOutput:true}` and exits 0).
+ *            Use when the engine is misbehaving but the policy modules
+ *            themselves are sound.
+ *   TIER 2 — Restore the pre-Move-#14 `hooks.json` from
+ *            `hooks/hooks.json.legacy-backup` (created in the move that
+ *            flips routing — NOT this move).
+ *   TIER 3 — `MPL_DISABLE_MODULES=id1,id2,...` disables specific module
+ *            ids inside lib/dispatch.mjs at registration time. See
+ *            installRoutes() in lib/dispatch.mjs.
  *
  * Sequence (verbatim from §4.2):
  *   1. parseEvent(stdin)  — defensive snake/camel-case normalization
@@ -204,6 +216,16 @@ function silent() {
 // --- main ------------------------------------------------------------------
 
 async function main() {
+  // TIER 1 ROLLBACK: env kill-switch. When set, engine becomes a no-op
+  // regardless of stdin content. Drains stdin first to avoid SIGPIPE on the
+  // upstream Claude Code process, then emits the inert envelope.
+  if (process.env.MPL_ENGINE_BYPASS === '1') {
+    try {
+      if (stdinMod?.readStdin) await stdinMod.readStdin(500);
+    } catch { /* ignore */ }
+    return silent();
+  }
+
   // Step 1
   const evt = await parseEvent();
   if (!evt || !evt.event) return silent();
@@ -255,6 +277,17 @@ async function main() {
     mplActive,
     raw: evt.raw,
   };
+
+  // Lazy install of the ROUTES table on first invocation. installRoutes()
+  // is idempotent — subsequent calls (e.g. from a long-lived test runner)
+  // are cheap no-ops because the registry is process-local.
+  try {
+    if (dispatchMod && typeof dispatchMod.installRoutes === 'function') {
+      await dispatchMod.installRoutes();
+    }
+  } catch {
+    /* fail-open: an install error degrades to an empty registry */
+  }
 
   let modules = [];
   try {
