@@ -152,12 +152,22 @@ describe('mpl-write-guard hook integration (P0-3, #111)', () => {
     return JSON.parse(out);
   }
 
-  it('default (warn) on source file outside allowlist → continue + delegation notice', () => {
+  it('default (block — Move #6) on source file outside allowlist → block + delegation notice', () => {
     const r = runHook('Edit', {
       file_path: join(tmp, 'src', 'app.ts'),
       old_string: 'a',
       new_string: 'b',
     });
+    assert.strictEqual(r.decision, 'block');
+    assert.match(r.reason, /MPL DELEGATION NOTICE/);
+  });
+
+  it('opted-back-to-warn on source file → continue + delegation notice', () => {
+    const r = runHook('Edit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      old_string: 'a',
+      new_string: 'b',
+    }, { enforcement: { direct_source_edit: 'warn' } });
     assert.strictEqual(r.continue, true);
     assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
   });
@@ -167,7 +177,7 @@ describe('mpl-write-guard hook integration (P0-3, #111)', () => {
       file_path: join(tmp, 'src', 'app.ts'),
       old_string: 'a',
       new_string: 'b',
-    }, { enforcement: { strict: true } });
+    }, { enforcement: { strict: true, direct_source_edit: 'warn' } });
     assert.strictEqual(r.decision, 'block');
     assert.match(r.reason, /MPL DELEGATION NOTICE/);
   });
@@ -191,12 +201,13 @@ describe('mpl-write-guard hook integration (P0-3, #111)', () => {
     assert.strictEqual(r.suppressOutput, true);
   });
 
-  it('dogfood mode (config) + edit on /MPL/ source → delegation notice, not silent', () => {
+  it('dogfood mode (config) + edit on /MPL/ source → delegation notice (warn override), not silent', () => {
+    // Use direct_source_edit: warn to keep additionalContext delivery shape.
     const r = runHook('Edit', {
       file_path: '/proj/MPL/hooks/test.mjs',
       old_string: 'a',
       new_string: 'b',
-    }, { dogfood: true });
+    }, { dogfood: true, enforcement: { direct_source_edit: 'warn' } });
     assert.strictEqual(r.continue, true);
     assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
     assert.match(r.hookSpecificOutput?.additionalContext || '', /dogfood mode/);
@@ -207,7 +218,7 @@ describe('mpl-write-guard hook integration (P0-3, #111)', () => {
       file_path: '/proj/MPL/hooks/test.mjs',
       old_string: 'a',
       new_string: 'b',
-    }, null, { MPL_DOGFOOD: '1' });
+    }, { enforcement: { direct_source_edit: 'warn' } }, { MPL_DOGFOOD: '1' });
     assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
   });
 
@@ -265,11 +276,21 @@ describe('mpl-write-guard hook integration (P0-3, #111)', () => {
     assert.match(r.reason, /MultiEdit/);
   });
 
-  it('MultiEdit on source file (default warn) → continue + delegation notice', () => {
+  it('MultiEdit on source file (default block — Move #6) → decision: block', () => {
     const r = runHook('MultiEdit', {
       file_path: join(tmp, 'src', 'app.ts'),
       edits: [{ old_string: 'a', new_string: 'b' }],
     });
+    assert.strictEqual(r.decision, 'block');
+    assert.match(r.reason, /MPL DELEGATION NOTICE/);
+    assert.match(r.reason, /MultiEdit/);
+  });
+
+  it('MultiEdit on source file (explicit warn override) → continue + delegation notice', () => {
+    const r = runHook('MultiEdit', {
+      file_path: join(tmp, 'src', 'app.ts'),
+      edits: [{ old_string: 'a', new_string: 'b' }],
+    }, { enforcement: { direct_source_edit: 'warn' } });
     assert.strictEqual(r.continue, true);
     assert.match(r.hookSpecificOutput?.additionalContext || '', /MPL DELEGATION NOTICE/);
     assert.match(r.hookSpecificOutput?.additionalContext || '', /MultiEdit/);

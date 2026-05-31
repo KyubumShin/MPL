@@ -22,7 +22,7 @@
         ]
       },
       {
-        "matcher": "Edit|Write|MultiEdit|Bash|Task|Agent",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Task|Agent",
         "hooks": [
           {
             "type": "command",

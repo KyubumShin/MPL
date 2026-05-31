@@ -155,8 +155,17 @@ phase0_artifacts_required: true
 # -----------------------------------------------------------------------------
 enforcement:
   strict: false
-  # Default 'warn' rules (transitional per #110).
-  direct_source_edit: warn
+  # v0.18.1+ — direct_source_edit now defaults to BLOCK on the Bash tool surface
+  # too (per Move #6 closing Law 2 gap). Workspaces that still want the
+  # transitional warn behavior must explicitly set `direct_source_edit: warn`
+  # in their .mpl/config.json or state.json `enforcement` override.
+  direct_source_edit: block
+  # bash_write_targets: gate for the Move #6 Bash-tool extension. When 'off'
+  # the Bash-target extraction is skipped entirely (fall through to dangerous-
+  # bash warn). When 'warn' or 'block', falls back to direct_source_edit for
+  # the actual enforcement action — bash_write_targets is the GATE,
+  # direct_source_edit is the ACTION.
+  bash_write_targets: block
   phase_scope_violation: warn
   missing_gate_evidence: warn
   missing_artifact_schema: warn
