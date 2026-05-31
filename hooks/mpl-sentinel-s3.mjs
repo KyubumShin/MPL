@@ -1,314 +1,71 @@
 #!/usr/bin/env node
 /**
- * MPL Sentinel S3 — Test Import Path Validator (PostToolUse)
+ * MPL Sentinel S3 — thin wrapper (Move #12).
  *
- * Validates that Test Agent's import paths resolve to real files.
- * Runs after Test Agent completes to catch broken imports before Gate execution.
+ * Delegates the test-import-path validator to
+ * `lib/observability/signals.mjs::handleSentinelS3`. Legacy verbatim impl
+ * preserved in `mpl-sentinel-s3.legacy.mjs`.
  *
- * Checks import/from statements in test files, resolves relative paths,
- * and verifies target files exist with common extension fallbacks.
+ * CLOSES EVAL FINDING (biggest perf cost): filter knob
+ * `observability.sentinels.subagent_type_filter.s3`
+ * (default: ['mpl-test-agent', 'mpl:mpl-test-agent']) short-circuits the
+ * recursive readdir + statSync per import resolution attempt, so
+ * unrelated Task|Agent completions no longer pay the cost.
  */
 
-import { dirname, join, resolve, extname } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Import shared MPL state utility
-const { isMplActive, readState } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
-);
+const { isMplActive } = await import(pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href);
+const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+const { handleSentinelS3 } = await import(pathToFileURL(join(__dirname, 'lib', 'observability', 'signals.mjs')).href);
+const configMod = await (async () => {
+  try { return await import(pathToFileURL(join(__dirname, 'lib', 'config.mjs')).href); }
+  catch { return null; }
+})();
+const legacyConfigMod = await (async () => {
+  try { return await import(pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href); }
+  catch { return null; }
+})();
 
-// Import shared stdin reader
-const { readStdin } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
-);
+function ok() { console.log(JSON.stringify({ continue: true, suppressOutput: true })); }
 
-/**
- * Common extensions to try when resolving import paths without extensions.
- */
-const RESOLVE_EXTENSIONS = ['.ts', '.js', '.tsx', '.jsx', '.mjs', '.cjs'];
-
-/**
- * Patterns to detect test files by name.
- */
-const TEST_FILE_PATTERNS = [
-  /\.test\.[jt]sx?$/,
-  /\.spec\.[jt]sx?$/,
-  /test_.*\.py$/,
-  /.*_test\.py$/,
-  /.*_test\.go$/,
-  /.*_test\.rs$/,
-  /__tests__\//,
-];
-
-/**
- * Regex patterns for extracting import paths from source code.
- * Captures the module specifier from import/from statements.
- */
-const IMPORT_PATTERNS = [
-  // ES import: import X from './path'  or  import './path'
-  /\bimport\s+(?:(?:[\w{},*\s]+)\s+from\s+)?['"]([^'"]+)['"]/g,
-  // Dynamic import: import('./path')
-  /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  // CommonJS require: require('./path')
-  /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  // Python import: from .path import X  (relative only)
-  /\bfrom\s+(\.[\w.]*)\s+import\b/g,
-];
-
-/**
- * Check if a file is a test file based on its name.
- * @param {string} fileName
- * @returns {boolean}
- */
-export function isTestFile(fileName) {
-  return TEST_FILE_PATTERNS.some(p => p.test(fileName));
-}
-
-/**
- * Extract import paths from file content.
- * Only returns relative paths (starting with . or ..) since package imports
- * cannot be resolved with filesystem checks alone.
- * @param {string} content - File content
- * @returns {string[]} Array of relative import paths
- */
-export function extractImportPaths(content) {
-  const paths = new Set();
-
-  for (const pattern of IMPORT_PATTERNS) {
-    // Reset lastIndex for global regex
-    pattern.lastIndex = 0;
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      const importPath = match[1];
-      // Only check relative imports (. or ..)
-      if (importPath.startsWith('.')) {
-        paths.add(importPath);
-      }
-    }
-  }
-
-  return [...paths];
-}
-
-/**
- * Resolve an import path to an actual file path.
- * Tries the path as-is, then with common extensions, then as directory/index.
- * @param {string} importPath - The import specifier (relative)
- * @param {string} fromDir - Directory of the importing file
- * @returns {string|null} Resolved absolute path, or null if not found
- */
-export function resolveImportPath(importPath, fromDir) {
-  const basePath = resolve(fromDir, importPath);
-
-  // 1. Try exact path
-  if (existsSync(basePath) && isFile(basePath)) {
-    return basePath;
-  }
-
-  // 2. Try with extensions
-  for (const ext of RESOLVE_EXTENSIONS) {
-    const withExt = basePath + ext;
-    if (existsSync(withExt) && isFile(withExt)) {
-      return withExt;
-    }
-  }
-
-  // 3. Try as directory with index file
-  if (existsSync(basePath) && isDirectory(basePath)) {
-    for (const ext of RESOLVE_EXTENSIONS) {
-      const indexPath = join(basePath, `index${ext}`);
-      if (existsSync(indexPath)) {
-        return indexPath;
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Check if path is a file (not directory).
- * @param {string} filePath
- * @returns {boolean}
- */
-function isFile(filePath) {
-  try {
-    return statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if path is a directory.
- * @param {string} filePath
- * @returns {boolean}
- */
-function isDirectory(filePath) {
-  try {
-    return statSync(filePath).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Find test files in phase directories.
- * Scans .mpl/mpl/phases/{phase_id}/ for test files.
- * @param {string} cwd - Working directory
- * @returns {string[]} Absolute paths to test files
- */
-export function findTestFiles(cwd) {
-  const phasesDir = join(cwd, '.mpl', 'mpl', 'phases');
-  if (!existsSync(phasesDir)) return [];
-
-  const testFiles = [];
-  try {
-    const phaseEntries = readdirSync(phasesDir, { withFileTypes: true });
-    for (const phaseEntry of phaseEntries) {
-      if (!phaseEntry.isDirectory()) continue;
-      const phaseDir = join(phasesDir, phaseEntry.name);
-      collectTestFiles(phaseDir, testFiles);
-    }
-  } catch {
-    // Directory read failure
-  }
-  return testFiles;
-}
-
-/**
- * Recursively collect test files from a directory (max depth 3).
- * @param {string} dir - Directory to scan
- * @param {string[]} results - Accumulator for found test files
- * @param {number} depth - Current recursion depth
- */
-function collectTestFiles(dir, results, depth = 0) {
-  if (depth > 3) return; // Prevent deep recursion
-
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-      if (entry.isFile() && isTestFile(entry.name)) {
-        results.push(fullPath);
-      } else if (entry.isDirectory() && depth < 3) {
-        collectTestFiles(fullPath, results, depth + 1);
-      }
-    }
-  } catch {
-    // Read failure: skip
-  }
-}
-
-/**
- * Validate all import paths in a test file.
- * @param {string} testFilePath - Absolute path to the test file
- * @returns {{ file: string, invalid: Array<{ importPath: string, resolvedAttempt: string }> }}
- */
-export function validateTestImports(testFilePath) {
-  const invalid = [];
-
-  let content;
-  try {
-    content = readFileSync(testFilePath, 'utf-8');
-  } catch {
-    return { file: testFilePath, invalid: [{ importPath: '<unreadable>', resolvedAttempt: testFilePath }] };
-  }
-
-  const importPaths = extractImportPaths(content);
-  const fromDir = dirname(testFilePath);
-
-  for (const importPath of importPaths) {
-    const resolved = resolveImportPath(importPath, fromDir);
-    if (!resolved) {
-      const attempted = resolve(fromDir, importPath);
-      invalid.push({ importPath, resolvedAttempt: attempted });
-    }
-  }
-
-  return { file: testFilePath, invalid };
+function loadCfg(cwd) {
+  try { if (configMod?.loadConfigV2) return configMod.loadConfigV2(cwd) || {}; } catch { /* */ }
+  try { if (legacyConfigMod?.loadConfig) return legacyConfigMod.loadConfig(cwd) || {}; } catch { /* */ }
+  return {};
 }
 
 async function main() {
   const input = await readStdin();
-
   let data;
-  try {
-    data = JSON.parse(input);
-  } catch {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  const toolName = data.tool_name || data.toolName || '';
-
-  // Only intercept Task/Agent tool completions
-  if (!['Task', 'task', 'Agent', 'agent'].includes(toolName)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Check if MPL is active
+  try { data = JSON.parse(input); } catch { return ok(); }
   const cwd = data.cwd || data.directory || process.cwd();
-  if (!isMplActive(cwd)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
+  if (!isMplActive(cwd)) return ok();
 
-  // Find test files in phase directories
-  const testFiles = findTestFiles(cwd);
+  const decision = handleSentinelS3({
+    cwd,
+    toolName: data.tool_name || data.toolName || '',
+    toolInput: data.tool_input || data.toolInput || {},
+    toolResponse: data.tool_response || data.toolResponse || '',
+    config: loadCfg(cwd),
+  });
 
-  // Skip if no test files found
-  if (testFiles.length === 0) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Validate imports in all test files
-  const allInvalid = [];
-  for (const testFile of testFiles) {
-    const { file, invalid } = validateTestImports(testFile);
-    if (invalid.length > 0) {
-      allInvalid.push({ file, invalid });
-    }
-  }
-
-  if (allInvalid.length === 0) {
-    // All imports resolve
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Validation failed: output system-reminder with invalid imports
-  const errorLines = [];
-  for (const { file, invalid } of allInvalid) {
-    errorLines.push(`  ${file}:`);
-    for (const { importPath, resolvedAttempt } of invalid) {
-      errorLines.push(`    - import "${importPath}" -> not found (tried: ${resolvedAttempt})`);
-    }
-  }
-
-  const message = `[MPL SENTINEL S3] Test import path validation failed.
-
-The following test file imports could not be resolved to existing files:
-${errorLines.join('\n')}
-
-ACTION REQUIRED: Fix broken import paths in test files before running Gate checks.
-Verify that the imported modules exist and paths are correct relative to the test file location.`;
-
+  if (!decision || decision.action !== 'signal' || !decision.additionalContext) return ok();
   console.log(JSON.stringify({
     continue: true,
-    hookSpecificOutput: {
-      hookEventName: 'PostToolUse',
-      additionalContext: message
-    }
+    hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: decision.additionalContext },
   }));
 }
 
-main().catch(() => {
-  console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-});
+main().catch(() => ok());
+
+export {
+  isTestFile,
+  extractImportPaths,
+  resolveImportPath,
+  findTestFiles,
+  validateTestImports,
+} from './lib/observability/signals.mjs';

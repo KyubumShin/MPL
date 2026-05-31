@@ -107,6 +107,24 @@ discovery:
   false_positive_threshold_pct: 30
 
 # -----------------------------------------------------------------------------
+# Observability (Move #12) — sentinel subagent_type gating
+# -----------------------------------------------------------------------------
+# Closes the eval finding that S1/S3 fired on every Task|Agent PostToolUse,
+# doing recursive filesystem scans for unrelated subagents (debate,
+# validate-seed, ambiguity-gate, …). Defaults scope each sentinel to the
+# agent whose output it actually validates. Set a list to `null` to disable
+# filtering for that sentinel (legacy fire-for-every-Task behavior). Set to
+# `["__none__"]` to opt out of the sentinel entirely. File-write tools
+# (Edit/Write/MultiEdit) bypass the filter — their path-based gates apply.
+observability:
+  sentinels:
+    subagent_type_filter:
+      s0: ['mpl-seed-generator', 'mpl:mpl-seed-generator',
+           'mpl-phase-runner',   'mpl:mpl-phase-runner']
+      s1: ['mpl-phase-runner',   'mpl:mpl-phase-runner']
+      s3: ['mpl-test-agent',     'mpl:mpl-test-agent']
+
+# -----------------------------------------------------------------------------
 # Ambiguity Gate (#240)
 # -----------------------------------------------------------------------------
 ambiguity:
