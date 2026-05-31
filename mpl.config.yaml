@@ -404,12 +404,23 @@ evidence:
 
 gates:
   # Finalize / quality / ambiguity / phase-transition gate rules.
+  # Owned by hooks/lib/policy/gates.mjs (Move #9 L2 SSOT). Each entry maps to
+  # one of the four `handle(event, ctx)` sub-handlers exposed by gates.mjs.
   finalize:
     enabled: true
   quality:
     threshold: 0.7
     max_retries: 3
   ambiguity:
+    enabled: true
+  phase_transition:
+    # Pass-A: simple phase cases (mpl-init, mpl-decompose,
+    # mpl-ambiguity-resolve, phase1-plan, phase1a-research, phase1b-plan,
+    # phase4-fix, phase5-finalize) + G4 hang short-circuit + blocked_hook
+    # routing are owned by gates.mjs::handlePhaseTransition. Heavy cases
+    # (phase2-sprint cohort lazy-init, release-gate, release-finalize,
+    # phase3-gate, small-*) stay in the wrapper for now and migrate to
+    # `lib/release/` in Pass-B (a follow-up Move).
     enabled: true
 
 permit:

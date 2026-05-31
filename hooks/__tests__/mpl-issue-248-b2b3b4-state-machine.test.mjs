@@ -171,8 +171,10 @@ test('#248 B2: NO active cohort + PASS gates still routes to phase5-finalize (de
 });
 
 test('#248 B2 wire: stopReason mentions mpl-recover advisory', () => {
+  // Post-Move #9: phase3-gate active-cohort branch lives in the legacy
+  // sibling (Pass-A keeps phase3-gate heavy path in the legacy file).
   const text = readFileSync(
-    join(REPO_ROOT, 'hooks', 'mpl-phase-controller.mjs'),
+    join(REPO_ROOT, 'hooks', 'mpl-phase-controller.legacy.mjs'),
     'utf-8',
   );
   // The active-cohort branch must reference mpl-recover and the
@@ -193,8 +195,14 @@ test('#248 B2 wire: stopReason mentions mpl-recover advisory', () => {
 // ---------------------------------------------------------------------------
 
 test('#248 B3 wire: stagnation auto-finalize requires multi-tick + config opt-in', () => {
+  // Post-Move #9: phase-controller is a thin wrapper; the phase4-fix
+  // routing decision lives both in the legacy file (heavy path) AND in
+  // lib/policy/gates.mjs::handlePhaseTransition (Pass-A simple cases). The
+  // SSOT for the stagnation logic is now the legacy file (Pass-B will
+  // migrate it). Read from the .legacy.mjs sibling so the existing
+  // structural assertions hold.
   const text = readFileSync(
-    join(REPO_ROOT, 'hooks', 'mpl-phase-controller.mjs'),
+    join(REPO_ROOT, 'hooks', 'mpl-phase-controller.legacy.mjs'),
     'utf-8',
   );
   // Must reference the counter, the threshold, and the config flag.

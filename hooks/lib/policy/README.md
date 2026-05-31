@@ -21,3 +21,14 @@ identified by the lib scout include:
 `policy/X` may NOT import `policy/Y`. Cross-policy coupling defeats the
 purpose of L2 isolation. Policies may import from L1 (`state/`, config) and
 from pure utilities only.
+
+### Narrow exception — `gates.mjs` → `contracts.mjs`
+Move #9 introduces a single, documented narrow exception: `policy/gates.mjs`
+MAY import the four finalize-child handlers from `policy/contracts.mjs`
+(`handleE2eGate`, `handleE2eAuthenticity`, `handleFinalizeArtifacts`,
+`handleWholeGoalClosure`) for use inside `handleFinalize`. Rationale:
+`contracts.mjs` is already the SSOT for those four rules; re-implementing
+them in `gates.mjs` would clone code with no compensating benefit. This is
+the ONLY permitted cross-policy import. `gates.mjs` MUST NOT import
+`policy/evidence.mjs`, `policy/channel-registry.mjs`, or
+`policy/source-edit.mjs`. All other forbidden-import rules unchanged.
