@@ -278,7 +278,7 @@ channels:
   writable_paths: []
 
 contracts:
-  # Phase contract declarative rules.
+  # Phase contract declarative rules (extended in Move #8 to cover all 13 require-* surfaces).
   chain_assignment:
     required: true
   coverage:
@@ -289,14 +289,118 @@ contracts:
     required: true
   test_agent:
     brief_required: true
+    pass_required: true                # gate state.test_agent_dispatched verdict
   reviewer:
     required: true
   e2e:
     required: true
+  e2e_authenticity:
+    required: true
+  finalize_artifacts:
+    required: true
+  whole_goal_closure:
+    required: true
+  phase_contract_graph:
+    required: true
+  phase_evidence:
+    required: true                     # canonical Evidence Latch gate (now structural)
+  completed_phase_immutability:
+    required: true
 
 evidence:
-  # Structural evidence-check rules. Replaces legacy Evidence Latch.
-  rules: []
+  # Structural evidence-check rules. Replaces legacy substring+'pass' Evidence Latch.
+  # Each rule names a token from decomposition.yaml phase.evidence_required[].
+  # structural_check: true means policy/evidence.mjs runs the per-token
+  # structural verification (state-join + artifact-existence + schema parse).
+  # fallback_allowed: false means substring 'pass' in verification.md is INSUFFICIENT.
+  allow_legacy_text_fallback: false    # transition-window opt-out (set true only via state.json override)
+  unknown_token_action: block          # closes the open-schema hole — decomposer cannot invent tokens
+  rules:
+    - token: command
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results
+    - token: test_agent
+      structural_check: true
+      fallback_allowed: false
+      state_path: test_agent_dispatched
+    - token: test_agent_brief
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/test-agent-brief.yaml']
+    - token: goal_trace
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/decomposition.yaml', '.mpl/goal-contract.yaml']
+    - token: api_contract
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/contracts/*.json', '.mpl/contracts/*.yaml']
+    - token: type_policy
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: error_spec
+      structural_check: true
+      fallback_allowed: false
+    - token: tests_pass
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/junit*.xml']
+      state_path: test_agent_dispatched
+    - token: security
+      structural_check: true
+      fallback_allowed: false
+      state_path: security_results
+      artifact_paths: ['.mpl/security-report.json']
+    - token: e2e
+      structural_check: true
+      fallback_allowed: false
+      state_path: e2e_results
+      artifact_paths: ['.mpl/mpl/e2e-scenarios.yaml']
+    - token: e2e_authenticity
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/e2e-scenarios.yaml']
+    - token: file_exists
+      structural_check: true
+      fallback_allowed: false
+    - token: export_manifest
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/releases/{cut_id}/release-manifest.json']
+    - token: lsp_diagnostics
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/lsp-diagnostics.json']
+    - token: lint
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: type_check
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: build
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: documentation
+      structural_check: true
+      fallback_allowed: true               # docs are textual; allow text fallback for now
+    - token: manual
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.manual_attestation
+    - token: external_audit
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/external-audit.json']
+    - token: tooling
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.tooling
 
 gates:
   # Finalize / quality / ambiguity / phase-transition gate rules.

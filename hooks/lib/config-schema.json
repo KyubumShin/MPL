@@ -91,8 +91,61 @@
         "writable_paths":     { "type": "array", "items": { "type": "string" } }
       }
     },
-    "contracts": { "type": "object", "additionalProperties": true },
-    "evidence":  { "type": "object", "additionalProperties": true },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "chain_assignment":          { "$ref": "#/definitions/requiredFlag" },
+        "coverage":                  { "$ref": "#/definitions/requiredFlag" },
+        "decomposition": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "require_delta": { "type": "boolean" }
+          }
+        },
+        "goal_trace":                { "$ref": "#/definitions/requiredFlag" },
+        "test_agent": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "brief_required":  { "type": "boolean" },
+            "pass_required":   { "type": "boolean" }
+          }
+        },
+        "reviewer":                  { "$ref": "#/definitions/requiredFlag" },
+        "e2e":                       { "$ref": "#/definitions/requiredFlag" },
+        "e2e_authenticity":          { "$ref": "#/definitions/requiredFlag" },
+        "finalize_artifacts":        { "$ref": "#/definitions/requiredFlag" },
+        "whole_goal_closure":        { "$ref": "#/definitions/requiredFlag" },
+        "phase_contract_graph":      { "$ref": "#/definitions/requiredFlag" },
+        "phase_evidence":            { "$ref": "#/definitions/requiredFlag" },
+        "completed_phase_immutability": { "$ref": "#/definitions/requiredFlag" }
+      }
+    },
+    "evidence":  {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allow_legacy_text_fallback": { "type": "boolean" },
+        "unknown_token_action": { "type": "string", "enum": ["block", "warn", "off"] },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "token":             { "type": "string" },
+              "structural_check":  { "type": "boolean" },
+              "fallback_allowed":  { "type": "boolean" },
+              "state_path":        { "type": "string" },
+              "artifact_paths":    { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["token"]
+          }
+        }
+      }
+    },
     "gates":     { "type": "object", "additionalProperties": true },
     "permit":    { "type": "object", "additionalProperties": true },
     "schemas":   { "type": "object", "additionalProperties": true },
@@ -102,6 +155,13 @@
     "ruleAction": {
       "type": "string",
       "enum": ["warn", "block", "off"]
+    },
+    "requiredFlag": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "required": { "type": "boolean" }
+      }
     }
   }
 }
