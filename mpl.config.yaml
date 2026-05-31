@@ -577,3 +577,104 @@ audit:
   drift:
     escalate_undeclared_to_anti_pattern: true
   rules: []
+
+# -----------------------------------------------------------------------------
+# State merge policy (Move #17) — field-ownership matrix consumed by
+# hooks/lib/state/wave-reducer.mjs. Unknown fields encountered in shard
+# patches that have no entry here -> reducer THROWS
+# UnknownFieldOwnershipError (no silent last-write-wins). Adding a new
+# state.json top-level field henceforth REQUIRES a merge_policy entry.
+# -----------------------------------------------------------------------------
+state:
+  merge_policy:
+    # ---- phase-keyed: per-phase_id segment in the JSON Pointer path ----
+    gate_results:                phase_keyed
+    test_agent_dispatched:       phase_keyed
+    e2e_results:                 last_completed_at_wins
+    security_results:            phase_keyed
+    phase_lifecycle:             phase_keyed
+    release:                     phase_keyed
+    reconciler_reentries:        phase_keyed   # NEW: {[wave_id]: {[contract_ref_hash]: {count<=1, winner_phase_id, loser_phase_id}}}
+
+    # ---- ring_merge: concat then slice(-cap); caps mirror writer.mjs ----
+    ambiguity_history:           ring_merge
+    phase_scheduler_history:     ring_merge
+    fix_loop_history:            ring_merge
+    worktree_pool_history:       ring_merge
+    quality_score_history:       ring_merge
+    convergence.pass_rate_history: ring_merge
+
+    # ---- union: Set-merge dedup by stable entry-id ----
+    permits:                     union
+    worktree_history:            union
+    waves_in_flight:             union
+    running:                     union
+    completed_cut_ids:           union
+
+    # ---- recomputed_from_decomposition: shard values DISCARDED ----
+    sprint_status:               recomputed_from_decomposition
+    execution.phases.completed:  recomputed_from_decomposition
+    execution.phases.total:      recomputed_from_decomposition
+
+    # ---- engine-only: pipeline-scoped fields; shard patches REJECTED ----
+    pipeline_id:                 engine_only
+    session_status:              engine_only
+    current_phase:               engine_only
+    schema_version:              engine_only
+    started_at:                  engine_only
+    finalize_done:               engine_only
+    finalized_at:                engine_only
+    completed_at:                engine_only
+    blocked_by_hook:             engine_only
+    blocked_phase:               engine_only
+    blocked_artifact:            engine_only
+    block_code:                  engine_only
+    block_reason:                engine_only
+    resume_instruction:          engine_only
+    retry_context:               engine_only
+    blocked_at:                  engine_only
+    current_cut_id:              engine_only
+    fix_loop_count:              engine_only
+
+# -----------------------------------------------------------------------------
+# Reconciliation (Move #17) — wave-end 4-bucket classifier + reconciler verdict
+# -----------------------------------------------------------------------------
+reconcile:
+  enabled: true
+  # Bucket X bounded re-entry cap per (wave_id, contract_ref).
+  reentry_cap: 1
+  # Bucket priority on multi-classification (T > C > S > X).
+  bucket_priority: [T, C, S, X]
+  # Verifier dispatch — when bucket C non-empty, the gate spawns
+  # mpl-adversarial-reviewer --mode=reconcile and awaits the
+  # wave-<tier>-<wave>-reconciler-verdict.json signal.
+  verifier:
+    agent: mpl-adversarial-reviewer
+    mode: reconcile
+    timeout_ms: 600000
+  # Frontier gate — mpl-require-reconciliation.mjs blocks dependent-phase
+  # dispatch until reconcileWave returns terminal outcome ∈
+  # {clean, reconciled, aborted}.
+  gate_dependent_frontier: true
+
+# -----------------------------------------------------------------------------
+# Failure codes (Move #17) — canonical allowlist surfaced by the scheduler
+# aggregator AND finalize gate. Extended from 5 → 11 to cover wave-reducer +
+# reconcile errors. The frozen Set in hooks/lib/mpl-scheduler-failure-codes.mjs
+# is the SSOT consumed at runtime; this YAML duplicate exists so users +
+# operators can audit the vocabulary without reading source.
+# -----------------------------------------------------------------------------
+failure_codes:
+  canonical:
+    - worker_dispatch_error
+    - worktree_setup_error
+    - wave_execution_error
+    - merge_error
+    - unknown_runtime_error
+    # Move #17 extensions (wave-reducer + reconcile)
+    - stale_shard_base
+    - unknown_field_ownership
+    - merge_error:textual_conflict
+    - semantic_reentry_exhausted
+    - reconcile_required
+    - wave_reducer_unresolvable

@@ -421,6 +421,57 @@ export async function installRoutes() {
     });
   }
 
+  // -------- Reconciliation gate (Move #17) -------------------------------
+  // Blocks dependent-phase frontier dispatch until the wave-end reconciler
+  // produces a terminal outcome. Lives in the engine-front-door PreToolUse
+  // chain at the same order tier as other "require-" gates (210 → after
+  // ambiguity but before observability sinks). Additive / dormant until
+  // wave_end routes ship.
+  const reconcileMod = await _importPolicy('policy/reconcile/index.mjs');
+  if (reconcileMod?.classifyWave) {
+    reg({
+      id: 'reconcile.require',
+      events: ['PreToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 210,
+      conditions: (ctx) => /mpl-phase-runner/.test(
+        String(ctx.toolInput?.subagent_type || ctx.toolInput?.subagentType || ''),
+      ),
+      handler: async (ctx) => {
+        // Read the wave-reconciliation.json sentinel; allow when absent
+        // (no reconciliation in flight). When outcome is non-terminal,
+        // block the dependent-phase dispatch.
+        try {
+          const { existsSync, readFileSync } = await import('fs');
+          const { join: _join } = await import('path');
+          const path = _join(ctx.cwd, '.mpl', 'signals', 'reconcile', 'wave-reconciliation.json');
+          if (!existsSync(path)) return { action: 'noop' };
+          let payload;
+          try { payload = JSON.parse(readFileSync(path, 'utf-8')); } catch { return { action: 'noop' }; }
+          const outcome = payload?.outcome;
+          if (outcome === 'clean' || outcome === 'reconciled') return { action: 'allow' };
+          if (outcome === 'pending_verifier') {
+            return {
+              action: 'block',
+              reason: `wave ${payload?.wave_id} reconciliation pending verifier`,
+              code: 'reconcile_pending',
+            };
+          }
+          if (outcome === 'aborted') {
+            return {
+              action: 'block',
+              reason: `wave ${payload?.wave_id} reconciliation aborted (${payload?.failure_code || 'unspecified'})`,
+              code: payload?.failure_code || 'reconcile_aborted',
+            };
+          }
+          return { action: 'noop' };
+        } catch {
+          return { action: 'noop' };
+        }
+      },
+    });
+  }
+
   _routesInstalled = true;
   return getRegistry();
 }
