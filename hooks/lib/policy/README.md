@@ -8,14 +8,23 @@ schemas, audit). They are leaf nodes in the dependency graph: each policy is
 independent.
 
 ## Status
-Empty in v2 commit #1 (this README only). Population order is TBD; candidates
-identified by the lib scout include:
+Seven policy modules populated (Moves #6-#11):
+
+- `source-edit.mjs`       — Move #6
+- `contracts.mjs`         — Move #8
+- `evidence.mjs`          — Move #7
+- `gates.mjs`             — Move #9 (narrow exception → `contracts.mjs`)
+- `permit.mjs`            — Move #10 (narrow exception → `source-edit.mjs` pure helpers)
+- `channel-registry.mjs`  — earlier move
+- `schemas.mjs`           — Move #11 (zero cross-policy imports)
+
+Other candidates identified by the lib scout (not yet moved):
 
 - `mpl-enforcement.mjs` → `policy/enforcement.mjs`
 - `mpl-gate-classify.mjs` → `policy/gate-classify.mjs`
 - `mpl-goal-contract.mjs` → `policy/goal-contract.mjs`
-- `permit-store.mjs` → `policy/permit.mjs`
-- `mpl-artifact-schema.mjs` → `policy/artifact-schema.mjs`
+- `mpl-artifact-schema.mjs` → `policy/artifact-schema.mjs` (future move could
+  fold pivot-points presence-check into the artifact-schema registry)
 
 ## Forbidden imports
 `policy/X` may NOT import `policy/Y`. Cross-policy coupling defeats the
