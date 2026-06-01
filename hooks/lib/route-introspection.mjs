@@ -86,17 +86,23 @@ export const MODULE_TO_HOOK_IDS = {
     { hookId: 'mpl-require-test-agent',           matcher: 'Task|Agent' },
   ],
 
+  // ── State invariant (Move P3 #2) ─────────────────────────────────────────
+  // Three coalesced routes (pre.task / pre.write / stop) map onto the single
+  // legacy hook id `mpl-state-invariant`. The introspection coalescer below
+  // merges matchers for same-event rows so the design.md table sees one
+  // "PreToolUse: Task/Agent/Edit/Write/MultiEdit; Stop" entry.
+  'state.invariant.pre.task':  [{ hookId: 'mpl-state-invariant',
+                                  matcher: 'Task|Agent' }],
+  'state.invariant.pre.write': [{ hookId: 'mpl-state-invariant',
+                                  matcher: 'Edit|Write|MultiEdit' }],
+  'state.invariant.stop':      [{ hookId: 'mpl-state-invariant' }],
+
   // ── Channel registry (collapsed pre/post) ────────────────────────────────
-  // channel-registry.pre is the state-invariant entry point for
-  // .mpl/state.json writes; pre-Move-#14 this was mpl-state-invariant on
-  // PreToolUse: Task|Agent|Edit|Write|MultiEdit + Stop. We keep the
-  // matcher exactly as design.md documents it.
+  // mpl-require-completed-phase-immutability + mpl-require-phase-evidence
+  // + mpl-baseline-guard are pre-Move-#14 state-write guards on the
+  // Edit|Write|MultiEdit matcher. mpl-state-invariant used to piggyback here
+  // — it's now driven by its own routes above.
   'channel-registry.pre':     [
-    { hookId: 'mpl-state-invariant',
-      matcher: 'Task|Agent|Edit|Write|MultiEdit' },
-    // mpl-require-completed-phase-immutability + mpl-require-phase-evidence
-    // + mpl-baseline-guard are also pre-Move-#14 state-write guards on the
-    // same Edit|Write|MultiEdit matcher.
     { hookId: 'mpl-require-completed-phase-immutability',
       matcher: 'Edit|Write|MultiEdit' },
     { hookId: 'mpl-require-phase-evidence',
@@ -159,14 +165,6 @@ export const MODULE_TO_HOOK_IDS = {
   'reconcile.require':        [],
 };
 
-// Stop-event entries that don't have a clean module surrogate in dispatch.mjs
-// but are present in the legacy hooks.json: mpl-state-invariant also runs on
-// Stop with no matcher, and mpl-phase-controller's Stop entry is registered
-// via gates.phase-transition. Add the extra rows explicitly.
-const EXTRA_LEGACY_ROWS = [
-  { hookId: 'mpl-state-invariant', event: 'Stop',           matcher: '' },
-];
-
 // ----------------------------------------------------------------------------
 // regexToMatcher — invert a route's `tools` RegExp back to a matcher string
 // in the same pipe-delimited shape that hooks.json used (e.g. 'Edit|Write|MultiEdit').
@@ -223,20 +221,55 @@ function formatEventMatcher(event, matcher) {
   return matcher ? `${event}: ${matcher.replaceAll('|', '/')}` : event;
 }
 
+/**
+ * Coalesce matcher fragments for the same (hookId, event) pair so multi-route
+ * hook ids (e.g. `mpl-state-invariant` registered via three split routes for
+ * PreToolUse Task|Agent + PreToolUse Edit|Write|MultiEdit + Stop) render as
+ * one row in design.md / hook-trace. Without this merge the output would
+ * surface duplicated "PreToolUse: …; PreToolUse: …" entries.
+ */
+function coalesceRowsByHookEvent(rows) {
+  // hookId -> ordered list of { event, matcherParts:Set<string> }
+  const byHook = new Map();
+  for (const row of rows) {
+    if (!byHook.has(row.hookId)) byHook.set(row.hookId, []);
+    const list = byHook.get(row.hookId);
+    let bucket = list.find((b) => b.event === row.event);
+    if (!bucket) {
+      bucket = { event: row.event, matcherParts: [] };
+      list.push(bucket);
+    }
+    if (row.matcher) {
+      for (const part of String(row.matcher).split('|')) {
+        if (part && !bucket.matcherParts.includes(part)) bucket.matcherParts.push(part);
+      }
+    }
+  }
+  const out = [];
+  for (const [hookId, buckets] of byHook.entries()) {
+    for (const b of buckets) {
+      out.push({
+        hookId,
+        event: b.event,
+        matcher: b.matcherParts.join('|'),
+      });
+    }
+  }
+  return out;
+}
+
 export async function liveHooksFromRoutes() {
   await installRoutes();
   const routes = getRegistry();
-  const hooks = new Map();
-
+  const rawRows = [];
   for (const spec of routes) {
     for (const row of _expandRoute(spec)) {
-      const entry = formatEventMatcher(row.event, row.matcher);
-      const existing = hooks.get(row.hookId);
-      hooks.set(row.hookId, existing ? `${existing}; ${entry}` : entry);
+      rawRows.push(row);
     }
   }
-  // Append the EXTRA_LEGACY_ROWS (Stop-event mpl-state-invariant etc.).
-  for (const row of EXTRA_LEGACY_ROWS) {
+  const coalesced = coalesceRowsByHookEvent(rawRows);
+  const hooks = new Map();
+  for (const row of coalesced) {
     const entry = formatEventMatcher(row.event, row.matcher);
     const existing = hooks.get(row.hookId);
     hooks.set(row.hookId, existing ? `${existing}; ${entry}` : entry);
@@ -265,28 +298,23 @@ function _commandFor(hookId) {
 export async function registeredRouteRows() {
   await installRoutes();
   const routes = getRegistry();
-  const rows = [];
+  const rawRows = [];
   for (const spec of routes) {
     for (const row of _expandRoute(spec)) {
-      rows.push({
-        event:    row.event,
-        matcher:  row.matcher || null,
-        hookId:   row.hookId,
-        command:  _commandFor(row.hookId),
-        timeout:  null,
-      });
+      rawRows.push(row);
     }
   }
-  for (const row of EXTRA_LEGACY_ROWS) {
-    rows.push({
-      event:    row.event,
-      matcher:  row.matcher || null,
-      hookId:   row.hookId,
-      command:  _commandFor(row.hookId),
-      timeout:  null,
-    });
-  }
-  return rows;
+  // Coalesce same-(hookId, event) fragments so consumers see the legacy
+  // shape — e.g. mpl-state-invariant's three split routes collapse into one
+  // "PreToolUse: Task|Agent|Edit|Write|MultiEdit" + one "Stop" row.
+  const coalesced = coalesceRowsByHookEvent(rawRows);
+  return coalesced.map((row) => ({
+    event:    row.event,
+    matcher:  row.matcher || null,
+    hookId:   row.hookId,
+    command:  _commandFor(row.hookId),
+    timeout:  null,
+  }));
 }
 
 // ----------------------------------------------------------------------------

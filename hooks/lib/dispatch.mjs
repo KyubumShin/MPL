@@ -221,6 +221,45 @@ export async function installRoutes() {
     });
   }
 
+  // -------- State invariant (Move P3 #2) ----------------------------------
+  // Three coalesced routes mirror the legacy hooks.json registration:
+  //   PreToolUse Task|Agent          (trigger='task-dispatch')
+  //   PreToolUse Edit|Write|MultiEdit on .mpl/state.json (trigger='state-write')
+  //   Stop                            (trigger='stop')
+  // Three routes (vs one multi-event spec) because the PreToolUse legs need
+  // different matcher/conditions — Task|Agent unconditionally vs
+  // Edit|Write|MultiEdit gated on state.json target.
+  const stateInvariantMod = await _importPolicy('policy/state-invariant.mjs');
+  if (stateInvariantMod?.handle) {
+    reg({
+      id: 'state.invariant.pre.task',
+      events: ['PreToolUse'],
+      tools: /^(Task|Agent)$/,
+      order: 42, // before contracts.pre (50), after gates.finalize (40)
+      requireMplActive: true,
+      handler: (ctx) => stateInvariantMod.handle('task-dispatch', ctx),
+    });
+    reg({
+      id: 'state.invariant.pre.write',
+      events: ['PreToolUse'],
+      tools: /^(Edit|Write|MultiEdit)$/,
+      order: 42,
+      requireMplActive: true,
+      conditions: (ctx) =>
+        /\.mpl\/state\.json$/.test(
+          String(ctx.toolInput?.file_path || ctx.toolInput?.filePath || ''),
+        ),
+      handler: (ctx) => stateInvariantMod.handle('state-write', ctx),
+    });
+    reg({
+      id: 'state.invariant.stop',
+      events: ['Stop'],
+      order: 20, // after gates.phase-transition (10) so phase resolution runs first
+      requireMplActive: true,
+      handler: (ctx) => stateInvariantMod.handle('stop', ctx),
+    });
+  }
+
   // -------- Contracts (collapsed: ONE pre + ONE post entry) ---------------
   if (contractsMod?.handle) {
     reg({

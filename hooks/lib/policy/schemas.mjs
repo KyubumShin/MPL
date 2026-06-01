@@ -59,6 +59,17 @@ import {
   DEFAULT_CONFIG_TARGETS as PROPERTY_DEFAULT_CONFIG_TARGETS,
 } from '../mpl-property-check.mjs';
 
+// P3 #6 Pass 1: declarative rule loader. Late-import to avoid an import cycle
+// (schemas-config.mjs re-imports the frozen fallback constants from this
+// module). Each getter falls back to the frozen constant when YAML is absent
+// / malformed so behavior is byte-identical to the legacy implementation.
+import {
+  getUcSchemaPatterns,
+  getValidateAgents,
+  getExpectedSections,
+  getPropertyAuditTargets,
+} from './schemas-config.mjs';
+
 // ============================================================================
 // Shared constants
 // ============================================================================
@@ -247,9 +258,12 @@ export function extractProposedContent(toolInput, toolName) {
     .join('\n');
 }
 
-export function detectUcLeakage(content) {
+export function detectUcLeakage(content, patterns = UC_SCHEMA_PATTERNS) {
   if (!content || typeof content !== 'string') return [];
-  return UC_SCHEMA_PATTERNS.filter((p) => p.re.test(content));
+  const src = Array.isArray(patterns) && patterns.length > 0
+    ? patterns
+    : UC_SCHEMA_PATTERNS;
+  return src.filter((p) => p && p.re && typeof p.re.test === 'function' && p.re.test(content));
 }
 
 export function formatPivotPointsBlockReason(hits) {
@@ -274,7 +288,7 @@ export const formatBlockReason = formatPivotPointsBlockReason;
  * ctx: { toolName, toolInput, cwd, state?, mplActive }
  */
 export function handlePivotPointsSchema(ctx = {}) {
-  const { toolName, toolInput, mplActive } = ctx;
+  const { toolName, toolInput, mplActive, cwd } = ctx;
 
   if (!isFileWriteTool(toolName)) {
     return noop({ ruleId: 'pp_schema_irrelevant_tool' });
@@ -295,7 +309,9 @@ export function handlePivotPointsSchema(ctx = {}) {
     return noop({ ruleId: 'pp_schema_empty_content' });
   }
 
-  const hits = detectUcLeakage(content);
+  // P3 #6 Pass 1: read patterns through the YAML loader with frozen fallback.
+  const patterns = getUcSchemaPatterns(cwd);
+  const hits = detectUcLeakage(content, patterns);
 
   if (hits.length === 0) {
     // Clear path — wrappers translate this into emitClearedOk (when MPL
@@ -464,14 +480,19 @@ export function handleAgentOutputSchema(ctx = {}) {
   // Telemetry runs for ALL Task completions (not just validated agents).
   const sideEffects = trackTokenUsage(cwd, agentType, responseText);
 
-  if (!VALIDATE_AGENTS.has(agentType)) {
+  // P3 #6 Pass 1: read agent allowlist + expected sections through the YAML
+  // loader with frozen fallback.
+  const validateAgents = getValidateAgents(cwd);
+  const expectedSections = getExpectedSections(cwd);
+
+  if (!validateAgents.has(agentType)) {
     return allow({
       ruleId: 'agent_output_not_validated_agent',
       sideEffects,
     });
   }
 
-  const sections = EXPECTED_SECTIONS[agentType] || [];
+  const sections = expectedSections[agentType] || [];
   const { passed, missing, found, sectionList } =
     validateSections(sections, responseText);
   const message = formatValidationMessage(
@@ -883,16 +904,19 @@ export function handleSeedSchema(ctx = {}) {
  * ctx: { pluginRoot, configPaths? }
  */
 export function handlePropertyAudit(ctx = {}) {
-  const { pluginRoot } = ctx;
+  const { pluginRoot, cwd } = ctx;
   if (!pluginRoot || typeof pluginRoot !== 'string') {
     return report({
       error: 'pluginRoot is required for property audit',
     });
   }
 
+  // P3 #6 Pass 1: read property-audit target list through the YAML loader
+  // with frozen fallback. Explicit ctx.configPaths still wins.
+  const yamlTargets = getPropertyAuditTargets(cwd);
   const configPaths = Array.isArray(ctx.configPaths) && ctx.configPaths.length > 0
     ? ctx.configPaths
-    : DEFAULT_CONFIG_TARGETS;
+    : yamlTargets;
 
   const results = runPropertyBatch(pluginRoot, configPaths);
   const summary = {

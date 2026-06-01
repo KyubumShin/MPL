@@ -689,7 +689,105 @@ permit:
 
 schemas:
   # validate-* + property-check rules.
-  rules: []
+  #
+  # P3 #6 Pass 1 — declarative migration of three frozen-in-module schema
+  # constants. Each rule below mirrors the legacy frozen value EXACTLY so the
+  # loader path produces byte-identical output to the fallback path. Workspace
+  # overrides extend or replace these entries; absent / malformed rules fall
+  # back to the frozen constants in lib/policy/schemas.mjs.
+  #
+  # Pass 2 will tighten config-schema.json to validate the per-kind shapes.
+  # Pass 3 will migrate phase_seed_required (gated by `enabled: false` until
+  # parity tests prove the dispatcher matches the inline control flow).
+  rules:
+    pp_uc_leakage:
+      kind: regex_denylist
+      target: '.mpl/pivot-points.md'
+      patterns:
+        - name: 'user_cases:'
+          re: '^user_cases\s*:'
+          flags: 'm'
+        - name: 'deferred_cases:'
+          re: '^deferred_cases\s*:'
+          flags: 'm'
+        - name: 'cut_cases:'
+          re: '^cut_cases\s*:'
+          flags: 'm'
+        - name: 'user_delta:'
+          re: '^\s{2,}user_delta\s*:'
+          flags: 'm'
+        - name: 'covers_pp:'
+          re: '^\s{2,}covers_pp\s*:'
+          flags: 'm'
+        - name: 'UC-NN identifier'
+          re: '\bUC-\d{2,}\b'
+          flags: ''
+    agent_output_sections:
+      kind: section_presence
+      match: case_insensitive_substring
+      agents:
+        mpl-phase-runner:
+          - status
+          - state_summary
+          - verification
+        mpl-decomposer:
+          - architecture_anchor
+          - phases
+        mpl-interviewer:
+          - 'PP-'
+          - 'Priority Order'
+          - 'Interview Metadata'
+        mpl-test-agent:
+          - phase_id
+          - test_files_created
+          - test_results
+          - a_item_coverage
+        mpl-codebase-analyzer:
+          - project_type
+          - modules
+          - external_deps
+          - test_infrastructure
+        mpl-doctor:
+          - Results
+          - 'Tool Availability Detail'
+          - Recommendations
+          - Summary
+        mpl-git-master:
+          - 'Commits Created'
+        mpl-phase0-analyzer:
+          - type-policy
+          - error-spec
+    property_audit_targets:
+      kind: config_target_list
+      paths: []
+    phase_seed_required:
+      kind: yaml_field_required
+      enabled: false   # Pass 3 deferred — validateSeed inline control flow remains authoritative
+      always:
+        - path: phase_seed.goal
+          check: nonEmptyString
+        - path: phase_seed.acceptance_criteria
+          check: nonEmptyArray
+        - path: phase_seed.mini_plan_seed.todo_structure
+          check: nonEmptyArray
+        - path: phase_seed.exit_conditions
+          check: nonEmptyArray
+      per_todo:
+        - depends_on
+        - files_to_modify
+        - resource_locks
+      conditional:
+        - when: hasContractFiles
+          required:
+            - path: phase_seed.contract_snippet
+              check: yamlField
+            - path: contract_snippet.inbound|outbound
+              check: anyMappingHasKeys
+          warnings:
+            - path: contract_snippet.inbound
+              check: mappingValuesAreStrings
+            - path: contract_snippet.outbound
+              check: mappingValuesAreStrings
 
 audit:
   # Finalize-time global audit (Tier 4 + drift). Move #13 introduces a
