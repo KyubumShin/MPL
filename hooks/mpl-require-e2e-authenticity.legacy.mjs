@@ -6,35 +6,6 @@
  * proves the scenarios are admissible evidence for the goal contract: real
  * runtime when required, no mock substitution when mock_allowed=false, and no
  * placeholder assertions when placeholder assertions are forbidden.
- *
- * Policy-SSOT + legacy-layer wrapper (Move #8 Phase B), mirroring the
- * `mpl-require-e2e.mjs` idiom:
- *   1. Preserve the legacy stdin / tool gate / finalize_done detection /
- *      cfg.e2e_authenticity_required=false opt-out / loadOverride gates
- *      verbatim — the existing test fixtures (mpl-require-e2e-authenticity
- *      test) target these byte-for-byte.
- *   2. Call `policy.handleE2eAuthenticity` (hooks/lib/policy/contracts.mjs).
- *      Seed `issues[]` from `decision.retryContext.issues` on action='block'
- *      so the canonical failure_code tokens — `required_e2e_scenario_missing`,
- *      `<id>:runtime_class=missing`, `<id>:mock_allowed=true`, and
- *      `<id>:mock_token_in_command` — propagate from the policy SSOT.
- *   3. Append LOCAL-LAYER predicates the policy doesn't own yet:
- *        - `detectTauriCapabilityIssues` → `tauri_capabilities_missing`
- *        - `scanTestFiles` → `<id>:placeholder_assertion:<rel>`,
- *          `<id>:forbidden_pattern:<pat>:<rel>`, `<id>:fake_runtime_e2e:<rel>`,
- *          `<id>:test_file_missing:<rel>`
- *        - launcher_evidence_missing, assertion_evidence_missing
- *      These local predicates are disjoint from the policy's runtime_class /
- *      mock_* set, so no de-dup is necessary.
- *   4. Rebuild the legacy reason string verbatim (legacy prefix +
- *      `${issues.join(', ')}`) so every test substring regex matches
- *      byte-for-byte: the decision='block' shape AND the canonical token
- *      strings.
- *
- * Named export `parseE2EScenariosText` is preserved — tests import it
- * directly from this hook file.
- *
- * Rollback: `mpl-require-e2e-authenticity.legacy.mjs` sibling is preserved.
  */
 
 import { dirname, join } from 'path';
@@ -57,23 +28,6 @@ const { readGoalContract } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
-const { emitBlockedHook, emitClearedOk } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
-);
-
-// Policy SSOT — seeds runtime_class / mock predicates. Loaded behind a
-// try/catch so policy import failure degrades to the local-only layer
-// rather than converting allow→error.
-let policyHandleE2eAuthenticity = null;
-try {
-  const mod = await import(
-    pathToFileURL(join(__dirname, 'lib', 'policy', 'contracts.mjs')).href
-  );
-  policyHandleE2eAuthenticity =
-    typeof mod?.handleE2eAuthenticity === 'function' ? mod.handleE2eAuthenticity : null;
-} catch {
-  policyHandleE2eAuthenticity = null;
-}
 
 const REAL_RUNTIME_CLASSES = new Set([
   'real_desktop',
@@ -86,6 +40,10 @@ const REAL_RUNTIME_CLASSES = new Set([
 const MOCK_PATTERN = /\b(mock|stub|fake|msw|mockIPC|VITE_E2E_MOCK|__mocks__)\b/i;
 const PLACEHOLDER_PATTERN = /\b(expect\s*\(\s*true\s*\)|assert\s*\(\s*true\s*\)|\.toBe\s*\(\s*true\s*\)|test\.skip\s*\(|it\.skip\s*\(|describe\.skip\s*\()/;
 const FAKE_RUNTIME_E2E_PATTERN = /\bWITHOUT\s+a\s+running\s+Tauri\s+runtime\b|\bwithout\s+a\s+running\s+Tauri\s+runtime\b|\brepo\/db layer directly\b|\brepo layer directly\b|\bbypass(?:es|ing)?\s+Tauri\s+runtime\b/i;
+
+const { emitBlockedHook, emitClearedOk } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
+);
 
 const HOOK_ID = 'mpl-require-e2e-authenticity';
 const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
@@ -311,30 +269,26 @@ function detectTauriCapabilityIssues(cwd) {
   return [];
 }
 
-// Local-layer authenticity checks that the policy SSOT does NOT own.
-// These are disjoint from policy's runtime_class / mock_* set, with one
-// intentional overlap: `required_e2e_scenario_missing`. The policy emits
-// this only when the YAML file EXISTS but contains zero required
-// scenarios; the legacy hook (and exp19 regression test) also expect it
-// when the YAML file is absent. Local owns the broader predicate and
-// dedupe is handled by the caller.
-function localAuthenticityIssues(cwd, scenarios, policy) {
+function evaluateScenarioAuthenticity(cwd, scenarios, policy) {
   const issues = [];
+  const required = scenarios.filter((s) => s.required !== false && s.test_command);
+  if (policy.real_runtime_required !== false && required.length === 0) {
+    issues.push('required_e2e_scenario_missing');
+  }
   if (policy.real_runtime_required !== false) {
     issues.push(...detectTauriCapabilityIssues(cwd));
   }
 
-  const required = scenarios.filter((s) => s.required !== false && s.test_command);
-  if (policy.real_runtime_required !== false && required.length === 0) {
-    // Covers both "YAML missing" and "YAML present but no required
-    // scenarios" — superset of the policy's predicate so we can dedupe
-    // safely.
-    issues.push('required_e2e_scenario_missing');
-  }
-
   for (const scenario of required) {
+    if (policy.real_runtime_required !== false && !REAL_RUNTIME_CLASSES.has(scenario.runtime_class)) {
+      issues.push(`${scenario.id}:runtime_class=${scenario.runtime_class || 'missing'}`);
+    }
     if (policy.real_runtime_required !== false && !scenario.launcher_evidence) {
       issues.push(`${scenario.id}:launcher_evidence_missing`);
+    }
+    if (policy.mock_allowed === false) {
+      if (scenario.mock_allowed === true) issues.push(`${scenario.id}:mock_allowed=true`);
+      if (MOCK_PATTERN.test(String(scenario.test_command || ''))) issues.push(`${scenario.id}:mock_token_in_command`);
     }
     if (policy.placeholder_assertions_allowed === false) {
       if (!scenario.assertion_evidence && (!scenario.test_files || scenario.test_files.length === 0)) {
@@ -343,6 +297,7 @@ function localAuthenticityIssues(cwd, scenarios, policy) {
       issues.push(...scanTestFiles(cwd, scenario));
     }
   }
+
   return issues;
 }
 
@@ -382,78 +337,26 @@ async function main() {
         placeholder_assertions_allowed: false,
       };
 
-  const state = readState(cwd) || {};
   const scenarios = loadScenarios(cwd);
-
-  // ---------------------------------------------------------------
-  // 1. Policy SSOT — runtime_class / mock_allowed / mock_token /
-  //    required_e2e_scenario_missing.
-  //    Failure inside the policy must NOT convert allow→error; degrade
-  //    gracefully to the local-only layer.
-  // ---------------------------------------------------------------
-  const issues = [];
-  if (policyHandleE2eAuthenticity) {
-    try {
-      const decision = policyHandleE2eAuthenticity({
-        cwd,
-        toolInput,
-        config: cfg,
-        state,
-        toolName,
-        hookEvent: data.hook_event_name || 'PreToolUse',
-      });
-      if (decision && decision.action === 'block') {
-        const policyIssues = Array.isArray(decision.retryContext?.issues)
-          ? decision.retryContext.issues
-          : [];
-        issues.push(...policyIssues);
-      }
-    } catch {
-      // Degrade silently — local layer below is the safety net.
-    }
-  }
-
-  // ---------------------------------------------------------------
-  // 2. Local layer — placeholder/tauri/launcher/assertion checks the
-  //    policy does not (yet) own. `required_e2e_scenario_missing`
-  //    overlaps with the policy (which only fires when the YAML file
-  //    exists), so we dedupe after concatenation while preserving
-  //    insertion order — first occurrence wins, every test substring
-  //    regex still matches.
-  // ---------------------------------------------------------------
-  issues.push(...localAuthenticityIssues(cwd, scenarios, policy));
-
-  const deduped = [];
-  const seen = new Set();
-  for (const issue of issues) {
-    if (seen.has(issue)) continue;
-    seen.add(issue);
-    deduped.push(issue);
-  }
-  const finalIssues = deduped;
-
-  if (finalIssues.length === 0) {
-    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
+  const issues = evaluateScenarioAuthenticity(cwd, scenarios, policy);
+  if (issues.length > 0) {
+    const state = readState(cwd) || {};
+    emitBlockedHook(cwd, state, {
+      hookId: HOOK_ID,
+      ruleId: 'e2e_authenticity_invalid',
+      code: 'e2e_authenticity_invalid',
+      artifact: BLOCKED_ARTIFACT,
+      reason:
+        `[MPL E2E Authenticity] Cannot set finalize_done=true — required E2E evidence is not authentic: ${issues.join(', ')}. ` +
+        'Use real runtime scenarios, remove mock/placeholder substitutes, or record a user-approved override in .mpl/config/e2e-authenticity-override.json.',
+      resumeInstruction:
+        'Replace mock/placeholder E2E substitutes with authentic real-runtime scenarios (or record a user-approved override), then retry finalize.',
+      retryContext: { issues: issues.slice(0, 50) },
+    });
     return;
   }
 
-  // Reason rebuilt with the legacy prefix verbatim so every test
-  // regex substring (`required_e2e_scenario_missing`,
-  // `runtime_class=missing`, `mock_token_in_command`,
-  // `placeholder_assertion`, `tauri_capabilities_missing`) matches
-  // byte-for-byte.
-  emitBlockedHook(cwd, state, {
-    hookId: HOOK_ID,
-    ruleId: 'e2e_authenticity_invalid',
-    code: 'e2e_authenticity_invalid',
-    artifact: BLOCKED_ARTIFACT,
-    reason:
-      `[MPL E2E Authenticity] Cannot set finalize_done=true — required E2E evidence is not authentic: ${finalIssues.join(', ')}. ` +
-      'Use real runtime scenarios, remove mock/placeholder substitutes, or record a user-approved override in .mpl/config/e2e-authenticity-override.json.',
-    resumeInstruction:
-      'Replace mock/placeholder E2E substitutes with authentic real-runtime scenarios (or record a user-approved override), then retry finalize.',
-    retryContext: { issues: finalIssues.slice(0, 50) },
-  });
+  emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {
