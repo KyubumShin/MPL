@@ -346,6 +346,8 @@ MPL/
     └── roadmap/
 ```
 
+> The 11-agent / 11-command surface is intentional, not pending consolidation — see docs/design.md §4 (Agent Catalog) and AD-0007.
+
 **Key internals:**
 
 - **Policy Engine (v2, #18)** — 12 policy modules under hooks/lib/policy/ replace 36 standalone hook decisions; .legacy.mjs siblings retained for one cycle as rollback tier.
@@ -378,7 +380,11 @@ individual scripts to a single mpl-engine.mjs dispatcher routing 46
 modules through lib/dispatch.mjs ROUTES, with policy decisions
 consolidated into hooks/lib/policy/. Full rationale, before/after
 diagrams, and the per-move log live in
-[`docs/redesign-proposal.html`](./docs/redesign-proposal.html).
+[`docs/redesign-proposal.html`](./docs/redesign-proposal.html). v2
+consolidated the *hook* surface only (39 hook entries → 1 dispatcher);
+the agent/command surface (11 agents, 11 protocol files) is intentionally
+preserved by AD-0007 frontmatter-locked tool grants and is **not** a
+pending consolidation target — see `docs/v2-remaining-work.md` §2.
 
 ### State Directory: `.mpl/`
 

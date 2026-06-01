@@ -56,11 +56,35 @@ production smoke로 Law 2 Bash 차단 + Channel Registry 차단 검증됨 (`~/pl
 
 ---
 
-## 2. Agent / Command 통합 (proposal §3.4-3.5)
+## 2. Agent / Command 통합 (proposal §3.4-3.5) — **Won't Do**
 
-비전: 11 agents → 4, 11 commands → 3. 18 moves 동안 한 번도 손대지 않음.
+> **결정: 옵션 C 채택 (2026-06-01)** — proposal §3.4 / §3.5의 11 agents → 4, 11 commands → 3 비전은 formally deferred로 격하한다. TODO 큐가 아니라 **rejected direction** (Won't Do)이며, Moves #22-#24은 이 축에 reserved되지 **않는다**. AD-0003 / AD-0004 / AD-0007 체인이 그 분리를 frontmatter-locked invariant로 잠그고 있으므로 향후 planner가 "남은 v2 잔여"로 이 비전을 부활시키지 않도록 본 결정 기록을 §2의 표준 진입점으로 사용한다.
 
-### 통합 비전 (proposal §3.4)
+### Why 11 agents stayed (and 11 commands stayed)
+
+§3.4/§3.5의 통합 비전(11 agents → 4, 11 commands → 3)은 v2 redesign proposal의 *aspirational* sketch였다. 18 Moves의 v2 실행을 거친 뒤 우리는 의도적으로 그 비전을 추구하지 않았다. 비전은 이제 formally deferred — TODO가 아니라 **rejected direction**으로 닫는다. 이유:
+
+1. **AD-0007 author-independence는 frontmatter-locked invariant이지 prompt-mode flag가 아니다.** `mpl-test-agent`는 자신의 `disallowed-tools: Task` frontmatter를 가진 별도 agent 파일이어야 한다 — code author가 *동시에* test author일 수 없도록 Claude Code agent loader가 dispatch 시점에 강제한다. 단일 `mpl-verifier` agent에 `--mode=test|review|audit` 플래그를 다는 설계는 test 작성, 적대적 review, Tier-4 audit를 하나의 prompt context로 합치며, 그 안에서 모델은 (실측상, 압력하에서) review slot을 통과시키려고 test slot에서 증거를 fabricate할 수 있다. 분리 자체가 안전 속성이며, 합치는 순간 그 속성이 삭제된다.
+
+2. **적대적 체인은 역할마다 fresh context를 전제로 한다.** `mpl-phase-runner` → `mpl-test-agent` → `mpl-adversarial-reviewer` → `mpl-codex-auditor`는 각각 깨끗한 context window와 frontmatter에 잠긴 role-locked tool grant(`disallowed-tools`)로 진입한다. "verifier가 executor와 disagree 가능"이 성립하는 이유 — 서로의 추론을 볼 수 없기 때문이다. mode-flagged 단일 agent는 정의상 mode 간에 context를 공유하므로, AD-0003 / AD-0004 / AD-0007이 막으려고 만들어진 바로 그 실패 모드로 회귀한다.
+
+3. **Frontmatter `disallowed-tools`는 runtime branching보다 강한 boundary다.** 현재 `mpl-codex-auditor`는 literally Write/Edit를 호출할 수 없다 — prompt가 돌기 전에 harness가 tool call을 거부한다. 통합 agent는 같은 제한을 prompt body 안에서 gate해야 하며, 모델은 그것을 rationalize할 수 있다. loader에서 무료로 얻는 보장이며, 통합하면 prompt complexity로 영원히 그 보장을 지불해야 한다.
+
+4. **Empirical validation.** Doctor 11/11 PASS, `~/playground/ygg-exp23`에서 production smoke가 Law 2 Bash + Channel Registry를 agent-layer regression 없이 통과. 11-agent surface의 비용은 roster bookkeeping (역할당 `agents/*.md` 하나); 통합 비용은 mode-dispatch prompt를 작성/유지하면서 "왜 mode flag가 AD-0007을 깨지 않는지"를 reader에게 영원히 설명하는 것.
+
+5. **Hook 통합이 성공한 이유는 agent 층에 적용되지 않는다.** 47→1 엔진 cutover가 paid off된 이유는 hook이 pure deterministic policy이기 때문이다 — merge가 실제 중복(dispatch glue, JSON parsing, state I/O)을 제거하고 8개 eval finding을 닫았다. Agent는 role-locked tool grant를 가진 LLM prompt이다; "merging"은 단지 역할 경계를 frontmatter(enforced)에서 prose(advisory)로 옮기는 것일 뿐, decision point 수는 같고 enforcement만 약해진다.
+
+**Conclusion:** 11 agents와 11 commands는 통합 대기 중인 technical debt가 아니다. 이들은 AD-0003, AD-0004, AD-0007의 load-bearing 구현이다. §3.4/§3.5 비전은 **Won't Do**로 닫는다 — v2가 추가한 바로 그 안전 속성에 의해 superseded됨.
+
+### 결정 체인 (참조)
+
+- `docs/decisions/AD-0003-v012.2-accidental-agent-deletion.md` — agent file 삭제 사고로 학습한 분리의 비대칭 가치
+- `docs/decisions/AD-0004-test-agent-long-term-architecture.md` — test-agent를 별도 dispatch surface로 유지하는 장기 결정
+- `docs/decisions/AD-0007-test-agent-enforcement.md` — frontmatter-locked `disallowed-tools: Task` enforcement (이 결정의 핵심 invariant)
+
+### Historical vision (not pursued)
+
+아래는 proposal §3.4 / §3.5의 원안 비전이다. **추구하지 않기로 한 방향**의 감사 기록으로 그대로 보존하며, 현재 또는 미래의 작업 항목이 아니다.
 
 ```
 mpl-planner   = decomposer + phase0-analyzer + interviewer + seed-generator  (4→1)
@@ -70,21 +94,11 @@ mpl-verifier  = test-agent + adversarial-reviewer + codex-auditor +
 mpl-doctor    = doctor + git-master                                            (2→1)
 ```
 
-### Command 통합 비전 (proposal §3.5)
-
 ```
 /mpl plan     = mpl-run-decompose + mpl-run-phase0(+analysis +memory)         (4→1)
 /mpl run      = mpl-run + mpl-run-execute(+context +gates +parallel)          (5→1)
 /mpl finalize = mpl-run-finalize + mpl-run-finalize-resume                    (2→1)
 ```
-
-### 선택지
-
-- **옵션 A**: 의도적으로 보류 — 현재 분업이 잘 동작, frontmatter로 잠긴 adversarial chain 보존
-- **옵션 B**: Move #22-#24로 진행 — 약 Move #18까지의 작업량과 비슷한 스코프
-- **옵션 C (권장)**: 비전 자체를 future work로 격하 — README/proposal 업데이트, "11 agents는 의도된 분업" 명시
-
-**추천 근거**: hook 통합은 명확한 가치 (47→1 engine, eval finding 8개 해결), agent 통합은 가치 약함. 11 agents가 doctor 11/11 PASS + production smoke로 잘 동작 확인됨. 4-agent로 줄이면 mpl-verifier가 mode flag 3개를 prompt 분기해야 함.
 
 ---
 

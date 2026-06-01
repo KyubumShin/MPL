@@ -578,7 +578,7 @@
         <text x="575" y="312" class="small">읽기: phase N 산출 + contracts + brief</text>
         <text x="575" y="332" class="small">evidence.mjs STRUCTURAL 검증 (문자열 아님)</text>
         <text x="575" y="352" class="small">산출: phases/N/verification.md (구조화)</text>
-        <text x="575" y="378" class="mono" style="fill:#34d399">※ author-independence (AD-0007)</text>
+        <text x="575" y="378" class="mono" style="fill:#34d399">※ author-independence (AD-0007) (frontmatter-locked — see §note)</text>
 
         <!-- decision diamond -->
         <path d="M 540 430 L 600 410 L 660 430 L 600 450 Z" fill="#1c243f" stroke="#a78bfa" stroke-width="1.2"/>
@@ -923,6 +923,16 @@
       Telemetry/schema는 v7에 다 있지만 dispatcher 코드는 0줄. PR #230이 <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">failure_code</code>를 별도 축으로 분리한 이유.
     </div>
 
+    <div class="callout warn" style="margin-bottom: 22px; border-left-color:#f59e0b">
+      <strong>Agent / Command consolidation — deferred (Won't Do)</strong><br>
+      §3.4 (11 agents → 4) and §3.5 (11 commands → 3) are formally closed as <strong>Won't Do</strong>, not deferred backlog.
+      The 11-agent / 11-command surface is the load-bearing implementation of <strong>AD-0003</strong> (accidental deletion), <strong>AD-0004</strong> (test-agent long-term architecture), and <strong>AD-0007</strong> (author-independence enforcement) —
+      <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">disallowed-tools: Task</code> frontmatter on <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">mpl-test-agent</code> is a loader-enforced safety invariant, not a prompt-mode flag.
+      Collapsing into a single <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">mpl-verifier --mode=…</code> agent would move that boundary from frontmatter (enforced) into prose (advisory), deleting the very property the adversarial chain exists to provide.
+      Full rationale: <a href="design.md" style="color:#fbbf24">docs/design.md §4 (Agent Catalog)</a> and <a href="v2-remaining-work.md" style="color:#fbbf24">v2-remaining-work.md §2 (Why 11 agents stayed)</a>.
+      Therefore <em>새 agent: 0</em> below means "no new agents <em>and</em> no consolidation of existing ones" — Moves #22-#24 are <strong>not</strong> reserved for this axis.
+    </div>
+
     <p class="muted">통합 설계: prompt-only 스케줄러를 <strong>deterministic Node-side pipeline</strong>으로 교체. Continuous-frontier dispatcher + worktree-per-slot 격리 + per-phase state shard + manifest 기반 4-bucket reconcile, 모두 <strong>ExecutionContext tuple</strong>로 묶음.</p>
 
     <!-- ===== Stat row ===== -->
@@ -940,7 +950,7 @@
       <div class="stat">
         <div class="label">새 agent</div>
         <div class="val">0</div>
-        <div class="delta">verifier --mode=reconcile</div>
+        <div class="delta warn">agent 통합 won't do — AD-0007 (see §note)</div>
       </div>
       <div class="stat">
         <div class="label">Wall-clock 개선</div>
