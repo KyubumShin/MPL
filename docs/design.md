@@ -516,6 +516,33 @@ Discoveries are reviewed at phase transition; CONFIRMED PP conflicts auto-reject
 | `mpl-session-init` | SessionStart | Initialize context rotation and MCP bootstrap state at session start (F-38). | v0.13.x baseline |
 | `mpl-keyword-detector` | UserPromptSubmit | Detect MPL entry prompts, initialize pipeline state, count user intervention, and ignore `<task-notification>` completion XML. | v0.13.x baseline; intervention counter v0.18.1; task-notification guard #153 |
 
+### 7.1 Known static-analysis limitations (Source-Edit policy)
+
+`mpl-write-guard` delegates its Bash write-target extraction to
+`hooks/lib/policy/source-edit.mjs#extractBashWriteTargets`. The extractor is a
+**static** Bash parser by design — it inspects the command string before
+execution and cannot resolve runtime-constructed call paths or payloads.
+
+The following bypass patterns are accepted as known limitations of the
+static layer:
+
+- Obfuscated interpreter call names, e.g.
+  `String.prototype['repeat'].call('writ','e')` reconstructed at runtime.
+- `eval`-decoded base64 payloads passed to `node -e` / `python -c` / `ruby -e`.
+- Runtime-constructed target paths inside `$(…)` / backtick command
+  substitutions.
+
+Defense-in-depth at execution time is handled by:
+
+1. `lib/policy/permit.mjs`'s layered veto (PreToolUse): dangerous-union →
+   protected-delete → state/decomposition writes → source-target redirects.
+2. `mpl-tool-tracker` (PostToolUse): records the tool invocation fingerprint
+   so a later auditor (Tier 4 / `audit.mjs`) can flag drift.
+
+This intentional limit is documented so contributors do not repeatedly file
+"we should detect X obfuscation" issues against the static extractor. See
+also `docs/changelog.md` → Unreleased → Known limitations.
+
 ---
 
 ## 8. Configuration Options

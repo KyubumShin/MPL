@@ -450,3 +450,114 @@ test('isAllowedPath honors PLAN.md / docs/learnings', () => {
   assert.equal(isAllowedPath('PLAN.md'), true);
   assert.equal(isAllowedPath('docs/learnings/notes.md'), true);
 });
+
+// ============================================================================
+// action ↔ decision SSOT (Move #16 cleanup)
+//
+// The canonical envelope field is `action`. The legacy `.decision` alias is
+// kept as a deprecated mirror that emits a one-time stderr DEPRECATED line
+// when read. Both fields MUST round-trip identically; the mirror must NOT
+// throw when accessed; existing wrapper switch/aggregate paths must keep
+// observing the same shape.
+// ============================================================================
+
+test('handle() returns `action` as the canonical field (block path)', async () => {
+  const { handle } = await import('../lib/policy/source-edit.mjs');
+  const cwd = freshWorkspace();
+  try {
+    const result = await handle({
+      event: 'PreToolUse',
+      toolName: 'Edit',
+      toolInput: { file_path: 'src/app.ts', old_string: 'a', new_string: 'b' },
+      cwd,
+      state: { current_phase: 'phase-1' },
+      data: {},
+      isMplActive: true,
+      callerTranscriptPath: null,
+    });
+    assert.equal(typeof result.action, 'string');
+    assert.equal(result.action, 'block');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('handle() exposes deprecated `.decision` alias that mirrors `.action`', async () => {
+  const { handle } = await import('../lib/policy/source-edit.mjs');
+  const cwd = freshWorkspace();
+  try {
+    const result = await handle({
+      event: 'PreToolUse',
+      toolName: 'Edit',
+      toolInput: { file_path: 'src/app.ts', old_string: 'a', new_string: 'b' },
+      cwd,
+      state: { current_phase: 'phase-1' },
+      data: {},
+      isMplActive: true,
+      callerTranscriptPath: null,
+    });
+    // Legacy callers (wrapper switch + engine aggregate) still see `.decision`.
+    assert.equal(result.decision, result.action,
+      'decision alias must mirror action exactly');
+    assert.equal(result.decision, 'block');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('handle() allow path: action === "allow"', async () => {
+  const { handle } = await import('../lib/policy/source-edit.mjs');
+  const cwd = freshWorkspace();
+  try {
+    const result = await handle({
+      event: 'PreToolUse',
+      toolName: 'Read',          // not a write/bash/task tool → allow()
+      toolInput: {},
+      cwd,
+      state: {},
+      data: {},
+      isMplActive: true,
+      callerTranscriptPath: null,
+    });
+    assert.equal(result.action, 'allow');
+    assert.equal(result.decision, 'allow');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('handle() decision alias emits exactly one stderr DEPRECATED line per process', async () => {
+  // Run a sub-process so the module-level memoization is fresh.
+  const probeScript = `
+    import { handle } from '${join(HOOKS_DIR, 'lib', 'policy', 'source-edit.mjs').replace(/\\\\/g, '/')}';
+    const event = {
+      event: 'PreToolUse',
+      toolName: 'Edit',
+      toolInput: { file_path: 'src/app.ts', old_string: 'a', new_string: 'b' },
+      cwd: process.cwd(),
+      state: { current_phase: 'phase-1' },
+      data: {},
+      isMplActive: true,
+      callerTranscriptPath: null,
+    };
+    const r1 = await handle(event);
+    // First read — should trigger the deprecation warning.
+    void r1.decision;
+    // Second read — should NOT trigger a second warning (memoized).
+    void r1.decision;
+    const r2 = await handle(event);
+    // Third read on a fresh result — still NO additional warning (process-wide flag).
+    void r2.decision;
+    process.stdout.write('OK\\n');
+  `;
+  const cwd = freshWorkspace();
+  try {
+    const { spawnSync } = await import('child_process');
+    const proc = spawnSync('node', ['--input-type=module', '-e', probeScript], {
+      cwd,
+      encoding: 'utf-8',
+      env: { ...process.env },
+    });
+    assert.equal(proc.stdout.trim(), 'OK');
+    const deprecationMatches = (proc.stderr.match(/DEPRECATED: result\.decision/g) || []);
+    assert.equal(
+      deprecationMatches.length,
+      1,
+      `expected exactly one DEPRECATED line, got ${deprecationMatches.length}.\nstderr:\n${proc.stderr}`,
+    );
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});

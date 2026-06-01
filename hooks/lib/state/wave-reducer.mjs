@@ -174,6 +174,63 @@ function mergePolicyFor(field, yamlConfig) {
 }
 
 // ---------------------------------------------------------------------------
+// Drift detector — BUILTIN_MERGE_POLICY vs mpl.config.yaml state.merge_policy.
+//
+// BUILTIN is defense-in-depth so the reducer never fails open on a missing
+// YAML. When BOTH are present, they MUST agree — otherwise the YAML SSOT is
+// effectively bypassed by whichever copy the reducer happened to consult.
+//
+// This helper emits a single stderr warning per process per drift signature
+// (memoized) when called with a yamlConfig that disagrees with BUILTIN.
+// It NEVER throws — the engine fail-open contract requires the reducer to
+// continue even when the YAML is malformed or absent. The structural enforcer
+// is `__tests__/state-merge-policy-ssot.test.mjs`.
+// ---------------------------------------------------------------------------
+
+const _driftWarningsEmitted = new Set();
+
+/**
+ * @param {object | null | undefined} yamlConfig output of loadConfigV2
+ * @returns {Array<{field: string, builtin: string|null, yaml: string|null}>}
+ *          empty when registries agree (or when yaml has no merge_policy).
+ */
+export function verifyBuiltinMatchesYaml(yamlConfig) {
+  const yamlPolicy = yamlConfig?.state?.merge_policy;
+  if (!yamlPolicy || typeof yamlPolicy !== 'object') return [];
+  const drift = [];
+
+  for (const [field, builtinPolicy] of Object.entries(BUILTIN_MERGE_POLICY)) {
+    const yamlValue = yamlPolicy[field];
+    if (yamlValue === undefined) {
+      drift.push({ field, builtin: builtinPolicy, yaml: null });
+    } else if (yamlValue !== builtinPolicy) {
+      drift.push({ field, builtin: builtinPolicy, yaml: yamlValue });
+    }
+  }
+  for (const [field, yamlValue] of Object.entries(yamlPolicy)) {
+    if (field.includes('.')) continue; // nested sub-policy; BUILTIN tops only
+    if (!(field in BUILTIN_MERGE_POLICY)) {
+      drift.push({ field, builtin: null, yaml: yamlValue });
+    }
+  }
+
+  if (drift.length > 0) {
+    const sig = drift.map((d) => `${d.field}=${d.builtin}/${d.yaml}`).join(',');
+    if (!_driftWarningsEmitted.has(sig)) {
+      _driftWarningsEmitted.add(sig);
+      const summary = drift
+        .map((d) => `${d.field}: BUILTIN=${d.builtin}, YAML=${d.yaml}`)
+        .join('; ');
+      process.stderr.write(
+        `[mpl/wave-reducer] BUILTIN_MERGE_POLICY drift vs mpl.config.yaml ` +
+        `state.merge_policy: ${summary}\n`,
+      );
+    }
+  }
+  return drift;
+}
+
+// ---------------------------------------------------------------------------
 // Minimal RFC-6902 implementation (no external deps).
 // ---------------------------------------------------------------------------
 
@@ -522,6 +579,9 @@ function archiveWave(cwd, waveId) {
  */
 export async function mergeWaveShards(waveId, cwd, opts = {}) {
   const config = opts.config ?? null;
+  // Drift detector — emits a stderr warning ONCE per drift signature when
+  // BUILTIN_MERGE_POLICY disagrees with the YAML SSOT. Never throws.
+  if (config) verifyBuiltinMatchesYaml(config);
   const files = listShardFiles(cwd, waveId);
   if (files.length === 0) {
     return {

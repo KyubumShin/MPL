@@ -135,6 +135,16 @@ const DEFAULT_STATE = {
   phase_lifecycle: {},
   running: [],
   waves_in_flight: [],
+  // Move #17 (additive — no schema_version bump): wave-scoped reconciler
+  // re-entry policy. Populated by `lib/policy/reconcile/reentry-policy.mjs`
+  // as `{ [wave_id]: { [contract_ref_hash]: { count, winner_phase_id,
+  // loser_phase_id } } }`. The reader has always used optional chaining
+  // (`state?.reconciler_reentries?.[waveId]`), but declaring the field here
+  // (a) makes the schema honest, (b) mirrors the `BUILTIN_MERGE_POLICY`
+  // 'phase_keyed' entry in `state/wave-reducer.mjs`, and (c) matches the
+  // `mpl.config.yaml#state.merge_policy.reconciler_reentries` declaration.
+  // Defaults to {} so existing reader migrations remain a no-op.
+  reconciler_reentries: {},
   // AD-0006: verification contract captured by Phase 0 Enhanced Step 4.
   // "verify_script" | "explicit" | "heuristic" | null (pre-Phase-0 default).
   verification_strategy: null,

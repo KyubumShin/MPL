@@ -150,6 +150,13 @@ export const MODULE_TO_HOOK_IDS = {
   // ── Session init ─────────────────────────────────────────────────────────
   'session.init':             [{ hookId: 'mpl-session-init',
                                  event: 'SessionStart' }],
+
+  // ── Reconcile (additive / dormant) ───────────────────────────────────────
+  // `reconcile.require` is registered in dispatch.mjs but is intentionally
+  // dormant — the wave_end reconciler route fires only when the on-disk
+  // sentinel exists. It does not surface a legacy hook id (no pre-Move-#14
+  // analog), so it stays empty here, mirroring `schemas.pivot-points` above.
+  'reconcile.require':        [],
 };
 
 // Stop-event entries that don't have a clean module surrogate in dispatch.mjs

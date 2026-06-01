@@ -8,6 +8,26 @@ This project adheres to a pre-1.0 `0.MINOR.PATCH` scheme (see README §Versionin
 
 ## [Unreleased]
 
+### Known limitations
+
+- **Bash interpreter obfuscation (static-analysis limit).**
+  `hooks/lib/policy/source-edit.mjs#extractBashWriteTargets` statically
+  parses Bash one-liners to detect writes to source files. By design it
+  cannot resolve:
+  - Obfuscated method invocations such as
+    `String.prototype['repeat'].call('writ','e')` that reconstruct
+    interpreter / file-system call names at runtime.
+  - `eval`-decoded base64 payloads passed to `node -e` / `python -c` /
+    `ruby -e`.
+  - Runtime-constructed target paths inside command substitutions
+    (`$(printf …)`, `` `…` ``).
+  These bypass the static gate by construction; defense-in-depth via the
+  runtime write-guard + permit pipeline (`policy/permit.mjs`'s layered
+  veto + `mpl-tool-tracker`'s PostToolUse fingerprint) is the layer that
+  catches these cases at execution time. Surfaced as documented intent
+  rather than a gap — see Move #6 commit history and
+  `docs/design.md` §7 Hook System for the rationale.
+
 ## [0.19.0] — 2026-06-01 — v2 Architecture Cutover
 
 ### Architecture

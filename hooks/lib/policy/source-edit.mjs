@@ -417,6 +417,16 @@ function headVerbOf(segment) {
  *
  * Input MUST be the already-built `normalizedCommand` (the same string
  * the protected-delete + state.json gates inspect).
+ *
+ * KNOWN LIMITATION (intentional, not a bug):
+ *   This extractor is a STATIC bash parser. It cannot resolve obfuscated
+ *   forms such as `String.prototype['repeat'].call('writ','e')`,
+ *   eval-decoded base64 payloads passed to `node -e` / `python -c`, or
+ *   runtime-constructed paths inside `$(…)` / backtick command
+ *   substitutions. Those bypass the static gate by construction and are
+ *   handled by the runtime defense-in-depth layer (write-guard +
+ *   permit pipeline + tool-tracker fingerprint at PostToolUse).
+ *   See docs/changelog.md → Unreleased → Known limitations.
  */
 export function extractBashWriteTargets(normalizedCommand) {
   const out = [];
@@ -845,19 +855,28 @@ function classifyTargets(targets, cwd, dogfood) {
 
 // =============================================================================
 // Decision builders
+//
+// SSOT rename (Move #16 cleanup): the canonical envelope field is `action`,
+// matching the engine + every other policy module. Internal builders below
+// emit `action`; `handle()` wraps the result with a back-compat shim that
+// exposes a deprecated `.decision` alias for callers that still read it
+// (mpl-write-guard wrapper switch, envelope-bridge legacy bridge, engine
+// aggregate fallback). The shim emits one stderr DEPRECATED line per
+// process so we have telemetry on remaining legacy reads before removing
+// the alias in the next minor.
 // =============================================================================
 
 function allow(reason = '') {
-  return { decision: 'allow', reason, signals: {}, sideEffects: [] };
+  return { action: 'allow', reason, signals: {}, sideEffects: [] };
 }
 
 function block(reason, sideEffects = [], signals = {}) {
-  return { decision: 'block', reason, signals, sideEffects };
+  return { action: 'block', reason, signals, sideEffects };
 }
 
 function warn(reason, additionalContext, sideEffects = [], signals = {}) {
   return {
-    decision: 'warn',
+    action: 'warn',
     reason,
     signals: { ...signals, additionalContext },
     sideEffects,
@@ -885,7 +904,7 @@ function handleTask(event) {
 
   if (firstSeen && callerTranscriptPath && firstSeen === callerTranscriptPath) {
     return {
-      decision: 'allow',
+      action: 'allow',
       reason: '',
       signals: {},
       sideEffects: [{
@@ -936,7 +955,7 @@ function handleWriteEdit(event) {
       }
       // Decomposer dispatch is active — lock child + allow.
       return {
-        decision: 'allow',
+        action: 'allow',
         reason: '',
         signals: {},
         sideEffects: [
@@ -985,7 +1004,7 @@ function handleWriteEdit(event) {
     const action = resolveRuleAction(cwd, state, 'direct_source_edit');
     if (action === 'off') {
       return {
-        decision: 'allow',
+        action: 'allow',
         reason: '',
         signals: {},
         sideEffects: [{
@@ -1035,7 +1054,7 @@ Delegate via: Agent(subagent_type="mpl-phase-runner", prompt="Edit ${filePath} t
           const action = resolveRuleAction(cwd, state, 'phase_scope_violation');
           if (action === 'off') {
             return {
-              decision: 'allow',
+              action: 'allow',
               reason: '',
               signals: {},
               sideEffects: [{
@@ -1080,7 +1099,7 @@ This may cause cross-phase side effects. Verify this modification belongs in the
   }
 
   return {
-    decision: 'allow',
+    action: 'allow',
     reason: '',
     signals: {},
     sideEffects: [{
@@ -1348,7 +1367,7 @@ function handleBash(event) {
         if (action === 'off') {
           // Honor per-rule off.
           return {
-            decision: 'allow',
+            action: 'allow',
             reason: '',
             signals: {},
             sideEffects: concrete.map((c) => ({
@@ -1437,10 +1456,11 @@ ensure you have the correct target path. The command will proceed, but please ve
  *   callerTranscriptPath: string | null,
  * }} event
  * @returns {Promise<{
- *   decision: 'block' | 'allow' | 'warn',
+ *   action: 'block' | 'allow' | 'warn',
  *   reason: string,
  *   signals: object,
  *   sideEffects: Array<{kind: string, payload: object}>,
+ *   decision?: 'block' | 'allow' | 'warn',  // DEPRECATED alias of `action`
  * }>}
  */
 export async function handle(event) {
@@ -1453,7 +1473,7 @@ export async function handle(event) {
   const isTaskTool = ['Task', 'Agent', 'task', 'agent'].includes(toolName);
 
   if (!isWriteTool && !isBashTool && !isTaskTool) {
-    return allow();
+    return _attachDecisionAlias(allow());
   }
 
   // NOTE: the wrapper applies `recordFirstTranscript` BEFORE calling handle()
@@ -1470,6 +1490,44 @@ export async function handle(event) {
     result = handleWriteEdit(event);
   }
 
+  return _attachDecisionAlias(result);
+}
+
+// ---------------------------------------------------------------------------
+// Back-compat shim — mirrors `result.action` to a deprecated `.decision`
+// alias and emits a one-time stderr DEPRECATED line per process when a
+// caller reads the alias. The mirror is observable via a Proxy-free getter
+// so existing callers (mpl-write-guard.mjs `switch (decision.decision)`,
+// engine aggregate `d.decision === 'block'` fallback, envelope-bridge
+// `decision.action || decision.decision`) keep working without code change.
+//
+// Will be removed in the next minor after the legacy reads in
+// mpl-write-guard / mpl-engine / envelope-bridge are migrated.
+// ---------------------------------------------------------------------------
+
+let _decisionAliasWarned = false;
+
+function _attachDecisionAlias(result) {
+  if (!result || typeof result !== 'object') return result;
+  if (typeof result.action !== 'string') return result;
+  // Define a deprecated `.decision` getter that mirrors `.action`. Emit the
+  // stderr deprecation line ONCE per process on first read.
+  Object.defineProperty(result, 'decision', {
+    configurable: true,
+    enumerable: true,           // JSON.stringify still sees it (back-compat)
+    get() {
+      if (!_decisionAliasWarned) {
+        _decisionAliasWarned = true;
+        try {
+          process.stderr.write(
+            `[mpl/source-edit] DEPRECATED: result.decision read by caller — ` +
+            `switch to result.action; will be removed in next minor.\n`,
+          );
+        } catch { /* stderr unavailable; non-fatal */ }
+      }
+      return result.action;
+    },
+  });
   return result;
 }
 

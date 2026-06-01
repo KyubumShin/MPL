@@ -41,6 +41,7 @@ import { extname, dirname, join, basename, resolve as resolvePath } from 'path';
 // L1 dependencies
 import { isMplActive, readState } from '../mpl-state.mjs';
 import { loadConfig } from '../mpl-config.mjs';
+import { loadConfigV2 } from '../config.mjs';
 import { resolveRuleAction } from '../mpl-enforcement.mjs';
 import { decideTimeout } from '../bash-timeout-categories.mjs';
 import { detectTauriRustResourceRisk } from '../mpl-resource-risk.mjs';
@@ -136,6 +137,39 @@ const REGISTRY_RELATIVE = 'commands/references/anti-patterns.md';
 const SIGNALS_RELATIVE = '.mpl/signals/anti-pattern-hits.jsonl';
 
 // ============================================================================
+// Config loading — prefer v2 (YAML SSOT) with legacy .mpl/config.json fallback
+// ============================================================================
+
+/**
+ * Load the merged config that resolveUnknownBashPolicy + handleAutoPermit +
+ * handleBashTimeout / handlePermitLearner consume. Tries `loadConfigV2`
+ * first so `mpl.config.yaml` knobs flow through (e.g.
+ * `permit.unknown_bash`), then falls back to the legacy `.mpl/config.json`
+ * loader. Both return shapes are object-compatible.
+ *
+ * resolveUnknownBashPolicy's existing precedence chain still applies:
+ *   1. .mpl/config.json#permit.unknown_bash (highest — runtime override)
+ *   2. the merged config object (which now carries the YAML value)
+ *   3. UNKNOWN_BASH_DEFAULT
+ *
+ * Failures are swallowed so an unreadable YAML never breaks auto-permit.
+ *
+ * @param {string} cwd
+ * @returns {object}
+ */
+function _loadMergedConfig(cwd) {
+  try {
+    const v2 = loadConfigV2(cwd);
+    if (v2 && typeof v2 === 'object') return v2;
+  } catch { /* fall through to legacy */ }
+  try {
+    const legacy = loadConfig(cwd);
+    if (legacy && typeof legacy === 'object') return legacy;
+  } catch { /* fall through */ }
+  return {};
+}
+
+// ============================================================================
 // Knob resolution
 // ============================================================================
 
@@ -143,9 +177,11 @@ const SIGNALS_RELATIVE = '.mpl/signals/anti-pattern-hits.jsonl';
  * Resolve `permit.unknown_bash` knob.
  *
  * Resolution order:
- *   1. .mpl/config.json#permit.unknown_bash
- *   2. mpl.config.yaml#permit.unknown_bash (passed via `config` argument —
- *      callers thread it from loadConfig + the v2 YAML reader)
+ *   1. .mpl/config.json#permit.unknown_bash (runtime override)
+ *   2. mpl.config.yaml#permit.unknown_bash — wired via the v2 loader.
+ *      `handleAutoPermit` now threads a `loadConfigV2`-first merged config
+ *      (see `_loadMergedConfig`) so the YAML SSOT is automatically picked
+ *      up here without each caller manually merging.
  *   3. hardcoded default UNKNOWN_BASH_DEFAULT ('pass-through')
  *
  * @param {string} cwd
@@ -382,7 +418,10 @@ export function handleAutoPermit(ctx = {}) {
   if (toolName === 'Bash') {
     const command = toolInput.command || '';
     const state = ctx.state || readState(cwd) || {};
-    const config = ctx.config || loadConfig(cwd) || {};
+    // Prefer v2 (YAML SSOT) so `permit.unknown_bash` declared in
+    // mpl.config.yaml flows into resolveUnknownBashPolicy's step 2; legacy
+    // .mpl/config.json still wins via step 1.
+    const config = ctx.config || _loadMergedConfig(cwd);
 
     // STEP 1: layered veto pipeline (closes fail-open).
     const classification = classifyBashCommand(cwd, command, state);
@@ -508,7 +547,10 @@ export function handleBashTimeout(ctx = {}) {
   if (ruleAction === 'off') return { action: 'silent' };
   const strict = ruleAction === 'block';
 
-  const cfg = ctx.config || loadConfig(cwd);
+  // Prefer v2 (YAML SSOT) so any YAML-side bash_timeout knobs flow through;
+  // legacy .mpl/config.json still wins because _loadMergedConfig deep-merges
+  // the YAML defaults with the legacy loader as fallback.
+  const cfg = ctx.config || _loadMergedConfig(cwd);
   const decision = decideTimeout(command, timeoutMs, {
     strict,
     configOverride: cfg?.bash_timeout,
