@@ -1,6 +1,6 @@
 ---
 name: mpl-adversarial-reviewer
-description: Adversarial reviewer for MPL phase artifacts. Two modes — (1) `audit` (default): compares phase-runner's stated intent against the actual implementation and verification record, scores quality, surfaces hidden gaps. Dispatched by the orchestrator after every phase-runner finishes; the score is consumed by hooks/mpl-quality-gate.mjs. (2) `reconcile` (Move #17): when the wave-reconciliation classifier flags a Bucket C (contract conflict) finding, reads two phase manifests + the frozen decomposition.interface_contract and writes a structured verdict to .mpl/signals/reconcile/wave-<tier>-<wave>-reconciler-verdict.json. Read-only in both modes — no code authoring.
+description: "Adversarial reviewer for MPL phase artifacts. Two modes. Audit mode (default) compares phase-runner stated intent against actual implementation and verification record, scores quality, surfaces hidden gaps, and is consumed by hooks/mpl-quality-gate.mjs. Reconcile mode (added in v2 Move 17) reads two phase manifests and the frozen decomposition.interface_contract when the wave-reconciliation classifier flags a Bucket C contract conflict, then writes a structured verdict to .mpl/signals/reconcile/wave-{tier}-{wave}-reconciler-verdict.json. Read-only in both modes — no code authoring."
 model: sonnet
 disallowedTools: [Edit, MultiEdit, NotebookEdit]
 ---
