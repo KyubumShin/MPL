@@ -325,49 +325,177 @@ channels:
   # remain present as empty lists so any reader that addresses them
   # directly still sees [], not undefined.
   allowed:
-    - { path: '.mpl/state.json',                                writers: [engine, worker, mcp], category: state }
-    - { path: '.mpl/config.json',                               writers: [user, engine],        category: config }
-    - { path: '.mpl/config/**/*.json',                          writers: [user, engine],        category: config }
-    - { path: '.mpl/goal-contract.yaml',                        writers: [interviewer],         category: contract, schema: goal_contract }
-    - { path: '.mpl/pivot-points.md',                           writers: [interviewer],         category: contract, schema: pivot_points }
-    - { path: '.mpl/requirements/user-contract.md',             writers: [interviewer],         category: contract, schema: user_contract }
-    - { path: '.mpl/mpl/decomposition.yaml',                    writers: [planner],             category: decomposition, schema: decomposition }
-    - { path: '.mpl/mpl/decomposition-derived.json',            writers: [planner],             category: decomposition }
-    - { path: '.mpl/mpl/decomposition-delta.yaml',              writers: [planner],             category: decomposition }
-    - { path: '.mpl/mpl/decomposition-deltas/recompose-*.yaml', writers: [planner],             category: decomposition }
-    - { path: '.mpl/mpl/baseline.yaml',                         writers: [interviewer],         category: baseline }
-    - { path: '.mpl/mpl/.baseline-renewal',                     writers: [orchestrator],        category: sentinel }
-    - { path: '.mpl/mpl/phases/phase-*/state-summary.md',       writers: [executor],            category: phase, schema: state_summary }
-    - { path: '.mpl/mpl/phases/phase-*/verification.md',        writers: [verifier],            category: phase, schema: verification }
-    - { path: '.mpl/mpl/phases/phase-*/phase-seed.yaml',        writers: [planner],             category: phase }
-    - { path: '.mpl/mpl/phases/phase-*/changes.diff',           writers: [executor],            category: phase }
-    - { path: '.mpl/mpl/phases/phase-*/warnings.json',          writers: [executor, verifier],  category: phase }
-    - { path: '.mpl/mpl/phases/phase-*/reflections/attempt-*.md', writers: [executor],          category: phase }
-    - { path: '.mpl/contracts/*.json',                          writers: [planner],             category: contract }
-    - { path: '.mpl/mpl/phase0/**',                             writers: [analyzer],            category: phase0 }
-    - { path: '.mpl/mpl/chains/chain-*/chain-seed.yaml',        writers: [planner],             category: chain }
-    - { path: '.mpl/mpl/profile/**',                            writers: [engine],              category: profile, append_only: true }
-    - { path: '.mpl/signals/**',                                writers: [engine, hooks],       category: signals, append_only: true }
-    - { path: '.mpl/memory/{semantic,episodic,learnings,working}.md', writers: [engine],        category: memory }
-    - { path: '.mpl/memory/{procedural,routing-patterns}.jsonl', writers: [engine],             category: memory, append_only: true }
-    - { path: '.mpl/cache/**',                                  writers: [engine],              category: cache }
-    - { path: '.mpl/archive/**',                                writers: [engine],              category: archive }
-    - { path: '.mpl/research/**',                               writers: [research],            category: research }
-    - { path: '.mpl/e2e-traces/**',                             writers: [executor],            category: traces }
-    - { path: '.mpl/mpl/checkpoints/**',                        writers: [engine],              category: checkpoint }
-    - { path: '.mpl/mpl/releases/**',                           writers: [engine],              category: release }
+    - path: '.mpl/state.json'
+      writers:
+        - engine
+        - worker
+        - mcp
+      category: state
+    - path: '.mpl/config.json'
+      writers:
+        - user
+        - engine
+      category: config
+    - path: '.mpl/config/**/*.json'
+      writers:
+        - user
+        - engine
+      category: config
+    - path: '.mpl/goal-contract.yaml'
+      writers:
+        - interviewer
+      category: contract
+      schema: goal_contract
+    - path: '.mpl/pivot-points.md'
+      writers:
+        - interviewer
+      category: contract
+      schema: pivot_points
+    - path: '.mpl/requirements/user-contract.md'
+      writers:
+        - interviewer
+      category: contract
+      schema: user_contract
+    - path: '.mpl/mpl/decomposition.yaml'
+      writers:
+        - planner
+      category: decomposition
+      schema: decomposition
+    - path: '.mpl/mpl/decomposition-derived.json'
+      writers:
+        - planner
+      category: decomposition
+    - path: '.mpl/mpl/decomposition-delta.yaml'
+      writers:
+        - planner
+      category: decomposition
+    - path: '.mpl/mpl/decomposition-deltas/recompose-*.yaml'
+      writers:
+        - planner
+      category: decomposition
+    - path: '.mpl/mpl/baseline.yaml'
+      writers:
+        - interviewer
+      category: baseline
+    - path: '.mpl/mpl/.baseline-renewal'
+      writers:
+        - orchestrator
+      category: sentinel
+    - path: '.mpl/mpl/phases/phase-*/state-summary.md'
+      writers:
+        - executor
+      category: phase
+      schema: state_summary
+    - path: '.mpl/mpl/phases/phase-*/verification.md'
+      writers:
+        - verifier
+      category: phase
+      schema: verification
+    - path: '.mpl/mpl/phases/phase-*/phase-seed.yaml'
+      writers:
+        - planner
+      category: phase
+    - path: '.mpl/mpl/phases/phase-*/changes.diff'
+      writers:
+        - executor
+      category: phase
+    - path: '.mpl/mpl/phases/phase-*/warnings.json'
+      writers:
+        - executor
+        - verifier
+      category: phase
+    - path: '.mpl/mpl/phases/phase-*/reflections/attempt-*.md'
+      writers:
+        - executor
+      category: phase
+    - path: '.mpl/contracts/*.json'
+      writers:
+        - planner
+      category: contract
+    - path: '.mpl/mpl/phase0/**'
+      writers:
+        - analyzer
+      category: phase0
+    - path: '.mpl/mpl/chains/chain-*/chain-seed.yaml'
+      writers:
+        - planner
+      category: chain
+    - path: '.mpl/mpl/profile/**'
+      writers:
+        - engine
+      category: profile
+      append_only: true
+    - path: '.mpl/signals/**'
+      writers:
+        - engine
+        - hooks
+      category: signals
+      append_only: true
+    - path: '.mpl/memory/{semantic,episodic,learnings,working}.md'
+      writers:
+        - engine
+      category: memory
+    - path: '.mpl/memory/{procedural,routing-patterns}.jsonl'
+      writers:
+        - engine
+      category: memory
+      append_only: true
+    - path: '.mpl/cache/**'
+      writers:
+        - engine
+      category: cache
+    - path: '.mpl/archive/**'
+      writers:
+        - engine
+      category: archive
+    - path: '.mpl/research/**'
+      writers:
+        - research
+      category: research
+    - path: '.mpl/e2e-traces/**'
+      writers:
+        - executor
+      category: traces
+    - path: '.mpl/mpl/checkpoints/**'
+      writers:
+        - engine
+      category: checkpoint
+    - path: '.mpl/mpl/releases/**'
+      writers:
+        - engine
+      category: release
     # marginal-but-grandfathered top-level sentinels (current code writes these)
-    - { path: '.mpl/PLAN.md',                                   writers: [engine],              category: plan }
-    - { path: '.mpl/discoveries.md',                            writers: [engine],              category: discoveries, append_only: true }
-    - { path: '.mpl/auto-permit-learned.json',                  writers: [hooks],               category: permit }
-    - { path: '.mpl/context-usage.json',                        writers: [hooks],               category: hud }
+    - path: '.mpl/PLAN.md'
+      writers:
+        - engine
+      category: plan
+    - path: '.mpl/discoveries.md'
+      writers:
+        - engine
+      category: discoveries
+      append_only: true
+    - path: '.mpl/auto-permit-learned.json'
+      writers:
+        - hooks
+      category: permit
+    - path: '.mpl/context-usage.json'
+      writers:
+        - hooks
+      category: hud
 
   immutable_when:
-    - { match: '.mpl/mpl/baseline.yaml',               when: 'baseline_renewal_sentinel_absent' }
-    - { match: '.mpl/mpl/phases/phase-*/**',           when: 'phase_lifecycle.phase_id_completed', applies_to: phase_id }
-    - { match: '.mpl/mpl/decomposition.yaml',          when: 'completed_phase_block_unchanged' }
-    - { match: '.mpl/pivot-points.md',                 when: 'always_after_first_write' }
-    - { match: '.mpl/contracts/*.json',                when: 'phase_lifecycle.phase_id_completed', applies_to: contract_phase_id }
+    - match: '.mpl/mpl/baseline.yaml'
+      when: 'baseline_renewal_sentinel_absent'
+    - match: '.mpl/mpl/phases/phase-*/**'
+      when: 'phase_lifecycle.phase_id_completed'
+      applies_to: phase_id
+    - match: '.mpl/mpl/decomposition.yaml'
+      when: 'completed_phase_block_unchanged'
+    - match: '.mpl/pivot-points.md'
+      when: 'always_after_first_write'
+    - match: '.mpl/contracts/*.json'
+      when: 'phase_lifecycle.phase_id_completed'
+      applies_to: contract_phase_id
 
   forbidden_patterns:
     - '.mpl/scratchpad*'
@@ -651,7 +779,11 @@ reconcile:
   # Bucket X bounded re-entry cap per (wave_id, contract_ref).
   reentry_cap: 1
   # Bucket priority on multi-classification (T > C > S > X).
-  bucket_priority: [T, C, S, X]
+  bucket_priority:
+    - T
+    - C
+    - S
+    - X
   # Verifier dispatch — when bucket C non-empty, the gate spawns
   # mpl-adversarial-reviewer --mode=reconcile and awaits the
   # wave-<tier>-<wave>-reconciler-verdict.json signal.
