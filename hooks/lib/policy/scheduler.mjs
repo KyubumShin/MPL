@@ -56,6 +56,7 @@
  */
 
 import { randomBytes } from 'crypto';
+import { spawnSync } from 'child_process';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -498,6 +499,64 @@ export function detectImpactDrift(declared = {}, observed = []) {
     undeclared: undeclared.sort(),
     missing_declared: missing_declared.sort(),
   };
+}
+
+/**
+ * P2b — git-fed wave-end drift check.
+ *
+ * Runs `git diff --name-only <base_ref>..HEAD` inside `worktree_root`
+ * and forwards the observed path list into the pure `detectImpactDrift`.
+ * Lives next to the pure version so an `isolation → scheduler` reverse
+ * import is unnecessary; the isolation CLI just calls this directly.
+ *
+ *   worktree_root: absolute path to a slot worktree
+ *   base_ref:      git ref the slot was branched from. Callers MUST
+ *                  thread a captured SHA (e.g. the value returned by
+ *                  `acquireSlot`'s `acquired_base_sha`) — literal 'HEAD'
+ *                  drifts as the workspace HEAD moves.
+ *   declared:      `{ create, modify, affected_tests }` from phase_details
+ *
+ * Returns:
+ *   { ok:true,  drift, undeclared, missing_declared, observed, error:null } |
+ *   { ok:false, error, drift:false, undeclared:[], missing_declared:[], observed:[] }
+ *
+ * Never throws — git failures surface as `{ ok:false }` so the dispatcher
+ * can route to ABANDONED without unwinding.
+ */
+export function detectImpactDriftFromGit(worktree_root, base_ref, declared) {
+  if (typeof worktree_root !== 'string' || !worktree_root.startsWith('/')) {
+    return { ok: false, error: 'worktree_root must be absolute', drift: false, undeclared: [], missing_declared: [], observed: [] };
+  }
+  if (typeof base_ref !== 'string' || !base_ref) {
+    return { ok: false, error: 'base_ref required', drift: false, undeclared: [], missing_declared: [], observed: [] };
+  }
+  let r;
+  try {
+    r = spawnSync('git', ['diff', '--name-only', `${base_ref}..HEAD`], {
+      cwd: worktree_root,
+      encoding: 'utf-8',
+      timeout: 30_000,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: `git diff spawn failed: ${err?.message || err}`,
+      drift: false, undeclared: [], missing_declared: [], observed: [],
+    };
+  }
+  if (r.status !== 0) {
+    return {
+      ok: false,
+      error: `git diff failed (exit ${r.status}): ${(r.stderr || '').trim()}`,
+      drift: false, undeclared: [], missing_declared: [], observed: [],
+    };
+  }
+  const observed = String(r.stdout || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const pure = detectImpactDrift(declared, observed);
+  return { ok: true, error: null, observed, ...pure };
 }
 
 // ---------------------------------------------------------------------------

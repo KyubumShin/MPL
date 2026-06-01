@@ -312,6 +312,13 @@ export function acquireSlot({
     return _err(`slot worktree already exists at ${worktree_root}; stale slot? release before re-acquiring`);
   }
 
+  // P2b: capture the resolved SHA of base_ref BEFORE creating the worktree.
+  // detectImpactDriftFromGit needs a stable SHA — literal 'HEAD' drifts as
+  // the workspace HEAD moves. Surface on the return envelope so the
+  // orchestrator can thread it back at drift-check time without bookkeeping.
+  const baseShaProbe = gitSync(['rev-parse', base_ref], { cwd, timeout: 10_000 });
+  const acquired_base_sha = baseShaProbe.ok ? baseShaProbe.stdout.trim() : null;
+
   const branch = `mpl-pool-${phase_id}-slot${slot_id}-${nowISO().replace(/[^0-9]/g, '').slice(0, 14)}`;
   const r = gitSync(['worktree', 'add', worktree_root, '-b', branch, base_ref], { cwd, timeout: 120_000 });
   if (!r.ok) {
@@ -351,6 +358,10 @@ export function acquireSlot({
     branch,
     lock_path,
     heartbeat_path,
+    // P2b: caller threads this into detectImpactDriftFromGit at wave end.
+    // null on hosts where rev-parse failed (rare; HEAD always resolves on
+    // a non-empty repo). Drift check returns ok:false on null base.
+    acquired_base_sha,
     error: null,
     freeze: freezeResult,
   };
@@ -463,6 +474,7 @@ function _err(reason) {
     branch: null,
     lock_path: null,
     heartbeat_path: null,
+    acquired_base_sha: null,
     error: reason,
   };
 }

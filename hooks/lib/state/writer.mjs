@@ -321,7 +321,7 @@ const DEFAULT_STATE = {
       failed: 0,
       circuit_breaks: 0,
     },
-    phase_details: [],               // [{ id, name, status, pp_proximity, retries, criteria_passed, pass_rate }]
+    phase_details: [],               // [{ id, name, status, pp_proximity, retries, criteria_passed, pass_rate, impact:{create,modify,affected_tests} }]
     totals: {
       total_retries: 0,
       total_micro_fixes: 0,

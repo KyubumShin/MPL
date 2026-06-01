@@ -301,6 +301,10 @@ Add the following instructions to the mpl-decomposer agent:
          id: p.id, name: p.name, status: "pending",
          pp_proximity: p.pp_proximity, retries: 0,
          criteria_passed: null, pass_rate: null,
+         // P2b: structured impact powers scheduler.route_to_phase resolver (3)
+         // (file_path → declared phase) and detectImpactDriftFromGit at wave end.
+         // Source: parseDecompositionPostprocessText() emits p.impact.
+         impact: p.impact || { create: [], modify: [], affected_tests: [] },
        })),
      }
    })
