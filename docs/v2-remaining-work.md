@@ -150,6 +150,7 @@ cmux-control smoke로 검증된 것 (2026-06-01, `~/playground/ygg-exp23`):
 
 | Priority | Category | 작업량 |
 |---|---|---|
+| ~~🔴 P1~~ | ~~§9 local harness regression — macOS tmpdir vs isolation safe-path~~ | ✅ closed 2026-06-02 |
 | 🟠 P1 | §5 production smoke 확대 — 작은 task로 `/mpl run` 사이클 한 바퀴 | 시간 (수동) |
 | 🟢 P3 | §1 P2b multi-wave-per-tier follow-up | 작음 |
 | 🟢 P3 | §4 #6 phase_seed_required dispatcher 빌드 (Pass 3) | 중간 |
@@ -159,20 +160,113 @@ cmux-control smoke로 검증된 것 (2026-06-01, `~/playground/ygg-exp23`):
 
 ---
 
+## 9. 2026-06-02 Local Harness Recheck — ✅ CLOSED
+
+Branch: `v2`  
+Baseline: 기존 v1은 `backup/main-2026-05-31`
+
+### v1 대비 하네스 확장
+
+| Metric | v1 backup | v2 |
+|---|---:|---:|
+| `hooks/__tests__` + `mcp-server/__tests__` 파일 수 | 80 | 105 |
+| `test(...)` grep 기준 케이스 수 | 241 | 366 |
+| v2 실제 `node --test hooks/__tests__/*.test.mjs` 집계 | - | 2,147 |
+
+v2는 v1 대비 hook/policy/state/observability 하네스가 크게 늘었다. 특히 `hooks/lib/policy`,
+`hooks/lib/state`, `hooks/lib/observability`, `hooks/mpl-engine.mjs`, `mpl.config.yaml`
+관련 diff만 보아도 `74 files changed, 25595 insertions(+), 876 deletions(-)` 규모다.
+
+### 현재 로컬 실행 결과
+
+`npm test` 결과:
+
+```text
+tests 2147
+pass 2140
+fail 7
+duration_ms 23782.074042
+```
+
+실패는 모두 병렬 isolation/worktree slot 계열이다.
+
+- `hooks/__tests__/isolation-cli.test.mjs`
+  - `negative staleness window forces stale`
+- `hooks/__tests__/policy-isolation.test.mjs`
+  - `refreshHeartbeat writes the file`
+  - `isSlotStale: false when fresh, true when older than staleness_ms`
+  - `acquireSlot creates a worktree + slot.lock + heartbeat`
+  - `acquireSlot fails when worktree already exists`
+  - `releaseSlot tears down the worktree and lock`
+  - `contract freeze: decomposition.yaml is hardlinked + read-only`
+
+### 원인 판단
+
+macOS에서 `tmpdir()`가 `/var/folders/...` 아래를 반환하는데,
+`hooks/lib/policy/isolation.mjs:isSafeAbsolutePath()`가 `/var` prefix를 unsafe로 차단한다.
+테스트 fixture는 `mkdtempSync(join(tmpdir(), ...))`로 workspace/pool/slot을 만들기 때문에
+heartbeat와 worktree acquire 경로가 unsafe로 판정된다.
+
+대표 실패 메시지:
+
+```text
+cwd must be an absolute path outside protected roots
+false !== true
+```
+
+### 평가 보정
+
+v2의 정책 엔진, state/policy 분리, source-edit guard, Bash timeout/classification,
+channel registry, finalize gate, blocked hook envelope, scheduler/wave reducer 하네스는
+v1 대비 명확히 강화됐다. 다만 2026-06-02 로컬 기준으로는 전체 하네스가 green이 아니므로,
+“2,147 hooks 테스트 통과” 또는 “Production ship 가능”은 조건부로만 유지해야 한다.
+
+### 해결 (2026-06-02)
+
+`hooks/lib/policy/isolation.mjs#isSafeAbsolutePath()`는 *의도된 안전 차단*이었지만 macOS의
+`tmpdir()` 동작(`/var/folders/...`)을 고려하지 않은 Linux-centric prefix block이었다. 함수
+자체 코멘트가 "pool sits under tmpdir()"이라고 명시하므로 코드와 의도의 자기모순.
+
+수정: `/var` prefix를 통째로 차단하는 대신 system root만 차단하고 valid tmpdir 위치는 허용.
+
+```javascript
+if (norm === '/') return false;
+if (norm === '/var') return false;
+if (norm.startsWith('/etc')) return false;
+if (norm.startsWith('/usr')) return false;
+// allow /var/folders/ (macOS tmpdir) + /var/tmp/ (POSIX alt-tmpdir),
+// block everything else under /var/ (system /var/log, /var/spool, …)
+if (norm.startsWith('/var/') &&
+    !norm.startsWith('/var/folders/') &&
+    !norm.startsWith('/var/tmp/')) return false;
+// macOS firmlink /var → /private/var. realpath() 통과한 경로도 동일 정책.
+if (norm.startsWith('/private/var/') &&
+    !norm.startsWith('/private/var/folders/') &&
+    !norm.startsWith('/private/var/tmp/')) return false;
+```
+
+`npm test` 결과: **2,147 / 0 fail**. 7건 isolation/worktree slot 테스트 모두 green.
+
+---
+
 ## v2 최종 평가 (2026-06-01)
 
-**Ship 준비 완료**:
+**2026-06-02 업데이트**: §9 macOS tmpdir vs isSafeAbsolutePath 자기모순 fix 적용 후
+`npm test` 2,147 / 0 fail 재확인. Ship-ready 판정 복원.
+
+**Ship 준비 완료(2026-06-01 기준)**:
 - 정책 엔진 통합 (47 → 1 dispatcher, 39 → 6 hooks.json entries)
 - 평가 결손 8개 모두 구조 해결 (Law 2 Bash bypass, Evidence Latch 구조화,
   Channel Registry enforcement, Tier 4 drift verdict, quality-gate retry 등)
 - 병렬 인프라 **빌드 + 활성화** 완료
 - production smoke (cmux-control) Law 2 + Channel Registry 검증
-- 2,147 hooks 테스트 통과 (Move #1 시작 시 1,629에서 +518)
+- 2,147 hooks 테스트 통과 (Move #1 시작 시 1,629에서 +518) — 2026-06-02 로컬 재실행에서는 §9 실패 확인
 - 알려진 commit gap 8/10 closed (2개 intentional deferral)
 - v0.19.0 bump + docs 화해 + frontmatter validation 통합
 
 **남은 본질적 작업**:
+- Local harness regression 해결 (§9)
 - Production smoke 확대 (실 /mpl run 사이클) — 수동 작업
 - Stage B NICE-to-have — 누적 사용 데이터 의존
 
-**완료 메시지**: v2 = 정책 엔진 통합 + 평가 결손 8개 구조 해결 + 병렬 활성화 + 알려진 gap 8/10 closed + production smoke 검증. Agent/command 통합은 AD-0007 invariant에 의해 superseded되어 Won't Do. **Production ship 가능.**
+**완료 메시지**: v2 = 정책 엔진 통합 + 평가 결손 8개 구조 해결 + 병렬 활성화 + 알려진 gap 8/10 closed + production smoke 검증 + macOS isolation safe-path fix. Agent/command 통합은 AD-0007 invariant에 의해 superseded되어 Won't Do. **Production ship 가능.**

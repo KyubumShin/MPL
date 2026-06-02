@@ -74,10 +74,24 @@ function isSafeAbsolutePath(p) {
   if (typeof p !== 'string' || !p) return false;
   if (!isAbsolute(p)) return false;
   const norm = normalize(p);
-  // Block the obvious foot-guns. The pool sits under tmpdir() / mpl-wt-…
-  // by default; callers may override but must stay outside `/`, `/etc`,
-  // `/usr`, `/var`, the user's home root, and the workspace root itself.
-  if (norm === '/' || norm.startsWith('/etc') || norm.startsWith('/usr') || norm.startsWith('/var')) return false;
+  // Block the obvious foot-guns: filesystem root + system directories.
+  // The pool sits under tmpdir() / mpl-wt-… by default; on macOS that is
+  // /var/folders/<user>/…/T/ — a legitimate per-user tmpdir. We therefore
+  // ALLOW the standard tmpdir locations under /var while still rejecting
+  // genuine system roots (/var/log, /var/spool, /var/db, /var/run, …).
+  if (norm === '/') return false;
+  if (norm === '/var') return false;
+  if (norm.startsWith('/etc')) return false;
+  if (norm.startsWith('/usr')) return false;
+  if (norm.startsWith('/var/') &&
+      !norm.startsWith('/var/folders/') &&
+      !norm.startsWith('/var/tmp/')) return false;
+  // macOS firmlinks /var → /private/var; consumers that realpath() their
+  // cwd land under /private/var/folders/... Mirror the allowlist so the
+  // same tmpdir() output is safe whether or not it's been resolved.
+  if (norm.startsWith('/private/var/') &&
+      !norm.startsWith('/private/var/folders/') &&
+      !norm.startsWith('/private/var/tmp/')) return false;
   return true;
 }
 
