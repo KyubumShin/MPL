@@ -46,6 +46,7 @@ import { readGoalContract } from '../mpl-goal-contract.mjs';
 import { detectHang } from '../mpl-hang-detector.mjs';
 import { resolveRuleAction } from '../mpl-enforcement.mjs';
 import { blockedPhaseTransitionReason } from '../mpl-phase0-artifacts.mjs';
+import { isPassingGateEntry } from '../mpl-state-invariant.mjs';
 
 // Pure-fn quality decision module
 import {
@@ -209,6 +210,47 @@ export function handleFinalize(ctx = {}) {
     }
     // Note: contracts.mjs handlers currently only return 'allow' or 'block'.
     // Future warn-tier decisions land in `advisories[]` via the same shape.
+  }
+
+  // exp25 R0' Part B: enforce the 3 Hard Gates' PASSING evidence on the
+  // finalize_done=true write itself. The completion transition then happens via
+  // the phase-controller (_phase5FinalizeDecision) which DOES NOT route through
+  // I14 (STATE_WRITE-scoped) or writer-cli (mpl_state_write-scoped) — so without
+  // this, a phase-controller completion could land with gate_results=null
+  // (exp24/exp25b gate-theater). The schema check uses isPassingGateEntry, which
+  // (post-R0') accepts both the recorder {exit_code} and orchestrator {result}
+  // schemas. Exemptions: (a) PARTIAL completion (fix-loop exhausted) legitimately
+  // finalizes with failing gates — gates present-but-failing is allowed there;
+  // (b) the small-* pipeline never writes finalize_done:true so never reaches
+  // here. An ABSENT/null gate_results is ALWAYS blocked (the exp24/exp25b target:
+  // zero evidence is theater regardless of partial status).
+  const fState = ctx.state || {};
+  const REQUIRED_GATES = ['hard1_baseline', 'hard2_coverage', 'hard3_resilience'];
+  const gr = fState.gate_results;
+  const gateResultsAbsent = !gr || typeof gr !== 'object'
+    || REQUIRED_GATES.some((k) => gr[k] == null);
+  const allGatesPass = !gateResultsAbsent
+    && REQUIRED_GATES.every((k) => isPassingGateEntry(gr[k]));
+  const maxFix = Number(fState.max_fix_loops);
+  const fixCount = Number(fState.fix_loop_count);
+  const isPartialCompletion = Number.isFinite(maxFix) && Number.isFinite(fixCount)
+    && maxFix > 0 && fixCount >= maxFix;
+  if (gateResultsAbsent || (!allGatesPass && !isPartialCompletion)) {
+    const missing = !gr || typeof gr !== 'object'
+      ? ['gate_results_absent']
+      : REQUIRED_GATES.filter((k) => !isPassingGateEntry(gr[k]))
+        .map((k) => (gr[k] == null ? `${k}_unrecorded` : `${k}_not_passing`));
+    failures.push({
+      hookId: 'mpl-require-gate-evidence',
+      code: 'completion_without_gate_evidence',
+      reason: `[MPL R0'] finalize_done=true requires PASSING structured gate_results for all `
+        + `three Hard Gates (exit_code 0 / waived:true / result:'PASS'). Unsatisfied: `
+        + `${missing.join(', ')}. Run the Hard Gates so each slot records passing evidence `
+        + `before finalizing. (Partial completion after fix-loop exhaustion is exempt.)`,
+      resume_instruction: 'Record passing gate_results.{hard1_baseline,hard2_coverage,hard3_resilience} '
+        + "then retry the finalize_done=true write; do not finalize with absent gate evidence.",
+      retry_context: { unsatisfied: missing },
+    });
   }
 
   if (failures.length === 0) {

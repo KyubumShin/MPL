@@ -168,8 +168,18 @@ export function handle(routeTrigger, ctx = {}) {
   // `warn`, which would let a manual Write to state.json land a protected
   // phase without artifacts and only emit a systemMessage. The fast-track
   // invariant exists precisely to stop that path.
+  // Non-configurable blocks fire even when policy=`off`/`warn` — a soft
+  // systemMessage would let a corrupting write land. I13 (Phase 0 artifacts,
+  // #222) and I14 (completion without passing gate/finalize evidence, exp24 R0)
+  // are both data-integrity gates that the default `warn` policy is
+  // insufficient for. Name kept (`hasFastTrackViolation`) so the off/block
+  // branches below stay unchanged.
+  const NON_CONFIGURABLE_BLOCK_IDS = new Set([
+    VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING,
+    VIOLATION_IDS.COMPLETION_WITHOUT_GATE_EVIDENCE,
+  ]);
   const hasFastTrackViolation = result.violations.some(
-    (v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING,
+    (v) => NON_CONFIGURABLE_BLOCK_IDS.has(v.id),
   );
   const action = resolveRuleAction(cwd, state, 'state_invariant_violation');
   if (action === 'off' && !hasFastTrackViolation) {
@@ -190,12 +200,21 @@ export function handle(routeTrigger, ctx = {}) {
     // #235: record envelope so mpl-recover sees the block code. I13 fast-track
     // uses its own non-configurable code; other invariant violations use the
     // generic state_invariant_violation bucket from ENFORCEMENT_DEFAULTS.
-    const code = hasFastTrackViolation
-      ? 'fast_track_phase0_artifacts_missing'
-      : 'state_invariant_violation';
-    const resumeInstruction = hasFastTrackViolation
-      ? 'Materialize the required Phase 0 artifacts (raw-scan.md / design-intent.yaml / contracts) and rewrite the state transition, or opt out via .mpl/config.json `phase0_artifacts_required: false`.'
-      : 'Resolve the state-invariant violation(s) in state.json (see reason for the specific check IDs), then retry the write.';
+    const hasI13 = result.violations.some(
+      (v) => v.id === VIOLATION_IDS.FAST_TRACK_PHASE0_ARTIFACTS_MISSING,
+    );
+    const hasI14 = result.violations.some(
+      (v) => v.id === VIOLATION_IDS.COMPLETION_WITHOUT_GATE_EVIDENCE,
+    );
+    let code = 'state_invariant_violation';
+    let resumeInstruction = 'Resolve the state-invariant violation(s) in state.json (see reason for the specific check IDs), then retry the write.';
+    if (hasI13) {
+      code = 'fast_track_phase0_artifacts_missing';
+      resumeInstruction = 'Materialize the required Phase 0 artifacts (raw-scan.md / design-intent.yaml / contracts) and rewrite the state transition, or opt out via .mpl/config.json `phase0_artifacts_required: false`.';
+    } else if (hasI14) {
+      code = 'completion_without_gate_evidence';
+      resumeInstruction = "Do not patch current_phase='completed' directly. Run the Hard Gates so mpl-gate-recorder records passing gate_results.{hard1_baseline,hard2_coverage,hard3_resilience}, complete finalize (finalize_done=true), then transition to completed.";
+    }
     try {
       recordBlockedHook(cwd, {
         hookId: STATE_INVARIANT_HOOK_ID,

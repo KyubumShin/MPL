@@ -69,6 +69,14 @@ export const VIOLATION_IDS = Object.freeze({
   // Fast-track (run_mode=auto) makes this especially important because
   // user review is reduced.
   FAST_TRACK_PHASE0_ARTIFACTS_MISSING: 'I13',
+  // exp24 R0 / G3 + G4: the completion transition (current_phase -> 'completed')
+  // must carry PASSING structured Hard-Gate evidence AND finalize_done===true.
+  // exp24 jumped phase2-sprint -> completed in a single state-write with
+  // gate_results all null and finalize_done false, slipping past I6 (fires only
+  // at phase3-gate) and the finalize gate (fires only on a finalize_done:true
+  // write). I14 gates the completion WRITE itself and is a non-configurable
+  // block (see hooks/lib/policy/state-invariant.mjs).
+  COMPLETION_WITHOUT_GATE_EVIDENCE: 'I14',
 });
 
 const ACTIVE_PHASES = new Set([
@@ -147,10 +155,69 @@ function sumFixLoopHistory(state) {
   return sum;
 }
 
+// exp25 R0' (schema unification): a gate slot is "recorded" if it is an object
+// carrying EITHER schema MPL actually produces:
+//   - recorder/command schema: { command, exit_code:<number>, source:'recorder' }
+//     (what mpl-gate-recorder stamps from a real command run; exp24 I14 assumed
+//      only this)
+//   - orchestrator summary schema: { gate, ..., result:'PASS'|'FAIL' }
+//     (what the Phase-5 hard-gate step actually wrote in exp25a — real tsc/vitest
+//      were run, but the slot was summarized as result:'PASS' with NO exit_code).
+// Pre-R0', the exit_code-only check flagged the result:'PASS' schema as
+// "unrecorded" and would have FALSE-POSITIVE blocked a legitimate completion
+// (exp25a live-R0 observation). Accepting both keeps the gate honest — a null /
+// absent / FAIL slot is still caught.
 function isStructuredEntry(e) {
-  return e && typeof e === 'object'
-    && typeof e.exit_code === 'number'
-    && Number.isFinite(e.exit_code);
+  return !!e && typeof e === 'object'
+    && (
+      (typeof e.exit_code === 'number' && Number.isFinite(e.exit_code))
+      || typeof e.result === 'string'
+    );
+}
+
+// A gate slot "passes" when it is structured AND (exited 0 / explicitly waived /
+// summarized PASS). exp24 R0: the completion transition requires PASSING gates,
+// not merely recorded ones. exp25 R0': honor the result:'PASS' summary schema too.
+export function isPassingGateEntry(e) {
+  if (!isStructuredEntry(e)) return false;
+  if (e.waived === true) return true;
+  if (typeof e.exit_code === 'number' && Number.isFinite(e.exit_code)) return e.exit_code === 0;
+  if (typeof e.result === 'string') return /^pass$/i.test(e.result.trim());
+  return false;
+}
+
+/**
+ * The list of reasons a state would FAIL the completion-evidence gate (R0).
+ * Empty array = the state may legitimately transition to current_phase:'completed'.
+ *
+ * Shared single source of truth so that BOTH enforcement points agree on what
+ * "completion evidence" means:
+ *   - checkI14()  — fires on Edit/Write of state.json (PreToolUse hook path)
+ *   - writer-cli  — fires on the `mpl_state_write` MCP path, which bypasses the
+ *                   hook layer (exp25: exp25b reached current_phase='completed'
+ *                   with gate_results=null + finalize_done=false via that path,
+ *                   so I14 never saw it). See hooks/lib/state/writer-cli.mjs.
+ *
+ * NOTE: callers decide WHEN to apply this (e.g. only on the transition INTO
+ * 'completed', and only for the full pipeline — the lightweight small-* flow and
+ * the phase-controller's internal partial-completion path are intentionally
+ * exempt). This helper only answers WHAT counts as sufficient evidence.
+ */
+export function completionGateIssues(state) {
+  const issues = [];
+  if (state?.finalize_done !== true) issues.push('finalize_done_not_true');
+
+  const gr = state?.gate_results;
+  const required = ['hard1_baseline', 'hard2_coverage', 'hard3_resilience'];
+  if (!gr || typeof gr !== 'object') {
+    issues.push('gate_results_absent');
+  } else {
+    for (const k of required) {
+      if (!isStructuredEntry(gr[k])) issues.push(`${k}_unrecorded`);
+      else if (!isPassingGateEntry(gr[k])) issues.push(`${k}_not_passing`);
+    }
+  }
+  return issues;
 }
 
 /* ────────────────────────── individual invariants ────────────────────────── */
@@ -469,6 +536,30 @@ function checkI12(state, trigger, cwd) {
     { mismatches: issues });
 }
 
+function checkI14(state, trigger) {
+  // exp24 R0 (G3 + G4): gate the COMPLETION transition. Fire on STATE_WRITE so a
+  // manual/orchestrator write that flips current_phase -> 'completed' cannot
+  // land unless (a) finalize_done===true and (b) all three Hard Gates carry
+  // PASSING structured evidence. Closes the gap where I6 only checks at
+  // phase3-gate and the finalize gate fires only on a finalize_done:true write —
+  // jumping straight to 'completed' bypassed both (exp24, gate_results all null,
+  // finalize_done false).
+  if (trigger !== TRIGGERS.STATE_WRITE) return null;
+  if (state.current_phase !== 'completed') return null;
+
+  // Shared evidence definition with the mpl_state_write path (writer-cli.mjs).
+  const issues = completionGateIssues(state);
+
+  if (issues.length === 0) return null;
+  return v(VIOLATION_IDS.COMPLETION_WITHOUT_GATE_EVIDENCE,
+    `Completion transition to current_phase='completed' lacks passing gate/finalize evidence: ${issues.join(', ')}. ` +
+      `A 'completed' state-write requires finalize_done=true AND structured PASSING ` +
+      `gate_results.{hard1_baseline,hard2_coverage,hard3_resilience} (exit_code 0 or waived:true). ` +
+      `Run the Hard Gates so mpl-gate-recorder produces evidence and complete finalize, then transition — ` +
+      `do not patch current_phase='completed' directly.`,
+    { issues });
+}
+
 /* ────────────────────────── aggregator ──────────────────────────────────── */
 
 /**
@@ -500,6 +591,7 @@ export function checkInvariants(state, opts = {}) {
     () => checkI11(state),
     () => checkI12(state, trigger, cwd),
     () => checkI13(state, cwd, trigger),
+    () => checkI14(state, trigger),
   ];
 
   const violations = [];

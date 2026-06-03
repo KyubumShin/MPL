@@ -933,11 +933,60 @@ function handleWriteEdit(event) {
 
     if (DECOMPOSITION_FILE_REGEX.test(normalizedPath)) {
       if (!isDecomposerDispatchActive(state, callerTranscriptPath)) {
+        // exp24 R1 / G1 + G5: the #236 A1 writer-identity protocol is
+        // transcript-based. Some hosts (cmux split, headless/CI) never
+        // propagate transcript_path to ANY hook invocation — neither the
+        // arming dispatch nor this write carried one (`first_transcript_seen`
+        // never recorded AND callerTranscriptPath null), so MPL cannot *verify*
+        // the writer and hard-blocks a legitimate dispatched mpl-decomposer
+        // (exp24b had to write decomposition to docs/ instead).
+        //
+        // We CANNOT distinguish a legit decomposer from a malicious direct
+        // write in a transcript-blind host — both look identical. So the
+        // block->warn degrade is OPT-IN via config and DEFAULT OFF: normal
+        // (transcript-capable) hosts and any host that hasn't opted in keep the
+        // full #236 hard block. A transcript-blind operator (e.g. the cmux
+        // experiment harness) sets
+        // `.mpl/config.json { "writer_identity_degrade_when_transcript_blind": true }`
+        // to accept the reduced enforcement explicitly.
+        //
+        // exp25a empirical fix (round 2): the arming protocol (handleTaskDispatch)
+        // records `decomposer_dispatch` ONLY when the ORCHESTRATOR had a transcript
+        // at dispatch time (first_transcript_seen === its callerTranscriptPath, see
+        // line ~905). A transcript-blind orchestrator (cmux split) can NEVER arm, so
+        // isDecomposerDispatchActive() is permanently false and EVERY decomposer
+        // write lands in this branch. Two distinct "can't-verify" shapes must both
+        // degrade under the opt-in:
+        //   (X) THIS WRITER has no transcript          → !callerTranscriptPath
+        //   (Y) the orchestrator never saw a transcript → first_transcript_seen===null
+        //       so the dispatch could not be armed even though the writer subagent
+        //       may itself be transcript-capable. This was exp25a's actual stall:
+        //       round-1's writer-only condition (!callerTranscriptPath) missed it
+        //       because the decomposer subagent's Write DID carry a transcript while
+        //       the orchestrator stayed blind → no degrade → hard block.
+        // OR (not AND): a genuinely transcript-capable host arms successfully and
+        // never reaches this branch; if it somehow reaches here unarmed, BOTH are
+        // non-null → no degrade → full #236 block strength preserved.
+        const firstSeen = typeof state?.first_transcript_seen === 'string'
+          ? state.first_transcript_seen
+          : null;
+        const armingImpossible = !callerTranscriptPath || firstSeen === null;
+        const degradeOptIn = armingImpossible
+          && loadConfig(cwd)?.writer_identity_degrade_when_transcript_blind === true;
         const reason =
-          `[MPL #236 A1] Refused direct ${toolName} of decomposition.yaml: ` +
+          `[MPL #236 A1] ${degradeOptIn ? 'Unverifiable' : 'Refused'} direct ${toolName} of decomposition.yaml: ` +
           `only the mpl-decomposer subagent may emit this file. ` +
           `Dispatch via Agent(subagent_type='mpl-decomposer', prompt='...') ` +
           `and let it write.`;
+        if (degradeOptIn) {
+          const warnMsg = reason +
+            ` (writer-identity UNVERIFIABLE: host did not propagate transcript_path and ` +
+            `writer_identity_degrade_when_transcript_blind=true; enforcement degraded ` +
+            `block->warn for this environment. exp24 R1/G1.)`;
+          return warn(warnMsg, warnMsg, [
+            { kind: 'clearBlockedHook', payload: { cwd, hookId: HOOK_ID, artifact: filePath } },
+          ]);
+        }
         return block(reason, [{
           kind: 'recordBlockedHook',
           payload: {

@@ -45,6 +45,7 @@ import { writeState, UnsupportedSchemaVersionError } from './writer.mjs';
 import { readState } from './reader.mjs';
 import { deepMerge } from '../mpl-state-merge.mjs';
 import { blockedPhaseTransitionReason } from '../mpl-phase0-artifacts.mjs';
+import { completionGateIssues } from '../mpl-state-invariant.mjs';
 
 function parseArgs(argv) {
   let cwd = null;
@@ -126,8 +127,9 @@ function main() {
   // (phase-controller, ambiguity-gate) already gate I13 upstream and
   // would double-pay the artifact existsSync cost on every write.
   let merged = patch;
+  let current = null;
   try {
-    const current = readState(cwd);
+    current = readState(cwd);
     merged = deepMerge(current ?? {}, patch);
   } catch {
     // readState already swallows parse errors and returns null; this
@@ -149,6 +151,32 @@ function main() {
       // error rather than silently allowing the write.
       process.stderr.write(`[writer-cli] I13 check failed: ${err && err.message ? err.message : err}\n`);
       process.exit(5);
+    }
+  }
+
+  // exp25 R0 pre-check (post-merge). The MCP `mpl_state_write` path bypasses
+  // both the PreToolUse hook (where I14 lives) AND the Stop hook, so a direct
+  // flip to current_phase='completed' here never hit I14 — exp25b reached
+  // 'completed' with gate_results=null + finalize_done=false via this path.
+  // Gate the TRANSITION into 'completed' with the same evidence definition I14
+  // uses (completionGateIssues). Only the transition is checked, so a steady-
+  // state rewrite of an already-completed state is untouched. The lightweight
+  // small-* flow and full-pipeline partial completion both land via the
+  // phase-controller Stop hook (writeState), never this CLI, so they are exempt.
+  if (mergedPhase === 'completed' && current?.current_phase !== 'completed') {
+    const r0Issues = completionGateIssues(merged);
+    if (r0Issues.length) {
+      emit({
+        success: false,
+        updated_keys: [],
+        reason:
+          `[MPL R0] Refused mpl_state_write transition to current_phase='completed' without `
+          + `passing gate/finalize evidence: ${r0Issues.join(', ')}. Record passing `
+          + `gate_results.{hard1_baseline,hard2_coverage,hard3_resilience} (exit_code 0 or `
+          + `waived:true) AND set finalize_done=true — or complete through the MPL phase `
+          + `pipeline (Hard Gates + finalize) instead of patching current_phase directly.`,
+      });
+      process.exit(0);
     }
   }
 
