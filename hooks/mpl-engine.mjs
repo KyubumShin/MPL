@@ -61,6 +61,7 @@ const stdinMod = await importOptional('lib/stdin.mjs');
 // `{}` on failure — config wiring is resilient by design.
 const configV2Mod = await importOptional('lib/config.mjs');
 const configV1Mod = await importOptional('lib/mpl-config.mjs');
+const autoContinueMod = await importOptional('lib/auto-continue.mjs');
 const stateMod = await importOptional('lib/state/reader.mjs');
 const dispatchMod = await importOptional('lib/dispatch.mjs');
 const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
@@ -217,6 +218,7 @@ function silent() {
   }
   process.exit(0);
 }
+
 
 // --- main ------------------------------------------------------------------
 
@@ -410,7 +412,29 @@ async function main() {
   }
 
   // Step 7 — aggregate
-  const envelope = aggregate(evt.event, decisions);
+  let envelope = aggregate(evt.event, decisions);
+
+  // Step 7.5 — single-session auto-continue (exp25): convert a Phase-2+ idle
+  // Stop into a resume directive so unattended runs need no second CLI / nudge.
+  // The auto_continue flag lives in the user-facing v1 config (.mpl/config.json);
+  // the engine's aggregated `config` is the v2/YAML object which does not surface
+  // it. DEFAULT ON — only an explicit false opts out. Fail-open throughout.
+  try {
+    if (autoContinueMod && typeof autoContinueMod.maybeAutoContinue === 'function') {
+      let userCfg = {};
+      try {
+        if (configV1Mod && typeof configV1Mod.loadConfig === 'function') {
+          userCfg = configV1Mod.loadConfig(evt.cwd) || {};
+        }
+      } catch {
+        userCfg = {};
+      }
+      const enabled = userCfg.auto_continue !== false; // default ON
+      envelope = autoContinueMod.maybeAutoContinue(evt.event, envelope, state, enabled);
+    }
+  } catch {
+    /* fail-open: auto-continue never breaks the hook response */
+  }
 
   // Step 8 — placeholder signal emission (no-op until signals.mjs lands).
   await emitSignal({
