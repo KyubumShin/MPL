@@ -62,6 +62,7 @@ const stdinMod = await importOptional('lib/stdin.mjs');
 const configV2Mod = await importOptional('lib/config.mjs');
 const configV1Mod = await importOptional('lib/mpl-config.mjs');
 const autoContinueMod = await importOptional('lib/auto-continue.mjs');
+const stateWriterMod = await importOptional('lib/state/writer.mjs');
 const stateMod = await importOptional('lib/state/reader.mjs');
 const dispatchMod = await importOptional('lib/dispatch.mjs');
 const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
@@ -420,7 +421,7 @@ async function main() {
   // the engine's aggregated `config` is the v2/YAML object which does not surface
   // it. DEFAULT ON — only an explicit false opts out. Fail-open throughout.
   try {
-    if (autoContinueMod && typeof autoContinueMod.maybeAutoContinue === 'function') {
+    if (autoContinueMod && typeof autoContinueMod.decideAutoContinue === 'function') {
       let userCfg = {};
       try {
         if (configV1Mod && typeof configV1Mod.loadConfig === 'function') {
@@ -430,7 +431,19 @@ async function main() {
         userCfg = {};
       }
       const enabled = userCfg.auto_continue !== false; // default ON
-      envelope = autoContinueMod.maybeAutoContinue(evt.event, envelope, state, enabled);
+      const decided = autoContinueMod.decideAutoContinue(evt.event, envelope, state, enabled);
+      if (decided && typeof decided === 'object') {
+        envelope = decided.envelope || envelope;
+        // Persist the recover-streak mutation (cause-aware escalation tracking).
+        // Best-effort: a write failure never blocks the hook response.
+        if (decided.mutation && stateWriterMod && typeof stateWriterMod.writeState === 'function') {
+          try {
+            stateWriterMod.writeState(evt.cwd, decided.mutation);
+          } catch {
+            /* fail-open */
+          }
+        }
+      }
     }
   } catch {
     /* fail-open: auto-continue never breaks the hook response */
