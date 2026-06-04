@@ -63,6 +63,7 @@ const configV2Mod = await importOptional('lib/config.mjs');
 const configV1Mod = await importOptional('lib/mpl-config.mjs');
 const autoContinueMod = await importOptional('lib/auto-continue.mjs');
 const stateWriterMod = await importOptional('lib/state/writer.mjs');
+const provenanceMod = await importOptional('lib/model-provenance.mjs');
 const stateMod = await importOptional('lib/state/reader.mjs');
 const dispatchMod = await importOptional('lib/dispatch.mjs');
 const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
@@ -447,6 +448,41 @@ async function main() {
     }
   } catch {
     /* fail-open: auto-continue never breaks the hook response */
+  }
+
+  // Step 7.6 — model provenance stamping (exp25): on Stop, read the resolved
+  // model from the transcript, persist it, and append a drift-smoke advisory if
+  // it changed since the last stamped run. Transcript-blind hosts simply skip.
+  // Fail-open throughout.
+  try {
+    if (
+      (evt.event === 'Stop' || evt.event === 'SubagentStop')
+      && provenanceMod
+      && typeof provenanceMod.readLastAssistantModel === 'function'
+    ) {
+      const transcriptPath = evt.raw?.transcript_path || evt.raw?.transcriptPath || null;
+      const model = provenanceMod.readLastAssistantModel(transcriptPath);
+      if (model) {
+        const { mutation, advisory } = provenanceMod.computeModelProvenance(
+          state?.model_provenance, model, new Date().toISOString(),
+        );
+        if (mutation && stateWriterMod && typeof stateWriterMod.writeState === 'function') {
+          try { stateWriterMod.writeState(evt.cwd, mutation); } catch { /* fail-open */ }
+        }
+        if (advisory) {
+          if (envelope.decision === 'block' && typeof envelope.reason === 'string') {
+            envelope.reason = `${envelope.reason}\n\n${advisory}`;
+          } else {
+            envelope.systemMessage = envelope.systemMessage
+              ? `${envelope.systemMessage}\n\n${advisory}` : advisory;
+            if (envelope.suppressOutput) delete envelope.suppressOutput;
+            if (envelope.continue === undefined) envelope.continue = true;
+          }
+        }
+      }
+    }
+  } catch {
+    /* fail-open: provenance never breaks the hook response */
   }
 
   // Step 8 — placeholder signal emission (no-op until signals.mjs lands).
