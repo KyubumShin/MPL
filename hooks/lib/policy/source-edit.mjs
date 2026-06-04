@@ -71,6 +71,54 @@ export const PROTECTED_DELETE_TARGETS = [
 // Dogfood mode toggle — `/MPL/` is allowed by default; suppressed in dogfood.
 export const DOGFOOD_SUPPRESSED = /\/MPL\//;
 
+// exp25 #236 A3 false-positive fix (thin-harness "allowlist command forms").
+// Heads that are unambiguously NON-mutating readers. A pipeline made ONLY of
+// these — with no write redirect, no command/process substitution, and no
+// decoder — cannot destroy a protected path no matter which path it merely
+// MENTIONS (a grep pattern, a cd target, a sed address). `sed` is included only
+// in read form (an `-i`/`--in-place` write is rejected below); `awk`, `find`,
+// `git`, `cp`, interpreters, etc. are deliberately EXCLUDED so they fall through
+// to the full destructive analysis (no security regression).
+export const READ_ONLY_HEADS = new Set([
+  'cat', 'ls', 'head', 'tail', 'wc', 'file', 'stat', 'du', 'df',
+  'grep', 'rg', 'ag', 'ack', 'jq', 'yq',
+  'less', 'more', 'sort', 'uniq', 'tac', 'nl', 'tr', 'cut', 'rev', 'fold', 'column', 'paste', 'join',
+  'diff', 'comm', 'sdiff',
+  'echo', 'printf', 'pwd', 'type', 'which', 'whereis',
+  'basename', 'dirname', 'realpath', 'readlink', 'true', 'false', 'test', 'date',
+  'cd', 'pushd', 'popd', // directory navigation — non-mutating
+  'sed',
+]);
+
+/**
+ * True iff `normalized` is a pipeline composed ONLY of read-only command forms.
+ * Conservative: any mutation signal (real write redirect, cmd/process
+ * substitution, decoder, `sed -i`, or a non-allowlisted head) returns false so
+ * the caller proceeds to the full destructive checks.
+ */
+export function isReadOnlyPipeline(normalized) {
+  if (!normalized || typeof normalized !== 'string') return false;
+  const lc = normalized.toLowerCase();
+  // Harmless /dev/null redirects (e.g. `2>/dev/null`) don't make it a write —
+  // strip them, THEN reject if any real redirect remains.
+  const stripped = lc
+    .replace(/(?:^|[\s;|&(])\d?>{1,2}\s*\/dev\/null\b/g, ' ')
+    .replace(/(?:^|[\s;|&(])&>{1,2}\s*\/dev\/null\b/g, ' ');
+  if (/(?:^|[\s;|&(])\d?>{1,2}/.test(stripped)) return false;       // real write redirect
+  if (/(?:^|[\s;|&(])&>{1,2}/.test(stripped)) return false;
+  if (/\$\(|`|<\(|>\(/.test(lc)) return false;                      // command/process substitution
+  if (/\bbase64\b|\bxxd\b|\bopenssl\b/.test(lc)) return false;      // decoders (smuggling)
+  if (/\bsed\b[^|;&]*(?:\s-\S*i\b|\s--in-place)/.test(lc)) return false; // sed -i writes in place
+  const segments = lc.split(/[|;&\n]+/).map((s) => s.trim()).filter(Boolean);
+  if (segments.length === 0) return false;
+  return segments.every((seg) => {
+    const head = (seg.match(/^([a-z0-9_./-]+)/) || ['', ''])[1];
+    if (!head) return false;
+    const base = head.split('/').pop(); // /bin/cat → cat
+    return READ_ONLY_HEADS.has(base);
+  });
+}
+
 export const ALLOWED_PATTERNS = [
   /\.mpl\//,
   /\.omc\//,
@@ -224,6 +272,12 @@ export function normalizeShellCommand(command) {
 export function matchesProtectedDelete(command, cwd) {
   if (!command || typeof command !== 'string') return null;
   let normalized = normalizeShellCommand(command);
+  // exp25 #236 A3: a purely read-only pipeline can never destroy a protected
+  // path — exit before the (over-broad) isDestructive heuristic + substring
+  // match that produced 4 false positives in one session (read-only sed/grep/
+  // cat naming a protected path). Any mutation signal fails this and falls
+  // through to the full analysis below, so destructive commands still block.
+  if (isReadOnlyPipeline(normalized)) return null;
   const isDestructive = (
     /\brm\b/.test(normalized) ||
     /\bfind\b.*-delete\b/.test(normalized) ||
