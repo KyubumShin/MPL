@@ -98,6 +98,7 @@ export async function installRoutes() {
     signalsMod,
     trackersMod,
     sessionInitMod, // may be null — no policy module backing yet
+    phaseReceiptMod,
   ] = await Promise.all([
     _importPolicy('policy/source-edit.mjs'),
     _importPolicy('policy/permit.mjs'),
@@ -108,6 +109,7 @@ export async function installRoutes() {
     _importPolicy('observability/signals.mjs'),
     _importPolicy('observability/trackers.mjs'),
     _importPolicy('policy/session-init.mjs'),
+    _importPolicy('policy/phase-receipt.mjs'),
   ]);
 
   const disabled = _disabledSet();
@@ -352,6 +354,21 @@ export async function installRoutes() {
       tools: /^(Task|Agent|Write|Edit|MultiEdit)$/,
       order: 70,
       handler: (ctx) => schemasMod.handle('seed_schema', ctx),
+    });
+  }
+
+  // -------- Phase-runner receipt handoff (R04 part b) --------------------
+  if (phaseReceiptMod?.handle) {
+    reg({
+      id: 'phase-receipt.record',
+      events: ['PostToolUse'],
+      tools: /^(Task|Agent)$/,
+      // order 55: BEFORE agent-output(60)/seed(70). Recording is pure
+      // observability (advisory at most, never blocks), and the engine
+      // short-circuits on the first block — so running early guarantees the
+      // receipt is captured even when section validation later blocks.
+      order: 55,
+      handler: (ctx) => phaseReceiptMod.handle('phase_receipt', ctx),
     });
   }
 

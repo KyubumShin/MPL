@@ -70,6 +70,7 @@ const PURPOSES = {
   'mpl-quality-gate': 'adversarial quality gate',
   'mpl-validate-output': 'agent output validation/token tracking',
   'mpl-validate-seed': 'phase seed validation',
+  'mpl-phase-receipt': 'phase-runner receipt handoff recording',
   'mpl-sentinel-s0': 'sentinel S0 guard',
   'mpl-sentinel-s1': 'sentinel S1 guard',
   'mpl-sentinel-s3': 'sentinel S3 guard',

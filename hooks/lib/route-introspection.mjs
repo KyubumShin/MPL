@@ -126,6 +126,8 @@ export const MODULE_TO_HOOK_IDS = {
                                  matcher: 'Task|Agent' }],
   'schemas.seed':             [{ hookId: 'mpl-validate-seed',
                                  matcher: 'Task|Agent|Write|Edit|MultiEdit' }],
+  'phase-receipt.record':     [{ hookId: 'mpl-phase-receipt',
+                                 matcher: 'Task|Agent' }],
 
   // ── Observability: signals ───────────────────────────────────────────────
   'signals.s0':               [{ hookId: 'mpl-sentinel-s0',

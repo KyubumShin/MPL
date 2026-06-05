@@ -473,7 +473,7 @@ Discoveries are reviewed at phase transition; CONFIRMED PP conflicts auto-reject
 
 ## 7. Hook System
 
-`hooks/hooks.json` is the live SSOT for hook registration. As of the v2 cutover (Move #14), `hooks.json` itself shrinks to 6 entries — one per event — that all point at the single dispatcher `hooks/mpl-engine.mjs`. Per-module behavior is wired through `hooks/lib/dispatch.mjs` ROUTES, and the live list below is introspected from that registry. The repo currently ships 46 hook modules under `hooks/`, of which the 38 listed here are routed through ROUTES; the remainder are `.legacy.mjs` siblings retained for one release as the rollback tier. MPL maintains pipeline integrity with 38 registered hook commands:
+`hooks/hooks.json` is the live SSOT for hook registration. As of the v2 cutover (Move #14), `hooks.json` itself shrinks to 6 entries — one per event — that all point at the single dispatcher `hooks/mpl-engine.mjs`. Per-module behavior is wired through `hooks/lib/dispatch.mjs` ROUTES, and the live list below is introspected from that registry. The repo currently ships 46 hook modules under `hooks/`, of which the 39 listed here are routed through ROUTES; the remainder are `.legacy.mjs` siblings retained for one release as the rollback tier. MPL maintains pipeline integrity with 39 registered hook commands:
 
 | Hook | Event / matcher | Purpose | Introduced |
 |----|--------|------|------------|
@@ -505,6 +505,7 @@ Discoveries are reviewed at phase transition; CONFIRMED PP conflicts auto-reject
 | `mpl-quality-gate` | PostToolUse: Task/Agent | Consume adversarial reviewer quality scores and trigger retry/escalation decisions. | v0.18.1 |
 | `mpl-validate-output` | PostToolUse: Task/Agent | Validate required sections of agent output and track token usage. | v0.13.x baseline |
 | `mpl-validate-seed` | PostToolUse: Task/Agent/Write/Edit/MultiEdit | Validate phase and chain seed YAML, contract snippets, TODO dependencies, files, and resource locks. | v0.10.0; registered v0.11.3; scheduling metadata v0.18.6 |
+| `mpl-phase-receipt` | PostToolUse: Task/Agent | Parse the phase-runner's compact handoff receipt (verdict enum + sha256 of on-disk artifacts + counts), verify the sha against the artifacts, append to `.mpl/mpl/receipts.jsonl` audit ledger; advise explicitly on a missing/malformed receipt or sha mismatch (never blocks). | exp25 R04 |
 | `mpl-sentinel-s0` | PostToolUse: Task/Agent/Write/Edit/MultiEdit | Fact-check seed contract snippets against known contract keys. | v0.10.0; registered v0.11.3 |
 | `mpl-sentinel-s1` | PostToolUse: Task/Agent | Validate runner export-manifest symbols against generated files. | v0.10.0; registered v0.11.3 |
 | `mpl-sentinel-s3` | PostToolUse: Task/Agent | Validate test-agent import paths against actual files. | v0.10.0; registered v0.11.3 |
