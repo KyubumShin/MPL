@@ -162,7 +162,7 @@ cmux-control smoke로 검증된 것 (2026-06-01, `~/playground/ygg-exp23`):
 
 ## 9. 2026-06-02 Local Harness Recheck — ✅ CLOSED
 
-Branch: `v2`  
+Branch: `v2`
 Baseline: 기존 v1은 `backup/main-2026-05-31`
 
 ### v1 대비 하네스 확장
