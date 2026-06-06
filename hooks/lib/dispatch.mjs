@@ -1,12 +1,10 @@
 /**
  * MPL v2 Dispatch Registry — declarative routing brain for mpl-engine.mjs.
  *
- * MOVE #14: ROUTES table is now populated (lazy registration on first
- * dispatch()), wiring all 10 policy/observability modules into the engine.
- * `hooks.json` is intentionally NOT modified in this move (see CONSERVATIVE
- * FALLBACK in the Move #14 plan): the engine is wired but Claude Code still
- * routes events to the per-hook .mjs wrappers. The engine therefore stays
- * dormant in production until a follow-up move flips hooks.json.
+ * CURRENT STATE (v0.19.0+): ROUTES table is populated lazily on first
+ * dispatch(), and `hooks/hooks.json` points all live hook events at
+ * `hooks/mpl-engine.mjs`. This module is therefore the production routing
+ * registry, not a dormant migration scaffold.
  *
  * Contract (v2):
  *   moduleSpec = {

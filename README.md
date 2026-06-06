@@ -311,7 +311,7 @@ Fix loops track pass rate history for automatic decisions:
 ## Under the Hood
 
 <details>
-<summary><strong>11 agents · 46 hooks · 10 skills · 11 protocol files</strong></summary>
+<summary><strong>11 agents · 46 live hook modules · 10 skills · 11 protocol files</strong></summary>
 
 ```
 MPL/
@@ -324,9 +324,9 @@ MPL/
 ├── hooks/
 │   ├── hooks.json         # 6 events × 1 entrypoint (PreCompact / PreToolUse / PostToolUse
 │   │                      #   / Stop / SessionStart / UserPromptSubmit)
-│   ├── mpl-engine.mjs     # v2 dispatcher — single entrypoint for all 6 events
-│   ├── mpl-*.mjs          # 46 hook modules (36 with .legacy siblings during the v2 cutover,
-│   │                      #   routed through lib/dispatch.mjs ROUTES)
+│   ├── mpl-engine.mjs     # v2 dispatcher — production entrypoint for all 6 events
+│   ├── mpl-*.mjs          # 46 live hook modules, plus 39 .legacy rollback/reference siblings
+│   │                      #   where still needed during the v2 cutover
 │   └── lib/
 │       ├── dispatch.mjs              # ROUTES table per event
 │       ├── state/                    # reader / writer / writer-cli / shard-writer / wave-reducer (schema v7)
@@ -350,8 +350,8 @@ MPL/
 
 **Key internals:**
 
-- **Policy Engine (v2, #18)** — 12 policy modules under hooks/lib/policy/ replace 36 standalone hook decisions; .legacy.mjs siblings retained for one cycle as rollback tier.
-- **Single-Dispatcher Hook Surface (v2 #14)** — hooks.json shrinks from 39 entries to 6 (one per event); mpl-engine.mjs fans out via lib/dispatch.mjs ROUTES.
+- **Policy Engine (v2, #18)** — 12 policy modules under hooks/lib/policy/ replace the former per-hook decision graphs; `.legacy.mjs` siblings remain only as rollback/reference surfaces where still needed.
+- **Single-Dispatcher Hook Surface (v2 #14)** — hooks.json has 6 event entries, all pointing at `mpl-engine.mjs`; `lib/dispatch.mjs` fans out to the production ROUTES registry.
 - **State Sharding + Wave Reducer (v2 #17)** — concurrent phase workers write shard files; wave-reducer collapses them into .mpl/state.json (schema v7).
 - **Scheduler + Isolation (v2 #16)** — ExecutionContext threads scheduler decisions and isolation policy through the dispatch layer.
 - **Audit Policy + Tier 4 Drift Gating (v2 #13)** — Codex Auditor verdict gates finalize.
@@ -375,13 +375,14 @@ MPL/
 ## v2 Architecture
 
 The v0.19.0 release is the closing cut of the Stage A v2 redesign (moves
-#1–#18). The hook layer moved from 39 entries in hooks.json calling
-individual scripts to a single mpl-engine.mjs dispatcher routing 46
-modules through lib/dispatch.mjs ROUTES, with policy decisions
-consolidated into hooks/lib/policy/. Full rationale, before/after
+#1–#18). The hook layer moved from many hooks.json entries calling
+individual scripts to 6 event entries that all invoke the single
+`mpl-engine.mjs` dispatcher. The dispatcher routes through
+`lib/dispatch.mjs` ROUTES, with policy decisions consolidated into
+`hooks/lib/policy/`. Full rationale, before/after
 diagrams, and the per-move log live in
 [`docs/redesign-proposal.html`](./docs/redesign-proposal.html). v2
-consolidated the *hook* surface only (39 hook entries → 1 dispatcher);
+consolidated the *hook* surface only (per-hook entrypoint fanout → 1 dispatcher);
 the agent/command surface (11 agents, 11 protocol files) is intentionally
 preserved by AD-0007 frontmatter-locked tool grants and is **not** a
 pending consolidation target — see `docs/v2-remaining-work.md` §2.

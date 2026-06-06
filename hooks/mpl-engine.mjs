@@ -2,20 +2,18 @@
 /**
  * MPL v2 Engine — single-entry hook dispatcher (proposal §4.2).
  *
- * STATE AT THIS COMMIT (Move #14): ROUTES table populated; hooks.json NOT
- * repointed yet. The engine still works end-to-end via `node
- * hooks/mpl-engine.mjs` (smoke tests + ad-hoc invocation) but Claude Code
- * continues to call the per-hook .mjs wrappers in production. A follow-up
- * move will swap hooks.json to route the 6 events through this single entry.
+ * CURRENT STATE (v0.19.0+): hooks.json routes all live hook events through
+ * this single entrypoint. `lib/dispatch.mjs` owns per-module routing via its
+ * ROUTES registry; the older per-hook .mjs files remain as thin wrappers or
+ * rollback/reference modules where still needed.
  *
  * ROLLBACK contract:
  *   TIER 1 — `MPL_ENGINE_BYPASS=1` makes the engine an inert no-op
  *            (emits `{continue:true, suppressOutput:true}` and exits 0).
  *            Use when the engine is misbehaving but the policy modules
  *            themselves are sound.
- *   TIER 2 — Restore the pre-Move-#14 `hooks.json` from
- *            `hooks/hooks.json.legacy-backup` (created in the move that
- *            flips routing — NOT this move).
+ *   TIER 2 — Restore a pre-dispatch hooks.json from release artifacts or
+ *            source control if the dispatcher itself must be bypassed.
  *   TIER 3 — `MPL_DISABLE_MODULES=id1,id2,...` disables specific module
  *            ids inside lib/dispatch.mjs at registration time. See
  *            installRoutes() in lib/dispatch.mjs.
@@ -66,7 +64,7 @@ const stateWriterMod = await importOptional('lib/state/writer.mjs');
 const provenanceMod = await importOptional('lib/model-provenance.mjs');
 const stateMod = await importOptional('lib/state/reader.mjs');
 const dispatchMod = await importOptional('lib/dispatch.mjs');
-const signalsMod = await importOptional('lib/observability/signals.mjs'); // not yet present — null is fine
+const signalsMod = await importOptional('lib/observability/signals.mjs');
 const envelopeBridgeMod = await importOptional('lib/policy/envelope-bridge.mjs');
 // Move #16 — scheduler front-door (route_to_phase). Optional: when absent,
 // `executionContext` is null and the engine behaves exactly as before.

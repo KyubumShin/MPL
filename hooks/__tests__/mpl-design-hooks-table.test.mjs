@@ -51,7 +51,7 @@ describe('docs/design.md Hook System table', () => {
     assert.deepEqual(documented, [...live.keys()]);
     assert.match(
       section,
-      new RegExp(`MPL maintains pipeline integrity with ${live.size} registered hook commands`)
+      new RegExp(`MPL maintains pipeline integrity through ${live.size} logical hook surfaces`)
     );
     assert.doesNotMatch(section, /Drift note/);
     assert.doesNotMatch(section, /with 8 hooks/);

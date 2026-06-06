@@ -1,7 +1,9 @@
 # Changelog
 
-All notable changes to MPL after v0.18.6 are documented here.
-Pre-v0.19.0 history lives in `docs/design.md` §9 Version History.
+All notable changes to MPL from v0.19.0 onward are documented here.
+For pre-v0.19.0 context, prefer the closed issue / PR trail that introduced
+the behavior; older roadmap docs are retained as indexes, not as the primary
+source of truth.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to a pre-1.0 `0.MINOR.PATCH` scheme (see README §Versioning).

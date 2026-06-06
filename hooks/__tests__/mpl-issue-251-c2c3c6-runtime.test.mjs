@@ -599,7 +599,7 @@ test('#251: docs/design.md Hook System table includes mpl-require-reviewer', () 
   // mpl-require-e2e-authenticity, mpl-require-finalize-artifacts, and
   // mpl-require-whole-goal-closure into the coalesced mpl-finalize-gate.
   // exp25 R04 added mpl-phase-receipt → 39.
-  assert.match(text, /39 registered hook commands/);
+  assert.match(text, /39 logical hook surfaces/);
 });
 
 test('#251: PURPOSES map (hooks/lib/mpl-hook-trace.mjs) has entry for mpl-require-reviewer', () => {
