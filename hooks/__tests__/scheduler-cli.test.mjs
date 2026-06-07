@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   subPlanWave,
+  subPlanTier,
   subValidateWave,
   subBuildWaveState,
   subClaim,
@@ -80,6 +81,49 @@ describe('scheduler-cli — plan-wave', () => {
     assert.equal(r.ok, true);
     assert.equal(r.wave_state.queue.length, 0);
     assert.ok(r.ready_but_blocked.some((x) => x.code === 'high_risk_phase_rejected'));
+  });
+});
+
+describe('scheduler-cli — plan-tier', () => {
+  it('plans multiple waves as dependencies close within the same tier', () => {
+    const r = subPlanTier({
+      cwd: '/repo',
+      run_id: '2026-06-01T00:00:00Z',
+      tier: 2,
+      phase_ids: ['p1', 'p2', 'p3'],
+      phases: [
+        { id: 'p1', risk_level: 'LOW', dependencies: [], impact: { create: ['src/a.ts'] } },
+        { id: 'p2', risk_level: 'LOW', dependencies: ['p1'], impact: { create: ['src/b.ts'] } },
+        { id: 'p3', risk_level: 'LOW', dependencies: ['p2'], impact: { create: ['src/c.ts'] } },
+      ],
+      completed_phase_ids: [],
+      config: { parallelism: { max_phase_workers: 2 } },
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.waves.length, 3);
+    assert.deepEqual(r.waves.map((w) => w.wave_state.queue), [['p1'], ['p2'], ['p3']]);
+    assert.deepEqual(r.unplanned_phase_ids, []);
+  });
+
+  it('replans file-overlap losers into a later wave', () => {
+    const r = subPlanTier({
+      cwd: '/repo',
+      run_id: '2026-06-01T00:00:00Z',
+      tier: 1,
+      phase_ids: ['p1', 'p2', 'p3'],
+      phases: [
+        { id: 'p1', risk_level: 'LOW', dependencies: [], impact: { create: ['src/a.ts'] } },
+        { id: 'p2', risk_level: 'LOW', dependencies: [], impact: { create: ['src/a.ts'] } },
+        { id: 'p3', risk_level: 'LOW', dependencies: [], impact: { create: ['src/b.ts'] } },
+      ],
+      completed_phase_ids: [],
+      config: { parallelism: { max_phase_workers: 2 } },
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.waves.length, 2);
+    assert.deepEqual(r.waves[0].wave_state.queue, ['p1', 'p3']);
+    assert.deepEqual(r.waves[1].wave_state.queue, ['p2']);
+    assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p2' && x.code === 'file_overlap'));
   });
 });
 
@@ -253,6 +297,23 @@ describe('scheduler-cli — black-box stdin/stdout', () => {
     const out = JSON.parse(r.stdout);
     assert.equal(out.ok, true);
     assert.deepEqual(out.wave_state.queue, ['p1']);
+  });
+
+  it('plan-tier invokable via Bash', () => {
+    const r = runCli('plan-tier', {
+      run_id: 'r1', tier: 1,
+      phase_ids: ['p1', 'p2'],
+      phases: [
+        { id: 'p1', risk_level: 'LOW', dependencies: [], impact: { create: ['a.ts'] } },
+        { id: 'p2', risk_level: 'LOW', dependencies: ['p1'], impact: { create: ['b.ts'] } },
+      ],
+      completed_phase_ids: [],
+      config: {},
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.ok, true);
+    assert.deepEqual(out.waves.map((w) => w.wave_state.queue), [['p1'], ['p2']]);
   });
 
   it('malformed stdin → exit 64 with structured envelope', () => {

@@ -21,6 +21,8 @@
  *
  * Subcommands:
  *   plan-wave            — validateWaveComposition + buildWaveState composite
+ *   plan-tier            — repeatedly plan waves for one tier until the
+ *                          dependency frontier is exhausted
  *   validate-wave        — pure validateWaveComposition
  *   build-wave-state     — pure buildWaveState
  *   claim                — claim
@@ -148,6 +150,82 @@ function subPlanWave(input) {
     wave_state,
     rejection_reasons: validation.reasons || [],
     ready_but_blocked,
+  };
+}
+
+function phaseDepsClosed(phase, completed) {
+  const deps = Array.isArray(phase?.dependencies) ? phase.dependencies : [];
+  return deps.every((dep) => typeof dep !== 'string' || completed.has(dep));
+}
+
+function subPlanTier(input) {
+  const {
+    run_id, tier, phase_ids, phases,
+    completed_phase_ids, config, start_wave_index,
+  } = input || {};
+
+  if (!Array.isArray(phase_ids) || !Array.isArray(phases)) {
+    return fail('InvalidInput', 'phase_ids and phases must be arrays', { phase_ids, phases });
+  }
+
+  const phaseById = new Map(phases.filter((p) => p && typeof p.id === 'string').map((p) => [p.id, p]));
+  const completed = new Set(completed_phase_ids || []);
+  const remaining = new Set(phase_ids);
+  const waves = [];
+  const ready_but_blocked = [];
+  const maxIterations = phase_ids.length + 1;
+  let wave_index = Number.isInteger(start_wave_index) ? start_wave_index : 0;
+
+  for (let i = 0; i < maxIterations && remaining.size > 0; i++) {
+    const readyIds = [...remaining].filter((id) => phaseDepsClosed(phaseById.get(id), completed));
+
+    if (readyIds.length === 0) break;
+
+    const planned = subPlanWave({
+      ...input,
+      wave_index,
+      phase_ids: readyIds,
+      phases: readyIds.map((id) => phaseById.get(id)).filter(Boolean),
+      completed_phase_ids: [...completed],
+      config: config || {},
+    });
+
+    for (const row of planned.ready_but_blocked || []) {
+      ready_but_blocked.push({ wave_index, ...row });
+      // HIGH-risk phases cannot become parallel-ready in a later wave.
+      if (row.code === WAVE_REJECTION_CODES.HIGH_RISK_PHASE && row.phase_id) {
+        remaining.delete(row.phase_id);
+      }
+    }
+
+    const queued = planned.wave_state?.queue || [];
+    if (queued.length === 0) {
+      // Avoid spinning forever on a frontier where every ready phase was
+      // rejected by a non-retryable reason.
+      break;
+    }
+
+    waves.push({
+      wave_index,
+      wave_state: planned.wave_state,
+      rejection_reasons: planned.rejection_reasons || [],
+      ready_but_blocked: planned.ready_but_blocked || [],
+    });
+
+    for (const id of queued) {
+      remaining.delete(id);
+      completed.add(id);
+    }
+    wave_index += 1;
+  }
+
+  const unplanned_phase_ids = [...remaining];
+  return {
+    ok: true,
+    waves,
+    ready_but_blocked,
+    unplanned_phase_ids,
+    completed_phase_ids_after_plan: [...completed],
   };
 }
 
@@ -353,6 +431,7 @@ function main() {
   try {
     switch (subcommand) {
       case 'plan-wave':            result = subPlanWave(input); break;
+      case 'plan-tier':            result = subPlanTier(input); break;
       case 'validate-wave':        result = subValidateWave(input); break;
       case 'build-wave-state':     result = subBuildWaveState(input); break;
       case 'claim':                result = subClaim(input); break;
@@ -381,6 +460,7 @@ function main() {
 // shelling out for every assertion. The CLI binary path stays the same.
 export {
   subPlanWave,
+  subPlanTier,
   subValidateWave,
   subBuildWaveState,
   subClaim,
