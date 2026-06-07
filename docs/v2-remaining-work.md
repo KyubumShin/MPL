@@ -106,12 +106,14 @@ cmux-control smoke로 검증된 것 (2026-06-01, `~/playground/ygg-exp23`):
 - ✅ /mpl 슬래시 명령 13+개 등록
 - ✅ /mpl-doctor 11/11 PASS
 
+post-merge local smoke로 검증된 것 (2026-06-07, PR #266 merge 후 `main`):
+- ✅ statusline (`cli/mpl-hud.mjs`) 실 렌더링: temp `.mpl/state.json` + Claude statusline stdin shape에서 phase, TODO, gate, fix loop, token, context 표시 확인
+- ✅ MCP 도구 직접 호출: stdio server `dist/index.js`에서 `mpl_state_read`/`mpl_state_write` 호출 성공, I13 artifact guard 거부 케이스도 확인
+
 남은 미검증 (Production smoke 확대 필요):
 ```
 □ /mpl run 전체 사이클 (Phase 0 → execute → finalize)
 □ Evidence Latch structural check (실 active phase에서)
-□ MCP 도구 직접 호출 (mpl_state_write subprocess 흐름)
-□ statusline (cli/mpl-hud.mjs) 실 렌더링
 □ verifier 실제 dispatch (audit + reconcile 두 모드)
 □ envelope bridge 실 .mpl/blocked-hook/*.json 생성 확인
 □ Tier 1/2/3 rollback 실 시나리오 검증
