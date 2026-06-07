@@ -137,11 +137,26 @@ disallowedTools: []
   </Progress_Reporting>
 
   <Output_Schema>
-    Final output MUST be valid JSON in ```json fences:
+    Final output MUST be valid JSON in ```json fences.
+
+    **Receipt handoff (R04):** the `receipt` block is the compact, verifiable
+    hand-off the orchestrator reads — verdict + a sha256 over the on-disk
+    artifacts + counts + pointers. Compute the sha over the actual bytes you
+    wrote, e.g. `cat .mpl/mpl/phases/phase-N/state-summary.md .mpl/mpl/phases/phase-N/verification.md | shasum -a 256`.
+    A PostToolUse hook records it to `.mpl/mpl/receipts.jsonl` and advises if it is
+    missing/malformed or its sha does not match the artifacts on disk.
 
     ```json
     {
       "status": "complete | circuit_break",
+      "receipt": {
+        "phase_id": "phase-N",
+        "verdict": "PASS | FAIL | PARTIAL | CIRCUIT_BREAK | BLOCKED",
+        "artifacts_sha256": "sha256 hex of (state-summary.md bytes ++ verification.md bytes)",
+        "tests": { "pass_rate": 100, "total": 0, "passed": 0 },
+        "files_changed": 0,
+        "artifacts": [".mpl/mpl/phases/phase-N/state-summary.md", ".mpl/mpl/phases/phase-N/verification.md"]
+      },
       "state_summary": "markdown string (all required sections)",
       "new_decisions": [
         { "id": "PD-N", "title": "str", "reason": "str", "affected_files": ["str"], "related_pp": "PP-N | null" }

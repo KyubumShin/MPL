@@ -1,11 +1,34 @@
 #!/usr/bin/env node
 /**
- * MPL Finalize Artifact Guard (PreToolUse on Write|Edit|MultiEdit targeting state.json).
+ * MPL Finalize Artifact Guard — thin wrapper.
  *
- * E2E pass/fail is necessary but not sufficient for completion. This hook
- * blocks `finalize_done=true` unless the goal contract's declared completion
- * evidence exists: audit report, run summary, RUNBOOK final section, finalize
- * timestamps, security evidence, and optional commit evidence.
+ * Phase B of the policy-module migration: the core "artifact + RUNBOOK +
+ * timestamps + security evidence" allow/block decision is delegated to
+ * `hooks/lib/policy/contracts.mjs::handleFinalizeArtifacts`. This wrapper
+ * preserves the legacy concerns that are NOT (yet) part of the pure policy:
+ *
+ *   1. Early filters: stdin parse, isMplActive, tool-name allowlist,
+ *      isFinalizeDoneWrite shape gate.
+ *   2. `.mpl/config/finalize-artifact-override.json` user-approved bypass.
+ *   3. `loadConfig.finalize_artifacts_required === false` workspace bypass.
+ *   4. Baseline goal-contract hash checks with the legacy reason text
+ *      (`raw shasum may differ because MPL normalizes CRLF to LF`,
+ *      `corrupt baseline.yaml goal_contract sha256`, etc.) — assertions
+ *      in `__tests__/mpl-require-finalize-artifacts.test.mjs` match this
+ *      specific wording, so the policy module's terser reason can't be
+ *      surfaced as-is.
+ *   5. `contract.completion_evidence.require_commit` check
+ *      (`hasCommitSinceBaseline`).
+ *   6. Exp22 R6 / #205 scheduler observability guard
+ *      (`schedulerExplanationMissing`). This is a large block of
+ *      aggregation/comparison logic that lives in the wrapper because the
+ *      policy module does not depend on `mpl-scheduler-aggregate.mjs`.
+ *   7. Legacy stdout / envelope side-effects:
+ *        - block → emitBlockedHook (records envelope + decision:'block')
+ *        - allow → emitClearedOk (clears stale envelope)
+ *
+ * The legacy implementation is preserved at
+ * `mpl-require-finalize-artifacts.legacy.mjs` for emergency rollback.
  */
 
 import { dirname, join } from 'path';
@@ -23,7 +46,7 @@ const { readState, isMplActive } = await import(
 const { loadConfig } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
 );
-const { readGoalContract, readBaselineGoalContractHash, defaultRequiredArtifacts } = await import(
+const { readGoalContract, readBaselineGoalContractHash } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
 );
 const { readStdin } = await import(
@@ -35,9 +58,13 @@ const { aggregateScheduler, explanationRequiredFromAggregate } = await import(
 const { emitBlockedHook, emitClearedOk } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
 );
+const { handleFinalizeArtifacts } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'contracts.mjs')).href
+);
 
 const HOOK_ID = 'mpl-require-finalize-artifacts';
 const BLOCKED_ARTIFACT = '.mpl/state.json#finalize_done';
+const RULE_ID = 'missing_finalize_artifacts';
 
 function ok() {
   console.log(JSON.stringify({ continue: true, suppressOutput: true }));
@@ -46,7 +73,7 @@ function ok() {
 function blockWithEnvelope(cwd, state, { code, reason, resumeInstruction, retryContext = {} }) {
   emitBlockedHook(cwd, state, {
     hookId: HOOK_ID,
-    ruleId: 'missing_finalize_artifacts',
+    ruleId: RULE_ID,
     code,
     artifact: BLOCKED_ARTIFACT,
     reason,
@@ -85,20 +112,7 @@ function proposedTexts(toolInput) {
 
 function isFinalizeDoneWrite(toolInput) {
   if (!targetPaths(toolInput).some((p) => /\.mpl\/state\.json$/.test(p))) return false;
-  // Intentionally re-check any proposed state text that contains
-  // finalize_done=true, including state re-serializations after completion:
-  // evidence can be deleted or invalidated between final writes.
   return proposedTexts(toolInput).some((text) => /"finalize_done"\s*:\s*true/.test(text));
-}
-
-function incomingText(toolInput) {
-  return proposedTexts(toolInput).join('\n');
-}
-
-function hasTimestamp(state, text, key) {
-  if (typeof state?.[key] === 'string' && state[key].trim()) return true;
-  const re = new RegExp(`"${key}"\\s*:\\s*"[^"]+"`);
-  return re.test(text);
 }
 
 function loadOverride(cwd) {
@@ -107,50 +121,15 @@ function loadOverride(cwd) {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8'));
     if (typeof parsed?.reason === 'string' && parsed.reason.trim()) return parsed;
-  } catch {
-    // fall through
-  }
+  } catch { /* fall through */ }
   return null;
 }
 
 function readJsonIfExists(cwd, relPath) {
   const path = join(cwd, relPath);
   if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-function isPassRecord(record) {
-  if (!record || typeof record !== 'object') return false;
-  if (record.exit_code === 0) return true;
-  if (record.verdict === 'pass' || record.status === 'pass' || record.status === 'PASS') return true;
-  return false;
-}
-
-function securityEvidenceMissing(cwd, state, contract) {
-  if (contract?.security_policy?.required !== true) return [];
-
-  const checks = contract.security_policy.checks || [];
-  const report = readJsonIfExists(cwd, '.mpl/mpl/security-report.json');
-  const stateResults = state?.security_results && typeof state.security_results === 'object'
-    ? state.security_results
-    : {};
-
-  if (checks.length === 0) {
-    if (isPassRecord(report)) return [];
-    return ['security_report_or_checks'];
-  }
-
-  const missing = [];
-  for (const check of checks) {
-    const stateRecord = stateResults[check];
-    const reportRecord = report?.checks?.[check];
-    if (!isPassRecord(stateRecord) && !isPassRecord(reportRecord)) missing.push(check);
-  }
-  return missing;
+  try { return JSON.parse(readFileSync(path, 'utf-8')); }
+  catch { return null; }
 }
 
 function readBaselineSha(cwd) {
@@ -160,9 +139,7 @@ function readBaselineSha(cwd) {
     const text = readFileSync(path, 'utf-8');
     const match = text.match(/base_sha:\s*["']?([0-9a-f]{7,40})["']?/i);
     return match ? match[1] : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function hasCommitSinceBaseline(cwd) {
@@ -170,30 +147,19 @@ function hasCommitSinceBaseline(cwd) {
   if (!base) return { ok: false, reason: 'baseline_sha_missing' };
   try {
     const count = execFileSync('git', ['rev-list', '--count', `${base}..HEAD`], {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 1000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      cwd, encoding: 'utf-8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     return { ok: Number(count) > 0, reason: Number(count) > 0 ? null : 'no_commit_since_baseline' };
-  } catch {
-    return { ok: false, reason: 'git_commit_check_failed' };
-  }
+  } catch { return { ok: false, reason: 'git_commit_check_failed' }; }
 }
 
+// Exp22 R6 / #205: machine-enforce the scheduler observability MUST.
+// Computes per-aggregate evidence from phase-scheduler.jsonl +
+// state.phase_scheduler_history and compares it against the self-report
+// in run-summary.json. Returns a string error code on violation, null on
+// success. Lives in the wrapper because the policy module deliberately
+// does not depend on the aggregator.
 function schedulerExplanationMissing(cwd, state) {
-  // Exp22 R6 / #205: when decomposition.yaml declares any
-  // execution_tiers[].parallel:true, the run-summary scheduler block must
-  // either show full execution or carry a non-null no_parallel_explanation.
-  // The prompt in commands/mpl-run-finalize.md documents this MUST; the
-  // hook makes it machine-enforceable so prompt drift cannot ship a
-  // completed run with rejected/missing parallelism and no explanation.
-  //
-  // The hook re-derives the aggregation itself from phase-scheduler.jsonl
-  // and state.phase_scheduler_history (see hooks/lib/mpl-scheduler-aggregate.mjs).
-  // A drifted or hand-edited run-summary can self-report a clean state, so
-  // the summary cannot be trusted as the source of truth — only as an
-  // informational mirror that must MATCH the computed evidence.
   const computed = aggregateScheduler(cwd, state);
   if (!computed) return null;
   if (computed.__decomposition_unparseable__) {
@@ -206,19 +172,9 @@ function schedulerExplanationMissing(cwd, state) {
   const sched = summary.scheduler;
   if (!sched || typeof sched !== 'object') return 'scheduler:block_missing';
 
-  // The summary's self-report must match what we just recomputed from the
-  // raw event stream. Mismatches indicate prompt drift, hand-edits, or
-  // missing telemetry that the finalizer prompt failed to surface. Compare
-  // every aggregate field, not just a sentinel subset — codex r11 noted a
-  // narrow subset still let drift through (mis-named missing tier ids,
-  // under-reported rejected waves).
   const scalarKeys = [
-    'tiers_total',
-    'tiers_parallel_requested',
-    'tiers_parallel_executed',
-    'tiers_parallel_rejected',
-    'waves_parallel_rejected',
-    'waves_parallel_failed',
+    'tiers_total', 'tiers_parallel_requested', 'tiers_parallel_executed',
+    'tiers_parallel_rejected', 'waves_parallel_rejected', 'waves_parallel_failed',
   ];
   for (const k of scalarKeys) {
     const a = Number(computed[k]);
@@ -232,28 +188,21 @@ function schedulerExplanationMissing(cwd, state) {
       ? [...computed[k]].map(Number).sort((x, y) => x - y) : [];
     const summarySorted = Array.isArray(sched[k])
       ? [...sched[k]].map(Number).sort((x, y) => x - y) : null;
-    if (summarySorted === null) {
-      return `scheduler:${k}_not_array_in_summary`;
-    }
+    if (summarySorted === null) return `scheduler:${k}_not_array_in_summary`;
     if (computedSorted.length !== summarySorted.length ||
         computedSorted.some((v, i) => v !== summarySorted[i])) {
       return `scheduler:${k}_contents_mismatch:computed=[${computedSorted.join(',')}],summary=[${summarySorted.join(',')}]`;
     }
   }
 
-  // rejection_reasons set must match what we observed in events.
   const computedReasons = [...(computed.rejection_reasons || [])].sort();
   const summaryReasons = Array.isArray(sched.rejection_reasons)
     ? [...sched.rejection_reasons].filter((r) => typeof r === 'string' && r).sort()
     : null;
-  if (summaryReasons === null) {
-    return 'scheduler:rejection_reasons_not_array_in_summary';
-  }
-  // Set equality (order-independent, deduplicated).
+  if (summaryReasons === null) return 'scheduler:rejection_reasons_not_array_in_summary';
   const computedReasonSet = new Set(computedReasons);
   const summaryReasonSet = new Set(summaryReasons);
-  const reasonsMatch =
-    computedReasonSet.size === summaryReasonSet.size &&
+  const reasonsMatch = computedReasonSet.size === summaryReasonSet.size &&
     [...computedReasonSet].every((r) => summaryReasonSet.has(r));
   if (!reasonsMatch) {
     return `scheduler:rejection_reasons_mismatch:computed=[${[...computedReasonSet].sort().join(',')}],summary=[${[...summaryReasonSet].sort().join(',')}]`;
@@ -264,13 +213,8 @@ function schedulerExplanationMissing(cwd, state) {
   if (explanationRequiredFromAggregate(computed) && !explanationFilled) {
     return 'scheduler:no_parallel_explanation_required_but_missing';
   }
-  // The explanation must reference each affected tier id by number, so an
-  // operator reading the summary can find which tiers lost parallelism.
-  // `n/a`-style placeholders fail this check.
   if (explanationFilled && Array.isArray(computed.affected_tier_ids) && computed.affected_tier_ids.length > 0) {
     const missingMentions = computed.affected_tier_ids.filter((tid) => {
-      // Match the tier id as a standalone integer (not embedded in another
-      // number). Accept both "tier 1" and bare "1" anywhere in the text.
       const re = new RegExp(`(^|[^\\d])${tid}(?=[^\\d]|$)`);
       return !re.test(explanation);
     });
@@ -278,30 +222,8 @@ function schedulerExplanationMissing(cwd, state) {
       return `scheduler:no_parallel_explanation_missing_tier_refs:[${missingMentions.join(',')}]`;
     }
   }
-  // #214: tier-id-only explanations (e.g. "tier 1") used to pass even
-  // when computed.rejection_reasons named concrete reasons like
-  // "file_overlap" or "depends_on_predecessor_failure". The summary
-  // must actually name at least one such reason — otherwise an operator
-  // reading it has zero information about WHY parallelism was lost.
-  //
-  // Each computed reason has a canonical lowercase snake_case form
-  // (e.g. "file_overlap"). The explanation matches a reason when it
-  // either includes the exact token, OR includes any of its hyphen-/
-  // space-separated variants (e.g. "file-overlap", "file overlap"),
-  // case-insensitively. Free text containing the same words in
-  // different order or stem (e.g. "overlapping files") does NOT match
-  // — operators MUST use the canonical vocabulary so the gate signal
-  // is unambiguous (see commands/mpl-run-finalize.md for the
-  // producer-side contract; finalize agents are instructed to use
-  // verbatim rejection_reasons tokens).
   if (!explanationFilled) return null;
   const lowerExplanation = explanation.toLowerCase();
-  // Codex r5 on PR #229 [contract-break]: substring-only matching let
-  // `file_overlapping` or `xfile_overlapx` satisfy `file_overlap`,
-  // weakening the grep-friendly-vocabulary guarantee. Tokens must
-  // appear at word boundaries — adjacent characters must be
-  // non-token (i.e. not [A-Za-z0-9_-]). Hyphen is treated as a
-  // token character because hyphen variants use hyphen mid-token.
   const containsToken = (token) => {
     const t = String(token).toLowerCase();
     const variants = [t, t.replace(/_/g, '-'), t.replace(/_/g, ' ')];
@@ -313,8 +235,6 @@ function schedulerExplanationMissing(cwd, state) {
     });
   };
 
-  // Axis 1: when computed.rejection_reasons is populated, at least one
-  // canonical token MUST appear verbatim (snake_case / hyphen / space).
   if (computedReasons.length > 0) {
     const matched = computedReasons.some(containsToken);
     if (!matched) {
@@ -322,42 +242,14 @@ function schedulerExplanationMissing(cwd, state) {
     }
   }
 
-  // #230 axis 1b — canonical failure_code per parallel_failed wave.
-  // Free-form `failure_reason` is no longer unioned into rejection_reasons
-  // (see mpl-scheduler-aggregate.mjs), so a wave with a runtime failure
-  // surfaces a canonical token in `computed.failure_codes` instead.
-  // EACH code must appear in the explanation independently — naming the
-  // pre-attempt rejection token (e.g. `file_overlap`) is not enough when
-  // the wave also failed at runtime. Use `every`, not `some`, so a mixed
-  // batch of failure codes cannot be satisfied by mentioning only one.
   const computedFailureCodes = Array.isArray(computed?.failure_codes)
-    ? computed.failure_codes.filter((c) => typeof c === 'string' && c)
-    : [];
+    ? computed.failure_codes.filter((c) => typeof c === 'string' && c) : [];
   for (const code of computedFailureCodes) {
     if (!containsToken(code)) {
       return `scheduler:no_parallel_explanation_missing_failure_code:expected=${code}`;
     }
   }
 
-  // #214 + codex r1/r2 [logic]: degraded-telemetry axis is INDEPENDENT
-  // of the rejection-reasons axis. Codex r2 showed a mixed run (one
-  // missing-telemetry tier + one tier with file_overlap) bypassed the
-  // degraded-cause check because computedReasons.length > 0. Now the
-  // required token list is built from the aggregate shape itself, and
-  // EACH required token must appear in the explanation — concrete
-  // reasons and degraded causes are complementary requirements, not
-  // alternatives.
-  // Codex r3/r4 [logic]: accumulate every applicable degraded token
-  // INDEPENDENTLY. The r3 fix used a global `reasonless` flag
-  // (computedReasons.length === 0) which codex r4 showed misses
-  // cross-tier mixed cases — one tier with a concrete reason + another
-  // tier with a reasonless parallel_failed wave never set reasonless,
-  // so parallel_failed_without_reason was never required.
-  //
-  // Per-event reasonless counters now come from the aggregator
-  // (waves_parallel_rejected_without_reason /
-  // waves_parallel_failed_without_reason) so each axis is checked
-  // independently regardless of whether other waves had reasons.
   const requiredDegraded = [];
   if (explanationRequiredFromAggregate(computed)) {
     if (Array.isArray(computed.tiers_with_missing_telemetry) && computed.tiers_with_missing_telemetry.length > 0) {
@@ -369,23 +261,8 @@ function schedulerExplanationMissing(cwd, state) {
     if ((computed.waves_parallel_failed_without_reason || 0) > 0) {
       requiredDegraded.push('parallel_failed_without_reason');
     }
-    // Catch-all: aggregate still requires an explanation but no
-    // specific degraded shape was identified (and no concrete reasons
-    // were recorded).
-    //
-    // #230: a canonical failure_code IS a recorded reason — when
-    // computed.failure_codes is non-empty, the runtime cause is
-    // already required as an independent axis (axis 1b above). Adding
-    // `no_recorded_reason` on top would force the operator to say both
-    // `worker_dispatch_error` AND `no_recorded_reason`, which is
-    // contradictory. Skip the fallback when failure_codes is non-empty.
-    const hasFailureCode = Array.isArray(computed?.failure_codes)
-      && computed.failure_codes.length > 0;
-    if (
-      requiredDegraded.length === 0 &&
-      computedReasons.length === 0 &&
-      !hasFailureCode
-    ) {
+    const hasFailureCode = Array.isArray(computed?.failure_codes) && computed.failure_codes.length > 0;
+    if (requiredDegraded.length === 0 && computedReasons.length === 0 && !hasFailureCode) {
       requiredDegraded.push('no_recorded_reason');
     }
   }
@@ -397,14 +274,33 @@ function schedulerExplanationMissing(cwd, state) {
   return null;
 }
 
-function runbookFinalized(cwd) {
-  const path = join(cwd, '.mpl', 'mpl', 'RUNBOOK.md');
-  if (!existsSync(path)) return false;
-  try {
-    return /(^|\n)##\s+Pipeline Complete\b/.test(readFileSync(path, 'utf-8'));
-  } catch {
-    return false;
+/**
+ * Translate the policy module's `{ action:'block', code, reason, retryContext }`
+ * envelope into the legacy reason text the test suite asserts on. The policy's
+ * messages are terser; tests assert the legacy phrasing (e.g. "Cannot set
+ * finalize_done=true — missing completion evidence: ...").
+ */
+function legacyReasonFromPolicy(decision) {
+  const code = decision.code || 'finalize_artifacts_missing';
+  const ctx = decision.retryContext || {};
+  if (code === 'goal_contract_invalid') {
+    const missing = Array.isArray(ctx.missing) ? ctx.missing.join(', ') : '';
+    return {
+      reason:
+        `[MPL Goal Contract] Cannot set finalize_done=true — goal contract missing or invalid: ${missing}.`,
+      resumeInstruction:
+        'Restore a valid .mpl/goal-contract.yaml (Phase 0 renewal) and re-attempt finalize.',
+    };
   }
+  // finalize_artifacts_missing
+  const missingList = Array.isArray(ctx.missing) ? ctx.missing.join(', ') : '';
+  return {
+    reason:
+      `[MPL Finalize Guard] Cannot set finalize_done=true — missing completion evidence: ${missingList}. ` +
+      'Create the declared artifacts/evidence or record a user-approved override in .mpl/config/finalize-artifact-override.json.',
+    resumeInstruction:
+      'Create the missing completion artifacts/evidence (or record a user-approved override), then retry finalize.',
+  };
 }
 
 async function main() {
@@ -425,8 +321,6 @@ async function main() {
 
   const cfg = loadConfig(cwd);
   if (cfg.finalize_artifacts_required === false) {
-    // Codex r1 on PR #246: explicit config opt-out clears any stale
-    // envelope from a prior block. Same for user-approved override.
     emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
     return;
   }
@@ -438,19 +332,11 @@ async function main() {
   }
 
   const state = readState(cwd) || {};
-  const text = incomingText(toolInput);
-  const goal = readGoalContract(cwd);
-  if (cfg.goal_contract_required !== false && (!goal.exists || !goal.valid)) {
-    blockWithEnvelope(cwd, state, {
-      code: 'goal_contract_invalid',
-      reason: `[MPL Goal Contract] Cannot set finalize_done=true — goal contract missing or invalid: ${goal.missing.join(', ')}.`,
-      resumeInstruction:
-        'Restore a valid .mpl/goal-contract.yaml (Phase 0 renewal) and re-attempt finalize.',
-      retryContext: { missing: goal.missing },
-    });
-    return;
-  }
 
+  // Legacy-only baseline drift / corruption checks. The policy module does
+  // not surface the "raw shasum may differ" guidance the test suite asserts,
+  // so the wrapper runs these BEFORE delegating so the legacy reason wins.
+  const goal = readGoalContract(cwd);
   const contract = goal.valid ? goal.contract : null;
   if (cfg.goal_contract_required !== false && contract?.content_sha256) {
     const baseline = readBaselineGoalContractHash(cwd);
@@ -485,36 +371,46 @@ async function main() {
     }
   }
 
-  const requiredArtifacts = contract?.completion_evidence?.required_artifacts?.length
-    ? contract.completion_evidence.required_artifacts
-    : defaultRequiredArtifacts();
+  // Delegate the core artifact / RUNBOOK / timestamps / security decision
+  // to the policy module. Pass a `ctx` shaped as the policy expects.
+  const decision = await handleFinalizeArtifacts({
+    cwd, state, config: cfg, toolName, toolInput, hookEvent: 'PreToolUse',
+  });
 
+  // Pre-policy goal-contract-invalid result is terminal — surface verbatim.
+  if (decision.action === 'block' && decision.code === 'goal_contract_invalid') {
+    const translated = legacyReasonFromPolicy(decision);
+    blockWithEnvelope(cwd, state, {
+      code: decision.code,
+      reason: translated.reason,
+      resumeInstruction: translated.resumeInstruction,
+      retryContext: decision.retryContext || {},
+    });
+    return;
+  }
+
+  // Collect missing tokens from the policy block (if any) so we can merge
+  // them with the wrapper-only `require_commit` + scheduler tokens before
+  // emitting a single combined envelope. The legacy hook always emits ONE
+  // block listing every missing item — tests assert e.g. that a missing
+  // run-summary.json AND scheduler:decomposition_execution_tiers_unparseable
+  // surface together.
   const missing = [];
-  for (const rel of requiredArtifacts) {
-    if (!existsSync(join(cwd, rel))) missing.push(rel);
+  if (decision.action === 'block') {
+    const policyMissing = Array.isArray(decision.retryContext?.missing)
+      ? decision.retryContext.missing : [];
+    missing.push(...policyMissing);
   }
 
-  if (requiredArtifacts.includes('.mpl/mpl/RUNBOOK.md') && !runbookFinalized(cwd)) {
-    missing.push('.mpl/mpl/RUNBOOK.md#Pipeline Complete');
-  }
-
-  if (contract?.completion_evidence?.require_finalize_timestamps !== false) {
-    if (!hasTimestamp(state, text, 'completed_at')) missing.push('state.completed_at');
-    if (!hasTimestamp(state, text, 'finalized_at')) missing.push('state.finalized_at');
-  }
-
-  const securityMissing = securityEvidenceMissing(cwd, state, contract);
-  for (const check of securityMissing) missing.push(`security:${check}`);
-
+  // Legacy-only commit-since-baseline gate (not in policy module).
   if (contract?.completion_evidence?.require_commit === true) {
     const commit = hasCommitSinceBaseline(cwd);
     if (!commit.ok) missing.push(`git:${commit.reason}`);
   }
 
   // Exp22 R6 / #205: machine-enforce the scheduler observability MUST.
-  // Independent of contract.completion_evidence so even runs without an
-  // explicit completion contract still satisfy the no-parallel
-  // explanation rule when decomposition declared parallel tiers.
+  // Independent of contract.completion_evidence so runs without an explicit
+  // completion contract still satisfy the no-parallel-explanation rule.
   const schedulerProblem = schedulerExplanationMissing(cwd, state);
   if (schedulerProblem) missing.push(schedulerProblem);
 

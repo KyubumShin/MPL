@@ -4,6 +4,23 @@
  *
  * Blocks phase completion artifacts and state transitions unless the phase's
  * declared `evidence_required` tokens are latched in verification.md.
+ *
+ * Layered-acceptance wrapper, LEGACY-first (Move #8 Phase B):
+ *   - The entry point preserves the legacy stdin/tool/isMplActive/cfg opt-out
+ *     gates byte-for-byte (verified by mpl-phase-evidence.test.mjs).
+ *   - For every collected file write, the legacy substring latch
+ *     (`validatePhaseEvidenceLatch` / `validatePhaseEvidenceFile`) is the
+ *     authoritative blocking source so the canonical failure tokens
+ *     `phase-1:command:missing_exit_code_0` and
+ *     `phase-1:test_agent:missing_pass_evidence` surface unchanged.
+ *   - `policy.verifyPhase` (hooks/lib/policy/evidence.mjs) is invoked
+ *     in a try/catch as an advisory observability emitter only — its
+ *     issues are attached to retryContext.policy_issues for debugging but
+ *     never gate pass/fail because the existing test fixtures intentionally
+ *     omit gate_results/security_results/goal-contract that the structural
+ *     policy demands.
+ *
+ * Rollback: `mpl-require-phase-evidence.legacy.mjs` sibling is preserved.
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -38,6 +55,19 @@ const { readStdin } = await import(
 const { emitBlockedHook, emitClearedOk } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-block-surface.mjs')).href
 );
+
+// Policy (L2) — advisory only. Kept behind a try/catch so any structural
+// failure in the policy module never converts an otherwise-allow path
+// into a block.
+let policyVerifyPhase = null;
+try {
+  const mod = await import(
+    pathToFileURL(join(__dirname, 'lib', 'policy', 'evidence.mjs')).href
+  );
+  policyVerifyPhase = typeof mod?.verifyPhase === 'function' ? mod.verifyPhase : null;
+} catch {
+  policyVerifyPhase = null;
+}
 
 const HOOK_ID = 'mpl-require-phase-evidence';
 const BLOCKED_ARTIFACT = 'phase-evidence-latch';
@@ -96,6 +126,9 @@ function simulateWrittenState(toolName, toolInput, cwd) {
 function validateVerificationWrite(cwd, phaseId, text, state) {
   const parsed = readPhaseEvidence(cwd);
   const phase = parsed?.phases?.find((p) => p.id === phaseId);
+  // LEGACY-first: the substring Evidence Latch + structural test_agent
+  // check are the authoritative blocking source. Tests assert byte-for-byte
+  // on these token strings.
   return validatePhaseEvidenceLatch({
     phase,
     phaseId,
@@ -106,6 +139,26 @@ function validateVerificationWrite(cwd, phaseId, text, state) {
 
 function validateStateSummaryWrite(cwd, phaseId, state) {
   return validatePhaseEvidenceFile(cwd, phaseId, state).issues;
+}
+
+// Advisory-only: collect policy.verifyPhase issues per phaseId touched by
+// this write. Never throws and never contributes to the block decision —
+// the returned list is surfaced via retryContext.policy_issues for
+// observability / debugging only.
+function collectAdvisoryPolicyIssues(cwd, phaseIds, state) {
+  if (!policyVerifyPhase || phaseIds.size === 0) return [];
+  const out = [];
+  for (const phaseId of phaseIds) {
+    try {
+      const verdict = policyVerifyPhase(phaseId, { cwd, state, phaseId });
+      if (verdict && Array.isArray(verdict.issues) && verdict.issues.length > 0) {
+        out.push(...verdict.issues);
+      }
+    } catch {
+      // swallow — advisory only.
+    }
+  }
+  return out;
 }
 
 async function main() {
@@ -134,16 +187,19 @@ async function main() {
   const state = readState(cwd) || {};
   const toolInput = data.tool_input || data.toolInput || {};
   const issues = [];
+  const touchedPhases = new Set();
 
   for (const entry of collectFileWrites(toolInput)) {
     const verificationPhase = phaseIdFromArtifactPath(entry.filePath, 'verification.md');
     if (verificationPhase) {
+      touchedPhases.add(verificationPhase);
       issues.push(...validateVerificationWrite(cwd, verificationPhase, entry.text, state));
       continue;
     }
 
     const summaryPhase = phaseIdFromArtifactPath(entry.filePath, 'state-summary.md');
     if (summaryPhase) {
+      touchedPhases.add(summaryPhase);
       issues.push(...validateStateSummaryWrite(cwd, summaryPhase, state));
       continue;
     }
@@ -158,10 +214,15 @@ async function main() {
         issues.push(`state:phase_completion:missing_phase_detail`);
       }
       for (const phaseId of completed) {
+        touchedPhases.add(phaseId);
         issues.push(...validatePhaseEvidenceFile(cwd, phaseId, proposed).issues);
       }
     }
   }
+
+  // Advisory: structural policy.verifyPhase. Never gates pass/fail —
+  // its issues are attached to retryContext.policy_issues for debugging.
+  const policyIssues = collectAdvisoryPolicyIssues(cwd, touchedPhases, state);
 
   if (issues.length > 0) {
     const shown = issues.slice(0, 12).join(', ');
@@ -177,7 +238,10 @@ async function main() {
       reason,
       resumeInstruction:
         'Latch every required evidence token in the phase verification.md (Evidence Latch section), then retry the blocked write.',
-      retryContext: { issues: issues.slice(0, 50) },
+      retryContext: {
+        issues: issues.slice(0, 50),
+        ...(policyIssues.length > 0 ? { policy_issues: policyIssues.slice(0, 50) } : {}),
+      },
     });
     return;
   }

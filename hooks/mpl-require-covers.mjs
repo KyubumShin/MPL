@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
- * MPL Require Covers Hook (PreToolUse on Write|Edit|MultiEdit)
+ * MPL Require Covers Hook — thin wrapper around policy/contracts.handleCovers.
  *
- * Validates the Tier B schema on `.mpl/mpl/decomposition.yaml` writes:
- *   - Every phase MUST have non-empty `covers: [...]`.
- *   - Each entry MUST be either `internal` (escape) or match `UC-\d{2,}`.
- *   - Emits a warn (not block) when the ratio of `["internal"]`-only phases
- *     exceeds the configured threshold (default 0.4).
+ * Structural decision (Tier B `covers` schema validation on
+ * `.mpl/mpl/decomposition.yaml` writes) is delegated to
+ * `lib/policy/contracts.handleCovers`. This wrapper preserves the legacy
+ * stdout shape, blocked-hook envelope writes, and the local warn-on-high-
+ * internal-ratio side effect that the policy module intentionally does
+ * not own (warns are not structural decisions).
  *
- * Config: `.mpl/config.json` may set `internal_todo_warn_threshold` (0..1).
+ * Named exports `targetsDecompositionFile`, `parsePhaseCovers`,
+ * `validatePhase`, `computeInternalRatio`, `loadWarnThreshold`,
+ * `isLegacyMode` remain available for the existing unit tests.
  *
- * Legacy graceful-skip mode: when `.mpl/requirements/user-contract.md` is
- * absent, the hook accepts `["internal"]` anywhere without checking UC-NN
- * existence, and only enforces the ratio warn.
+ * For emergency rollback the original implementation lives at
+ *   hooks/mpl-require-covers.legacy.mjs
  *
  * Non-blocking on any error.
  */
@@ -24,11 +26,14 @@ import { existsSync, readFileSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const { collectFileWrites, isFileWriteTool } = await import(
+const { isFileWriteTool } = await import(
   pathToFileURL(join(__dirname, 'lib', 'tool-input.mjs')).href
 );
 const { recordBlockedHook, clearBlockedHook } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+const { handleCovers } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'contracts.mjs')).href
 );
 
 const DEFAULT_WARN_THRESHOLD = 0.4;
@@ -36,54 +41,44 @@ const UC_ID_RE = /^UC-\d{2,}$/;
 const HOOK_ID = 'mpl-require-covers';
 const BLOCKED_ARTIFACT = '.mpl/mpl/decomposition.yaml';
 
+// ----------------------------------------------------------------------------
+// Named exports preserved for the existing unit test surface.
+// (Logic mirrors the legacy hook 1:1; the policy module owns the structural
+// allow/block decision but the parser/validator/ratio helpers remain here so
+// callers and tests keep their import contract.)
+// ----------------------------------------------------------------------------
+
 export function targetsDecompositionFile(filePath) {
   if (!filePath || typeof filePath !== 'string') return false;
   return /(^|\/)\.mpl\/mpl\/decomposition\.yaml$/.test(filePath);
 }
 
-/**
- * Minimal YAML parse: extract every phase's `id` and `covers` list.
- * Returns [{ id, covers: [string] }, ...]
- *
- * Handles:
- *   - `- id: "phase-1"` phase entry
- *   - `covers:` key on same or nested line, followed by list items or inline
- */
 export function parsePhaseCovers(yamlText) {
   if (!yamlText || typeof yamlText !== 'string') return [];
-
   const lines = yamlText.split('\n').map((l) => l.replace(/\r$/, ''));
   const phases = [];
   let cur = null;
   let inCovers = false;
   let coversIndent = -1;
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-
-    // Phase start
     const phaseMatch = line.match(/^\s*-\s+id:\s*["']?(phase-[\w-]+)["']?/);
     if (phaseMatch) {
       if (cur) phases.push(cur);
-      cur = { id: phaseMatch[1], covers: null }; // null = field missing
+      cur = { id: phaseMatch[1], covers: null };
       inCovers = false;
       continue;
     }
     if (!cur) continue;
-
-    // covers: inline array form: `covers: [UC-01, UC-02]` or `covers: ["internal"]`
     const inlineMatch = line.match(/^(\s*)covers\s*:\s*\[(.*)\]\s*$/);
     if (inlineMatch) {
-      const items = inlineMatch[2]
+      cur.covers = inlineMatch[2]
         .split(',')
         .map((s) => s.trim().replace(/^["']|["']$/g, ''))
         .filter(Boolean);
-      cur.covers = items;
       inCovers = false;
       continue;
     }
-
-    // covers: start of nested list form
     const blockMatch = line.match(/^(\s*)covers\s*:\s*$/);
     if (blockMatch) {
       coversIndent = blockMatch[1].length;
@@ -91,21 +86,17 @@ export function parsePhaseCovers(yamlText) {
       inCovers = true;
       continue;
     }
-
     if (inCovers) {
-      // list item under covers: `  - "UC-01"` or `  - internal`
       const itemMatch = line.match(/^(\s*)-\s+["']?([^"'\s#]+)["']?/);
       if (itemMatch && itemMatch[1].length > coversIndent) {
         cur.covers.push(itemMatch[2]);
         continue;
       }
-      // Non-item line with indent <= coversIndent = covers block ended
       if (line.trim() !== '' && !line.startsWith(' '.repeat(coversIndent + 1))) {
         inCovers = false;
       }
     }
   }
-
   if (cur) phases.push(cur);
   return phases;
 }
@@ -125,10 +116,7 @@ export function validatePhase(phase, { allowLegacy }) {
     if (UC_ID_RE.test(entry)) continue;
     issues.push({ kind: 'invalid_entry', phase: phase.id, entry });
   }
-  // legacy mode downgrades UC format errors to warns (allow `internal` everywhere)
-  if (allowLegacy) {
-    return issues.filter((i) => i.kind !== 'invalid_entry');
-  }
+  if (allowLegacy) return issues.filter((i) => i.kind !== 'invalid_entry');
   return issues;
 }
 
@@ -153,9 +141,7 @@ export function loadWarnThreshold(cwd) {
     const cfg = JSON.parse(readFileSync(path, 'utf-8'));
     const t = cfg.internal_todo_warn_threshold;
     if (typeof t === 'number' && t > 0 && t <= 1) return t;
-  } catch {
-    // fall through
-  }
+  } catch { /* fall through */ }
   return DEFAULT_WARN_THRESHOLD;
 }
 
@@ -164,11 +150,9 @@ export function isLegacyMode(cwd) {
   return !existsSync(path);
 }
 
-function collectDecompositionContents(toolInput) {
-  return collectFileWrites(toolInput)
-    .filter((entry) => targetsDecompositionFile(entry.filePath) && entry.text)
-    .map((entry) => entry.text);
-}
+// ----------------------------------------------------------------------------
+// CLI entrypoint — delegating wrapper.
+// ----------------------------------------------------------------------------
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
 
@@ -200,66 +184,100 @@ if (isMain) {
     const toolName = input.tool_name || input.toolName || '';
     if (!isFileWriteTool(toolName)) { ok(); process.exit(0); }
 
-    const toolInput = input.tool_input || {};
-    const contents = collectDecompositionContents(toolInput);
-    if (contents.length === 0) { ok(); process.exit(0); }
-
+    const rawToolInput = input.tool_input || {};
     const cwd = input.cwd || process.cwd();
-    const legacy = isLegacyMode(cwd);
-    const phases = contents.flatMap((content) => parsePhaseCovers(content));
 
-    if (phases.length === 0) { ok(); process.exit(0); }
+    // Normalize MultiEdit: the policy collector pairs each edit's text with
+    // its own `file_path` only, but MultiEdit carries `file_path` at the top
+    // level. Propagate it onto every edit so the policy sees the writes.
+    const parentFp = rawToolInput.file_path || rawToolInput.filePath || null;
+    const toolInput = Array.isArray(rawToolInput.edits) && parentFp
+      ? {
+          ...rawToolInput,
+          edits: rawToolInput.edits.map((e) => ({
+            ...(e || {}),
+            file_path: (e && (e.file_path || e.filePath)) || parentFp,
+          })),
+        }
+      : rawToolInput;
 
-    const allIssues = [];
-    for (const p of phases) {
-      const issues = validatePhase(p, { allowLegacy: legacy });
-      allIssues.push(...issues);
-    }
-    if (allIssues.length > 0) {
-      const summary = allIssues
-        .slice(0, 10)
-        .map((i) => {
-          if (i.kind === 'missing')
-            return `${i.phase}: covers field missing`;
-          if (i.kind === 'empty')
-            return `${i.phase}: covers is empty`;
-          return `${i.phase}: invalid covers entry "${i.entry}" (must match UC-NN or "internal")`;
-        })
-        .join('; ');
-      const more = allIssues.length > 10 ? ` (+${allIssues.length - 10} more)` : '';
-      const reason = `Tier B schema violation in decomposition.yaml: ${summary}${more}. ` +
-        `See docs/schemas/user-contract.md for UC ids.`;
+    // Read workspace config (best-effort) so the policy module can honor
+    // any `contracts.coverage.required: false` opt-out a workspace sets.
+    let config = {};
+    try {
+      const cfgPath = join(cwd, '.mpl', 'config.json');
+      if (existsSync(cfgPath)) config = JSON.parse(readFileSync(cfgPath, 'utf-8')) || {};
+    } catch { /* non-blocking */ }
+
+    const decision = await handleCovers({
+      cwd,
+      toolName,
+      toolInput,
+      config,
+      hookEvent: input.hook_event_name || 'PreToolUse',
+      state: input.state || {},
+    });
+
+    if (decision && decision.action === 'block') {
+      const reason = decision.reason || 'Tier B schema violation in decomposition.yaml.';
+      const retryContext = {
+        // Preserve the legacy `target` companion that downstream consumers
+        // (recover skill, state-invariant guard) rely on.
+        target: BLOCKED_ARTIFACT,
+        ...(decision.retryContext || {}),
+      };
       recordBlockedHook(cwd, {
         hookId: HOOK_ID,
-        artifact: BLOCKED_ARTIFACT,
-        code: 'covers_schema_violation',
+        artifact: decision.artifact || BLOCKED_ARTIFACT,
+        code: decision.code || 'covers_schema_violation',
         reason,
         resumeInstruction:
+          decision.resumeInstruction ||
           'Add a non-empty covers list to every phase using UC-NN ids or "internal", then retry the decomposition write.',
-        retryContext: {
-          target: BLOCKED_ARTIFACT,
-          legacy_mode: legacy,
-          issue_count: allIssues.length,
-          issues: allIssues.slice(0, 20),
-        },
+        retryContext,
       });
       block(reason);
       process.exit(0);
     }
 
+    // Allow: clear any stale blocked envelope this hook owns…
     clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 
-    // warn on internal ratio
-    const threshold = loadWarnThreshold(cwd);
-    const ratio = computeInternalRatio(phases);
-    if (ratio > threshold) {
-      okWithWarn(
-        `[MPL Tier B] internal-only phases ${(ratio * 100).toFixed(0)}% > threshold ${(threshold * 100).toFixed(0)}%. ` +
-          `Consider whether more phases could covers a user UC. Override via .mpl/config.json internal_todo_warn_threshold.`,
-      );
-    } else {
-      ok();
+    // …then preserve the legacy warn-on-high-internal-ratio side effect.
+    // The policy module deliberately does not own this (it is advisory, not
+    // a structural decision). Recompute locally from the same texts the
+    // policy inspected so the user-visible behavior is unchanged.
+    const texts = [];
+    const pushText = (fp, t) => {
+      if (typeof fp === 'string' && targetsDecompositionFile(fp) && typeof t === 'string') {
+        texts.push(t);
+      }
+    };
+    pushText(
+      toolInput.file_path || toolInput.filePath,
+      toolInput.content || toolInput.new_string || toolInput.newString,
+    );
+    if (Array.isArray(toolInput.edits)) {
+      for (const e of toolInput.edits) {
+        pushText(
+          e?.file_path || e?.filePath,
+          e?.content || e?.new_string || e?.newString,
+        );
+      }
     }
+    const phases = texts.flatMap((t) => parsePhaseCovers(t));
+    if (phases.length > 0) {
+      const threshold = loadWarnThreshold(cwd);
+      const ratio = computeInternalRatio(phases);
+      if (ratio > threshold) {
+        okWithWarn(
+          `[MPL Tier B] internal-only phases ${(ratio * 100).toFixed(0)}% > threshold ${(threshold * 100).toFixed(0)}%. ` +
+            `Consider whether more phases could covers a user UC. Override via .mpl/config.json internal_todo_warn_threshold.`,
+        );
+        process.exit(0);
+      }
+    }
+    ok();
   } catch {
     ok();
   }

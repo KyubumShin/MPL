@@ -1,0 +1,917 @@
+# =============================================================================
+# MPL Configuration — v2 SSOT (Single Source of Truth)
+# =============================================================================
+#
+# This file is the v2 single-source-of-truth for MPL configuration.
+# Read by `hooks/lib/config.mjs` (v2 loader).
+#
+# COEXISTENCE WITH LEGACY:
+#   - Legacy `hooks/lib/mpl-config.mjs` is still active and read by every
+#     existing hook. It loads `.mpl/config.json` and uses its own DEFAULTS.
+#   - This YAML is ADDITIVE — it does NOT replace the legacy loader.
+#   - Every key in the legacy DEFAULTS appears here with the IDENTICAL
+#     default value (true superset). Doc-only knobs from
+#     `docs/config-schema.md` (tool_mode, context_rotation, mcp_server,
+#     context_monitor, phase_seed, chain_seed, discovery) are also
+#     included so an eventual single-file migration is lossless.
+#   - v2-only sections (`channels`, `contracts`, `evidence`, `gates`,
+#     `permit`, `schemas`, `audit`) are present as empty-but-shaped
+#     containers so future policy modules can register against a known
+#     structure without further schema work.
+#
+# RESOLUTION ORDER (when v2 loader is wired into hooks — NOT YET):
+#   workspace `<cwd>/mpl.config.yaml`  >  repo-root `mpl.config.yaml`
+#
+# Legacy-compat markers — `lib/config.mjs` uses these to detect
+# missing sections and fill from the legacy DEFAULTS at runtime.
+# =============================================================================
+
+version: 2
+legacy_json_compat: true
+
+# -----------------------------------------------------------------------------
+# Core Settings (legacy DEFAULTS — mirrors mpl-config.mjs)
+# -----------------------------------------------------------------------------
+max_fix_loops: 10
+gate1_strategy: auto           # auto | docker | native | skip
+hitl_timeout_seconds: 30
+
+# Doc-only knob (not in legacy DEFAULTS; legacy loader passes through
+# unchanged when present in .mpl/config.json). See docs/config-schema.md.
+tool_mode: standalone          # standalone | full | partial
+
+# -----------------------------------------------------------------------------
+# Context & Memory
+# -----------------------------------------------------------------------------
+context_cleanup_window: 3
+
+# Doc-only knob — terminal backend for session rotation. Auto-detect when
+# omitted; explicit value pins the backend.
+context_rotation:
+  backend: null                # kitty | tmux | osascript | null=auto
+
+# -----------------------------------------------------------------------------
+# Phase Parallelism
+# -----------------------------------------------------------------------------
+parallelism:
+  max_phase_workers: 2         # clamped to 1..3 at load time
+
+# -----------------------------------------------------------------------------
+# Scheduler (Move #16) — wave-scoped continuous-frontier dispatch
+# -----------------------------------------------------------------------------
+# Additive / dormant. Consumed by `hooks/lib/policy/scheduler.mjs` once the
+# Node scheduler owns dispatch. The prompt scheduler in
+# `commands/mpl-run-execute.md` Step 4.0 still drives every `/mpl run`.
+#
+# `enabled`              — master kill-switch. Even when true, dispatch only
+#                          activates if a future move populates wave_start /
+#                          wave_end routes in lib/dispatch.mjs.
+# `mode`                 — `wave_batch` (legacy) or `continuous_frontier`.
+#                          The Node scheduler always runs continuous-frontier
+#                          inside a wave; the field is here so the prompt
+#                          scheduler can declare its own mode in run summaries.
+# `tier_mutex_enabled`   — when true, tiers with `parallel: false` get a
+#                          virtual lock (`tier_mutex_{N}`) that serializes
+#                          their phase claims. Disabling defeats one of the
+#                          structural guarantees — don't.
+# `dispatch_owner`       — single-orchestrator (default). Reserved for a
+#                          future multi-orchestrator experiment.
+# `route_to_phase`       — front-door resolution chain. Empty → use the
+#                          built-in priority order (env → cwd → file_path →
+#                          state.current_phase). When set, overrides the
+#                          order. Values: env_ctx | cwd_match |
+#                          file_path_match | current_phase_fallback.
+# `fail_closed_when_running` — fail-closed contract for the engine
+#                          front-door. When state.running[].length > 0 AND
+#                          the resolution falls through to current_phase
+#                          fallback, the engine DENIES non-read tools.
+#                          Default true.
+scheduler:
+  enabled: false
+  mode: continuous_frontier
+  tier_mutex_enabled: true
+  dispatch_owner: single_orchestrator
+  route_to_phase:
+    - env_ctx
+    - cwd_match
+    - file_path_match
+    - current_phase_fallback
+  fail_closed_when_running: true
+
+# -----------------------------------------------------------------------------
+# Isolation (Move #16) — per-phase, per-slot worktree pool
+# -----------------------------------------------------------------------------
+# Additive / dormant. Consumed by `hooks/lib/policy/isolation.mjs` once the
+# Node scheduler drives dispatch.
+#
+# `mode`                 — `pool` (slot-keyed parallel pool) or
+#                          `single_tenant` (legacy F-15 path). HIGH-risk
+#                          phases ALWAYS use single_tenant regardless of
+#                          this setting.
+# `pool_root`            — null = derive from `tmpdir()/mpl-wt-<run_id>`.
+#                          Set to an absolute path to pin (e.g. a fast
+#                          SSD scratch dir). Must live outside `/etc`,
+#                          `/usr`, `/var`, and `/`.
+# `reject_high_risk`     — composer veto. true keeps the v6→v7 structural
+#                          distinction between worktree_history (single
+#                          tenant) and worktree_pool_history (pool).
+#                          Disabling lets the composer pack HIGH-risk
+#                          phases into parallel waves — STRONGLY NOT
+#                          RECOMMENDED.
+# `contract_freeze`      — paths hardlinked into each slot's `.mpl/` and
+#                          chmod a-w. Empty list = use built-in defaults
+#                          (decomposition.yaml + phase0/** + contracts/**).
+# `impact_drift`         — post-execution `git diff` vs declared
+#                          impact.create / impact.modify / affected_tests.
+#                          When `block_on_drift: true`, any undeclared
+#                          path causes the phase to fail.
+# `heartbeat`            — staleness window for slot.heartbeat. The
+#                          dispatcher refreshes every refresh_ms; a slot
+#                          whose heartbeat is older than staleness_ms is
+#                          treated as ABANDONED on resume.
+isolation:
+  mode: pool
+  pool_root: null
+  reject_high_risk: true
+  contract_freeze:
+    - .mpl/mpl/decomposition.yaml
+    - .mpl/mpl/phase0
+    - .mpl/contracts
+  impact_drift:
+    enabled: true
+    block_on_drift: false
+  heartbeat:
+    refresh_ms: 10000
+    staleness_ms: 30000
+
+# -----------------------------------------------------------------------------
+# Convergence Detection
+# -----------------------------------------------------------------------------
+convergence:
+  stagnation_window: 3
+  min_improvement: 0.05
+  regression_threshold: -0.1
+
+# -----------------------------------------------------------------------------
+# Phase Seed (D-01, v0.6.0) — doc-only knobs
+# -----------------------------------------------------------------------------
+phase_seed:
+  enabled: true
+
+# -----------------------------------------------------------------------------
+# Chain-Scoped Seed (#34, Stage 1) — doc-only knobs
+# -----------------------------------------------------------------------------
+chain_seed:
+  enabled: false
+  max_chain_size: 5
+  discovery_regen_enabled: true
+
+# -----------------------------------------------------------------------------
+# Context Monitor (#34, Stage 1) — doc-only knobs
+# -----------------------------------------------------------------------------
+context_monitor:
+  enabled: true
+  mode: measure                # measure | enforce
+  context_window_tokens: 1000000
+  baton_threshold_pct: 60
+  force_threshold_pct: 80
+  dispatch_warn: 30
+
+# -----------------------------------------------------------------------------
+# Test Wait Policy (#34, Stage 2)
+# -----------------------------------------------------------------------------
+test_wait:
+  cache_mode: default          # default | extended
+  threshold_default_sec: 270
+  threshold_extended_sec: 3300
+  pipelining_enabled: true
+
+# -----------------------------------------------------------------------------
+# Discovery Pipeline (#34, Stage 2) — doc-only knobs
+# -----------------------------------------------------------------------------
+discovery:
+  scanner_enabled: true
+  agent_enabled: false
+  false_positive_threshold_pct: 30
+
+# -----------------------------------------------------------------------------
+# Observability (Move #12) — sentinel subagent_type gating
+# -----------------------------------------------------------------------------
+# Closes the eval finding that S1/S3 fired on every Task|Agent PostToolUse,
+# doing recursive filesystem scans for unrelated subagents (debate,
+# validate-seed, ambiguity-gate, …). Defaults scope each sentinel to the
+# agent whose output it actually validates. Set a list to `null` to disable
+# filtering for that sentinel (legacy fire-for-every-Task behavior). Set to
+# `["__none__"]` to opt out of the sentinel entirely. File-write tools
+# (Edit/Write/MultiEdit) bypass the filter — their path-based gates apply.
+observability:
+  sentinels:
+    subagent_type_filter:
+      s0:
+        - mpl-seed-generator
+        - mpl:mpl-seed-generator
+        - mpl-phase-runner
+        - mpl:mpl-phase-runner
+      s1:
+        - mpl-phase-runner
+        - mpl:mpl-phase-runner
+      s3:
+        - mpl-test-agent
+        - mpl:mpl-test-agent
+
+# -----------------------------------------------------------------------------
+# Ambiguity Gate (#240)
+# -----------------------------------------------------------------------------
+ambiguity:
+  threshold: 0.2
+  force_proceed_after_rounds: null
+
+# -----------------------------------------------------------------------------
+# Gate Classification (#240) — extends STRICT_GATE_HEAD_ALLOWLIST
+# -----------------------------------------------------------------------------
+gate_classify:
+  allowed_heads: []
+
+# -----------------------------------------------------------------------------
+# Bash Timeout Categories (#240) — per-category ceiling overrides
+# -----------------------------------------------------------------------------
+# Shape (per-category override):
+#   bash_timeout:
+#     <category_name>:
+#       max_ms: <int>
+bash_timeout: {}
+
+# -----------------------------------------------------------------------------
+# Test Agent (AD-0007)
+# -----------------------------------------------------------------------------
+test_agent:
+  default_required: true
+
+# -----------------------------------------------------------------------------
+# Required-flag booleans (legacy)
+# -----------------------------------------------------------------------------
+goal_contract_required: true
+goal_trace_required: true
+phase_contract_graph_required: true
+decomposition_delta_required: true
+phase_evidence_latch_required: true
+completed_phase_immutability_required: true
+whole_goal_closure_required: true
+e2e_authenticity_required: true
+finalize_artifacts_required: true
+phase0_artifacts_required: true
+
+# -----------------------------------------------------------------------------
+# Enforcement (P0-2, #110) — strict toggle + per-rule policy
+# Values: warn | block | off
+# Precedence (legacy): state.json > .mpl/config.json > DEFAULTS
+# -----------------------------------------------------------------------------
+enforcement:
+  strict: false
+  # v0.18.1+ — direct_source_edit now defaults to BLOCK on the Bash tool surface
+  # too (per Move #6 closing Law 2 gap). Workspaces that still want the
+  # transitional warn behavior must explicitly set `direct_source_edit: warn`
+  # in their .mpl/config.json or state.json `enforcement` override.
+  direct_source_edit: block
+  # bash_write_targets: gate for the Move #6 Bash-tool extension. When 'off'
+  # the Bash-target extraction is skipped entirely (fall through to dangerous-
+  # bash warn). When 'warn' or 'block', falls back to direct_source_edit for
+  # the actual enforcement action — bash_write_targets is the GATE,
+  # direct_source_edit is the ACTION.
+  bash_write_targets: block
+  phase_scope_violation: warn
+  missing_gate_evidence: warn
+  missing_artifact_schema: warn
+  anti_pattern_match: warn
+  state_invariant_violation: warn
+  bash_timeout_violation: warn
+  audit_residual: warn
+  # Default 'block' rules (#235 B-category — state-corruption guards).
+  missing_phase_evidence: block
+  missing_finalize_artifacts: block
+  missing_completed_phase_immutability: block
+  missing_decomposition_delta: block
+  missing_chain_assignment: block
+  missing_e2e_evidence: block
+  e2e_authenticity_invalid: block
+  missing_whole_goal_closure: block
+  finalize_gate_failures: block        # #257 coalesced finalize gate
+  pp_schema_invalid: block
+  small_plan_scope_conflict: block
+  fast_track_phase0_artifacts_missing: block
+  # Audit-trail entries: {rule, value, reason, timestamp, source}
+  overrides: []
+
+# Top-level overrides[] (legacy DEFAULTS surface). Identical purpose to
+# `enforcement.overrides` — kept for byte-level parity with the legacy JSON.
+overrides: []
+
+# =============================================================================
+# v2-ONLY SECTIONS — empty-but-shaped policy registries
+# =============================================================================
+# These mirror the proposal §3 / §5 module taxonomy:
+#   channels | contracts | evidence | gates | permit | schemas | audit
+#
+# Each is a registry hash keyed by rule-id. Empty today; future policy
+# modules read from here. The v2 loader treats absence as "no rules
+# registered" — never as an error.
+# =============================================================================
+
+channels:
+  # SSOT for .mpl/ path allowlist. Anything under .mpl/ that matches NO
+  # allowed.path glob AND NO forbidden_patterns entry is treated as
+  # 'unregistered_channel' and blocked. Move #7 introduces this
+  # registry; legacy flat arrays (immutable_paths / writable_paths)
+  # remain present as empty lists so any reader that addresses them
+  # directly still sees [], not undefined.
+  allowed:
+    - path: '.mpl/state.json'
+      writers:
+        - engine
+        - worker
+        - mcp
+      category: state
+    - path: '.mpl/config.json'
+      writers:
+        - user
+        - engine
+      category: config
+    - path: '.mpl/config/**/*.json'
+      writers:
+        - user
+        - engine
+      category: config
+    - path: '.mpl/goal-contract.yaml'
+      writers:
+        - interviewer
+      category: contract
+      schema: goal_contract
+    - path: '.mpl/pivot-points.md'
+      writers:
+        - interviewer
+      category: contract
+      schema: pivot_points
+    - path: '.mpl/requirements/user-contract.md'
+      writers:
+        - interviewer
+      category: contract
+      schema: user_contract
+    - path: '.mpl/mpl/decomposition.yaml'
+      writers:
+        - planner
+      category: decomposition
+      schema: decomposition
+    - path: '.mpl/mpl/decomposition-derived.json'
+      writers:
+        - planner
+      category: decomposition
+    - path: '.mpl/mpl/decomposition-delta.yaml'
+      writers:
+        - planner
+      category: decomposition
+    - path: '.mpl/mpl/decomposition-deltas/recompose-*.yaml'
+      writers:
+        - planner
+      category: decomposition
+    - path: '.mpl/mpl/baseline.yaml'
+      writers:
+        - interviewer
+      category: baseline
+    - path: '.mpl/mpl/.baseline-renewal'
+      writers:
+        - orchestrator
+      category: sentinel
+    - path: '.mpl/mpl/phases/phase-*/state-summary.md'
+      writers:
+        - executor
+      category: phase
+      schema: state_summary
+    - path: '.mpl/mpl/phases/phase-*/verification.md'
+      writers:
+        - verifier
+      category: phase
+      schema: verification
+    - path: '.mpl/mpl/phases/phase-*/phase-seed.yaml'
+      writers:
+        - planner
+      category: phase
+    - path: '.mpl/mpl/phases/phase-*/changes.diff'
+      writers:
+        - executor
+      category: phase
+    - path: '.mpl/mpl/phases/phase-*/warnings.json'
+      writers:
+        - executor
+        - verifier
+      category: phase
+    - path: '.mpl/mpl/phases/phase-*/reflections/attempt-*.md'
+      writers:
+        - executor
+      category: phase
+    - path: '.mpl/contracts/*.json'
+      writers:
+        - planner
+      category: contract
+    - path: '.mpl/mpl/phase0/**'
+      writers:
+        - analyzer
+      category: phase0
+    - path: '.mpl/mpl/chains/chain-*/chain-seed.yaml'
+      writers:
+        - planner
+      category: chain
+    - path: '.mpl/mpl/profile/**'
+      writers:
+        - engine
+      category: profile
+      append_only: true
+    - path: '.mpl/signals/**'
+      writers:
+        - engine
+        - hooks
+      category: signals
+      append_only: true
+    - path: '.mpl/memory/{semantic,episodic,learnings,working}.md'
+      writers:
+        - engine
+      category: memory
+    - path: '.mpl/memory/{procedural,routing-patterns}.jsonl'
+      writers:
+        - engine
+      category: memory
+      append_only: true
+    - path: '.mpl/cache/**'
+      writers:
+        - engine
+      category: cache
+    - path: '.mpl/archive/**'
+      writers:
+        - engine
+      category: archive
+    - path: '.mpl/research/**'
+      writers:
+        - research
+      category: research
+    - path: '.mpl/e2e-traces/**'
+      writers:
+        - executor
+      category: traces
+    - path: '.mpl/mpl/checkpoints/**'
+      writers:
+        - engine
+      category: checkpoint
+    - path: '.mpl/mpl/releases/**'
+      writers:
+        - engine
+      category: release
+    # marginal-but-grandfathered top-level sentinels (current code writes these)
+    - path: '.mpl/PLAN.md'
+      writers:
+        - engine
+      category: plan
+    - path: '.mpl/discoveries.md'
+      writers:
+        - engine
+      category: discoveries
+      append_only: true
+    - path: '.mpl/auto-permit-learned.json'
+      writers:
+        - hooks
+      category: permit
+    - path: '.mpl/context-usage.json'
+      writers:
+        - hooks
+      category: hud
+
+  immutable_when:
+    - match: '.mpl/mpl/baseline.yaml'
+      when: 'baseline_renewal_sentinel_absent'
+    - match: '.mpl/mpl/phases/phase-*/**'
+      when: 'phase_lifecycle.phase_id_completed'
+      applies_to: phase_id
+    - match: '.mpl/mpl/decomposition.yaml'
+      when: 'completed_phase_block_unchanged'
+    - match: '.mpl/pivot-points.md'
+      when: 'always_after_first_write'
+    - match: '.mpl/contracts/*.json'
+      when: 'phase_lifecycle.phase_id_completed'
+      applies_to: contract_phase_id
+
+  forbidden_patterns:
+    - '.mpl/scratchpad*'
+    - '.mpl/scratch/**'
+    - '.mpl/notes/**'
+    - '.mpl/notes.md'
+    - '.mpl/tmp/**'
+    - '.mpl/temp/**'
+    - '.mpl/draft/**'
+    - '.mpl/idea/**'
+    - '.mpl/jot/**'
+    - '.mpl/pivot-points-backup.md'    # duplicate-of-SSOT
+    - '.mpl/working.md'                # duplicate of .mpl/memory/working.md
+    - '.mpl/runbook.md'                # duplicate of .mpl/mpl/RUNBOOK.md
+    - '.mpl/mml/**'                    # historical typo cleanup AD-0006
+
+  # Back-compat: legacy flat arrays kept available so any existing reader
+  # that addresses channels.immutable_paths / writable_paths directly
+  # still sees [], not undefined.
+  immutable_paths: []
+  writable_paths: []
+
+contracts:
+  # Phase contract declarative rules (extended in Move #8 to cover all 13 require-* surfaces).
+  chain_assignment:
+    required: true
+  coverage:
+    required: true
+  decomposition:
+    require_delta: true
+  goal_trace:
+    required: true
+  test_agent:
+    brief_required: true
+    pass_required: true                # gate state.test_agent_dispatched verdict
+  reviewer:
+    required: true
+  e2e:
+    required: true
+  e2e_authenticity:
+    required: true
+  finalize_artifacts:
+    required: true
+  whole_goal_closure:
+    required: true
+  phase_contract_graph:
+    required: true
+  phase_evidence:
+    required: true                     # canonical Evidence Latch gate (now structural)
+  completed_phase_immutability:
+    required: true
+
+evidence:
+  # Structural evidence-check rules. Replaces legacy substring+'pass' Evidence Latch.
+  # Each rule names a token from decomposition.yaml phase.evidence_required[].
+  # structural_check: true means policy/evidence.mjs runs the per-token
+  # structural verification (state-join + artifact-existence + schema parse).
+  # fallback_allowed: false means substring 'pass' in verification.md is INSUFFICIENT.
+  allow_legacy_text_fallback: false    # transition-window opt-out (set true only via state.json override)
+  unknown_token_action: block          # closes the open-schema hole — decomposer cannot invent tokens
+  rules:
+    - token: command
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results
+    - token: test_agent
+      structural_check: true
+      fallback_allowed: false
+      state_path: test_agent_dispatched
+    - token: test_agent_brief
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/test-agent-brief.yaml']
+    - token: goal_trace
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/decomposition.yaml', '.mpl/goal-contract.yaml']
+    - token: api_contract
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/contracts/*.json', '.mpl/contracts/*.yaml']
+    - token: type_policy
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: error_spec
+      structural_check: true
+      fallback_allowed: false
+    - token: tests_pass
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/junit*.xml']
+      state_path: test_agent_dispatched
+    - token: security
+      structural_check: true
+      fallback_allowed: false
+      state_path: security_results
+      artifact_paths: ['.mpl/security-report.json']
+    - token: e2e
+      structural_check: true
+      fallback_allowed: false
+      state_path: e2e_results
+      artifact_paths: ['.mpl/mpl/e2e-scenarios.yaml']
+    - token: e2e_authenticity
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/e2e-scenarios.yaml']
+    - token: file_exists
+      structural_check: true
+      fallback_allowed: false
+    - token: export_manifest
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/releases/{cut_id}/release-manifest.json']
+    - token: lsp_diagnostics
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/lsp-diagnostics.json']
+    - token: lint
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: type_check
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: build
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.hard1
+    - token: documentation
+      structural_check: true
+      fallback_allowed: true               # docs are textual; allow text fallback for now
+    - token: manual
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.manual_attestation
+    - token: external_audit
+      structural_check: true
+      fallback_allowed: false
+      artifact_paths: ['.mpl/mpl/phases/{phase_id}/external-audit.json']
+    - token: tooling
+      structural_check: true
+      fallback_allowed: false
+      state_path: gate_results.tooling
+
+gates:
+  # Finalize / quality / ambiguity / phase-transition gate rules.
+  # Owned by hooks/lib/policy/gates.mjs (Move #9 L2 SSOT). Each entry maps to
+  # one of the four `handle(event, ctx)` sub-handlers exposed by gates.mjs.
+  finalize:
+    enabled: true
+  quality:
+    threshold: 0.7
+    max_retries: 3
+  ambiguity:
+    enabled: true
+  phase_transition:
+    # Pass-A: simple phase cases (mpl-init, mpl-decompose,
+    # mpl-ambiguity-resolve, phase1-plan, phase1a-research, phase1b-plan,
+    # phase4-fix, phase5-finalize) + G4 hang short-circuit + blocked_hook
+    # routing are owned by gates.mjs::handlePhaseTransition. Heavy cases
+    # (phase2-sprint cohort lazy-init, release-gate, release-finalize,
+    # phase3-gate, small-*) stay in the wrapper for now and migrate to
+    # `lib/release/` in Pass-B (a follow-up Move).
+    enabled: true
+
+permit:
+  # Auto-permit + bash-timeout + resource-risk rules.
+  #
+  # MOVE #10 (#1c fix): the legacy `mpl-auto-permit.mjs` ended its Bash branch
+  # with a verbatim `decision: 'approve'` fail-open. `policy/permit.mjs`
+  # replaces that with a layered veto pipeline (dangerous-union, protected
+  # delete, state/decomposition writes, source-target redirects) followed by
+  # this `unknown_bash` knob. Default `pass-through` lets Claude Code prompt
+  # the user — the legacy `auto_permit.fail_closed` boolean below is retained
+  # for additionalProperties:true back-compat but is DEPRECATED; consumers
+  # should configure `unknown_bash` instead.
+  #
+  #   pass-through (default): unknown bash → Claude Code prompts the user.
+  #   block-strict:           unknown bash → blocked with explicit reason.
+  #   allow-loose:            unknown bash → approved (legacy fail-open).
+  unknown_bash: pass-through
+  auto_permit:
+    fail_closed: true        # DEPRECATED — use `permit.unknown_bash` instead.
+  bash_timeout:
+    categories: {}
+  resource_risk:
+    rules: []
+
+schemas:
+  # validate-* + property-check rules.
+  #
+  # P3 #6 Pass 1 — declarative migration of three frozen-in-module schema
+  # constants. Each rule below mirrors the legacy frozen value EXACTLY so the
+  # loader path produces byte-identical output to the fallback path. Workspace
+  # overrides extend or replace these entries; absent / malformed rules fall
+  # back to the frozen constants in lib/policy/schemas.mjs.
+  #
+  # Pass 2 will tighten config-schema.json to validate the per-kind shapes.
+  # Pass 3 will migrate phase_seed_required (gated by `enabled: false` until
+  # parity tests prove the dispatcher matches the inline control flow).
+  rules:
+    pp_uc_leakage:
+      kind: regex_denylist
+      target: '.mpl/pivot-points.md'
+      patterns:
+        - name: 'user_cases:'
+          re: '^user_cases\s*:'
+          flags: 'm'
+        - name: 'deferred_cases:'
+          re: '^deferred_cases\s*:'
+          flags: 'm'
+        - name: 'cut_cases:'
+          re: '^cut_cases\s*:'
+          flags: 'm'
+        - name: 'user_delta:'
+          re: '^\s{2,}user_delta\s*:'
+          flags: 'm'
+        - name: 'covers_pp:'
+          re: '^\s{2,}covers_pp\s*:'
+          flags: 'm'
+        - name: 'UC-NN identifier'
+          re: '\bUC-\d{2,}\b'
+          flags: ''
+    agent_output_sections:
+      kind: section_presence
+      match: case_insensitive_substring
+      agents:
+        mpl-phase-runner:
+          - status
+          - state_summary
+          - verification
+        mpl-decomposer:
+          - architecture_anchor
+          - phases
+        mpl-interviewer:
+          - 'PP-'
+          - 'Priority Order'
+          - 'Interview Metadata'
+        mpl-test-agent:
+          - phase_id
+          - test_files_created
+          - test_results
+          - a_item_coverage
+        mpl-codebase-analyzer:
+          - project_type
+          - modules
+          - external_deps
+          - test_infrastructure
+        mpl-doctor:
+          - Results
+          - 'Tool Availability Detail'
+          - Recommendations
+          - Summary
+        mpl-git-master:
+          - 'Commits Created'
+        mpl-phase0-analyzer:
+          - type-policy
+          - error-spec
+    property_audit_targets:
+      kind: config_target_list
+      paths: []
+    phase_seed_required:
+      kind: yaml_field_required
+      enabled: false   # Pass 3 deferred — validateSeed inline control flow remains authoritative
+      always:
+        - path: phase_seed.goal
+          check: nonEmptyString
+        - path: phase_seed.acceptance_criteria
+          check: nonEmptyArray
+        - path: phase_seed.mini_plan_seed.todo_structure
+          check: nonEmptyArray
+        - path: phase_seed.exit_conditions
+          check: nonEmptyArray
+      per_todo:
+        - depends_on
+        - files_to_modify
+        - resource_locks
+      conditional:
+        - when: hasContractFiles
+          required:
+            - path: phase_seed.contract_snippet
+              check: yamlField
+            - path: contract_snippet.inbound|outbound
+              check: anyMappingHasKeys
+          warnings:
+            - path: contract_snippet.inbound
+              check: mappingValuesAreStrings
+            - path: contract_snippet.outbound
+              check: mappingValuesAreStrings
+
+audit:
+  # Finalize-time global audit (Tier 4 + drift). Move #13 introduces a
+  # DECLARATIVE verdict expression — `verdict.required_clean[]` names the
+  # summary categories that MUST be zero for the audit to PASS. Closes the
+  # eval-finding gap where drift_undeclared + manifest_drift used to slip
+  # past the legacy 3-conjunct expression. Future categories added to the
+  # report summary auto-gate by listing them here.
+  verdict:
+    required_clean:
+      - anti_pattern_residual
+      - missing_covers
+      - dangling_covers
+      - drift_undeclared
+      - manifest_drift
+  # `drift.escalate_undeclared_to_anti_pattern` — when true (default), each
+  # drift_undeclared entry is injected into surfaces.anti_pattern_residual
+  # with synthetic id 'F6.drift_undeclared' so Tier 3+4 sinks see drift
+  # uniformly. Workspaces can disable by setting false.
+  drift:
+    escalate_undeclared_to_anti_pattern: true
+  rules: []
+
+# -----------------------------------------------------------------------------
+# State merge policy (Move #17) — field-ownership matrix consumed by
+# hooks/lib/state/wave-reducer.mjs. Unknown fields encountered in shard
+# patches that have no entry here -> reducer THROWS
+# UnknownFieldOwnershipError (no silent last-write-wins). Adding a new
+# state.json top-level field henceforth REQUIRES a merge_policy entry.
+# -----------------------------------------------------------------------------
+state:
+  merge_policy:
+    # ---- phase-keyed: per-phase_id segment in the JSON Pointer path ----
+    gate_results:                phase_keyed
+    test_agent_dispatched:       phase_keyed
+    e2e_results:                 last_completed_at_wins
+    security_results:            phase_keyed
+    phase_lifecycle:             phase_keyed
+    release:                     phase_keyed
+    reconciler_reentries:        phase_keyed   # NEW: {[wave_id]: {[contract_ref_hash]: {count<=1, winner_phase_id, loser_phase_id}}}
+
+    # ---- ring_merge: concat then slice(-cap); caps mirror writer.mjs ----
+    ambiguity_history:           ring_merge
+    phase_scheduler_history:     ring_merge
+    fix_loop_history:            ring_merge
+    worktree_pool_history:       ring_merge
+    quality_score_history:       ring_merge
+    convergence.pass_rate_history: ring_merge
+
+    # ---- union: Set-merge dedup by stable entry-id ----
+    permits:                     union
+    worktree_history:            union
+    waves_in_flight:             union
+    running:                     union
+    completed_cut_ids:           union
+
+    # ---- recomputed_from_decomposition: shard values DISCARDED ----
+    sprint_status:               recomputed_from_decomposition
+    execution.phases.completed:  recomputed_from_decomposition
+    execution.phases.total:      recomputed_from_decomposition
+
+    # ---- engine-only: pipeline-scoped fields; shard patches REJECTED ----
+    pipeline_id:                 engine_only
+    session_status:              engine_only
+    current_phase:               engine_only
+    schema_version:              engine_only
+    started_at:                  engine_only
+    finalize_done:               engine_only
+    finalized_at:                engine_only
+    completed_at:                engine_only
+    blocked_by_hook:             engine_only
+    blocked_phase:               engine_only
+    blocked_artifact:            engine_only
+    block_code:                  engine_only
+    block_reason:                engine_only
+    resume_instruction:          engine_only
+    retry_context:               engine_only
+    blocked_at:                  engine_only
+    current_cut_id:              engine_only
+    fix_loop_count:              engine_only
+
+# -----------------------------------------------------------------------------
+# Reconciliation (Move #17) — wave-end 4-bucket classifier + reconciler verdict
+# -----------------------------------------------------------------------------
+reconcile:
+  enabled: true
+  # Bucket X bounded re-entry cap per (wave_id, contract_ref).
+  reentry_cap: 1
+  # Bucket priority on multi-classification (T > C > S > X).
+  bucket_priority:
+    - T
+    - C
+    - S
+    - X
+  # Verifier dispatch — when bucket C non-empty, the gate spawns
+  # mpl-adversarial-reviewer --mode=reconcile and awaits the
+  # wave-<tier>-<wave>-reconciler-verdict.json signal.
+  verifier:
+    agent: mpl-adversarial-reviewer
+    mode: reconcile
+    timeout_ms: 600000
+  # Frontier gate — mpl-require-reconciliation.mjs blocks dependent-phase
+  # dispatch until reconcileWave returns terminal outcome ∈
+  # {clean, reconciled, aborted}.
+  gate_dependent_frontier: true
+
+# -----------------------------------------------------------------------------
+# Failure codes (Move #17) — canonical allowlist surfaced by the scheduler
+# aggregator AND finalize gate. Extended from 5 → 11 to cover wave-reducer +
+# reconcile errors. The frozen Set in hooks/lib/mpl-scheduler-failure-codes.mjs
+# is the SSOT consumed at runtime; this YAML duplicate exists so users +
+# operators can audit the vocabulary without reading source.
+# -----------------------------------------------------------------------------
+failure_codes:
+  canonical:
+    - worker_dispatch_error
+    - worktree_setup_error
+    - wave_execution_error
+    - merge_error
+    - unknown_runtime_error
+    # Move #17 extensions (wave-reducer + reconcile)
+    - stale_shard_base
+    - unknown_field_ownership
+    - merge_error:textual_conflict
+    - semantic_reentry_exhausted
+    - reconcile_required
+    - wave_reducer_unresolvable

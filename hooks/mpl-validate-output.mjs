@@ -1,270 +1,129 @@
 #!/usr/bin/env node
 /**
- * MPL Output Validation Hook (PostToolUse)
- * Inserts validation reminder when a validate_prompt-enabled agent completes.
+ * MPL Output Validation Hook (PostToolUse Task|Agent)
  *
- * Based on: design doc section 9.2 hook 2 + hoyeon validate_prompt pattern
+ * Thin stdin/stdout shim over
+ * `hooks/lib/policy/schemas.mjs::handleAgentOutputSchema` (Move #11). The
+ * policy module owns the VALIDATE_AGENTS / EXPECTED_SECTIONS denylist and
+ * the telemetry side effects (trackTokenUsage + logPhaseProfile). The
+ * wrapper translates the decision envelope back to the legacy stdout shape:
  *
- * Agents with validate_prompt: phase-runner, decomposer, worker
- * When these agents complete via Task tool, this hook inserts a [MPL VALIDATION] reminder
- * so the orchestrator checks the output against the agent's Output_Schema.
+ *   - allow:  { continue: true,  suppressOutput: true }
+ *           — when the agent isn't in VALIDATE_AGENTS the legacy hook
+ *             stayed silent; we preserve that.
+ *           — when the agent IS in VALIDATE_AGENTS and passes, the legacy
+ *             hook emitted { continue: true, hookSpecificOutput.additionalContext:
+ *             "[MPL VALIDATION PASSED] …" }; we preserve that too.
+ *   - block: { continue: false, hookSpecificOutput.additionalContext: <reason> }
+ *
+ * Original implementation: hooks/mpl-validate-output.legacy.mjs
  */
 
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
 
-// Import shared MPL state utility
-const { isMplActive, readState, writeState } = await import(
+const {
+  handle: schemasHandle,
+  validateSections,
+  formatValidationMessage,
+  VALIDATE_AGENTS,
+  EXPECTED_SECTIONS,
+} = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'schemas.mjs')).href
+);
+
+const { isMplActive } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
 
-const { recordTelemetryError } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'mpl-profile.mjs')).href
-);
-
-// Import shared stdin reader
-const { readStdin } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
-);
-
-// Agents that require output validation
-export const VALIDATE_AGENTS = new Set([
-  'mpl-phase-runner',
-  'mpl-decomposer',
-  'mpl-interviewer',
-  'mpl-test-agent',
-  'mpl-codebase-analyzer',
-  'mpl-doctor',
-  'mpl-git-master',
-  'mpl-phase0-analyzer',
-]);
-
-// Expected output sections per agent
-export const EXPECTED_SECTIONS = {
-  'mpl-phase-runner': [
-    'status',
-    'state_summary',
-    'verification',
-  ],
-  'mpl-decomposer': [
-    'architecture_anchor',
-    'phases',
-  ],
-  'mpl-interviewer': [
-    'PP-',
-    'Priority Order',
-    'Interview Metadata',
-  ],
-  'mpl-test-agent': [
-    'phase_id',
-    'test_files_created',
-    'test_results',
-    'a_item_coverage',
-  ],
-  'mpl-codebase-analyzer': [
-    'project_type',
-    'modules',
-    'external_deps',
-    'test_infrastructure',
-  ],
-  'mpl-doctor': [
-    'Results',
-    'Tool Availability Detail',
-    'Recommendations',
-    'Summary',
-  ],
-  'mpl-git-master': [
-    'Commits Created',
-  ],
-  'mpl-phase0-analyzer': [
-    'type-policy',
-    'error-spec',
-  ],
-};
-
-/**
- * Validate response text against expected sections (case-insensitive).
- * @param {string[]} sections - Expected section names
- * @param {string} responseText - Agent response text
- * @returns {{ passed: boolean, missing: string[], found: string[], sectionList: string }}
- */
-export function validateSections(sections, responseText) {
-  const missing = [];
-  const found = [];
-  const lower = responseText.toLowerCase();
-  for (const section of sections) {
-    if (lower.includes(section.toLowerCase())) {
-      found.push(section);
-    } else {
-      missing.push(section);
-    }
-  }
-  const sectionList = sections.map(s => {
-    const ok = found.includes(s);
-    return `  - ${ok ? '[PASS]' : '[MISSING]'} ${s}`;
-  }).join('\n');
-  return { passed: missing.length === 0, missing, found, sectionList };
+function ok() {
+  console.log(JSON.stringify({ continue: true, suppressOutput: true }));
 }
 
-/**
- * Format validation result into a hook message string.
- * @param {string} agentType
- * @param {string[]} sections
- * @param {boolean} passed
- * @param {string[]} missing
- * @param {string} sectionList
- * @returns {string}
- */
-export function formatValidationMessage(agentType, sections, passed, missing, sectionList) {
-  if (passed) {
-    return `[MPL VALIDATION PASSED] Agent "${agentType}" output contains all ${sections.length} required sections.`;
-  }
-  return `[VALIDATION FAILED] [MPL VALIDATION FAILED] Agent "${agentType}" output is missing ${missing.length}/${sections.length} required sections.
-
-Validation results:
-${sectionList}
-
-Missing sections: ${missing.join(', ')}
-
-ACTION REQUIRED: Re-run the agent with clarified instructions targeting the missing sections.
-Do NOT proceed to the next phase until all sections are present.`;
-}
-
-/**
- * Log a phase profile record to .mpl/mpl/profile/phases.jsonl.
- * @param {string} cwd
- * @param {object} state - current MPL state object
- * @param {string} agentType
- * @param {number} estimatedTokens
- */
-function logPhaseProfile(cwd, state, agentType, estimatedTokens) {
-  try {
-    const profileDir = join(cwd, '.mpl/mpl/profile');
-    if (!existsSync(profileDir)) mkdirSync(profileDir, { recursive: true });
-    const phaseRecord = {
-      step: state.current_phase || 'unknown',
-      name: agentType || '',
-      pass_rate: null,
-      micro_fixes: 0,
-      estimated_tokens: { context: 0, output: estimatedTokens, total: estimatedTokens },
-      compaction_count: state.compaction_count || 0,
-      timestamp: new Date().toISOString(),
-    };
-    appendFileSync(join(profileDir, 'phases.jsonl'), JSON.stringify(phaseRecord) + '\n');
-  } catch (err) {
-    recordTelemetryError(cwd, 'mpl-validate-output:logPhaseProfile', err, {
-      agent_type: agentType || null,
-      phase: state?.current_phase || null,
-    });
-    // Profile logging is best-effort
-  }
-}
-
-/**
- * Track token usage for a completed agent task.
- * Updates total_tokens in state and appends to weekly usage log.
- * @param {string} cwd
- * @param {string} agentType
- * @param {string} responseText
- */
-function trackTokenUsage(cwd, agentType, responseText) {
-  try {
-    const estimatedTokens = Math.ceil(responseText.length / 4);
-    if (estimatedTokens > 0) {
-      const currentState = readState(cwd);
-      if (currentState) {
-        const currentTokens = currentState.cost?.total_tokens || 0;
-        writeState(cwd, { cost: { total_tokens: currentTokens + estimatedTokens } });
-
-        // Weekly usage tracking for HUD
-        try {
-          const usageDir = join(cwd, '.mpl/usage');
-          if (!existsSync(usageDir)) mkdirSync(usageDir, { recursive: true });
-          appendFileSync(join(usageDir, 'weekly.jsonl'), JSON.stringify({
-            timestamp: new Date().toISOString(),
-            tokens: estimatedTokens,
-          }) + '\n');
-        } catch (err) {
-          recordTelemetryError(cwd, 'mpl-validate-output:weeklyUsage', err, {
-            agent_type: agentType || null,
-          });
-        }
-
-        // Experiment: append compaction_count to phases.jsonl for correlation analysis
-        logPhaseProfile(cwd, currentState, agentType, estimatedTokens);
-      }
-    }
-  } catch (err) {
-    recordTelemetryError(cwd, 'mpl-validate-output:trackTokenUsage', err, {
-      agent_type: agentType || null,
-    });
-    // Token tracking is best-effort; do not block on failure
-  }
-}
-
-async function main() {
-  const input = await readStdin();
+async function runHook(stdinPayload) {
+  if (!stdinPayload) { ok(); return; }
 
   let data;
   try {
-    data = JSON.parse(input);
+    data = JSON.parse(stdinPayload);
   } catch {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+    ok();
     return;
   }
 
   const toolName = data.tool_name || data.toolName || '';
-
-  // Only intercept Task/Agent tool completions
-  if (!['Task', 'task', 'Agent', 'agent'].includes(toolName)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Check if MPL is active
-  const cwd = data.cwd || data.directory || process.cwd();
-  if (!isMplActive(cwd)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-    return;
-  }
-
-  // Extract agent type from tool input
   const toolInput = data.tool_input || data.toolInput || {};
-  const agentType = toolInput.subagent_type || toolInput.subagentType || '';
-
-  // Track token usage for ALL Task completions (not just validated agents)
   const toolResponse = data.tool_response || data.toolResponse || '';
-  const responseText = typeof toolResponse === 'string'
-    ? toolResponse
-    : JSON.stringify(toolResponse);
+  const cwd = data.cwd || data.directory || process.cwd();
+  const mplActive = isMplActive(cwd);
 
-  // H2: Estimate token usage from response length and update state
-  trackTokenUsage(cwd, agentType, responseText);
+  const decision = schemasHandle('agent_output_schema', {
+    toolName,
+    toolInput,
+    toolResponse,
+    cwd,
+    mplActive,
+  });
 
-  // Validation only applies to agents in VALIDATE_AGENTS
-  if (!VALIDATE_AGENTS.has(agentType)) {
-    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+  if (decision.action === 'noop') {
+    ok();
     return;
   }
 
-  const sections = EXPECTED_SECTIONS[agentType] || [];
-  const { passed, missing, found, sectionList } = validateSections(sections, responseText);
-  const message = formatValidationMessage(agentType, sections, passed, missing, sectionList);
+  if (decision.action === 'allow') {
+    // The legacy hook emitted a [MPL VALIDATION PASSED] additionalContext
+    // ONLY when the agent was in VALIDATE_AGENTS. For other Tasks the
+    // hook stayed silent. We detect via the rule id.
+    if (decision.ruleId === 'agent_output_sections_ok') {
+      const agentType =
+        (toolInput && (toolInput.subagent_type || toolInput.subagentType)) || '';
+      const sections = EXPECTED_SECTIONS[agentType] || [];
+      const message =
+        `[MPL VALIDATION PASSED] Agent "${agentType}" output contains all ${sections.length} required sections.`;
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: message,
+        },
+      }));
+      return;
+    }
+    ok();
+    return;
+  }
 
-  // C3: Block (continue: false) when validation fails
+  // block — preserve legacy stdout shape: `continue: false` +
+  // additionalContext text.
   console.log(JSON.stringify({
-    continue: passed,
+    continue: false,
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
-      additionalContext: message
-    }
+      additionalContext: decision.reason,
+    },
   }));
 }
 
-main().catch(() => {
-  console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-});
+if (isMain) {
+  const { readStdin } = await import(
+    pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+  );
+  try {
+    const raw = await readStdin();
+    await runHook(raw);
+  } catch {
+    ok();
+  }
+}
+
+// Re-export legacy symbols so existing tests keep passing.
+export {
+  VALIDATE_AGENTS,
+  EXPECTED_SECTIONS,
+  validateSections,
+  formatValidationMessage,
+};

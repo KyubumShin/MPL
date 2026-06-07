@@ -46,10 +46,15 @@ function deepMergeConfig(target, source) {
  * v0.18.0 ships ALL rules at `warn` by default per issue #110 §정책 ("default:
  * transitional warn (사용자 surface 만, 차단 없음); exp16부터 strict: true"). Hooks
  * never silently downgrade — workspace must explicitly opt-in to block.
+ *
+ * v0.18.1 (Move #6): direct_source_edit flips to 'block' by default and the
+ * Bash tool surface is now in scope via the new `bash_write_targets` gate
+ * (defaults to 'block', falls back to direct_source_edit for the action).
  */
 const ENFORCEMENT_DEFAULTS = {
   strict: false,
-  direct_source_edit: 'warn',
+  direct_source_edit: 'block',
+  bash_write_targets: 'block',
   phase_scope_violation: 'warn',
   missing_gate_evidence: 'warn',
   missing_artifact_schema: 'warn',

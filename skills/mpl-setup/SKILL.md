@@ -482,8 +482,10 @@ If enabled:
 
 ```bash
 #!/bin/bash
-# MPL HUD Wrapper - resolves latest cached version dynamically
-HUD=$(ls -d ~/.claude/plugins/cache/mpl/mpl/*/hooks/mpl-hud.mjs 2>/dev/null | sort -V | tail -1)
+# MPL HUD Wrapper - resolves latest cached version dynamically.
+# Move #15 relocated mpl-hud.mjs from hooks/ to cli/; the dual glob keeps
+# users on older installed versions working until they bump.
+HUD=$(ls -d ~/.claude/plugins/cache/mpl/mpl/*/cli/mpl-hud.mjs ~/.claude/plugins/cache/mpl/mpl/*/hooks/mpl-hud.mjs 2>/dev/null | sort -V | tail -1)
 [ -n "$HUD" ] && exec node "$HUD" || exit 0
 ```
 

@@ -1,27 +1,17 @@
 #!/usr/bin/env node
 /**
- * MPL Artifact Schema Hook (PostToolUse Edit|Write|MultiEdit) — P0-K / #115.
+ * MPL Artifact Schema Hook (PostToolUse Edit|Write|MultiEdit|mcp__*__write*) — P0-K / #115.
  *
- * Validates phase artifacts (`goal-contract.yaml`, `decomposition.yaml`,
- * `state-summary.md`, `verification.md`, `pivot-points.md`, `user-contract.md`) against
- * required-section schemas immediately after they're written. Closes
- * the consumer gap that left `enforcement.missing_artifact_schema` as
- * a configured-but-unused rule (F5 #112 forward-compat allow-list).
+ * Move #7: thin shim over `hooks/lib/policy/channel-registry.mjs`. The
+ * schema-validation slice of the registry runs here. The shim keeps the
+ * existing PostToolUse contract intact:
  *
- * Action precedence: `enforcement.missing_artifact_schema` resolved by
- * `lib/mpl-enforcement.mjs#resolveRuleAction` (P0-2 / #110):
- *   - `warn` (default) → emit a system-reminder listing missing
- *     sections.
- *   - `block` → return `decision: 'block'`. PR #135 nit: PostToolUse
- *     fires AFTER the write lands on disk, so the offending file is
- *     already there. `block` stops the orchestrator's NEXT step so it
- *     re-emits an overwriting valid version — it doesn't prevent the
- *     original write itself.
- *   - `off` → log to `.mpl/signals/artifact-schema-hits.jsonl` only;
- *     no hook-level surfacing.
- *
- * Audit signals are written regardless of policy so finalize / doctor
- * can later replay them.
+ *   - `decision: 'block'` + reason on validation failure when
+ *     enforcement is 'block'
+ *   - `continue: true` + systemMessage on warn
+ *   - silent + `.mpl/signals/artifact-schema-hits.jsonl` log on off
+ *   - CLI mode (finalize Step 5 + doctor Category 6): walks the union of
+ *     allowed channels with `schema:` declared
  */
 
 import { dirname, join, resolve } from 'path';
@@ -37,6 +27,9 @@ const { isMplActive, readState } = await import(
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
 );
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
+);
 const { resolveRuleAction } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-enforcement.mjs')).href
 );
@@ -45,6 +38,9 @@ const { matchArtifactSchema, validateArtifactFile } = await import(
 );
 const { recordBlockedHook, clearBlockedHook } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+const { loadChannelRegistry } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'channel-registry.mjs')).href
 );
 
 const SIGNALS_RELATIVE = '.mpl/signals/artifact-schema-hits.jsonl';
@@ -101,10 +97,9 @@ async function main() {
   try { data = JSON.parse(input); } catch { return silent(); }
 
   const toolName = data.tool_name || data.toolName || '';
-  // PR #135 review #2 (Claude): hooks.json matcher routes
-  // `mcp__*__write*` tools to this hook, but the internal allowlist
-  // also has to accept them or the hook silent-skips. Mirror the
-  // matcher's regex shape here.
+  // hooks.json matcher routes Edit|Write|MultiEdit|mcp__.*__write.* here;
+  // mirror the matcher's regex shape so MCP filesystem writes are not
+  // silent-skipped.
   const isWriteTool =
     ['Edit', 'edit', 'Write', 'write', 'MultiEdit', 'multiEdit'].includes(toolName)
     || /^mcp__.*__write/i.test(toolName);
@@ -191,28 +186,30 @@ async function main() {
 }
 
 /**
- * CLI mode (P0-K finalize re-check / doctor support):
+ * CLI mode (P0-K finalize re-check / doctor support).
  *
  *   node hooks/mpl-artifact-schema.mjs <workspaceRoot>
  *
- * Walks every known artifact path under `workspaceRoot` and emits a
- * JSON verdict: `{ totals, results: [{ artifact, file, valid,
- * missing, missing_any_of }] }`. Exit code is 0 when every file is
- * valid (or absent), 1 when at least one validation failed. Designed
- * for finalize Step 5 to gate `finalize_done = true` and for
- * mpl-doctor's Category 6 to surface drift.
+ * Move #7: walks the union of (allowed channels with `schema:`
+ * declared) loaded from `hooks/lib/policy/channel-registry.mjs` —
+ * single source of truth replacing the hardcoded
+ * `enumerateArtifactPaths()` switch. The output contract is preserved:
+ * `{ totals: {files, valid, invalid}, results: [...] }` to stdout, exit
+ * 1 on any invalid, exit 2 when the workspace path does not exist.
  *
- * The CLI uses the same schema / validator the hook does; there is no
- * second source of truth for which sections are required.
+ * Re-exported as `runChannelRegistryCli(workspaceRoot)` so doctor /
+ * finalize callers can import without spawning a child process.
  */
-function runCli(workspaceRoot) {
+export function runChannelRegistryCli(workspaceRoot) {
   const root = resolve(workspaceRoot);
   if (!existsSync(root)) {
     process.stderr.write(`[mpl-artifact-schema] workspace root not found: ${root}\n`);
     process.exit(2);
   }
+  const cfg = loadConfig(root);
+  const registry = loadChannelRegistry(cfg);
 
-  const candidates = enumerateArtifactPaths(root);
+  const candidates = enumerateSchemaBoundPaths(root, registry);
   const results = [];
   for (const rel of candidates) {
     const abs = join(root, rel);
@@ -238,29 +235,42 @@ function runCli(workspaceRoot) {
   process.exit(totals.invalid > 0 ? 1 : 0);
 }
 
-function enumerateArtifactPaths(root) {
+function enumerateSchemaBoundPaths(root, registry) {
   const out = [];
-  // Singletons
-  if (existsSync(join(root, '.mpl/mpl/decomposition.yaml'))) out.push('.mpl/mpl/decomposition.yaml');
-  if (existsSync(join(root, '.mpl/mpl/decomposition.yml'))) out.push('.mpl/mpl/decomposition.yml');
-  if (existsSync(join(root, '.mpl/goal-contract.yaml'))) out.push('.mpl/goal-contract.yaml');
-  if (existsSync(join(root, '.mpl/goal-contract.yml'))) out.push('.mpl/goal-contract.yml');
-  if (existsSync(join(root, '.mpl/pivot-points.md'))) out.push('.mpl/pivot-points.md');
-  if (existsSync(join(root, '.mpl/requirements/user-contract.md'))) {
-    out.push('.mpl/requirements/user-contract.md');
-  }
-  // Per-phase artifacts
-  const phasesDir = join(root, '.mpl/mpl/phases');
-  if (existsSync(phasesDir)) {
-    let entries = [];
-    try { entries = readdirSync(phasesDir, { withFileTypes: true }); } catch {}
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      if (!/^phase-/.test(e.name)) continue;
-      const ssPath = `.mpl/mpl/phases/${e.name}/state-summary.md`;
-      const vPath = `.mpl/mpl/phases/${e.name}/verification.md`;
-      if (existsSync(join(root, ssPath))) out.push(ssPath);
-      if (existsSync(join(root, vPath))) out.push(vPath);
+  const seen = new Set();
+  const allowedWithSchema = (registry.allowed || []).filter((e) => e.schema);
+
+  for (const entry of allowedWithSchema) {
+    const literal = entry.path;
+    if (!literal.includes('*') && !literal.includes('{')) {
+      // Literal path. Also accept `.yml` sibling for legacy `.yaml`
+      // declarations so the existing tests that probe both extensions
+      // continue to behave the same way.
+      const variants = [literal];
+      if (literal.endsWith('.yaml')) variants.push(literal.slice(0, -5) + '.yml');
+      for (const v of variants) {
+        if (existsSync(join(root, v)) && !seen.has(v)) {
+          seen.add(v);
+          out.push(v);
+        }
+      }
+      continue;
+    }
+    if (literal.startsWith('.mpl/mpl/phases/phase-*/')) {
+      const phasesDir = join(root, '.mpl', 'mpl', 'phases');
+      if (!existsSync(phasesDir)) continue;
+      let entries = [];
+      try { entries = readdirSync(phasesDir, { withFileTypes: true }); } catch {}
+      const suffix = literal.slice('.mpl/mpl/phases/phase-*/'.length);
+      for (const dirent of entries) {
+        if (!dirent.isDirectory()) continue;
+        if (!/^phase-/.test(dirent.name)) continue;
+        const candidate = `.mpl/mpl/phases/${dirent.name}/${suffix}`;
+        if (existsSync(join(root, candidate)) && !seen.has(candidate)) {
+          seen.add(candidate);
+          out.push(candidate);
+        }
+      }
     }
   }
   return out;
@@ -270,7 +280,7 @@ function enumerateArtifactPaths(root) {
 // CLI mode triggers when at least one positional arg is present.
 const cliArg = process.argv[2];
 if (cliArg && !cliArg.startsWith('-')) {
-  runCli(cliArg);
+  runChannelRegistryCli(cliArg);
 } else {
   await main().catch(() => silent());
 }

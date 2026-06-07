@@ -1,30 +1,56 @@
 /**
- * MPL State Manager — ported from hooks/lib/mpl-state.mjs
- * Provides deterministic state read/write with atomic file operations.
+ * MPL State Manager — Move #3.
+ *
+ * Move #3 collapses the divergent MCP-side writer that used to live in
+ * this file. `writeState` is now a subprocess shim that synchronously
+ * spawns `hooks/lib/state/writer-cli.mjs`, which delegates to the
+ * canonical hooks-side `writeState(cwd, patch)` from
+ * `hooks/lib/state/writer.mjs`. The CLI prints
+ * `{success, updated_keys, reason?}` JSON to stdout; the shim returns it
+ * verbatim. `handleStateWrite` (src/tools/state.ts) sees the exact same
+ * return shape, so no caller needs to change.
+ *
+ * `readState` stays here because:
+ *   (a) it's a pure JSON parse + deep-merge against DEFAULT_STATE,
+ *   (b) three siblings depend on its typed return
+ *       (feature-classifier, e2e-diagnoser, llm-scorer), and
+ *   (c) keeping reads in-process avoids subprocess overhead on the hot
+ *       read path.
+ *
+ * Source-of-truth notes:
+ *   - The on-disk `schema_version` is owned by the hooks-side writer,
+ *     which imports the canonical `CURRENT_SCHEMA_VERSION` from
+ *     `hooks/lib/state/reader.mjs` (=7 at time of writing). The MCP
+ *     side intentionally has no `CURRENT_SCHEMA_VERSION` constant any
+ *     more — there is no second authoritative default shape to keep in
+ *     sync. The MCP `DEFAULT_STATE` below is a shallow safety net for
+ *     typed reads only; its job is to satisfy the TS interface when
+ *     the on-disk file is missing fields the consumer expects, not to
+ *     define what a fresh state.json looks like.
+ *   - Ring-buffer caps (ambiguity_history, phase_scheduler_history,
+ *     worktree_pool_history), the I5 fix_loop_count lockstep, the H8
+ *     fail-closed schema check, the I13 phase-0-artifact gate, and any
+ *     future writer-side rule live exclusively on the hooks side.
+ *     Adding a new rule there is automatically picked up here through
+ *     the subprocess boundary — drift between two writers is
+ *     eliminated by construction.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, readdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
 
 const STATE_PATH = '.mpl/state.json';
 
 /**
- * Ring-buffer cap for ambiguity_history. Mirrored from hooks/lib/mpl-state.mjs
- * so that whichever writer reaches state.json first still enforces the same
- * bound. The orchestrator already slices client-side as a courtesy; this is
- * the defense-in-depth guarantee.
+ * Ring-buffer cap for ambiguity_history. Mirrored from
+ * hooks/lib/state/reader.mjs so callers that want to slice client-side
+ * as a courtesy (cheaper stringify) can read the same bound from here.
+ * The actual enforcement lives in the hooks-side writer; this constant
+ * is informational only.
  */
 export const MAX_AMBIGUITY_HISTORY = 10;
-
-/**
- * P2-6: schema version for `.mpl/state.json`. The JS-side hook
- * (`hooks/lib/mpl-state.mjs`) owns the v1 → v2 migration (legacy
- * `.mpl/mpl/state.json` → `state.execution`). The MCP server merely needs
- * to understand the v2 shape; any v1 state it encounters will have been
- * migrated by the time the orchestrator issues `mpl_state_write`.
- */
-export const CURRENT_SCHEMA_VERSION = 2;
 
 export interface MplExecutionState {
   task: string | null;
@@ -49,7 +75,10 @@ export interface MplExecutionState {
 }
 
 export interface MplState {
-  schema_version?: number;   // P2-6: absent = legacy v1 (migration handled by hook layer)
+  // schema_version is owned by the hooks-side writer
+  // (hooks/lib/state/reader.mjs CURRENT_SCHEMA_VERSION). Read-side
+  // consumers may inspect it but MUST NOT assume a fixed value here.
+  schema_version?: number;
   pipeline_id: string | null;
   run_mode: string;
   tool_mode: string;
@@ -107,8 +136,19 @@ export interface MplState {
   [key: string]: unknown;
 }
 
+/**
+ * Shallow safety net for typed reads. NOT the authoritative default
+ * state shape — that lives in `hooks/lib/state/writer.mjs` and is
+ * stamped onto disk by the hooks-side writer (see Move #3 notes at the
+ * top of this file). The fields below exist solely so `readState` can
+ * hand a fully-typed `MplState` back to TS callers when the on-disk
+ * file is missing keys the consumer expects.
+ *
+ * Source of truth for both `schema_version` and the canonical fresh-
+ * state shape: hooks/lib/state/reader.mjs + hooks/lib/state/writer.mjs.
+ */
 const DEFAULT_STATE: MplState = {
-  schema_version: CURRENT_SCHEMA_VERSION,
+  // No schema_version field here on purpose — see note above.
   pipeline_id: null,
   run_mode: 'full',
   tool_mode: 'full',
@@ -209,100 +249,179 @@ export function readState(cwd: string): MplState | null {
   }
 }
 
-// #223: Phase 0 artifact invariant enforcement (mirrors I13 in
-// hooks/lib/mpl-state-invariant.mjs + phase-controller's pre-transition
-// check). The hooks-side enforcement is intercepted by Claude Code's
-// PreToolUse pipeline; MCP `mpl_state_write` writes through the
-// state-manager directly, bypassing PreToolUse. Keep the lists in sync
-// with hooks/lib/mpl-phase0-artifacts.mjs.
-const REQUIRES_PHASE0_ARTIFACTS = new Set<string>([
-  'phase2-sprint',
-  'phase3-gate',
-  'phase4-fix',
-  'phase5-finalize',
-  'release-gate',
-  'release-finalize',
-  'completed',
-]);
+/**
+ * Walk up from this compiled module looking for a package.json whose
+ * `name` is `mpl-hooks`. That's the repo root (see /package.json which
+ * declares `name: mpl-hooks`). Falls back to the `MPL_HOOKS_ROOT` env
+ * var so tests and dev workflows can point at a vendored checkout
+ * without depending on the on-disk layout.
+ *
+ * Cached on first resolve — both the answer and any failure — so the
+ * shim doesn't re-walk on every state-write.
+ */
+let cachedRepoRoot: string | null = null;
+let repoRootResolved = false;
 
-function missingPhase0Artifacts(cwd: string): string[] {
-  const missing: string[] = [];
-  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'raw-scan.md'))) {
-    missing.push('.mpl/mpl/phase0/raw-scan.md');
+function findRepoRoot(): string | null {
+  if (repoRootResolved) return cachedRepoRoot;
+  repoRootResolved = true;
+
+  const envRoot = process.env.MPL_HOOKS_ROOT;
+  if (envRoot && envRoot.length > 0) {
+    cachedRepoRoot = envRoot;
+    return cachedRepoRoot;
   }
-  if (!existsSync(join(cwd, '.mpl', 'mpl', 'phase0', 'design-intent.yaml'))) {
-    missing.push('.mpl/mpl/phase0/design-intent.yaml');
-  }
-  const contractsDir = join(cwd, '.mpl', 'contracts');
-  let hasContract = false;
+
+  // import.meta.url → dist/lib/state-manager.js → walk up looking for
+  // a package.json that declares { name: 'mpl-hooks' }. Stops at fs
+  // root.
   try {
-    if (existsSync(contractsDir)) {
-      hasContract = readdirSync(contractsDir).some((n) => n.endsWith('.json'));
+    let dir = dirname(fileURLToPath(import.meta.url));
+    // Hard cap on traversal depth so a misconfigured deployment can't
+    // turn this into an unbounded walk.
+    for (let i = 0; i < 32; i++) {
+      const pkgPath = join(dir, 'package.json');
+      if (existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+          if (pkg && pkg.name === 'mpl-hooks') {
+            cachedRepoRoot = dir;
+            return cachedRepoRoot;
+          }
+        } catch {
+          // Skip unreadable / non-JSON package.json files and keep
+          // walking — sibling packages along the path are expected
+          // (mcp-server/package.json declares name=mpl-mcp-server).
+        }
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break; // reached fs root
+      dir = parent;
     }
   } catch {
-    hasContract = false;
+    // fall through
   }
-  if (!hasContract) {
-    missing.push('.mpl/contracts/*.json (or _no-boundaries.json)');
-  }
-  return missing;
+  cachedRepoRoot = null;
+  return null;
 }
 
-function blockedPhaseTransitionReason(cwd: string, nextPhase: string): string | null {
-  if (!REQUIRES_PHASE0_ARTIFACTS.has(nextPhase)) return null;
-  const missing = missingPhase0Artifacts(cwd);
-  if (missing.length === 0) return null;
-  return (
-    `[MPL I13] Cannot transition to ${nextPhase} — Phase 0 boundary/runtime ` +
-    `artifacts missing: ${missing.join(', ')}. Fast-track (run_mode=auto) ` +
-    `may shorten user interviews but MUST NOT skip these artifacts. Re-run ` +
-    `Phase 0 to produce them, or write .mpl/contracts/_no-boundaries.json ` +
-    `as the explicit opt-out for non-boundary tasks.`
+/**
+ * Update MPL state by delegating to the hooks-side writer via a
+ * subprocess. Returns the JSON object that the CLI printed verbatim,
+ * preserving the `{success, updated_keys, reason?}` contract that
+ * `handleStateWrite` already forwards.
+ *
+ * Behavior contract (preserved across Move #3):
+ *   - success path → `{success:true, updated_keys:[...keys of patch]}`.
+ *   - I13 reject (Phase 0 artifacts missing for protected current_phase)
+ *     → `{success:false, updated_keys:[], reason:'[MPL I13] ...'}`,
+ *     subprocess exit code 0.
+ *   - H8 reject (on-disk schema_version newer than hooks side supports)
+ *     → `{success:false, updated_keys:[], reason:'[MPL H8] ...'}`,
+ *     subprocess exit code 0.
+ *   - subprocess failure (spawn error, non-zero exit other than the
+ *     above) → `{success:false, updated_keys:[], reason:'[MPL state]
+ *     writer subprocess failed: <stderr tail>'}`. The pre-Move-#3
+ *     non-atomic catch-block fallback (which wrote directly to
+ *     filePath on tmp-rename failure, leaving tmp files dangling) is
+ *     intentionally GONE — propagating the failure honestly is safer
+ *     than papering over it with a non-atomic write.
+ */
+export function writeState(
+  cwd: string,
+  patch: Record<string, unknown>,
+): { success: boolean; updated_keys: string[]; reason?: string } {
+  const repoRoot = findRepoRoot();
+  if (!repoRoot) {
+    return {
+      success: false,
+      updated_keys: [],
+      reason:
+        '[MPL state] writer subprocess failed: could not locate hooks repo root ' +
+        '(no package.json with name=mpl-hooks found by walking up from state-manager.js; ' +
+        'set MPL_HOOKS_ROOT to override).',
+    };
+  }
+
+  const cliPath = join(repoRoot, 'hooks', 'lib', 'state', 'writer-cli.mjs');
+  if (!existsSync(cliPath)) {
+    return {
+      success: false,
+      updated_keys: [],
+      reason: `[MPL state] writer subprocess failed: writer-cli.mjs not found at ${cliPath}`,
+    };
+  }
+
+  const child = spawnSync(
+    process.execPath,
+    [cliPath, '--cwd', cwd],
+    {
+      input: JSON.stringify(patch),
+      encoding: 'utf-8',
+      // Don't inherit stdio — we need to capture stdout/stderr.
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
   );
-}
 
-export function writeState(cwd: string, patch: Record<string, unknown>): { success: boolean; updated_keys: string[]; reason?: string } {
-  const filePath = join(cwd, STATE_PATH);
-  const dir = dirname(filePath);
-
-  // #223 + codex r1 [data-integrity]: enforce I13 against the
-  // POST-MERGE current_phase, not the patch alone. Hook-side I13
-  // validates the full proposed state on every STATE_WRITE; mirror
-  // that here so non-`current_phase` patches against an already-
-  // protected-phase state with missing artifacts cannot persist
-  // execution/gate metadata while leaving the invariant violated.
-  const current = readState(cwd) ?? { ...DEFAULT_STATE };
-  const merged = deepMerge(current as unknown as Record<string, unknown>, patch);
-  const mergedPhase = typeof merged.current_phase === 'string' ? merged.current_phase : '';
-  if (mergedPhase) {
-    const blockedReason = blockedPhaseTransitionReason(cwd, mergedPhase);
-    if (blockedReason) {
-      return { success: false, updated_keys: [], reason: blockedReason };
-    }
+  if (child.error) {
+    return {
+      success: false,
+      updated_keys: [],
+      reason: `[MPL state] writer subprocess failed: ${child.error.message}`,
+    };
   }
 
-  mkdirSync(dir, { recursive: true });
-
-  // Ring-buffer cap for ambiguity_history (mirrors hooks/lib/mpl-state.mjs).
-  // deepMerge replaces arrays wholesale, so the patch either set or preserved
-  // the final array; we trim the head if it exceeds the bound.
-  const history = merged.ambiguity_history;
-  if (Array.isArray(history) && history.length > MAX_AMBIGUITY_HISTORY) {
-    const dropped = history.length - MAX_AMBIGUITY_HISTORY;
-    merged.ambiguity_history = history.slice(-MAX_AMBIGUITY_HISTORY);
-    process.stderr.write(`[mpl-state] ambiguity_history ring-buffer truncated ${dropped} oldest entries (cap=${MAX_AMBIGUITY_HISTORY})\n`);
+  // Forward subprocess stderr verbatim so writer diagnostics
+  // (ring-buffer truncation, schema-version warnings, RUNBOOK append
+  // notices, etc.) remain visible on the MCP host's stderr after
+  // Move #3. Without this, those messages would be swallowed by the
+  // subprocess boundary and operators would lose the observability
+  // signal that the in-process writer used to surface directly.
+  if (child.stderr && child.stderr.length > 0) {
+    process.stderr.write(child.stderr);
   }
 
-  // Atomic write: temp file → rename
-  const tmpPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
+  // The CLI exits 0 on success AND on expected rejection (I13/H8) —
+  // the body of stdout carries the verdict in both cases. Treat any
+  // non-zero exit as a true subprocess failure.
+  if (child.status !== 0) {
+    const stderrTail = (child.stderr || '').toString().trim().split('\n').slice(-5).join(' | ');
+    return {
+      success: false,
+      updated_keys: [],
+      reason: `[MPL state] writer subprocess failed (exit=${child.status}): ${stderrTail || '<no stderr>'}`,
+    };
+  }
+
+  const stdout = (child.stdout || '').toString().trim();
+  if (!stdout) {
+    return {
+      success: false,
+      updated_keys: [],
+      reason: '[MPL state] writer subprocess produced empty stdout',
+    };
+  }
+
   try {
-    writeFileSync(tmpPath, JSON.stringify(merged, null, 2));
-    renameSync(tmpPath, filePath);
-    return { success: true, updated_keys: Object.keys(patch) };
-  } catch {
-    // Cleanup temp file on failure
-    try { writeFileSync(filePath, JSON.stringify(merged, null, 2)); } catch { /* ignore */ }
-    return { success: false, updated_keys: [] };
+    const parsed = JSON.parse(stdout);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('writer subprocess stdout was not a JSON object');
+    }
+    const success = typeof parsed.success === 'boolean' ? parsed.success : false;
+    const updatedKeys = Array.isArray(parsed.updated_keys) ? parsed.updated_keys.map(String) : [];
+    const result: { success: boolean; updated_keys: string[]; reason?: string } = {
+      success,
+      updated_keys: updatedKeys,
+    };
+    if (typeof parsed.reason === 'string') result.reason = parsed.reason;
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      success: false,
+      updated_keys: [],
+      reason: `[MPL state] writer subprocess returned unparseable stdout: ${msg}`,
+    };
   }
 }
 

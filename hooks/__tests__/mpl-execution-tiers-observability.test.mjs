@@ -5,49 +5,60 @@ import { join } from 'path';
 
 describe('execution_tiers observability contract', () => {
   it('requires scheduler telemetry for every tier decision', () => {
+    // P2b: prompt rewrote `record_scheduler_event(...)` as `emit_event(...)`,
+    // which the orchestrator implements by shelling out to
+    // `scheduler-cli record-event` (the single sanctioned JSONL+state
+    // producer). Either spelling satisfies the telemetry-mandatory contract.
     const text = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
-    assert.match(text, /record_scheduler_event/);
+    assert.match(text, /(record_scheduler_event|emit_event|record-event)/);
     assert.match(text, /\.mpl\/mpl\/profile\/phase-scheduler\.jsonl/);
     assert.match(text, /state\.phase_scheduler_history/);
     assert.match(text, /selected_mode.*parallel_rejected/s);
     assert.match(text, /Do not add a separate `phase_dependencies` field/);
   });
 
-  it('every record_scheduler_event block carries pipeline_id + run_started_at + recompose_count + worker_cap + worktree_slots', () => {
+  it('every scheduler-event block carries pipeline_id + run_started_at + recompose_count + worker_cap + worktree_slots', () => {
     // Codex r1: worker_cap/worktree_slots missing from skipped+sequential.
     // Codex r3: pipeline_id added because JSONL profile is persistent.
     // Codex r4: pipeline_id alone is not unique (mpl-{date}-{slug} collides
     // on same-day same-feature reruns); add state.started_at as run_started_at
     // for genuine per-run uniqueness.
+    // P2b: scheduler events are now emitted via `emit_event(...)` (=
+    // `scheduler-cli record-event`). Match both spellings so the identity
+    // contract survives the prompt rewrite.
     const text = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
-    const blockPattern = /record_scheduler_event\(\{[^}]*\}\)/gs;
+    const blockPattern = /(?:record_scheduler_event|emit_event)\(\{[^}]*\}\)/gs;
     const blocks = text.match(blockPattern) || [];
     assert.ok(blocks.length >= 3,
-      `expected at least 3 record_scheduler_event() blocks, found ${blocks.length}`);
+      `expected at least 3 scheduler-event blocks, found ${blocks.length}`);
     for (const block of blocks) {
       assert.match(block, /pipeline_id/,
-        `record_scheduler_event block missing pipeline_id:\n${block}`);
+        `scheduler-event block missing pipeline_id:\n${block}`);
       assert.match(block, /run_started_at/,
-        `record_scheduler_event block missing run_started_at:\n${block}`);
+        `scheduler-event block missing run_started_at:\n${block}`);
       assert.match(block, /recompose_count/,
-        `record_scheduler_event block missing recompose_count:\n${block}`);
+        `scheduler-event block missing recompose_count:\n${block}`);
       assert.match(block, /wave_index/,
-        `record_scheduler_event block missing wave_index:\n${block}`);
-      assert.match(block, /timestamp: now_iso\(\)/,
-        `record_scheduler_event block missing timestamp:\n${block}`);
+        `scheduler-event block missing wave_index:\n${block}`);
       assert.match(block, /worker_cap/,
-        `record_scheduler_event block missing worker_cap:\n${block}`);
+        `scheduler-event block missing worker_cap:\n${block}`);
       assert.match(block, /worktree_slots/,
-        `record_scheduler_event block missing worktree_slots:\n${block}`);
+        `scheduler-event block missing worktree_slots:\n${block}`);
     }
+    // The CLI auto-fills `timestamp` when the caller omits it, so the
+    // explicit `timestamp: now_iso()` requirement is dropped at the prompt
+    // surface — the contract now lives inside scheduler-cli record-event.
   });
 
   it('parallel-pool slot lifecycle uses state.worktree_pool_history (separate from HIGH-risk isolation worktree_history)', () => {
     // Claude review on PR #213: the new parallel-pool writer must not share
     // an array with the existing HIGH-risk isolation writer in
     // commands/mpl-run-execute-context.md §5 — the shapes are incompatible.
+    // P2b: the prompt now writes worktree_pool_history through
+    // mpl_state_write({worktree_pool_history: [...]}) (replacing the
+    // earlier "append state.worktree_pool_history entries" pseudocode).
     const text = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
-    assert.match(text, /append state\.worktree_pool_history entries/);
+    assert.match(text, /worktree_pool_history/);
     assert.doesNotMatch(text, /append state\.worktree_history entries/,
       'parallel-pool writer must use worktree_pool_history, not worktree_history');
     assert.match(text, /slot_id/);
@@ -72,26 +83,46 @@ describe('execution_tiers observability contract', () => {
     }
   });
 
-  it('parallel event is emitted AFTER parallel_map success; pool/dispatch failures emit parallel_failed', () => {
+  it('parallel event is emitted AFTER wave success; pool/dispatch failures emit parallel_failed', () => {
     // Codex round-6 review on PR #213: emitting selected_mode:"parallel"
-    // before ensure_worktree_pool/parallel_map run lets a setup or worker
-    // failure leave a successful-looking row that satisfies the run
-    // summary. The lifecycle must be:
+    // before the wave runs lets a setup or worker failure leave a
+    // successful-looking row that satisfies the run summary. The
+    // lifecycle must be:
     //   - wave.length == 1: emit parallel_rejected before single-phase exec
-    //   - wave.length > 1: emit parallel AFTER parallel_map succeeds, or
+    //   - wave.length > 1: emit parallel AFTER the wave succeeds, or
     //                      parallel_failed in the catch branch
+    //
+    // P2b: the prompt was rewritten to Node-backed CLIs. The
+    // `parallel_map(wave, ...)` pseudocode is now `Task(...)` +
+    // `wait_all(task_handles)` followed by `wave-reducer-cli merge`. The
+    // ordering invariant lives on those concrete artifacts. The lifecycle
+    // prose now reads "Emit proof-of-execution event ... means the wave
+    // actually ran in parallel" and the parallel_failed branch lives in
+    // the `catch err` block.
     const exec = readFileSync(join(process.cwd(), 'commands', 'mpl-run-execute.md'), 'utf-8');
     assert.match(exec, /parallel_failed/,
       'execute prompt must define a parallel_failed mode for pool/dispatch errors');
-    assert.match(exec, /MUST NOT be emitted before the wave finishes successfully/,
-      'execute prompt must state the lifecycle invariant in prose');
-    // The parallel-event block must sit AFTER parallel_map(...) in the prompt.
+    assert.match(exec, /proof-of-execution event/,
+      'execute prompt must state the lifecycle invariant in prose (parallel event = proof-of-execution)');
+
+    // The parallel-event block must sit AFTER the wave actually runs. In
+    // the new prompt the anchor is `wait_all(task_handles)`. In the
+    // legacy prompt the anchor was `parallel_map(wave,`. Accept either.
+    const waitAllIdx = exec.indexOf('wait_all(task_handles)');
     const parallelMapIdx = exec.indexOf('parallel_map(wave,');
+    const waveExecAnchor = Math.max(waitAllIdx, parallelMapIdx);
     const parallelEventIdx = exec.indexOf('selected_mode: "parallel",');
-    assert.ok(parallelMapIdx > 0, 'parallel_map(...) block must exist');
+    assert.ok(waveExecAnchor > 0, 'wave execution anchor (wait_all/parallel_map) must exist');
     assert.ok(parallelEventIdx > 0, 'selected_mode:"parallel" event must exist');
-    assert.ok(parallelEventIdx > parallelMapIdx,
-      'selected_mode:"parallel" event must appear AFTER the parallel_map(...) call in the executor prompt');
+    assert.ok(parallelEventIdx > waveExecAnchor,
+      'selected_mode:"parallel" event must appear AFTER the wave execution anchor in the executor prompt');
+
+    // parallel_failed must sit inside the catch branch — the same lifecycle
+    // invariant the legacy prose called out. Pin by adjacency to `catch err`.
+    const catchIdx = exec.indexOf('catch err');
+    const parallelFailedIdx = exec.indexOf('"parallel_failed"');
+    assert.ok(catchIdx > 0 && parallelFailedIdx > catchIdx,
+      'parallel_failed must be emitted inside the catch branch (after `catch err`)');
 
     const finalize = readFileSync(join(process.cwd(), 'commands', 'mpl-run-finalize.md'), 'utf-8');
     assert.match(finalize, /waves_parallel_failed/,

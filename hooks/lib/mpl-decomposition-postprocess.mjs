@@ -185,6 +185,59 @@ function collectImpactPathFields(block) {
   return [...new Set(out)];
 }
 
+/**
+ * P2b — structured per-key impact extractor.
+ *
+ * Mirrors `collectImpactPathFields` (same indent-walking algorithm) but
+ * emits `{ create, modify, affected_tests }` instead of a flat union.
+ * The structured shape feeds:
+ *   1. `scheduler.route_to_phase` resolver (3) — match a worktree edit
+ *      back to a phase via `def.impact.create + def.impact.modify`.
+ *   2. `detectImpactDriftFromGit` — declared blast-radius compared
+ *      against `git diff --name-only` at wave end.
+ *
+ * Additive: `collectImpactPathFields` continues to power the flat union
+ * used by the test-agent brief and risk pattern code.
+ */
+function collectImpactStructured(block) {
+  const lines = String(block || '').split('\n').map((line) => line.replace(/\r$/, ''));
+  const out = { create: [], modify: [], affected_tests: [] };
+  const impactKeys = new Set(Object.keys(out));
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const impactMatch = lines[i].match(/^(\s*)impact\s*:\s*$/);
+    if (!impactMatch) continue;
+
+    const impactIndent = impactMatch[1].length;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (!lines[j].trim()) continue;
+      const indent = lines[j].match(/^(\s*)/)?.[1]?.length || 0;
+      if (indent <= impactIndent) break;
+
+      const keyMatch = lines[j].match(/^(\s*)([A-Za-z_]+)\s*:\s*(.*?)\s*$/);
+      if (!keyMatch || !impactKeys.has(keyMatch[2])) continue;
+
+      const key = keyMatch[2];
+      const keyIndent = keyMatch[1].length;
+      out[key].push(...pathValuesFromImpactLine(keyMatch[3]));
+
+      for (let k = j + 1; k < lines.length; k += 1) {
+        if (!lines[k].trim()) continue;
+        const childIndent = lines[k].match(/^(\s*)/)?.[1]?.length || 0;
+        if (childIndent <= keyIndent) {
+          j = k - 1;
+          break;
+        }
+        out[key].push(...pathValuesFromImpactLine(lines[k]));
+        if (k === lines.length - 1) j = k;
+      }
+    }
+  }
+
+  for (const k of Object.keys(out)) out[k] = [...new Set(out[k])];
+  return out;
+}
+
 function parseRiskPatternBlocks(block) {
   if (!/^\s+risk_patterns\s*:/m.test(block || '')) return [];
   const out = [];
@@ -225,6 +278,9 @@ export function parseDecompositionPostprocessText(text) {
     phase.phase_domain = scalarField(block, 'phase_domain');
     phase.phase_lang = scalarField(block, 'phase_lang');
     phase.impact_files = collectImpactPathFields(block);
+    // P2b: structured impact for scheduler resolver (3) + detectImpactDriftFromGit.
+    // Additive — keeps phase.impact_files (flat union) intact for legacy consumers.
+    phase.impact = collectImpactStructured(block);
     phase.risk_patterns = parseRiskPatternBlocks(block);
     byId.set(id, phase);
   }

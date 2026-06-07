@@ -467,7 +467,11 @@ deferred_cases:`,
     assert.equal(report.surfaces.missing_covers[0].uc_id, 'UC-03');
   });
 
-  it('drift surface alone does NOT fail the verdict (informational only)', () => {
+  it('Move #13 inverted: drift_undeclared FAILS the verdict by default (new declarative gating)', () => {
+    // Move #13 inverts the legacy 3-conjunct expression. The default
+    // `audit.verdict.required_clean[]` now includes `drift_undeclared`,
+    // so any undeclared file in the diff surfaces as a fail. Drift
+    // unimplemented (declared but unshipped) remains informational.
     scaffold(tmp, {
       '.mpl/requirements/user-contract.md': SAMPLE_USER_CONTRACT,
       '.mpl/mpl/decomposition.yaml': SAMPLE_DECOMPOSITION,
@@ -476,9 +480,28 @@ deferred_cases:`,
       now: 'NOW',
       probes: ['echo src/undeclared.ts'],
     });
-    assert.equal(report.verdict, 'pass');
+    assert.equal(report.verdict, 'fail');
     assert.equal(report.summary.drift_undeclared, 1);
     assert.equal(report.surfaces.drift.undeclared[0], 'src/undeclared.ts');
+  });
+
+  it('legacyVerdict:true preserves pre-Move-#13 behavior (rollback safety)', () => {
+    // Single dedicated regression test for the back-compat lever. The
+    // legacy 3-conjunct expression treated drift_undeclared as
+    // informational. When the orchestrator opts into legacy mode, that
+    // semantic is restored byte-for-byte.
+    scaffold(tmp, {
+      '.mpl/requirements/user-contract.md': SAMPLE_USER_CONTRACT,
+      '.mpl/mpl/decomposition.yaml': SAMPLE_DECOMPOSITION,
+    });
+    const report = runCodexAudit(tmp, REAL_PLUGIN_ROOT, {
+      now: 'NOW',
+      probes: ['echo src/undeclared.ts'],
+      legacyVerdict: true,
+    });
+    assert.equal(report.verdict, 'pass');
+    assert.equal(report.summary.drift_undeclared, 1);
+    assert.equal(report.verdict_policy.legacy_verdict, true);
   });
 
   it('tolerates entirely empty workspace (graceful skip)', () => {

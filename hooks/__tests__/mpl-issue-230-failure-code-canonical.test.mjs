@@ -86,17 +86,19 @@ function fakeState() {
 // ---------------------------------------------------------------------------
 
 describe('#230 allowlist', () => {
-  it('exposes the five canonical failure codes', () => {
-    assert.deepEqual(
-      [...FAILURE_CODE_ALLOWLIST].sort(),
-      [
-        'merge_error',
-        'unknown_runtime_error',
-        'wave_execution_error',
-        'worker_dispatch_error',
-        'worktree_setup_error',
-      ],
-    );
+  it('exposes the five canonical failure codes (extended in Move #17; v1 codes still preserved)', () => {
+    // Move #17 extended the Set to 11 (5 legacy v1 + 6 wave-reducer/reconcile).
+    // The #230 contract is: every v1 code MUST still be canonical.
+    const codes = [...FAILURE_CODE_ALLOWLIST];
+    for (const code of [
+      'merge_error',
+      'unknown_runtime_error',
+      'wave_execution_error',
+      'worker_dispatch_error',
+      'worktree_setup_error',
+    ]) {
+      assert.ok(codes.includes(code), `#230 legacy code missing: ${code}`);
+    }
   });
   it('isCanonicalFailureCode accepts allowlisted codes only', () => {
     assert.equal(isCanonicalFailureCode('worker_dispatch_error'), true);

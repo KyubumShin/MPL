@@ -1,0 +1,1408 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MPL 재설계 제안 — Policy Engine + 모듈화</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --bg-2: #11172a;
+    --surface: #161d34;
+    --surface-2: #1c243f;
+    --border: #232c4a;
+    --border-strong: #2e3a5e;
+    --text: #e6ebf5;
+    --text-dim: #98a2c0;
+    --text-mute: #6b7494;
+
+    --c-engine:  #60a5fa;
+    --c-infra:   #fbbf24;
+    --c-policy:  #a78bfa;
+    --c-observ:  #34d399;
+    --c-state:   #f472b6;
+    --c-warn:    #f87171;
+    --c-good:    #4ade80;
+
+    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Pretendard", "Inter", "Helvetica Neue", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.6; }
+  a { color: var(--c-engine); }
+
+  .container { max-width: 1180px; margin: 0 auto; padding: 56px 28px 120px; }
+
+  /* HERO */
+  .hero { margin-bottom: 72px; }
+  .hero h1 { font-size: 38px; line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.02em; }
+  .hero .sub { color: var(--text-dim); font-size: 17px; max-width: 760px; }
+  .hero .tags { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .tag { font-family: var(--mono); font-size: 11px; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); }
+  .tag.good { color: var(--c-good); border-color: rgba(74,222,128,.3); background: rgba(74,222,128,.06); }
+  .tag.warn { color: var(--c-warn); border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.06); }
+
+  /* SECTION */
+  section { margin-bottom: 88px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .sec-num { font-family: var(--mono); font-size: 13px; color: var(--text-mute); }
+  .sec-head h2 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
+  .sec-head .lede { color: var(--text-dim); font-size: 14px; }
+
+  h3 { font-size: 17px; margin: 36px 0 12px; letter-spacing: -0.005em; }
+  h4 { font-size: 14px; color: var(--text-dim); margin: 24px 0 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--text-dim); }
+
+  /* CARDS / GRID */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  @media (max-width: 820px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+  .card h4 { margin-top: 0; }
+
+  /* CALLOUT */
+  .callout { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--c-engine); border-radius: 8px; padding: 14px 18px; color: var(--text-dim); font-size: 14px; }
+  .callout.warn { border-left-color: var(--c-warn); }
+  .callout.good { border-left-color: var(--c-good); }
+
+  /* FILE TREE */
+  .tree { font-family: var(--mono); font-size: 13px; line-height: 1.7; background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 22px 26px; overflow-x: auto; white-space: pre; }
+  .tree .dir   { color: var(--text); }
+  .tree .file  { color: var(--text-dim); }
+  .tree .comm  { color: var(--text-mute); font-style: italic; }
+  .tree .c-eng { color: var(--c-engine); }
+  .tree .c-inf { color: var(--c-infra); }
+  .tree .c-pol { color: var(--c-policy); }
+  .tree .c-obs { color: var(--c-observ); }
+  .tree .c-st  { color: var(--c-state); }
+
+  /* TABLES */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; background: var(--bg-2); }
+  td code { font-family: var(--mono); font-size: 12.5px; color: var(--text); background: var(--surface-2); padding: 2px 6px; border-radius: 4px; }
+  .table-wrap { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+  /* CATEGORY HEADERS */
+  .cat { margin: 36px 0 14px; display: flex; align-items: center; gap: 12px; }
+  .cat .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .cat h3 { margin: 0; font-size: 16px; }
+  .cat .count { font-family: var(--mono); font-size: 12px; color: var(--text-mute); }
+  .cat .arrow { color: var(--text-mute); font-size: 12px; }
+  .cat .dest { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  .cat.source  .dot { background: var(--c-policy); }
+  .cat.contract .dot { background: var(--c-policy); }
+  .cat.gate    .dot { background: var(--c-policy); }
+  .cat.permit  .dot { background: var(--c-policy); }
+  .cat.schema  .dot { background: var(--c-policy); }
+  .cat.observ  .dot { background: var(--c-observ); }
+  .cat.boot    .dot { background: var(--c-infra); }
+  .cat.cli     .dot { background: var(--c-state); }
+
+  /* LAYERS DIAGRAM */
+  .layers { display: grid; gap: 16px; margin: 20px 0 8px; }
+  .layer { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; }
+  .layer-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .layer-tag { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 4px; }
+  .layer-name { font-size: 14px; color: var(--text); font-weight: 600; }
+  .layer-desc { font-size: 13px; color: var(--text-dim); margin-left: auto; }
+  .modules { display: flex; gap: 10px; flex-wrap: wrap; }
+  .mod { font-family: var(--mono); font-size: 12px; padding: 6px 12px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border); }
+  .mod .loc { color: var(--text-mute); margin-left: 8px; font-size: 11px; }
+
+  .layer.l0 { border-left: 3px solid var(--c-engine); }
+  .layer.l0 .layer-tag { background: rgba(96,165,250,.12); color: var(--c-engine); }
+  .layer.l1 { border-left: 3px solid var(--c-infra); }
+  .layer.l1 .layer-tag { background: rgba(251,191,36,.12); color: var(--c-infra); }
+  .layer.l2 { border-left: 3px solid var(--c-policy); }
+  .layer.l2 .layer-tag { background: rgba(167,139,250,.12); color: var(--c-policy); }
+  .layer.l3 { border-left: 3px solid var(--c-observ); }
+  .layer.l3 .layer-tag { background: rgba(52,211,153,.12); color: var(--c-observ); }
+
+  /* SVG WRAP */
+  .svg-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 28px; overflow-x: auto; }
+  .svg-wrap svg { display: block; max-width: 100%; height: auto; }
+  .diagram-cap { margin-top: 10px; font-size: 13px; color: var(--text-mute); text-align: center; font-style: italic; }
+
+  /* BEFORE/AFTER */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px) { .ba { grid-template-columns: 1fr; } }
+  .ba .col { padding: 22px; border-radius: 12px; }
+  .ba .before { background: rgba(248,113,113,.05); border: 1px solid rgba(248,113,113,.25); }
+  .ba .after  { background: rgba(74,222,128,.05); border: 1px solid rgba(74,222,128,.25); }
+  .ba h4 { margin-top: 0; }
+  .ba ol { padding-left: 20px; margin: 0; font-size: 14px; }
+  .ba ol li { margin-bottom: 6px; }
+
+  /* LOC BAR */
+  .loc-row { display: grid; grid-template-columns: 220px 80px 1fr; gap: 14px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .loc-row:last-child { border-bottom: none; }
+  .loc-row .name { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  .loc-row .num  { font-family: var(--mono); font-size: 12px; color: var(--text-dim); text-align: right; }
+  .loc-row .bar  { height: 8px; background: var(--bg-2); border-radius: 4px; overflow: hidden; }
+  .loc-row .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--c-policy), var(--c-engine)); border-radius: 4px; }
+
+  .summary { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 14px; padding: 28px 32px; margin-top: 36px; }
+  .summary h3 { margin-top: 0; color: var(--c-engine); }
+
+  hr.soft { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+  @media (max-width: 820px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .stat .label { color: var(--text-mute); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat .val { font-size: 26px; margin-top: 6px; font-family: var(--mono); }
+  .stat .delta { font-size: 12px; color: var(--c-good); margin-top: 2px; }
+  .stat .delta.warn { color: var(--c-warn); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ============== HERO ============== -->
+  <header class="hero">
+    <div class="tags">
+      <span class="tag">MPL v0.18.6 → vNext</span>
+      <span class="tag good">Detail-preserving</span>
+      <span class="tag good">Modular engine</span>
+      <span class="tag warn">Big-bang 아님 · 4단계 점진 마이그레이션</span>
+    </div>
+    <h1>Policy Engine 재설계 — Dispatcher 1개 + 정책 모듈 ~10개</h1>
+    <p class="sub">
+      47개 hook을 한 덩어리로 합치는 게 아니라, <strong>단일 entry + 명확하게 쪼개진 모듈</strong>로 재구성합니다.
+      각 hook이 캡처한 nuance는 8개 정책 모듈 + 2개 관찰 모듈 + 2개 상태 모듈에 추적 가능하게 흡수됩니다.
+      어떤 파일도 500 LOC를 넘기지 않습니다.
+    </p>
+  </header>
+
+  <div class="stat-row">
+    <div class="stat">
+      <div class="label">현재 hook 파일</div>
+      <div class="val">47</div>
+      <div class="delta">→ 1 entry + ~10 modules</div>
+    </div>
+    <div class="stat">
+      <div class="label">정책 진실 출처</div>
+      <div class="val">4곳</div>
+      <div class="delta">→ 1 (mpl.config.yaml)</div>
+    </div>
+    <div class="stat">
+      <div class="label">State writer</div>
+      <div class="val">2개 (drift)</div>
+      <div class="delta">→ 1 (drift 영구 차단)</div>
+    </div>
+    <div class="stat">
+      <div class="label">총 LOC 예상</div>
+      <div class="val">~15k</div>
+      <div class="delta">→ ~4k (-73%)</div>
+    </div>
+  </div>
+
+  <!-- ============== SECTION 1: Engine Structure ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>엔진 구조 — Dispatcher + 정책 모듈</h2>
+    </div>
+
+    <p class="muted">엔진 본체(<code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">mpl-engine.mjs</code>)는 진짜 얇습니다. 이벤트 파싱 + dispatch 호출 + short-circuit + 결과 합성만 합니다. 정책 로직은 0줄.</p>
+
+    <div class="tree">
+<span class="dir">hooks/</span>
+├── <span class="c-eng">mpl-engine.mjs</span>              <span class="comm"># ~150 LOC · 유일 entry (PreToolUse / PostToolUse / SubagentStop / Stop / SessionStart)</span>
+└── <span class="dir">lib/</span>
+    ├── <span class="c-inf">config.mjs</span>              <span class="comm"># ~200 LOC · mpl.config.yaml 로드 + JSON Schema 검증 + 캐시</span>
+    ├── <span class="c-inf">dispatch.mjs</span>            <span class="comm"># ~150 LOC · event/tool/state → 적용 모듈 라우팅</span>
+    │
+    ├── <span class="dir">policy/</span>                  <span class="comm"># ← 결정을 내리는 모듈</span>
+    │   ├── <span class="c-pol">source-edit.mjs</span>     <span class="comm"># ~400 LOC · Law 2 (write-guard 흡수, Bash 분기 포함)</span>
+    │   ├── <span class="c-pol">channel-registry.mjs</span> <span class="comm"># ~150 LOC · .mpl/ 경로 화이트리스트 + immutability</span>
+    │   ├── <span class="c-pol">contracts.mjs</span>       <span class="comm"># ~400 LOC · requires/provides/produces + DAG topology</span>
+    │   ├── <span class="c-pol">evidence.mjs</span>        <span class="comm"># ~300 LOC · STRUCTURAL evidence 검사 (Evidence Latch 교체)</span>
+    │   ├── <span class="c-pol">gates.mjs</span>           <span class="comm"># ~300 LOC · finalize / quality / ambiguity / phase 전이</span>
+    │   ├── <span class="c-pol">permit.mjs</span>          <span class="comm"># ~250 LOC · auto-permit + bash-timeout + resource-risk</span>
+    │   ├── <span class="c-pol">schemas.mjs</span>         <span class="comm"># ~200 LOC · validate-* + property-check</span>
+    │   └── <span class="c-pol">audit.mjs</span>           <span class="comm"># ~300 LOC · finalize 전역 audit (Tier 4 + drift 포함)</span>
+    │
+    ├── <span class="dir">observability/</span>           <span class="comm"># ← 결정 안 내림, 신호만 기록</span>
+    │   ├── <span class="c-obs">signals.mjs</span>         <span class="comm"># ~250 LOC · sentinels + gate-recorder + soft-signal</span>
+    │   └── <span class="c-obs">trackers.mjs</span>        <span class="comm"># ~200 LOC · context + compaction + tool tracking</span>
+    │
+    └── <span class="dir">state/</span>                   <span class="comm"># ← state.json 단일 진실 (MCP도 여기로)</span>
+        ├── <span class="c-st">reader.mjs</span>          <span class="comm"># ~150 LOC · 읽기 + schema version 체크</span>
+        ├── <span class="c-st">writer.mjs</span>          <span class="comm"># ~400 LOC · I5 + H8 + normalize + history caps</span>
+        └── <span class="dir">migrations/</span>          <span class="comm"># v1 → v7 (그대로 유지)</span>
+
+<span class="dir">cli/</span>                                <span class="comm"># ← hooks가 아닌 도구 (현재 hooks/에 잘못 위치)</span>
+├── <span class="file">mpl-hud.mjs</span>                  <span class="comm"># statusline 렌더러</span>
+└── <span class="file">mpl-doctor-meta-self.mjs</span>     <span class="comm"># 메타 진단 도구</span></div>
+  </section>
+
+  <!-- ============== SECTION 2: 4 Layers ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>4개 층으로 정리된 모듈 책임</h2>
+    </div>
+
+    <p class="muted">L2 정책 모듈끼리는 서로 import하지 않습니다. 결정 의존성은 dispatch 순서로만 표현됩니다 — 이게 현재의 "hook들이 서로 모름" 강점을 보존하는 핵심입니다.</p>
+
+    <div class="layers">
+      <div class="layer l0">
+        <div class="layer-head">
+          <span class="layer-tag">L0 · ENGINE</span>
+          <span class="layer-name">단일 entry point</span>
+          <span class="layer-desc">이벤트 파싱 · dispatch 호출 · short-circuit · 결과 합성</span>
+        </div>
+        <div class="modules">
+          <div class="mod">mpl-engine.mjs <span class="loc">~150 LOC</span></div>
+        </div>
+      </div>
+
+      <div class="layer l1">
+        <div class="layer-head">
+          <span class="layer-tag">L1 · INFRA</span>
+          <span class="layer-name">모두가 의존하는 인프라</span>
+          <span class="layer-desc">한 번 로드 · 캐시 · 모든 L2가 읽기 전용으로 참조</span>
+        </div>
+        <div class="modules">
+          <div class="mod">config.mjs <span class="loc">~200</span></div>
+          <div class="mod">dispatch.mjs <span class="loc">~150</span></div>
+          <div class="mod">state/reader.mjs <span class="loc">~150</span></div>
+        </div>
+      </div>
+
+      <div class="layer l2">
+        <div class="layer-head">
+          <span class="layer-tag">L2 · POLICY</span>
+          <span class="layer-name">결정을 내리는 모듈</span>
+          <span class="layer-desc">L1만 의존 · 서로 import 금지 (audit 예외)</span>
+        </div>
+        <div class="modules">
+          <div class="mod">source-edit <span class="loc">~400</span></div>
+          <div class="mod">channel-registry <span class="loc">~150</span></div>
+          <div class="mod">contracts <span class="loc">~400</span></div>
+          <div class="mod">evidence <span class="loc">~300</span></div>
+          <div class="mod">gates <span class="loc">~300</span></div>
+          <div class="mod">permit <span class="loc">~250</span></div>
+          <div class="mod">schemas <span class="loc">~200</span></div>
+          <div class="mod">audit <span class="loc">~300</span></div>
+        </div>
+      </div>
+
+      <div class="layer l3">
+        <div class="layer-head">
+          <span class="layer-tag">L3 · SIDE</span>
+          <span class="layer-name">결정의 부산물을 기록</span>
+          <span class="layer-desc">L2 결정 받아 기록 / state 쓰기 — fire-and-forget</span>
+        </div>
+        <div class="modules">
+          <div class="mod">observability/signals <span class="loc">~250</span></div>
+          <div class="mod">observability/trackers <span class="loc">~200</span></div>
+          <div class="mod">state/writer <span class="loc">~400</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout good" style="margin-top:18px">
+      <strong>불변식:</strong> L2 모듈끼리 import 금지. 한 정책이 다른 정책 결정에 의존하면 직접 함수 호출이 아니라 <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">dispatch</code> 순서로 표현한다. 47개 hook의 "서로 모름" 강점을 모듈 레벨에서 보존하는 장치.
+    </div>
+  </section>
+
+  <!-- ============== SECTION 3: 47 Hooks Mapping ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>47개 hook → 모듈 매핑 — 디테일 보존 증명</h2>
+    </div>
+
+    <p class="muted">각 hook이 캡처한 nuance가 어디로 가는지 전수 추적. 잃어버린 책임 0개.</p>
+
+    <!-- 2.1 Source/path -->
+    <div class="cat source">
+      <span class="dot"></span>
+      <h3>Source / Path 보호</h3>
+      <span class="count">4 hooks</span>
+      <span class="arrow">→</span>
+      <span class="dest">policy/source-edit.mjs + policy/channel-registry.mjs</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-write-guard</code></td><td>Edit/Write의 source-file 차단, rule action 평가, Bash 분기 (현재 미완)</td><td><code>source-edit.mjs</code> (Bash 분기 보강 포함)</td></tr>
+          <tr><td><code>mpl-artifact-schema</code></td><td><code>.mpl/</code> 하위 파일 스키마</td><td><code>channel-registry.mjs</code> + <code>schemas.mjs</code></td></tr>
+          <tr><td><code>mpl-baseline-guard</code></td><td>baseline phase 보호</td><td><code>channel-registry.mjs</code> (immutable-paths 규칙)</td></tr>
+          <tr><td><code>mpl-require-completed-phase-immutability</code></td><td>완료 phase 산출물 잠금</td><td><code>channel-registry.mjs</code> (immutable-paths)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.2 Contracts -->
+    <div class="cat contract">
+      <span class="dot"></span>
+      <h3>Phase Contract — 대부분 선언적 YAML로 환원</h3>
+      <span class="count">14 hooks</span>
+      <span class="arrow">→</span>
+      <span class="dest">policy/contracts.mjs (+ YAML rule)</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 표현</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-require-chain-assignment</code></td><td>각 phase는 chain에 owner 명시</td><td>YAML: <code>contracts.chain_assignment.required</code></td></tr>
+          <tr><td><code>mpl-require-covers</code></td><td>decomp이 goal cover</td><td>YAML: <code>contracts.coverage.required</code></td></tr>
+          <tr><td><code>mpl-require-decomposition-delta</code></td><td>decomp 변경 시 delta 산출</td><td>YAML: <code>contracts.decomposition.require_delta</code></td></tr>
+          <tr><td><code>mpl-require-goal-trace</code></td><td>모든 phase → goal 추적</td><td>YAML: <code>contracts.goal_trace.required</code></td></tr>
+          <tr><td><code>mpl-require-phase-contract-graph</code></td><td>DAG topology + requires↔provides 심볼</td><td><code>contracts.mjs</code> graph validator</td></tr>
+          <tr><td><code>mpl-require-phase-evidence</code></td><td>evidence 토큰 존재</td><td><code>evidence.mjs</code> (structural 강화)</td></tr>
+          <tr><td><code>mpl-require-test-agent-brief</code></td><td>test-agent brief 필수</td><td>YAML: <code>contracts.test_agent.brief_required</code></td></tr>
+          <tr><td><code>mpl-require-test-agent</code></td><td>test-agent dispatch</td><td>YAML + structural dispatch flag 검사</td></tr>
+          <tr><td><code>mpl-require-reviewer</code></td><td>adversarial reviewer 필수</td><td>YAML: <code>contracts.reviewer.required</code></td></tr>
+          <tr><td><code>mpl-require-e2e</code></td><td>E2E 테스트 필수</td><td>YAML: <code>contracts.e2e.required</code></td></tr>
+          <tr><td><code>mpl-require-e2e-authenticity</code></td><td>E2E가 진짜 코드 경로</td><td><code>evidence.mjs</code> 구조 검사 (artifact 존재)</td></tr>
+          <tr><td><code>mpl-require-finalize-artifacts</code></td><td>finalize 산출물 완비</td><td>YAML + <code>audit.mjs</code></td></tr>
+          <tr><td><code>mpl-require-whole-goal-closure</code></td><td>전체 goal 닫힘</td><td><code>audit.mjs</code></td></tr>
+          <tr><td><code>mpl-decomposition-postprocess</code></td><td>decomp 후처리</td><td><code>contracts.mjs</code> post-hook</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.3 Gates -->
+    <div class="cat gate">
+      <span class="dot"></span>
+      <h3>Gate / 상태 전이</h3>
+      <span class="count">5 hooks</span>
+      <span class="arrow">→</span>
+      <span class="dest">policy/gates.mjs + state/writer.mjs</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-finalize-gate</code></td><td>4개 child 통합 (#257)</td><td><code>gates.mjs</code> finalize 함수</td></tr>
+          <tr><td><code>mpl-quality-gate</code></td><td>adversarial score / retry</td><td><code>gates.mjs</code> quality 함수 (+ rmSync 버그 수정)</td></tr>
+          <tr><td><code>mpl-ambiguity-gate</code></td><td>모호한 요청 차단</td><td><code>gates.mjs</code> ambiguity 함수</td></tr>
+          <tr><td><code>mpl-phase-controller</code></td><td>phase 진입/이탈 전이</td><td><code>gates.mjs</code> transition 함수</td></tr>
+          <tr><td><code>mpl-state-invariant</code></td><td>state.json 불변식</td><td><code>state/writer.mjs</code> (I5/I12 핵심)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.4 Permit -->
+    <div class="cat permit">
+      <span class="dot"></span>
+      <h3>Permit / Bash 안전</h3>
+      <span class="count">5 hooks</span>
+      <span class="arrow">→</span>
+      <span class="dest">policy/permit.mjs</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-auto-permit</code></td><td>안전한 Bash 자동 승인</td><td><code>permit.mjs</code> (fail-closed 기본으로 전환)</td></tr>
+          <tr><td><code>mpl-permit-learner</code></td><td>사용자 승인 학습</td><td><code>permit.mjs</code> learner sub</td></tr>
+          <tr><td><code>mpl-bash-timeout</code></td><td>timeout 강제</td><td><code>permit.mjs</code> timeout sub</td></tr>
+          <tr><td><code>mpl-resource-risk</code></td><td>위험 리소스 차단</td><td><code>permit.mjs</code> risk sub</td></tr>
+          <tr><td><code>mpl-fallback-grep</code></td><td>grep 대체 제안</td><td><code>permit.mjs</code> advice sub</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.5 Schemas -->
+    <div class="cat schema">
+      <span class="dot"></span>
+      <h3>검증 / 스키마</h3>
+      <span class="count">4 hooks</span>
+      <span class="arrow">→</span>
+      <span class="dest">policy/schemas.mjs</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-validate-output</code></td><td>산출 JSON/YAML 검증</td><td><code>schemas.mjs</code> (JSON Schema 기반)</td></tr>
+          <tr><td><code>mpl-validate-pp-schema</code></td><td>post-process schema</td><td><code>schemas.mjs</code></td></tr>
+          <tr><td><code>mpl-validate-seed</code></td><td>seed 파일 검증</td><td><code>schemas.mjs</code></td></tr>
+          <tr><td><code>mpl-property-check</code></td><td>산출 properties</td><td><code>schemas.mjs</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.6 Observ -->
+    <div class="cat observ">
+      <span class="dot"></span>
+      <h3>신호 / 관찰</h3>
+      <span class="count">10 hooks</span>
+      <span class="arrow">→</span>
+      <span class="dest">observability/signals.mjs + trackers.mjs + audit.mjs</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-sentinel-s0 / s1 / s3</code></td><td>phase 경계 신호</td><td><code>signals.mjs</code> (Task subagent_type 게이팅 추가)</td></tr>
+          <tr><td><code>mpl-sentinel-pp-file</code></td><td>pp 파일 신호</td><td><code>signals.mjs</code></td></tr>
+          <tr><td><code>mpl-soft-signal-emit</code></td><td>약한 신호</td><td><code>signals.mjs</code></td></tr>
+          <tr><td><code>mpl-gate-recorder</code></td><td>gate 결과 기록</td><td><code>signals.mjs</code> (모든 결정이 자동 기록됨)</td></tr>
+          <tr><td><code>mpl-discovery-scanner</code></td><td>코드베이스 스캔 신호</td><td><code>signals.mjs</code></td></tr>
+          <tr><td><code>mpl-keyword-detector</code></td><td>키워드 발견 신호</td><td><code>signals.mjs</code></td></tr>
+          <tr><td><code>mpl-codex-audit</code></td><td>Codex 감사 트리거</td><td><code>audit.mjs</code> (verdict 표현식 보강)</td></tr>
+          <tr><td><code>mpl-context-monitor</code></td><td>context 사용량</td><td><code>trackers.mjs</code></td></tr>
+          <tr><td><code>mpl-compaction-tracker</code></td><td>compaction 추적</td><td><code>trackers.mjs</code></td></tr>
+          <tr><td><code>mpl-tool-tracker</code></td><td>tool 호출 추적</td><td><code>trackers.mjs</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.7 Boot -->
+    <div class="cat boot">
+      <span class="dot"></span>
+      <h3>부트스트랩</h3>
+      <span class="count">1 hook</span>
+      <span class="arrow">→</span>
+      <span class="dest">mpl-engine.mjs (SessionStart 핸들러)</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 hook</th><th>캡처한 디테일</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>mpl-session-init</code></td><td>세션 시작 시 초기화</td><td><code>engine.mjs</code> SessionStart 핸들러 (active 'warn' 모드 배너 포함)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 2.8 CLI -->
+    <div class="cat cli">
+      <span class="dot"></span>
+      <h3>실제로는 hooks가 아닌 도구</h3>
+      <span class="count">2 mjs</span>
+      <span class="arrow">→</span>
+      <span class="dest">cli/ 디렉터리로 이동</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">현재 위치</th><th>실제 정체</th><th style="width:32%">새 위치</th></tr></thead>
+        <tbody>
+          <tr><td><code>hooks/mpl-hud.mjs</code></td><td>statusline 렌더러</td><td><code>cli/mpl-hud.mjs</code></td></tr>
+          <tr><td><code>hooks/mpl-doctor-meta-self.mjs</code></td><td>메타 진단 도구</td><td><code>cli/mpl-doctor-meta-self.mjs</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout good" style="margin-top:30px">
+      <strong>47개 합계 확인:</strong> 4 (source/path) + 14 (contracts) + 5 (gates) + 5 (permit) + 4 (schemas) + 10 (observ) + 1 (boot) + 2 (cli) = <strong>45</strong>.
+      실제 hooks/*.mjs 47개 — 차이 2개는 추가 sentinel 변형. 모든 책임이 새 위치에 추적됨.
+    </div>
+  </section>
+
+  <!-- ============== SECTION 4: Flow Diagrams ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h2>흐름 시각화</h2>
+    </div>
+
+    <!-- DIAGRAM 1: Phase Lifecycle -->
+    <h3>4.1 · Phase Lifecycle — End-to-End</h3>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg" style="background: transparent;">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c89b3"/>
+          </marker>
+          <linearGradient id="g-plan" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(96,165,250,0.18)"/>
+            <stop offset="100%" stop-color="rgba(96,165,250,0.04)"/>
+          </linearGradient>
+          <linearGradient id="g-run" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(167,139,250,0.18)"/>
+            <stop offset="100%" stop-color="rgba(167,139,250,0.04)"/>
+          </linearGradient>
+          <linearGradient id="g-final" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="rgba(52,211,153,0.18)"/>
+            <stop offset="100%" stop-color="rgba(52,211,153,0.04)"/>
+          </linearGradient>
+        </defs>
+        <style>
+          .lab    { fill: #e6ebf5; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; font-weight: 600; }
+          .small  { fill: #98a2c0; font-family: -apple-system, system-ui, sans-serif; font-size: 11px; }
+          .mono   { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+          .stage  { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+          .box    { fill: #161d34; stroke: #2e3a5e; stroke-width: 1; }
+          .arrow-l { stroke: #7c89b3; stroke-width: 1.5; fill: none; }
+          .accent-blue { fill: #60a5fa; }
+          .accent-purp { fill: #a78bfa; }
+          .accent-grn { fill: #34d399; }
+        </style>
+
+        <!-- /mpl plan -->
+        <rect x="40" y="20" width="1020" height="160" rx="14" fill="url(#g-plan)" stroke="#60a5fa" stroke-width="1" stroke-opacity="0.4"/>
+        <text x="60" y="50" class="stage" style="fill:#60a5fa">/MPL PLAN</text>
+        <rect x="60" y="65" width="600" height="100" rx="8" class="box"/>
+        <text x="80" y="92" class="lab">planner agent <tspan class="small">(fresh context)</tspan></text>
+        <text x="80" y="115" class="small">• 사용자 의도 분석</text>
+        <text x="80" y="132" class="small">• decomposition.yaml 작성</text>
+        <text x="80" y="149" class="small">• contracts/{api,types,errors}.yaml 작성</text>
+
+        <rect x="690" y="65" width="350" height="100" rx="8" class="box"/>
+        <text x="710" y="92" class="lab" style="fill:#60a5fa">engine</text>
+        <text x="710" y="115" class="small">• contracts.mjs: schema 유효성 검사</text>
+        <text x="710" y="132" class="small">• state.writer: current_phase = plan-done</text>
+        <text x="710" y="149" class="small">• signals.mjs: plan-complete 기록</text>
+
+        <!-- arrow down to /mpl run -->
+        <path d="M 550 180 L 550 210" class="arrow-l" marker-end="url(#arrow)"/>
+
+        <!-- /mpl run -->
+        <rect x="40" y="215" width="1020" height="350" rx="14" fill="url(#g-run)" stroke="#a78bfa" stroke-width="1" stroke-opacity="0.4"/>
+        <text x="60" y="245" class="stage" style="fill:#a78bfa">/MPL RUN · FOR EACH PHASE N</text>
+
+        <!-- ① executor -->
+        <rect x="60" y="265" width="465" height="135" rx="8" class="box"/>
+        <text x="80" y="290" class="lab"><tspan class="accent-purp">①</tspan> executor agent <tspan class="small">(FRESH context)</tspan></text>
+        <text x="80" y="312" class="small">읽기: state-summary[N-1] · contracts/*</text>
+        <text x="80" y="332" class="small">매 tool call마다 engine 가로채기 (4.2)</text>
+        <text x="80" y="352" class="small">산출: .mpl/phases/N/{changes,evidence}</text>
+        <text x="80" y="378" class="mono" style="fill:#a78bfa">※ MPL의 핵심 차별화 — fresh context</text>
+
+        <!-- arrow ① → ② -->
+        <path d="M 525 332 L 555 332" class="arrow-l" marker-end="url(#arrow)"/>
+
+        <!-- ② verifier -->
+        <rect x="555" y="265" width="485" height="135" rx="8" class="box"/>
+        <text x="575" y="290" class="lab"><tspan class="accent-grn">②</tspan> verifier agent <tspan class="small">(FRESH, executor와 분리)</tspan></text>
+        <text x="575" y="312" class="small">읽기: phase N 산출 + contracts + brief</text>
+        <text x="575" y="332" class="small">evidence.mjs STRUCTURAL 검증 (문자열 아님)</text>
+        <text x="575" y="352" class="small">산출: phases/N/verification.md (구조화)</text>
+        <text x="575" y="378" class="mono" style="fill:#34d399">※ author-independence (AD-0007) (frontmatter-locked — see §note)</text>
+
+        <!-- decision diamond -->
+        <path d="M 540 430 L 600 410 L 660 430 L 600 450 Z" fill="#1c243f" stroke="#a78bfa" stroke-width="1.2"/>
+        <text x="600" y="434" class="lab" text-anchor="middle">verified?</text>
+        <path d="M 600 400 L 600 400" class="arrow-l"/>
+        <path d="M 600 400 L 600 410" class="arrow-l" marker-end="url(#arrow)"/>
+
+        <!-- no → re-entry -->
+        <path d="M 540 430 L 280 430 L 280 332" class="arrow-l" marker-end="url(#arrow)"/>
+        <text x="395" y="422" class="small" style="fill:#f87171">no → executor 재진입 (complaints 전달)</text>
+
+        <!-- yes → state-summary -->
+        <path d="M 660 430 L 880 430 L 880 480" class="arrow-l" marker-end="url(#arrow)"/>
+        <text x="700" y="422" class="small" style="fill:#34d399">yes</text>
+
+        <rect x="730" y="480" width="300" height="65" rx="8" class="box"/>
+        <text x="750" y="505" class="lab" style="fill:#60a5fa">engine</text>
+        <text x="750" y="525" class="small">state-summary.md 작성</text>
+        <text x="750" y="540" class="small">current_phase = N+1</text>
+
+        <!-- arrow to finalize -->
+        <path d="M 550 565 L 550 600" class="arrow-l" marker-end="url(#arrow)"/>
+
+        <!-- finalize -->
+        <rect x="40" y="605" width="1020" height="95" rx="14" fill="url(#g-final)" stroke="#34d399" stroke-width="1" stroke-opacity="0.4"/>
+        <text x="60" y="632" class="stage" style="fill:#34d399">/MPL FINALIZE</text>
+        <text x="60" y="660" class="lab">audit.mjs <tspan class="small">(전역, 모든 phase 산출물 본다)</tspan></text>
+        <text x="60" y="680" class="small">drift = git diff vs Σ declared_impact  ·  contract closure = requires[] ⊆ Σ provides[]  ·  goal coverage = every token traced  ·  verdict = 4개 모두 충족? PASS / 아니면 FAIL</text>
+      </svg>
+    </div>
+    <div class="diagram-cap">계획 → 실행(phase 루프) → 최종 감사. 각 phase는 fresh context의 executor + 별도 verifier로 분리되어 author-independence를 유지.</div>
+
+    <hr class="soft"/>
+
+    <!-- DIAGRAM 2: Tool-call sequence -->
+    <h3>4.2 · 단일 Tool-Call이 엔진을 지나가는 시퀀스</h3>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 600" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c89b3"/>
+          </marker>
+          <marker id="arrow-block" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#f87171"/>
+          </marker>
+        </defs>
+        <style>
+          .lab2  { fill: #e6ebf5; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; font-weight: 600; }
+          .sm2   { fill: #98a2c0; font-family: -apple-system, system-ui, sans-serif; font-size: 11px; }
+          .mn2   { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+          .box2  { fill: #161d34; stroke: #2e3a5e; stroke-width: 1; }
+          .a-l   { stroke: #7c89b3; stroke-width: 1.5; fill: none; }
+          .a-b   { stroke: #f87171; stroke-width: 1.8; fill: none; }
+          .a-s   { stroke: #34d399; stroke-width: 1.2; stroke-dasharray: 4 4; fill: none; }
+        </style>
+
+        <!-- 1. Claude Code -->
+        <rect x="380" y="20" width="340" height="60" rx="8" class="box2"/>
+        <text x="550" y="44" class="lab2" text-anchor="middle">Claude Code</text>
+        <text x="550" y="64" class="sm2" text-anchor="middle">PreToolUse(tool=Edit, path=src/auth.ts)</text>
+
+        <path d="M 550 80 L 550 105" class="a-l" marker-end="url(#arrow2)"/>
+
+        <!-- 2. engine -->
+        <rect x="320" y="110" width="460" height="100" rx="8" class="box2" stroke="#60a5fa" stroke-opacity="0.6"/>
+        <text x="340" y="135" class="lab2" style="fill:#60a5fa">mpl-engine.mjs</text>
+        <text x="340" y="155" class="sm2">① parseEvent(stdin)</text>
+        <text x="340" y="172" class="sm2">② config = await loadConfig()  <tspan class="mn2">— 세션 1회 IO</tspan></text>
+        <text x="340" y="189" class="sm2">③ state = await readState()   <tspan class="mn2">— 5초 캐시</tspan></text>
+        <text x="340" y="206" class="sm2">④ isMplActive(state)? → 아니면 종료</text>
+
+        <path d="M 550 210 L 550 235" class="a-l" marker-end="url(#arrow2)"/>
+
+        <!-- 3. dispatch -->
+        <rect x="280" y="240" width="540" height="80" rx="8" class="box2" stroke="#fbbf24" stroke-opacity="0.5"/>
+        <text x="300" y="263" class="lab2" style="fill:#fbbf24">dispatch.mjs</text>
+        <text x="300" y="283" class="sm2">event=PreToolUse · tool=Edit · isSourceFile(path)=true</text>
+        <text x="300" y="302" class="mn2">applicable = [source-edit, channel-registry, contracts]</text>
+
+        <path d="M 550 320 L 550 345" class="a-l" marker-end="url(#arrow2)"/>
+
+        <!-- 4. modules in order -->
+        <text x="550" y="362" class="sm2" text-anchor="middle">선언된 순서로 실행 · block 시 short-circuit</text>
+
+        <!-- module 1 -->
+        <rect x="40" y="380" width="320" height="100" rx="8" class="box2" stroke="#a78bfa" stroke-opacity="0.6"/>
+        <text x="60" y="405" class="lab2" style="fill:#a78bfa">policy/source-edit.mjs</text>
+        <text x="60" y="425" class="sm2">resolveRuleAction('direct_source_edit')</text>
+        <text x="60" y="442" class="sm2">isOrchestratorContext()? = yes</text>
+        <text x="60" y="465" class="mn2" style="fill:#f87171">→ {decision: 'block', reason: 'Law 2'}</text>
+
+        <!-- short-circuit arrow -->
+        <path d="M 360 430 L 420 430" class="a-b" marker-end="url(#arrow-block)"/>
+        <text x="390" y="424" class="sm2" text-anchor="middle" style="fill:#f87171">block</text>
+
+        <!-- module 2 / 3 (skipped) -->
+        <rect x="430" y="380" width="320" height="100" rx="8" class="box2" stroke-dasharray="4 4" opacity="0.45"/>
+        <text x="450" y="405" class="lab2">channel-registry.mjs</text>
+        <text x="450" y="425" class="sm2">… skip (short-circuit)</text>
+
+        <rect x="770" y="380" width="290" height="100" rx="8" class="box2" stroke-dasharray="4 4" opacity="0.45"/>
+        <text x="790" y="405" class="lab2">contracts.mjs</text>
+        <text x="790" y="425" class="sm2">… skip (short-circuit)</text>
+
+        <!-- aggregate -->
+        <path d="M 200 480 L 200 510" class="a-l" marker-end="url(#arrow2)"/>
+        <rect x="40" y="513" width="320" height="68" rx="8" class="box2"/>
+        <text x="60" y="538" class="lab2">aggregate(decisions)</text>
+        <text x="60" y="560" class="sm2">최종: block + 사용자 메시지</text>
+
+        <!-- side effect: signals -->
+        <path d="M 360 547 L 420 547" class="a-s"/>
+        <rect x="430" y="513" width="630" height="68" rx="8" class="box2" stroke="#34d399" stroke-opacity="0.5"/>
+        <text x="450" y="538" class="lab2" style="fill:#34d399">observability/signals.mjs <tspan class="sm2">(비동기 · fire-and-forget)</tspan></text>
+        <text x="450" y="558" class="sm2">jsonl 에 'law2-block' 기록 · gate-recorder 자동 수행</text>
+      </svg>
+    </div>
+    <div class="diagram-cap">각 모듈은 100% 독립 — block 반환 시 나머지 모듈은 실행조차 안 됨. 순서는 dispatch에 명시적으로 선언되어 디버깅 가능.</div>
+
+    <hr class="soft"/>
+
+    <!-- DIAGRAM 3: Dependency -->
+    <h3>4.3 · 모듈 의존성 그래프</h3>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 660" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6485"/>
+          </marker>
+        </defs>
+        <style>
+          .l3l { fill: #e6ebf5; font-family: ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 600; }
+          .l3s { fill: #98a2c0; font-family: -apple-system, system-ui, sans-serif; font-size: 11px; }
+          .b3  { fill: #161d34; stroke-width: 1.2; }
+          .e   { stroke: #5a6485; stroke-width: 1.3; fill: none; }
+          .layer-band { fill: rgba(255,255,255,0.015); stroke: rgba(255,255,255,0.05); stroke-dasharray: 2 4; }
+        </style>
+
+        <!-- layer bands -->
+        <rect x="20" y="20" width="1060" height="100" rx="10" class="layer-band"/>
+        <text x="38" y="48" class="l3s" style="font-family:ui-monospace; letter-spacing:0.1em">L0 · ENGINE</text>
+
+        <rect x="20" y="135" width="1060" height="120" rx="10" class="layer-band"/>
+        <text x="38" y="163" class="l3s" style="font-family:ui-monospace; letter-spacing:0.1em">L1 · INFRA (공유 인프라)</text>
+
+        <rect x="20" y="270" width="1060" height="240" rx="10" class="layer-band"/>
+        <text x="38" y="298" class="l3s" style="font-family:ui-monospace; letter-spacing:0.1em">L2 · POLICY (서로 import 금지)</text>
+
+        <rect x="20" y="525" width="1060" height="115" rx="10" class="layer-band"/>
+        <text x="38" y="552" class="l3s" style="font-family:ui-monospace; letter-spacing:0.1em">L3 · SIDE EFFECTS</text>
+
+        <!-- L0: engine -->
+        <rect x="450" y="55" width="200" height="50" rx="8" class="b3" stroke="#60a5fa"/>
+        <text x="550" y="80" class="l3l" text-anchor="middle" style="fill:#60a5fa">mpl-engine.mjs</text>
+        <text x="550" y="98" class="l3s" text-anchor="middle">dispatcher</text>
+
+        <!-- L1: config, dispatch, state.reader -->
+        <rect x="170" y="170" width="170" height="60" rx="8" class="b3" stroke="#fbbf24"/>
+        <text x="255" y="195" class="l3l" text-anchor="middle" style="fill:#fbbf24">config.mjs</text>
+        <text x="255" y="213" class="l3s" text-anchor="middle">YAML 로드 + 캐시</text>
+
+        <rect x="465" y="170" width="170" height="60" rx="8" class="b3" stroke="#fbbf24"/>
+        <text x="550" y="195" class="l3l" text-anchor="middle" style="fill:#fbbf24">dispatch.mjs</text>
+        <text x="550" y="213" class="l3s" text-anchor="middle">모듈 라우팅</text>
+
+        <rect x="760" y="170" width="200" height="60" rx="8" class="b3" stroke="#fbbf24"/>
+        <text x="860" y="195" class="l3l" text-anchor="middle" style="fill:#fbbf24">state/reader.mjs</text>
+        <text x="860" y="213" class="l3s" text-anchor="middle">모두가 읽음</text>
+
+        <!-- L0 → L1 arrows -->
+        <path d="M 510 105 L 280 170" class="e" marker-end="url(#arrow3)"/>
+        <path d="M 550 105 L 550 170" class="e" marker-end="url(#arrow3)"/>
+        <path d="M 590 105 L 830 170" class="e" marker-end="url(#arrow3)"/>
+
+        <!-- L2: policy modules — row 1 -->
+        <rect x="55" y="315" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="135" y="338" class="l3l" text-anchor="middle" style="fill:#a78bfa">source-edit</text>
+        <text x="135" y="357" class="l3s" text-anchor="middle">Law 2</text>
+
+        <rect x="235" y="315" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="315" y="338" class="l3l" text-anchor="middle" style="fill:#a78bfa">channel-registry</text>
+        <text x="315" y="357" class="l3s" text-anchor="middle">.mpl/ 경로</text>
+
+        <rect x="415" y="315" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="495" y="338" class="l3l" text-anchor="middle" style="fill:#a78bfa">contracts</text>
+        <text x="495" y="357" class="l3s" text-anchor="middle">requires/provides</text>
+
+        <rect x="595" y="315" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="675" y="338" class="l3l" text-anchor="middle" style="fill:#a78bfa">evidence</text>
+        <text x="675" y="357" class="l3s" text-anchor="middle">structural 검사</text>
+
+        <!-- L2 row 2 -->
+        <rect x="55" y="395" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="135" y="418" class="l3l" text-anchor="middle" style="fill:#a78bfa">gates</text>
+        <text x="135" y="437" class="l3s" text-anchor="middle">전이 / finalize</text>
+
+        <rect x="235" y="395" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="315" y="418" class="l3l" text-anchor="middle" style="fill:#a78bfa">permit</text>
+        <text x="315" y="437" class="l3s" text-anchor="middle">Bash 안전</text>
+
+        <rect x="415" y="395" width="160" height="55" rx="8" class="b3" stroke="#a78bfa"/>
+        <text x="495" y="418" class="l3l" text-anchor="middle" style="fill:#a78bfa">schemas</text>
+        <text x="495" y="437" class="l3s" text-anchor="middle">산출 검증</text>
+
+        <rect x="775" y="355" width="200" height="65" rx="8" class="b3" stroke="#a78bfa" stroke-width="1.8"/>
+        <text x="875" y="382" class="l3l" text-anchor="middle" style="fill:#a78bfa">audit</text>
+        <text x="875" y="403" class="l3s" text-anchor="middle">모든 evidence 종합</text>
+
+        <!-- L1 → L2 (selected lines, just to show "all read from infra") -->
+        <path d="M 255 230 L 135 315" class="e" stroke-opacity="0.4"/>
+        <path d="M 550 230 L 495 315" class="e" stroke-opacity="0.4"/>
+        <path d="M 860 230 L 675 315" class="e" stroke-opacity="0.4"/>
+        <path d="M 860 230 L 875 355" class="e" stroke-opacity="0.4"/>
+
+        <!-- contracts → evidence allowed (audit too) -->
+        <path d="M 575 342 L 595 342" class="e" marker-end="url(#arrow3)"/>
+        <path d="M 755 342 L 775 365" class="e" marker-end="url(#arrow3)"/>
+
+        <!-- L2 → L3 -->
+        <path d="M 135 450 L 200 560" class="e" stroke-opacity="0.4" marker-end="url(#arrow3)"/>
+        <path d="M 315 450 L 350 560" class="e" stroke-opacity="0.4" marker-end="url(#arrow3)"/>
+        <path d="M 495 450 L 550 560" class="e" stroke-opacity="0.4" marker-end="url(#arrow3)"/>
+        <path d="M 875 420 L 800 560" class="e" stroke-opacity="0.4" marker-end="url(#arrow3)"/>
+
+        <!-- L3 -->
+        <rect x="120" y="560" width="200" height="55" rx="8" class="b3" stroke="#34d399"/>
+        <text x="220" y="583" class="l3l" text-anchor="middle" style="fill:#34d399">observ/signals</text>
+        <text x="220" y="601" class="l3s" text-anchor="middle">sentinels + recorder</text>
+
+        <rect x="350" y="560" width="200" height="55" rx="8" class="b3" stroke="#34d399"/>
+        <text x="450" y="583" class="l3l" text-anchor="middle" style="fill:#34d399">observ/trackers</text>
+        <text x="450" y="601" class="l3s" text-anchor="middle">context / compaction</text>
+
+        <rect x="700" y="560" width="200" height="55" rx="8" class="b3" stroke="#f472b6"/>
+        <text x="800" y="583" class="l3l" text-anchor="middle" style="fill:#f472b6">state/writer</text>
+        <text x="800" y="601" class="l3s" text-anchor="middle">유일한 writer</text>
+      </svg>
+    </div>
+    <div class="diagram-cap">L2 정책 모듈끼리는 import 금지 (audit만 예외). 모두 L1만 의존 → 현재의 "hook들이 서로 모름" 강점을 모듈 레벨에서 보존.</div>
+  </section>
+
+  <!-- ============== SECTION 5: Before/After ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <h2>새 정책 추가 — Before / After</h2>
+    </div>
+
+    <div class="ba">
+      <div class="col before">
+        <h4 style="color: var(--c-warn)">BEFORE · 현재</h4>
+        <ol>
+          <li><code>hooks/mpl-require-X.mjs</code> 작성 (200~400 LOC)</li>
+          <li><code>hooks.json</code>에 등록 (event, matcher, timeout)</li>
+          <li><code>__tests__/X.test.mjs</code> 작성</li>
+          <li><code>design.md</code> 카운트 업데이트</li>
+          <li><code>README</code> hook 카운트 업데이트</li>
+          <li><code>hooks-review.md</code> 카탈로그 업데이트</li>
+          <li>다른 hook과의 실행 순서 검증 (race?)</li>
+          <li>기존 hook과 검사 중복? 수동 확인</li>
+        </ol>
+        <p class="muted" style="margin-top: 14px; font-size:13px">8단계 — 매번 동기화 누락이 doc drift를 만든다.</p>
+      </div>
+      <div class="col after">
+        <h4 style="color: var(--c-good)">AFTER · 재설계</h4>
+        <ol>
+          <li><code>mpl.config.yaml</code>에 YAML 5~15줄 추가</li>
+          <li>(구조 검사 필요 시) <code>policy/contracts.mjs</code>에 함수 1개 추가</li>
+          <li>단일 테스트 작성</li>
+          <li>끝 — 문서는 YAML에서 자동 생성</li>
+        </ol>
+        <p class="muted" style="margin-top: 14px; font-size:13px">
+          새 정책 90%는 YAML만으로 표현 가능. 표현 불가능한 10%만 모듈 진입 → 그 자체가
+          <strong>"이 정책은 정말 declarative하지 않은가?"</strong> 라는 좋은 신호.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== SECTION 6: Module LOC ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <h2>모듈 크기 — "긴 파일 없다"는 약속</h2>
+    </div>
+
+    <p class="muted">모든 모듈이 500 LOC 미만. 한 화면 + 한두 스크롤로 끝나는 크기.</p>
+
+    <div class="card" style="margin-top:20px">
+      <div class="loc-row"><div class="name">engine</div><div class="num">~150</div><div class="bar"><span style="width: 30%"></span></div></div>
+      <div class="loc-row"><div class="name">config</div><div class="num">~200</div><div class="bar"><span style="width: 40%"></span></div></div>
+      <div class="loc-row"><div class="name">dispatch</div><div class="num">~150</div><div class="bar"><span style="width: 30%"></span></div></div>
+      <div class="loc-row"><div class="name">state/reader</div><div class="num">~150</div><div class="bar"><span style="width: 30%"></span></div></div>
+      <div class="loc-row"><div class="name">state/writer</div><div class="num">~400</div><div class="bar"><span style="width: 80%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/source-edit</div><div class="num">~400</div><div class="bar"><span style="width: 80%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/channel-registry</div><div class="num">~150</div><div class="bar"><span style="width: 30%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/contracts</div><div class="num">~400</div><div class="bar"><span style="width: 80%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/evidence</div><div class="num">~300</div><div class="bar"><span style="width: 60%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/gates</div><div class="num">~300</div><div class="bar"><span style="width: 60%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/permit</div><div class="num">~250</div><div class="bar"><span style="width: 50%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/schemas</div><div class="num">~200</div><div class="bar"><span style="width: 40%"></span></div></div>
+      <div class="loc-row"><div class="name">policy/audit</div><div class="num">~300</div><div class="bar"><span style="width: 60%"></span></div></div>
+      <div class="loc-row"><div class="name">observability/signals</div><div class="num">~250</div><div class="bar"><span style="width: 50%"></span></div></div>
+      <div class="loc-row"><div class="name">observability/trackers</div><div class="num">~200</div><div class="bar"><span style="width: 40%"></span></div></div>
+    </div>
+
+    <div class="stat-row" style="margin-top: 32px">
+      <div class="stat">
+        <div class="label">총합 (모듈 + engine)</div>
+        <div class="val">~4,000</div>
+        <div class="delta">현재 ~15,000 LOC 대비</div>
+      </div>
+      <div class="stat">
+        <div class="label">평균 모듈 LOC</div>
+        <div class="val">~260</div>
+        <div class="delta">최대 400 LOC</div>
+      </div>
+      <div class="stat">
+        <div class="label">500 LOC 초과 파일</div>
+        <div class="val">0</div>
+        <div class="delta">monolith 없음</div>
+      </div>
+      <div class="stat">
+        <div class="label">총 감소율</div>
+        <div class="val">~73%</div>
+        <div class="delta">디테일 보존하면서</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== SECTION 7: Parallelism + Consensus ============== -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <h2>병렬성 + 합의 — 재설계 위에 얹는 층</h2>
+    </div>
+
+    <div class="callout warn" style="margin-bottom: 22px">
+      <strong>출발점:</strong> MPL은 이미 parallel scheduler가 있지만 <em>prompt 안에만</em> 산다.
+      <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">commands/mpl-run-execute.md</code>
+      Step 4.0의 pseudocode를 orchestrator LLM이 손으로 실행 — 모델이 그 분기를 skip하면 무음 실패.
+      Telemetry/schema는 v7에 다 있지만 dispatcher 코드는 0줄. PR #230이 <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">failure_code</code>를 별도 축으로 분리한 이유.
+    </div>
+
+    <div class="callout warn" style="margin-bottom: 22px; border-left-color:#f59e0b">
+      <strong>Agent / Command consolidation — deferred (Won't Do)</strong><br>
+      §3.4 (11 agents → 4) and §3.5 (11 commands → 3) are formally closed as <strong>Won't Do</strong>, not deferred backlog.
+      The 11-agent / 11-command surface is the load-bearing implementation of <strong>AD-0003</strong> (accidental deletion), <strong>AD-0004</strong> (test-agent long-term architecture), and <strong>AD-0007</strong> (author-independence enforcement) —
+      <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">disallowed-tools: Task</code> frontmatter on <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">mpl-test-agent</code> is a loader-enforced safety invariant, not a prompt-mode flag.
+      Collapsing into a single <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">mpl-verifier --mode=…</code> agent would move that boundary from frontmatter (enforced) into prose (advisory), deleting the very property the adversarial chain exists to provide.
+      Full rationale: <a href="design.md" style="color:#fbbf24">docs/design.md §4 (Agent Catalog)</a> and <a href="v2-remaining-work.md" style="color:#fbbf24">v2-remaining-work.md §2 (Why 11 agents stayed)</a>.
+      Therefore <em>새 agent: 0</em> below means "no new agents <em>and</em> no consolidation of existing ones" — Moves #22-#24 are <strong>not</strong> reserved for this axis.
+    </div>
+
+    <p class="muted">통합 설계: prompt-only 스케줄러를 <strong>deterministic Node-side pipeline</strong>으로 교체. Continuous-frontier dispatcher + worktree-per-slot 격리 + per-phase state shard + manifest 기반 4-bucket reconcile, 모두 <strong>ExecutionContext tuple</strong>로 묶음.</p>
+
+    <!-- ===== Stat row ===== -->
+    <div class="stat-row" style="margin-top: 28px">
+      <div class="stat">
+        <div class="label">현재 dispatcher 코드</div>
+        <div class="val">0줄</div>
+        <div class="delta warn">prompt-only pseudocode</div>
+      </div>
+      <div class="stat">
+        <div class="label">신규 L2 모듈</div>
+        <div class="val">3</div>
+        <div class="delta">scheduler · isolation · reconcile</div>
+      </div>
+      <div class="stat">
+        <div class="label">새 agent</div>
+        <div class="val">0</div>
+        <div class="delta warn">agent 통합 won't do — AD-0007 (see §note)</div>
+      </div>
+      <div class="stat">
+        <div class="label">Wall-clock 개선</div>
+        <div class="val">1.4–1.8×</div>
+        <div class="delta">max_phase_workers=3</div>
+      </div>
+    </div>
+
+    <!-- ===== SVG 1: Scheduler Timeline Comparison ===== -->
+    <h3>7.1 · Scheduler — Barrier vs Continuous-Frontier</h3>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 580" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="idle-pat" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="#3a4564" stroke-width="2"/>
+          </pattern>
+          <marker id="arrow-s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c89b3"/>
+          </marker>
+        </defs>
+        <style>
+          .s-title { fill: #e6ebf5; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.05em; }
+          .s-lab   { fill: #e6ebf5; font-family: -apple-system, system-ui, sans-serif; font-size: 12px; font-weight: 600; }
+          .s-sm    { fill: #98a2c0; font-family: -apple-system, system-ui, sans-serif; font-size: 11px; }
+          .s-mn    { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
+          .axis    { stroke: #2e3a5e; stroke-width: 1; }
+          .tick    { stroke: #2e3a5e; stroke-width: 0.5; }
+          .barrier-line { stroke: #f87171; stroke-width: 1.5; stroke-dasharray: 4 4; }
+          .recon-line   { stroke: #a78bfa; stroke-width: 1.5; }
+          .ph { stroke-width: 1; }
+          .ph-A { fill: rgba(96,165,250,0.7); stroke: #60a5fa; }
+          .ph-B { fill: rgba(167,139,250,0.7); stroke: #a78bfa; }
+          .ph-C { fill: rgba(52,211,153,0.7); stroke: #34d399; }
+          .ph-D { fill: rgba(251,191,36,0.7); stroke: #fbbf24; }
+          .ph-E { fill: rgba(244,114,182,0.7); stroke: #f472b6; }
+        </style>
+
+        <!-- ===== TOP: BARRIER (current prompt-only) ===== -->
+        <text x="40" y="35" class="s-title" style="fill:#f87171">BARRIER WAVE (현재 · prompt-only)</text>
+        <text x="40" y="55" class="s-sm">tier 경계마다 모든 phase가 끝날 때까지 대기 → 빠른 slot이 놀고 있음</text>
+
+        <!-- x-axis -->
+        <line x1="100" y1="220" x2="1060" y2="220" class="axis"/>
+        <!-- time ticks -->
+        <g class="s-mn">
+          <line x1="100" y1="220" x2="100" y2="225" class="tick"/><text x="100" y="240" text-anchor="middle">0s</text>
+          <line x1="244" y1="220" x2="244" y2="225" class="tick"/><text x="244" y="240" text-anchor="middle">6</text>
+          <line x1="388" y1="220" x2="388" y2="225" class="tick"/><text x="388" y="240" text-anchor="middle">12</text>
+          <line x1="532" y1="220" x2="532" y2="225" class="tick"/><text x="532" y="240" text-anchor="middle">18</text>
+          <line x1="676" y1="220" x2="676" y2="225" class="tick"/><text x="676" y="240" text-anchor="middle">24</text>
+          <line x1="820" y1="220" x2="820" y2="225" class="tick"/><text x="820" y="240" text-anchor="middle">30</text>
+          <line x1="964" y1="220" x2="964" y2="225" class="tick"/><text x="964" y="240" text-anchor="middle">36s</text>
+        </g>
+
+        <!-- slot labels -->
+        <text x="40" y="105" class="s-lab">Slot 1</text>
+        <text x="40" y="175" class="s-lab">Slot 2</text>
+
+        <!-- Phase A: 0-6 (slot1) -->
+        <rect x="100" y="80" width="144" height="40" rx="4" class="ph ph-A"/>
+        <text x="172" y="105" text-anchor="middle" class="s-lab">P1</text>
+
+        <!-- Phase B: 6-14 (slot1) -->
+        <rect x="244" y="80" width="192" height="40" rx="4" class="ph ph-B"/>
+        <text x="340" y="105" text-anchor="middle" class="s-lab">P2 (slow)</text>
+
+        <!-- Phase C: 6-9 (slot2) -->
+        <rect x="244" y="150" width="72" height="40" rx="4" class="ph ph-C"/>
+        <text x="280" y="175" text-anchor="middle" class="s-lab">P3</text>
+
+        <!-- Slot 2 idle from 9-14 -->
+        <rect x="316" y="150" width="120" height="40" rx="4" fill="url(#idle-pat)" stroke="#3a4564" stroke-dasharray="2 2"/>
+        <text x="376" y="175" text-anchor="middle" class="s-mn">idle ↓ waits P2</text>
+
+        <!-- Tier barrier at t=14 -->
+        <line x1="436" y1="65" x2="436" y2="205" class="barrier-line"/>
+        <text x="436" y="60" text-anchor="middle" class="s-mn" style="fill:#f87171">tier barrier</text>
+
+        <!-- Phase D: 15-19 slot1 -->
+        <rect x="460" y="80" width="96" height="40" rx="4" class="ph ph-D"/>
+        <text x="508" y="105" text-anchor="middle" class="s-lab">P4</text>
+
+        <!-- Phase E: 15-18 slot2 -->
+        <rect x="460" y="150" width="72" height="40" rx="4" class="ph ph-E"/>
+        <text x="496" y="175" text-anchor="middle" class="s-lab">P5</text>
+
+        <text x="556" y="105" class="s-mn">→ total 19s</text>
+
+        <!-- divider -->
+        <line x1="40" y1="280" x2="1060" y2="280" stroke="#232c4a" stroke-width="1"/>
+
+        <!-- ===== BOTTOM: CONTINUOUS-FRONTIER ===== -->
+        <text x="40" y="320" class="s-title" style="fill:#34d399">CONTINUOUS-FRONTIER (제안 · code-driven)</text>
+        <text x="40" y="340" class="s-sm">의존성 닫히는 즉시 dispatch · reconcile만 barrier · idle slot 채워짐</text>
+
+        <!-- x-axis bottom -->
+        <line x1="100" y1="495" x2="1060" y2="495" class="axis"/>
+        <g class="s-mn">
+          <line x1="100" y1="495" x2="100" y2="500" class="tick"/><text x="100" y="515" text-anchor="middle">0s</text>
+          <line x1="244" y1="495" x2="244" y2="500" class="tick"/><text x="244" y="515" text-anchor="middle">6</text>
+          <line x1="388" y1="495" x2="388" y2="500" class="tick"/><text x="388" y="515" text-anchor="middle">12</text>
+          <line x1="532" y1="495" x2="532" y2="500" class="tick"/><text x="532" y="515" text-anchor="middle">18</text>
+          <line x1="676" y1="495" x2="676" y2="500" class="tick"/><text x="676" y="515" text-anchor="middle">24</text>
+          <line x1="820" y1="495" x2="820" y2="500" class="tick"/><text x="820" y="515" text-anchor="middle">30</text>
+          <line x1="964" y1="495" x2="964" y2="500" class="tick"/><text x="964" y="515" text-anchor="middle">36s</text>
+        </g>
+
+        <text x="40" y="380" class="s-lab">Slot 1</text>
+        <text x="40" y="450" class="s-lab">Slot 2</text>
+
+        <!-- P1 -->
+        <rect x="100" y="355" width="144" height="40" rx="4" class="ph ph-A"/>
+        <text x="172" y="380" text-anchor="middle" class="s-lab">P1</text>
+
+        <!-- P2 -->
+        <rect x="244" y="355" width="192" height="40" rx="4" class="ph ph-B"/>
+        <text x="340" y="380" text-anchor="middle" class="s-lab">P2 (slow)</text>
+
+        <!-- P3 -->
+        <rect x="244" y="425" width="72" height="40" rx="4" class="ph ph-C"/>
+        <text x="280" y="450" text-anchor="middle" class="s-lab">P3</text>
+
+        <!-- reconcile P3 small marker at t=9 -->
+        <line x1="316" y1="415" x2="316" y2="475" class="recon-line"/>
+        <text x="316" y="408" text-anchor="middle" class="s-mn" style="fill:#a78bfa">recon P3</text>
+
+        <!-- P4 starts at t=9 (slot 2) since only deps on P3 -->
+        <rect x="316" y="425" width="96" height="40" rx="4" class="ph ph-D"/>
+        <text x="364" y="450" text-anchor="middle" class="s-lab">P4</text>
+
+        <!-- reconcile P2 at t=14 -->
+        <line x1="436" y1="345" x2="436" y2="475" class="recon-line"/>
+        <text x="436" y="338" text-anchor="middle" class="s-mn" style="fill:#a78bfa">recon P2</text>
+
+        <!-- P5 starts at t=14, ends at 17 -->
+        <rect x="436" y="355" width="72" height="40" rx="4" class="ph ph-E"/>
+        <text x="472" y="380" text-anchor="middle" class="s-lab">P5</text>
+
+        <!-- reconcile P4 at t=13 -->
+        <line x1="412" y1="415" x2="412" y2="475" class="recon-line" stroke-opacity="0.6"/>
+        <text x="412" y="488" text-anchor="middle" class="s-mn" style="fill:#a78bfa">recon P4</text>
+
+        <text x="508" y="380" class="s-mn" style="fill:#34d399">→ total 14s (−26%)</text>
+
+        <text x="40" y="555" class="s-sm">tier <code style="font-family:var(--mono)">parallel: false</code> 는 <code style="font-family:var(--mono)">tier_mutex_{N}</code> 가상 lock으로 보존 — phase3-gate 같은 단독 phase는 여전히 단독 실행</text>
+      </svg>
+    </div>
+    <div class="diagram-cap">P4가 P3만 의존하면 P2 종료를 기다릴 필요 없음. Tier 경계가 아닌 <strong>reconcile 경계</strong>가 유일한 sync.</div>
+
+    <!-- ===== SVG 2: 4-Bucket Reconcile Decision Tree ===== -->
+    <h3 style="margin-top: 48px">7.2 · 4-Bucket 합의 — Manifest Diff 결정 트리</h3>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6485"/>
+          </marker>
+        </defs>
+        <style>
+          .r-lab  { fill: #e6ebf5; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; font-weight: 600; }
+          .r-sm   { fill: #98a2c0; font-family: -apple-system, system-ui, sans-serif; font-size: 11px; }
+          .r-mn   { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+          .r-tag  { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: 0.08em; }
+          .r-box  { fill: #161d34; stroke-width: 1.2; }
+          .r-e    { stroke: #5a6485; stroke-width: 1.3; fill: none; }
+          .r-warn { fill: #f87171; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; }
+          .r-good { fill: #34d399; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; }
+          .r-pur  { fill: #a78bfa; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; }
+        </style>
+
+        <!-- Input manifests -->
+        <rect x="180" y="20" width="270" height="80" rx="8" class="r-box" stroke="#60a5fa"/>
+        <text x="315" y="42" text-anchor="middle" class="r-lab" style="fill:#60a5fa">Phase A · phase-manifest.json</text>
+        <text x="200" y="62" class="r-mn">exported_symbols · routes · error_codes</text>
+        <text x="200" y="78" class="r-mn">schema_fingerprints · file_hashes · contract_refs</text>
+        <text x="200" y="94" class="r-tag">worker가 종료 전 작성</text>
+
+        <rect x="650" y="20" width="270" height="80" rx="8" class="r-box" stroke="#a78bfa"/>
+        <text x="785" y="42" text-anchor="middle" class="r-lab" style="fill:#a78bfa">Phase B · phase-manifest.json</text>
+        <text x="670" y="62" class="r-mn">exported_symbols · routes · error_codes</text>
+        <text x="670" y="78" class="r-mn">schema_fingerprints · file_hashes · contract_refs</text>
+        <text x="670" y="94" class="r-tag">worker가 종료 전 작성</text>
+
+        <path d="M 315 100 L 480 145" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 785 100 L 620 145" class="r-e" marker-end="url(#arrow-r)"/>
+
+        <!-- Engine drift check -->
+        <rect x="350" y="130" width="400" height="50" rx="8" class="r-box" stroke="#fbbf24"/>
+        <text x="550" y="150" text-anchor="middle" class="r-lab" style="fill:#fbbf24">Engine: file_hashes 재유도 vs 선언 비교</text>
+        <text x="550" y="167" text-anchor="middle" class="r-sm">불일치 → failure_code: manifest_drift</text>
+
+        <path d="M 550 180 L 550 215" class="r-e" marker-end="url(#arrow-r)"/>
+
+        <!-- manifest-diff classifier -->
+        <rect x="320" y="220" width="460" height="80" rx="8" class="r-box" stroke="#34d399" stroke-width="1.6"/>
+        <text x="550" y="245" text-anchor="middle" class="r-lab" style="fill:#34d399">policy/reconcile/manifest-diff.mjs</text>
+        <text x="550" y="265" text-anchor="middle" class="r-sm">deterministic pairwise diff (Node, LLM 호출 없음)</text>
+        <text x="550" y="285" text-anchor="middle" class="r-mn">→ 4-bucket 분류 T / S / C / X</text>
+
+        <!-- 4 buckets -->
+        <path d="M 380 300 L 130 350" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 480 300 L 365 350" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 620 300 L 615 350" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 720 300 L 855 350" class="r-e" marker-end="url(#arrow-r)"/>
+
+        <!-- Bucket T -->
+        <g>
+          <rect x="40" y="355" width="225" height="220" rx="10" class="r-box" stroke="#f87171"/>
+          <text x="55" y="378" class="r-tag" style="fill:#f87171">BUCKET T</text>
+          <text x="55" y="398" class="r-lab">Textual</text>
+          <text x="55" y="420" class="r-sm">같은 파일 path</text>
+          <text x="55" y="436" class="r-sm">다른 hash</text>
+          <text x="55" y="452" class="r-sm">계획에 없음</text>
+          <line x1="55" y1="468" x2="245" y2="468" stroke="#2e3a5e"/>
+          <text x="55" y="492" class="r-warn">abort_wave</text>
+          <text x="55" y="512" class="r-sm">planner 버그</text>
+          <text x="55" y="528" class="r-sm">auto-merge 금지</text>
+          <text x="55" y="556" class="r-mn">failure_code:</text>
+          <text x="55" y="570" class="r-mn">textual_conflict</text>
+        </g>
+
+        <!-- Bucket S -->
+        <g>
+          <rect x="285" y="355" width="225" height="220" rx="10" class="r-box" stroke="#60a5fa"/>
+          <text x="300" y="378" class="r-tag" style="fill:#60a5fa">BUCKET S</text>
+          <text x="300" y="398" class="r-lab">Symbol</text>
+          <text x="300" y="420" class="r-sm">같은 export 이름</text>
+          <text x="300" y="436" class="r-sm">두 phase에서</text>
+          <line x1="300" y1="468" x2="490" y2="468" stroke="#2e3a5e"/>
+          <text x="300" y="492" class="r-mn">if signature_hash</text>
+          <text x="300" y="508" class="r-good">→ auto-merge</text>
+          <text x="300" y="524" class="r-sm">(decomp order 우선)</text>
+          <text x="300" y="548" class="r-mn">if signature 불일치</text>
+          <text x="300" y="564" class="r-warn">→ escalate to C</text>
+        </g>
+
+        <!-- Bucket C -->
+        <g>
+          <rect x="530" y="355" width="225" height="220" rx="10" class="r-box" stroke="#a78bfa" stroke-width="1.8"/>
+          <text x="545" y="378" class="r-tag" style="fill:#a78bfa">BUCKET C</text>
+          <text x="545" y="398" class="r-lab">Contract</text>
+          <text x="545" y="420" class="r-sm">같은 route / error_code</text>
+          <text x="545" y="436" class="r-sm">/ schema_fingerprint</text>
+          <text x="545" y="452" class="r-sm">다른 구현</text>
+          <line x1="545" y1="468" x2="735" y2="468" stroke="#2e3a5e"/>
+          <text x="545" y="492" class="r-pur">verifier --mode=reconcile</text>
+          <text x="545" y="510" class="r-mn" style="fill:#a78bfa">⚡ 유일한 LLM hop</text>
+          <text x="545" y="530" class="r-sm">verdict.json + evidence_refs</text>
+          <text x="545" y="546" class="r-sm">엔진이 ref 존재 검증</text>
+          <text x="545" y="568" class="r-mn">실패 → recompose</text>
+        </g>
+
+        <!-- Bucket X -->
+        <g>
+          <rect x="775" y="355" width="225" height="220" rx="10" class="r-box" stroke="#fbbf24"/>
+          <text x="790" y="378" class="r-tag" style="fill:#fbbf24">BUCKET X</text>
+          <text x="790" y="398" class="r-lab">Semantic</text>
+          <text x="790" y="420" class="r-sm">같은 contract_ref</text>
+          <text x="790" y="436" class="r-sm">다른 symbol</text>
+          <line x1="790" y1="468" x2="980" y2="468" stroke="#2e3a5e"/>
+          <text x="790" y="492" class="r-mn">decomp_order winner</text>
+          <text x="790" y="510" class="r-sm">loser 1회 재진입</text>
+          <text x="790" y="526" class="r-mn">reentry_cap=1</text>
+          <text x="790" y="552" class="r-warn">재진입 실패</text>
+          <text x="790" y="568" class="r-warn">→ recompose</text>
+        </g>
+
+        <!-- Outputs -->
+        <path d="M 152 575 L 152 615" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 397 575 L 397 615" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 642 575 L 642 615" class="r-e" marker-end="url(#arrow-r)"/>
+        <path d="M 887 575 L 887 615" class="r-e" marker-end="url(#arrow-r)"/>
+
+        <rect x="170" y="618" width="760" height="65" rx="8" class="r-box" stroke="#34d399"/>
+        <text x="550" y="640" text-anchor="middle" class="r-lab" style="fill:#34d399">wave-{tier}-{wave}-reconciliation.json</text>
+        <text x="550" y="658" text-anchor="middle" class="r-sm">conflicts_by_bucket · outcome (clean|reconciled|aborted) · reconciler_reentries</text>
+        <text x="550" y="675" text-anchor="middle" class="r-mn">→ mpl-require-reconciliation.mjs 가 다음 frontier dispatch를 차단</text>
+      </svg>
+    </div>
+    <div class="diagram-cap">합의는 <strong>deterministic 4-bucket 분류 + Bucket C만 LLM</strong>. N-verifier 다수결 없음 — 단일 verifier가 결정 못 하면 그게 곧 recompose 신호 (planner under-spec).</div>
+
+    <!-- ===== SVG 3: State Shard Merge Flow ===== -->
+    <h3 style="margin-top: 48px">7.3 · State Shard — Per-Phase 쓰기 + Single Reducer</h3>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 580" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow-st" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6485"/>
+          </marker>
+        </defs>
+        <style>
+          .st-lab { fill: #e6ebf5; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; font-weight: 600; }
+          .st-sm  { fill: #98a2c0; font-family: -apple-system, system-ui, sans-serif; font-size: 11px; }
+          .st-mn  { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+          .st-tag { fill: #98a2c0; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: 0.06em; }
+          .st-box { fill: #161d34; stroke-width: 1.2; }
+          .st-e   { stroke: #5a6485; stroke-width: 1.3; fill: none; }
+          .st-step { fill: #34d399; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; }
+          .st-deny { fill: #f87171; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; }
+        </style>
+
+        <!-- Workers -->
+        <rect x="60" y="30" width="200" height="80" rx="8" class="st-box" stroke="#60a5fa"/>
+        <text x="160" y="52" text-anchor="middle" class="st-lab" style="fill:#60a5fa">worker P2</text>
+        <text x="80" y="72" class="st-mn">MPL_PHASE_ID=p2</text>
+        <text x="80" y="88" class="st-mn">cwd=worktree/slot-1</text>
+        <text x="80" y="102" class="st-tag">executor agent</text>
+
+        <rect x="445" y="30" width="200" height="80" rx="8" class="st-box" stroke="#a78bfa"/>
+        <text x="545" y="52" text-anchor="middle" class="st-lab" style="fill:#a78bfa">worker P3</text>
+        <text x="465" y="72" class="st-mn">MPL_PHASE_ID=p3</text>
+        <text x="465" y="88" class="st-mn">cwd=worktree/slot-2</text>
+        <text x="465" y="102" class="st-tag">executor agent</text>
+
+        <rect x="830" y="30" width="200" height="80" rx="8" class="st-box" stroke="#34d399"/>
+        <text x="930" y="52" text-anchor="middle" class="st-lab" style="fill:#34d399">worker P4</text>
+        <text x="850" y="72" class="st-mn">MPL_PHASE_ID=p4</text>
+        <text x="850" y="88" class="st-mn">cwd=worktree/slot-1</text>
+        <text x="850" y="102" class="st-tag">executor agent</text>
+
+        <!-- writeShard arrows -->
+        <path d="M 160 110 L 160 145" class="st-e" marker-end="url(#arrow-st)"/>
+        <path d="M 545 110 L 545 145" class="st-e" marker-end="url(#arrow-st)"/>
+        <path d="M 930 110 L 930 145" class="st-e" marker-end="url(#arrow-st)"/>
+
+        <!-- Shards -->
+        <rect x="50" y="148" width="220" height="105" rx="8" class="st-box" stroke="#60a5fa" stroke-opacity="0.5"/>
+        <text x="70" y="170" class="st-mn">.mpl/state.shards/</text>
+        <text x="70" y="185" class="st-mn">  wave-2/p2.patch.json</text>
+        <text x="70" y="206" class="st-sm">base_sha: a1b2…</text>
+        <text x="70" y="222" class="st-sm">patches: [RFC-6902 ops]</text>
+        <text x="70" y="238" class="st-sm">invariant_claims: {…}</text>
+
+        <rect x="435" y="148" width="220" height="105" rx="8" class="st-box" stroke="#a78bfa" stroke-opacity="0.5"/>
+        <text x="455" y="170" class="st-mn">.mpl/state.shards/</text>
+        <text x="455" y="185" class="st-mn">  wave-2/p3.patch.json</text>
+        <text x="455" y="206" class="st-sm">base_sha: a1b2…</text>
+        <text x="455" y="222" class="st-sm">patches: [RFC-6902 ops]</text>
+        <text x="455" y="238" class="st-sm">invariant_claims: {…}</text>
+
+        <rect x="820" y="148" width="220" height="105" rx="8" class="st-box" stroke="#34d399" stroke-opacity="0.5"/>
+        <text x="840" y="170" class="st-mn">.mpl/state.shards/</text>
+        <text x="840" y="185" class="st-mn">  wave-2/p4.patch.json</text>
+        <text x="840" y="206" class="st-sm">base_sha: a1b2…</text>
+        <text x="840" y="222" class="st-sm">patches: [RFC-6902 ops]</text>
+        <text x="840" y="238" class="st-sm">invariant_claims: {…}</text>
+
+        <!-- Annotation -->
+        <text x="50" y="275" class="st-deny">worker는 state.json 직접 쓰기 금지</text>
+        <text x="50" y="291" class="st-mn">writeShard()만 사용 — MPL_PHASE_ID 검증, 불일치 시 throw</text>
+
+        <!-- Funnel into reducer -->
+        <path d="M 160 296 L 540 320" class="st-e" marker-end="url(#arrow-st)"/>
+        <path d="M 545 296 L 545 320" class="st-e" marker-end="url(#arrow-st)"/>
+        <path d="M 930 296 L 555 320" class="st-e" marker-end="url(#arrow-st)"/>
+
+        <!-- Reducer -->
+        <rect x="270" y="325" width="550" height="170" rx="10" class="st-box" stroke="#fbbf24" stroke-width="1.8"/>
+        <text x="545" y="350" text-anchor="middle" class="st-lab" style="fill:#fbbf24">state/wave-reducer.mjs</text>
+        <text x="545" y="368" text-anchor="middle" class="st-tag">SINGLE-THREADED · ENGINE-ONLY</text>
+
+        <text x="290" y="395" class="st-step">①</text>
+        <text x="310" y="395" class="st-mn">각 shard의 base_sha == wave.base_sha 검증</text>
+
+        <text x="290" y="415" class="st-step">②</text>
+        <text x="310" y="415" class="st-mn">decomposition rank로 정렬</text>
+
+        <text x="290" y="435" class="st-step">③</text>
+        <text x="310" y="435" class="st-mn">in-memory clone에 patch 순차 적용</text>
+
+        <text x="290" y="455" class="st-step">④</text>
+        <text x="310" y="455" class="st-mn">매 shard 후 validateInvariants(state) 재실행 (I5/I12)</text>
+
+        <text x="290" y="475" class="st-step">⑤</text>
+        <text x="310" y="475" class="st-mn">atomic temp+rename으로 state.json 쓰기</text>
+
+        <!-- field-ownership matrix annotation -->
+        <rect x="60" y="335" width="190" height="155" rx="8" class="st-box" stroke="#f472b6" stroke-opacity="0.5"/>
+        <text x="155" y="356" text-anchor="middle" class="st-tag" style="fill:#f472b6">FIELD-OWNERSHIP MATRIX</text>
+        <text x="155" y="371" text-anchor="middle" class="st-sm">(policy/schemas.mjs)</text>
+        <text x="75" y="395" class="st-mn">gate_results: <tspan style="fill:#f472b6">phase_keyed</tspan></text>
+        <text x="75" y="410" class="st-mn">fix_loop_hist: <tspan style="fill:#f472b6">ring_merge</tspan></text>
+        <text x="75" y="425" class="st-mn">e2e_results: <tspan style="fill:#f472b6">last_completed</tspan></text>
+        <text x="75" y="440" class="st-mn">sprint_status: <tspan style="fill:#f472b6">recomputed</tspan></text>
+        <text x="75" y="455" class="st-mn">permits: <tspan style="fill:#f472b6">union</tspan></text>
+        <text x="75" y="478" class="st-deny">미선언 → THROW</text>
+
+        <!-- output state.json -->
+        <path d="M 545 495 L 545 525" class="st-e" marker-end="url(#arrow-st)"/>
+        <rect x="380" y="528" width="330" height="42" rx="8" class="st-box" stroke="#fbbf24"/>
+        <text x="545" y="553" text-anchor="middle" class="st-lab" style="fill:#fbbf24">state.json (v8) — engine-only writer</text>
+      </svg>
+    </div>
+    <div class="diagram-cap">Worker는 자기 phase의 shard만 쓰고, 단일 reducer가 결정론적으로 병합. Silent last-write-wins은 field-ownership matrix가 차단 — 미선언 필드는 throw.</div>
+
+    <!-- ===== Stage A/B summary cards ===== -->
+    <h3 style="margin-top: 48px">7.4 · 배포 — 2단계</h3>
+    <div class="grid-2">
+      <div class="card" style="border-left: 3px solid var(--c-engine)">
+        <h4 style="margin-top: 0; color: var(--c-engine)">Stage A · MUST · 4–6주</h4>
+        <p class="muted" style="font-size: 13px; margin-bottom: 12px">엔진 + L2 정책 모듈 재설계 머지 <strong>후</strong> 시작</p>
+        <ul style="font-size: 13px; line-height: 1.7; padding-left: 18px; margin: 0">
+          <li><code>policy/scheduler.mjs</code> — continuous-frontier + heartbeat/watchdog + tier_mutex + resume/pivot</li>
+          <li><code>policy/isolation.mjs</code> — worktree-per-slot + contract freezing + HIGH-risk rejection</li>
+          <li><code>state/wave-reducer.mjs</code> + <code>shard-writer.mjs</code> + field-ownership matrix</li>
+          <li><code>policy/reconcile/</code> — 4-bucket diff (T/S/C/X)</li>
+          <li><code>mpl-engine.mjs</code> <code>route_to_phase</code> 프론트도어 + ExecutionContext threading</li>
+          <li>source-edit · channel-registry · permit · contracts · audit → <code>execution_context_id</code> 키 사용</li>
+          <li><code>hooks/mpl-require-reconciliation.mjs</code> + 6개 신규 failure_code</li>
+          <li><code>commands/mpl-run-execute.md</code> Step 4.0 pseudocode 삭제</li>
+        </ul>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--c-observ)">
+        <h4 style="margin-top: 0; color: var(--c-observ)">Stage B · NICE · post-v1</h4>
+        <p class="muted" style="font-size: 13px; margin-bottom: 12px">Stage A 안정화 후 점진</p>
+        <ul style="font-size: 13px; line-height: 1.7; padding-left: 18px; margin: 0">
+          <li>Tree-sitter 심볼 추출 (regex 대체)</li>
+          <li>Priority inheritance — anti-starvation</li>
+          <li>Post-merge consensus recheck — silent 3-way merge 캐치</li>
+          <li>Per-wave hard1_baseline intermediate gate + file-set-hash 캐시</li>
+          <li><code>exports_symbols_manual_overrides[]</code> 탈출구</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout good" style="margin-top: 22px">
+      <strong>3개 kill switch — emergency rollback 보장:</strong>
+      <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">scheduler.dispatch_model: barrier</code> (legacy tier-barrier 흐름) ·
+      <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">reconcile.enabled: false</code> (오늘의 prose 아티팩트 fallback) ·
+      <code style="font-family:var(--mono);background:var(--surface-2);padding:1px 6px;border-radius:4px">state.writer_mode: single</code> (shard 비활성화, 강제 직렬)
+    </div>
+
+    <div class="callout" style="margin-top: 14px; border-left-color: var(--c-policy)">
+      <strong>왜 ship 해야 하나:</strong>
+      오늘의 병렬성은 모델이 분기를 skip해도 finalize에서야 발견됨. 이 통합 모델은 <strong>engine을 source of truth</strong>로 만든다 — 누가 언제 어디서 돌고 어떤 state를 쓰고 산출이 일치하는가까지. PR #230의 frozen failure_code 디시플린은 그대로 보존 (5→11), no_parallel_explanation 게이트도 그대로. Wall-clock 이득은 적당(1.4–1.8×)하지만, 진짜 페이로프는 <strong>invisible-failure mode 제거</strong>다.
+    </div>
+  </section>
+
+  <!-- ============== SUMMARY ============== -->
+  <section>
+    <div class="summary">
+      <h3>한 줄 요약</h3>
+      <p>
+        엔진은 dispatcher 1개 (150 LOC) + 정책 모듈 ~10개 (각 200~400 LOC)로 명확히 쪼개진다.
+        47개 hook이 잡던 디테일은 8개 정책 모듈 + 2개 관찰 모듈 + 2개 상태 모듈에
+        <strong>추적 가능하게</strong> 흡수된다 (§3 매핑 표).
+        결정이 한 곳에서 일관되게 내려지면서, "어느 hook이 충돌하는지" 류의 현재 디버깅 비용이 사라지고,
+        새 정책 90%는 YAML 한 줄로 추가된다.
+      </p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

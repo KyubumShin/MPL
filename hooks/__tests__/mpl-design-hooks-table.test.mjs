@@ -4,34 +4,11 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { liveHooksFromRoutes } from './helpers/introspect-routes.mjs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, '..', '..');
-
-function formatEventMatcher(event, matcher) {
-  return matcher ? `${event}: ${matcher.replaceAll('|', '/')}` : event;
-}
-
-function liveHooks() {
-  const registry = JSON.parse(readFileSync(join(ROOT, 'hooks', 'hooks.json'), 'utf-8'));
-  const hooks = new Map();
-
-  for (const [event, registrations] of Object.entries(registry.hooks || {})) {
-    for (const registration of registrations) {
-      for (const hook of registration.hooks || []) {
-        const match = String(hook.command || '').match(/hooks\/(mpl-[^" ]+)\.mjs/);
-        if (!match) continue;
-
-        const name = match[1];
-        const eventMatcher = formatEventMatcher(event, registration.matcher || '');
-        const existing = hooks.get(name);
-        hooks.set(name, existing ? `${existing}; ${eventMatcher}` : eventMatcher);
-      }
-    }
-  }
-
-  return new Map([...hooks.entries()].sort(([a], [b]) => a.localeCompare(b)));
-}
 
 function hookSection() {
   const design = readFileSync(join(ROOT, 'docs', 'design.md'), 'utf-8');
@@ -59,9 +36,12 @@ describe('docs/design.md Hook System table', () => {
     );
   });
 
-  it('lists every registered hook command from hooks/hooks.json', () => {
+  it('lists every registered hook command from dispatch.mjs ROUTES', async () => {
+    // Move #15: hooks.json was collapsed to a single mpl-engine entry per
+    // event. The SSOT for "what's registered" is now dispatch.mjs ROUTES +
+    // the MODULE_TO_HOOK_IDS expansion in lib/route-introspection.mjs.
     const section = hookSection();
-    const live = liveHooks();
+    const live = await liveHooksFromRoutes();
     const documented = hookRows(section)
       .map((row) => splitMarkdownRow(row)[0])
       .map((cell) => cell.match(/^`(mpl-[^`]+)`$/)?.[1])
@@ -71,15 +51,15 @@ describe('docs/design.md Hook System table', () => {
     assert.deepEqual(documented, [...live.keys()]);
     assert.match(
       section,
-      new RegExp(`MPL maintains pipeline integrity with ${live.size} registered hook commands`)
+      new RegExp(`MPL maintains pipeline integrity through ${live.size} logical hook surfaces`)
     );
     assert.doesNotMatch(section, /Drift note/);
     assert.doesNotMatch(section, /with 8 hooks/);
   });
 
-  it('keeps one table row and an Introduced value per live hook', () => {
+  it('keeps one table row and an Introduced value per live hook', async () => {
     const section = hookSection();
-    const live = liveHooks();
+    const live = await liveHooksFromRoutes();
     const rows = hookRows(section);
 
     assert.equal(rows.length, live.size);

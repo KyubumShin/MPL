@@ -2,7 +2,7 @@
 
 > **Version notation (v0.9.4)**: This file uses legacy major-version notation (v1.0, v3.0, v4.0) from the original roadmap. Actual release versions follow the `v0.x.y` semver series. Mapping: v1.0 = initial design, v3.x ≈ v0.3.x, v4.x ≈ v0.4.x. See `design.md` for the canonical version reference.
 >
-> **Currency note (2026-05-18)**: Plugin version is `0.18.3`. v0.18.0/v0.18.1 closed the v3.10 P0 enforcement track; v0.18.2 added dual-runtime install metadata; v0.18.3 closes exp19 runtime-verification false completion gaps. Per-version detail in `docs/design.md` §9.
+> **Currency note (2026-06-06)**: Plugin version is `0.19.0`. Current architecture detail lives in `docs/design.md`; historical release archaeology should start from the closed issue / PR trail, with this roadmap and `docs/changelog.md` as indexes.
 
 ## Vision: "Phase 0 Enhanced + Phase 5 Minimized"
 
@@ -231,7 +231,7 @@ v0.6.7 adapts MPL parameters to the Claude Opus 4.6 1M context window (5× incre
 | `skills/mpl-setup/SKILL.md` | Config template max_total_tokens |
 | `hooks/lib/mpl-memory.mjs` | compressEpisodic default 2→5, loadRelevantMemory slice(-2)→slice(-5) |
 | `commands/mpl-run-execute-context.md` | "cap at 500 lines" → "cap at 2000 lines" |
-| `docs/design.md` | Version bump, Phase 0 budgets, §8 config, §9 version history |
+| `docs/design.md` | Version bump, Phase 0 budgets, §8 config, historical index |
 
 ### v0.7.0 — 1M Context Protocol Restructuring (2026-03-24)
 
@@ -264,7 +264,7 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 
 ## v0.17.0 — Simplification + P1/P2 Hardening Stream (2026-04-21 ~ 2026-04-26)
 
-> Per-version detail lives in `docs/design.md` Section 9. This block is the roadmap-level summary for v0.15.x → v0.16.0 → v0.17 simplification + the merged P1/P2 follow-ups (#80, #82, #84, #87, #88). Released as plugin `0.17.0` on 2026-04-26.
+> Detailed archaeology should start from the closed issue / PR trail. This block is the roadmap-level summary for v0.15.x → v0.16.0 → v0.17 simplification + the merged P1/P2 follow-ups (#80, #82, #84, #87, #88). Released as plugin `0.17.0` on 2026-04-26.
 
 ### v0.15.x → v0.16.0 — Documented in design.md
 
@@ -290,7 +290,7 @@ Full analysis: `analysis/mpl-1m-context-impact-analysis.md`
 | Routing pattern recall (F-22) | DROPPED. `routing-patterns.jsonl` no longer consulted at start. |
 | Hat model PP-proximity tier branching | DROPPED. Pipeline depth no longer routes on PP-proximity score. |
 
-Cross-reference: `docs/design.md` §3.2 Flow table carries v0.17 markers row-by-row; `docs/design.md` §9 v0.8.5 entry has a REMOVED banner.
+Cross-reference: `docs/design.md` §3.2 Flow table carries v0.17 markers row-by-row; closed issue #55 is the primary historical source for the removed v0.8.5-era Triage/artifact-freshness flow.
 
 ### Post-v0.17 — P1/P2 Hardening Stream (#80, #82, #84, #87, #88) (2026-04-23 ~ 2026-04-26)
 

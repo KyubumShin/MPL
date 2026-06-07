@@ -2,29 +2,30 @@
 /**
  * MPL Require E2E Hook (PreToolUse on Write|Edit|MultiEdit targeting state.json)
  *
- * Guards the transition to `finalize_done: true`. Reads the declared required
- * E2E scenarios from `.mpl/mpl/e2e-scenarios.yaml` and blocks the state write
- * if any required scenario has not been recorded as passing in
- * `state.e2e_results` AND is not overridden.
+ * Thin wrapper over `hooks/lib/policy/contracts.mjs::handleE2eGate` (aliased
+ * here as `handleE2E`). The policy module is the SSOT for the post-finalize
+ * structural decision:
+ *   - required scenarios with missing test_command
+ *   - declared required scenarios never executed / non-zero exit
  *
- * AD-0008 enforcement contract:
- *   - Finalize Step 5.0 is responsible for executing missing scenarios
- *     (via Bash) before setting finalize_done. The gate-recorder hook writes
- *     `state.e2e_results[scenario.id]` as each execution completes.
- *   - This hook is the last line of defence: if finalize is asked to mark the
- *     pipeline complete while any required scenario lacks a passing exit code,
- *     the hook emits {continue: false, decision: "block", reason: ...}.
- *   - Override: `.mpl/config/e2e-scenario-override.json` can bypass with a
- *     user-supplied reason (AD-0007 pattern, extended with environment marker
- *     per AD-0008 R-2).
+ * The legacy hook ALSO enforced two predicates the policy does not own yet:
+ *   1. AD-0008 "zero declared scenarios" guard when the goal contract sets
+ *      e2e_policy.real_runtime_required: true (exp19 regression),
+ *   2. 0.16 Tier C UC-coverage gate against user-contract.md.
+ * Those two checks are layered locally so the legacy stdout contract is
+ * preserved end-to-end. Both rely on `parseUserContractText` and
+ * `computeUncoveredUcs`, which remain exported for the unit tests.
  *
- * The hook deliberately does NOT attempt to parse arbitrary Edit new_string
- * JSON — instead it reads the CURRENT state.json from disk after the write
- * would have happened (effectively an after-the-fact check). Because a
- * PreToolUse hook fires BEFORE the tool runs, we inspect the tool input
- * directly when it's a JSON assignment the caller can reveal.
+ * Legacy stdout contract preserved:
+ *   allow → {continue:true, suppressOutput:true}
+ *   block → {continue:false, decision:'block', reason}
+ *   warn  → {continue:true, suppressOutput:false, systemMessage:...}
+ *   block path also records the blocked_hook envelope via emitBlockedHook,
+ *   warn / clear paths invoke clearBlockedHook to drop a stale envelope.
  *
- * Non-blocking on error: swallows every exception.
+ * Original implementation: hooks/mpl-require-e2e.legacy.mjs
+ *
+ * Non-blocking on error: every exception → ok().
  */
 
 import { dirname, join } from 'path';
@@ -33,7 +34,6 @@ import { existsSync, readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
 
 const { readState, isMplActive } = await import(
@@ -41,6 +41,9 @@ const { readState, isMplActive } = await import(
 );
 const { readGoalContract } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-goal-contract.mjs')).href
+);
+const { loadConfig } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-config.mjs')).href
 );
 const { readStdin } = isMain
   ? await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href)
@@ -50,6 +53,9 @@ const { emitBlockedHook, emitClearedOk } = await import(
 );
 const { clearBlockedHook } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-blocked-hook.mjs')).href
+);
+const { handleE2eGate: handleE2E } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'policy', 'contracts.mjs')).href
 );
 
 const HOOK_ID = 'mpl-require-e2e';
@@ -71,145 +77,51 @@ function blockE2E(cwd, state, { code, reason, resumeInstruction, retryContext = 
   });
 }
 
-/**
- * Parse e2e-scenarios.yaml minimal subset for required entries.
- * Returns array of { id, title, test_command, required } in declaration order.
- */
-function parseScenarios(cwd) {
-  const path = join(cwd, '.mpl', 'mpl', 'e2e-scenarios.yaml');
-  if (!existsSync(path)) return [];
+// ---------------------------------------------------------------------------
+// Named exports preserved for the existing unit-test surface.
+// (The parsers stay local; the policy module owns the structural allow/block
+// decision but tests import these helpers directly.)
+// ---------------------------------------------------------------------------
 
-  let text;
-  try {
-    text = readFileSync(path, 'utf-8');
-  } catch {
-    return [];
-  }
-
-  const out = [];
-  let cur = null;
-
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.replace(/\r$/, '');
-
-    const idMatch = line.match(/^\s*-\s+id:\s*["']?(E2E-[\w-]+)["']?/);
-    if (idMatch) {
-      if (cur) out.push(cur);
-      cur = {
-        id: idMatch[1],
-        title: null,
-        test_command: null,
-        required: true, // default
-      };
-      continue;
-    }
-    if (!cur) continue;
-
-    const titleMatch = line.match(/^\s+title:\s*["']?(.+?)["']?\s*$/);
-    if (titleMatch) {
-      cur.title = titleMatch[1];
-      continue;
-    }
-
-    const tcMatch = line.match(/^\s+test_command:\s*["']?(.+?)["']?\s*$/);
-    if (tcMatch) {
-      cur.test_command = tcMatch[1];
-      continue;
-    }
-
-    const reqMatch = line.match(/^\s+required:\s*(true|false)\s*$/i);
-    if (reqMatch) {
-      cur.required = reqMatch[1].toLowerCase() === 'true';
-      continue;
-    }
-  }
-  if (cur) out.push(cur);
-
-  return out;
-}
-
-/**
- * AD-0008 R-2: overrides may be a string (legacy shape from AD-0007) or an
- * object with { reason, test_command_hash, recorded_at, source }. Returns the
- * unified shape or null.
- */
-function loadOverride(cwd) {
-  const path = join(cwd, '.mpl', 'config', 'e2e-scenario-override.json');
-  if (!existsSync(path)) return {};
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return {};
-  }
-}
-
-/**
- * 0.16 Tier C: read .mpl/config.json { e2e_contract_strict: false } to
- * degrade the missing-UC-coverage check from block to warn. Default true (strict).
- */
 export function isE2EContractStrict(cwd) {
   try {
     const cfgPath = join(cwd, '.mpl', 'config.json');
     if (!existsSync(cfgPath)) return true;
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     if (cfg && cfg.e2e_contract_strict === false) return false;
-  } catch {
-    // fall through
-  }
+  } catch { /* fall through */ }
   return true;
 }
 
-/**
- * 0.16 Tier A'/C: parse .mpl/requirements/user-contract.md to extract the
- * included UC ids and the scenario→UC mapping. File is YAML-shaped even though
- * it carries an .md extension (pragmatic convention — see Plan v2 Q5).
- *
- * Returns { included_uc_ids: [string], scenarios: [{id, covers, skip_allowed}] }.
- * Missing file → empty result (graceful skip mode).
- */
 export function parseUserContract(cwd) {
   const path = join(cwd, '.mpl', 'requirements', 'user-contract.md');
   if (!existsSync(path)) return { included_uc_ids: [], scenarios: [] };
-
   let text;
-  try {
-    text = readFileSync(path, 'utf-8');
-  } catch {
-    return { included_uc_ids: [], scenarios: [] };
-  }
-
+  try { text = readFileSync(path, 'utf-8'); }
+  catch { return { included_uc_ids: [], scenarios: [] }; }
   return parseUserContractText(text);
 }
 
 export function parseUserContractText(text) {
   if (!text || typeof text !== 'string') return { included_uc_ids: [], scenarios: [] };
-
   const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
-
-  let section = null; // "user_cases" | "scenarios" | null
-  let sectionIndent = -1;
+  let section = null;
   const included = [];
   const scenarios = [];
   let curScenario = null;
-  let inListField = null; // "covers" | "skip_allowed"
+  let inListField = null;
   let listIndent = -1;
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim() === '') continue;
-
-    // Top-level section detection
     const topMatch = line.match(/^(user_cases|deferred_cases|cut_cases|scenarios)\s*:\s*$/);
     if (topMatch) {
       if (curScenario) scenarios.push(curScenario);
       curScenario = null;
       section = topMatch[1];
-      sectionIndent = 0;
       inListField = null;
       continue;
     }
-
-    // Top-level unrelated keys terminate the section
     if (/^[a-zA-Z_]/.test(line) && !line.startsWith(' ')) {
       if (curScenario) scenarios.push(curScenario);
       curScenario = null;
@@ -217,22 +129,15 @@ export function parseUserContractText(text) {
       inListField = null;
       continue;
     }
-
     if (section === 'user_cases') {
       const idMatch = line.match(/^\s*-\s+id:\s*["']?(UC-\d{2,})["']?/);
-      if (idMatch) {
-        // Peek forward for status: "included"; safer to accept-all-then-filter via default
-        // We stream-parse: assume status defaults to "included" unless explicitly set.
-        included.push({ id: idMatch[1], status: 'included' });
-        continue;
-      }
+      if (idMatch) { included.push({ id: idMatch[1], status: 'included' }); continue; }
       const statusMatch = line.match(/^\s+status:\s*["']?(included|deferred|cut)["']?/);
       if (statusMatch && included.length > 0) {
         included[included.length - 1].status = statusMatch[1];
         continue;
       }
     }
-
     if (section === 'scenarios') {
       const idMatch = line.match(/^\s*-\s+id:\s*["']?(SC-[\w-]+|E2E-[\w-]+)["']?/);
       if (idMatch) {
@@ -242,69 +147,42 @@ export function parseUserContractText(text) {
         continue;
       }
       if (!curScenario) continue;
-
-      // Inline arrays
       const inlineCovers = line.match(/^\s+covers\s*:\s*\[(.*)\]\s*$/);
       if (inlineCovers) {
-        curScenario.covers = inlineCovers[1]
-          .split(',')
-          .map((s) => s.trim().replace(/^["']|["']$/g, ''))
-          .filter(Boolean);
+        curScenario.covers = inlineCovers[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
         inListField = null;
         continue;
       }
       const inlineSkip = line.match(/^\s+skip_allowed\s*:\s*\[(.*)\]\s*$/);
       if (inlineSkip) {
-        curScenario.skip_allowed = inlineSkip[1]
-          .split(',')
-          .map((s) => s.trim().replace(/^["']|["']$/g, ''))
-          .filter(Boolean);
+        curScenario.skip_allowed = inlineSkip[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
         inListField = null;
         continue;
       }
-
-      // Block list form
       const blockCovers = line.match(/^(\s+)covers\s*:\s*$/);
-      if (blockCovers) {
-        inListField = 'covers';
-        listIndent = blockCovers[1].length;
-        continue;
-      }
+      if (blockCovers) { inListField = 'covers'; listIndent = blockCovers[1].length; continue; }
       const blockSkip = line.match(/^(\s+)skip_allowed\s*:\s*$/);
-      if (blockSkip) {
-        inListField = 'skip_allowed';
-        listIndent = blockSkip[1].length;
-        continue;
-      }
-
+      if (blockSkip) { inListField = 'skip_allowed'; listIndent = blockSkip[1].length; continue; }
       if (inListField) {
         const itemMatch = line.match(/^(\s*)-\s+["']?([^"'\s#]+)["']?/);
         if (itemMatch && itemMatch[1].length > listIndent) {
           curScenario[inListField].push(itemMatch[2]);
           continue;
         }
-        // leaving list
         inListField = null;
       }
     }
   }
   if (curScenario) scenarios.push(curScenario);
-
   return {
     included_uc_ids: included.filter((u) => u.status === 'included').map((u) => u.id),
     scenarios,
   };
 }
 
-/**
- * 0.16 Tier C: compute which `included` UCs have no scenario covering them.
- * Returns array of uncovered UC ids.
- */
 export function computeUncoveredUcs(includedUcIds, scenarios) {
   const covered = new Set();
-  for (const s of scenarios) {
-    for (const uc of s.covers || []) covered.add(uc);
-  }
+  for (const s of scenarios) for (const uc of s.covers || []) covered.add(uc);
   return includedUcIds.filter((id) => !covered.has(id));
 }
 
@@ -313,12 +191,6 @@ function realRuntimeE2ERequired(cwd) {
   return goal.valid && goal.contract.e2e_policy.real_runtime_required === true;
 }
 
-/**
- * Detect whether the incoming tool input writes `finalize_done: true` to
- * `.mpl/state.json`. Handles Edit (old_string/new_string) and Write (content).
- * False positives are acceptable — the hook only blocks when scenarios are
- * actually missing, so innocent state edits pass through.
- */
 function isFinalizeDoneWrite(toolInput) {
   const paths = [];
   if (toolInput.file_path) paths.push(toolInput.file_path);
@@ -337,81 +209,100 @@ function isFinalizeDoneWrite(toolInput) {
     }
   }
   if (!paths.some((p) => /\.mpl\/state\.json$/.test(p))) return false;
-  // Match "finalize_done": true in either quoted-JSON or unquoted source.
-  // Re-serialized writes are intentionally rechecked because E2E evidence can
-  // be deleted or invalidated between final state writes.
   return texts.some((text) => /"finalize_done"\s*:\s*true/.test(text));
 }
 
+// ---------------------------------------------------------------------------
+// Delegating hook entrypoint.
+// ---------------------------------------------------------------------------
+
 async function runHook() {
   const raw = await readStdin();
-  if (!raw.trim()) {
-    ok();
-    return;
-  }
-
+  if (!raw.trim()) { ok(); return; }
   let data;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    ok();
-    return;
-  }
+  try { data = JSON.parse(raw); } catch { ok(); return; }
 
   const cwd = data.cwd || data.directory || process.cwd();
-  if (!isMplActive(cwd)) {
-    ok();
-    return;
-  }
+  if (!isMplActive(cwd)) { ok(); return; }
 
   const toolName = String(data.tool_name || data.toolName || '');
   if (!['Write', 'write', 'Edit', 'edit', 'MultiEdit', 'multiEdit'].includes(toolName)) {
-    ok();
-    return;
+    ok(); return;
   }
 
   const toolInput = data.tool_input || data.toolInput || {};
-  if (!isFinalizeDoneWrite(toolInput)) {
-    ok();
-    return;
-  }
+  if (!isFinalizeDoneWrite(toolInput)) { ok(); return; }
 
-  // A finalize_done: true write is imminent. Validate E2E coverage.
-  const scenarios = parseScenarios(cwd);
-  const declaredRequired = scenarios.filter((s) => s.required !== false);
-  const missingCommand = declaredRequired.filter((s) => !s.test_command).map((s) => s.id);
-  if (missingCommand.length > 0) {
-    const state = readState(cwd) || {};
+  const state = readState(cwd) || {};
+  const config = loadConfig(cwd);
+  const event = data.hook_event_name || 'PreToolUse';
+
+  // --- Structural decision (policy SSOT) -----------------------------------
+  const decision = await handleE2E({
+    cwd, toolName, toolInput, state, config, hookEvent: event,
+  });
+
+  if (decision && decision.action === 'block') {
+    // Translate policy envelope → legacy stdout shape, re-decorating the
+    // reason / resumeInstruction with the richer AD-0008 text the orchestrator
+    // and recover skill rely on.
+    if (decision.code === 'e2e_test_command_missing') {
+      const ids = decision.retryContext?.missing_command || [];
+      blockE2E(cwd, state, {
+        code: 'e2e_test_command_missing',
+        reason:
+          `[MPL AD-0008] Cannot set finalize_done=true — required E2E scenario(s) missing executable test_command: ${ids.join(', ')}. ` +
+          `Re-run decomposition Step 3-H and emit executable commands, or mark the scenario required:false with a rationale.`,
+        resumeInstruction:
+          'Re-run decomposition Step 3-H to emit executable test_command for every required E2E scenario, then retry finalize.',
+        retryContext: { missing_command: ids },
+      });
+      return;
+    }
+    if (decision.code === 'e2e_scenarios_unresolved') {
+      const unresolved = decision.retryContext?.unresolved || [];
+      blockE2E(cwd, state, {
+        code: 'e2e_scenarios_unresolved',
+        reason:
+          `[MPL AD-0008] Cannot set finalize_done=true — ${unresolved.length} required E2E scenario(s) missing or failing: ${unresolved.join(', ')}. ` +
+          `Each required scenario's test_command must be executed (gate-recorder writes state.e2e_results automatically) AND exit 0, ` +
+          `OR explicitly overridden via .mpl/config/e2e-scenario-override.json with a user reason. ` +
+          `Re-run the scenarios or use /mpl:mpl-finalize Step 5.0 HITL to record overrides before retrying finalize.`,
+        resumeInstruction:
+          'Re-execute each unresolved E2E scenario (or record an override in .mpl/config/e2e-scenario-override.json), then retry finalize.',
+        retryContext: { unresolved },
+      });
+      return;
+    }
+    // Generic fallback — surface the policy's reason as-is.
     blockE2E(cwd, state, {
-      code: 'e2e_test_command_missing',
-      reason:
-        `[MPL AD-0008] Cannot set finalize_done=true — required E2E scenario(s) missing executable test_command: ${missingCommand.join(', ')}. ` +
-        `Re-run decomposition Step 3-H and emit executable commands, or mark the scenario required:false with a rationale.`,
-      resumeInstruction:
-        'Re-run decomposition Step 3-H to emit executable test_command for every required E2E scenario, then retry finalize.',
-      retryContext: { missing_command: missingCommand },
+      code: decision.code || 'e2e_blocked',
+      reason: decision.reason || '[MPL AD-0008] E2E gate blocked finalize.',
+      resumeInstruction: decision.resumeInstruction || 'Resolve the E2E gate violation, then retry finalize.',
+      retryContext: decision.retryContext || {},
     });
     return;
   }
 
-  const required = declaredRequired.filter((s) => s.test_command);
+  // --- Legacy-only predicates the policy does NOT cover --------------------
+  // The policy only inspects e2e-scenarios.yaml; the legacy hook ALSO blocks
+  // when the goal contract demands real-runtime E2E or when included UCs
+  // lack scenario coverage, even with no declared scenarios.
   const contract = parseUserContract(cwd);
+  const scenariosFilePath = join(cwd, '.mpl', 'mpl', 'e2e-scenarios.yaml');
+  const haveScenarios = existsSync(scenariosFilePath);
 
-  if (required.length === 0) {
+  if (!haveScenarios) {
     const reasons = [];
-    if (realRuntimeE2ERequired(cwd)) {
-      reasons.push('goal contract requires real runtime E2E');
-    }
+    if (realRuntimeE2ERequired(cwd)) reasons.push('goal contract requires real runtime E2E');
     if (contract.included_uc_ids.length > 0) {
       reasons.push(`${contract.included_uc_ids.length} included UC(s) have no executable E2E scenario`);
     }
-
     if (reasons.length > 0) {
       const message =
         `[MPL AD-0008] Cannot set finalize_done=true — ${reasons.join('; ')}. ` +
         `Emit .mpl/mpl/e2e-scenarios.yaml with at least one required scenario and executable test_command, run it, and let gate-recorder populate state.e2e_results.`;
       if (realRuntimeE2ERequired(cwd) || isE2EContractStrict(cwd)) {
-        const state = readState(cwd) || {};
         blockE2E(cwd, state, {
           code: 'e2e_required_scenarios_absent',
           reason: message,
@@ -421,9 +312,8 @@ async function runHook() {
         });
         return;
       }
-      // Codex r3 on PR #246: warn downgrade also clears any stale
-      // envelope so mpl-recover doesn't dispatch on a no-longer-applicable
-      // block.
+      // warn downgrade — clear any stale envelope so mpl-recover doesn't
+      // dispatch on a no-longer-applicable block (Codex r3 on PR #246).
       clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
       console.log(JSON.stringify({
         continue: true,
@@ -432,61 +322,9 @@ async function runHook() {
       }));
       return;
     }
-
-    emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
-    return;
   }
 
-  const state = readState(cwd) || {};
-  const results = state.e2e_results || {};
-  const override = loadOverride(cwd);
-
-  const unresolved = [];
-  for (const s of required) {
-    // Override check (both legacy string and AD-0008 object shape)
-    const entry = override[s.id] ?? override['*'];
-    if (entry) {
-      if (typeof entry === 'string' && entry.trim().length > 0) continue;
-      if (
-        typeof entry === 'object' &&
-        entry !== null &&
-        typeof entry.reason === 'string' &&
-        entry.reason.trim().length > 0
-      ) {
-        // If test_command_hash recorded, check whether scenario changed.
-        // We don't compute sha1 inline (keep hook zero-dep); absence of hash
-        // match means we trust the override (legacy/unmigrated entry).
-        continue;
-      }
-    }
-
-    const rec = results[s.id];
-    if (!rec) {
-      unresolved.push(`${s.id} (never executed)`);
-      continue;
-    }
-    if (rec.exit_code !== 0) {
-      unresolved.push(`${s.id} (exit ${rec.exit_code})`);
-      continue;
-    }
-  }
-
-  if (unresolved.length > 0) {
-    blockE2E(cwd, state, {
-      code: 'e2e_scenarios_unresolved',
-      reason:
-        `[MPL AD-0008] Cannot set finalize_done=true — ${unresolved.length} required E2E scenario(s) missing or failing: ${unresolved.join(', ')}. ` +
-        `Each required scenario's test_command must be executed (gate-recorder writes state.e2e_results automatically) AND exit 0, ` +
-        `OR explicitly overridden via .mpl/config/e2e-scenario-override.json with a user reason. ` +
-        `Re-run the scenarios or use /mpl:mpl-finalize Step 5.0 HITL to record overrides before retrying finalize.`,
-      resumeInstruction:
-        'Re-execute each unresolved E2E scenario (or record an override in .mpl/config/e2e-scenario-override.json), then retry finalize.',
-      retryContext: { unresolved },
-    });
-    return;
-  }
-
-  // 0.16 Tier C: UC coverage gate.
+  // UC coverage gate (0.16 Tier C) — applies even when scenarios exist.
   if (contract.included_uc_ids.length > 0) {
     const uncovered = computeUncoveredUcs(contract.included_uc_ids, contract.scenarios);
     if (uncovered.length > 0) {
@@ -503,28 +341,22 @@ async function runHook() {
         });
         return;
       }
-      // Codex r3 on PR #246: warn downgrade clears any stale envelope.
       clearBlockedHook(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
-      console.log(
-        JSON.stringify({
-          continue: true,
-          suppressOutput: false,
-          systemMessage:
-            `[MPL 0.16 Tier C WARN] ${uncovered.length} UC(s) without E2E scenario coverage: ${uncovered.join(', ')}. ` +
-            `Strict mode is disabled; add coverage or re-enable e2e_contract_strict=true before the next run.`,
-        }),
-      );
+      console.log(JSON.stringify({
+        continue: true,
+        suppressOutput: false,
+        systemMessage:
+          `[MPL 0.16 Tier C WARN] ${uncovered.length} UC(s) without E2E scenario coverage: ${uncovered.join(', ')}. ` +
+          `Strict mode is disabled; add coverage or re-enable e2e_contract_strict=true before the next run.`,
+      }));
       return;
     }
   }
 
-  // Codex r3 on PR #246: final success path also clears stale envelope.
+  // All gates clear: drop any stale envelope and emit the silent success.
   emitClearedOk(cwd, { hookId: HOOK_ID, artifact: BLOCKED_ARTIFACT });
 }
 
 if (isMain) {
-  runHook().catch(() => {
-    // Hook must never wedge the pipeline.
-    ok();
-  });
+  runHook().catch(() => { ok(); });
 }

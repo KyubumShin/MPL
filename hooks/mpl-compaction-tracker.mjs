@@ -1,162 +1,96 @@
 #!/usr/bin/env node
 /**
- * MPL Compaction Tracker (PreCompact hook)
- * Tracks compaction events for the token budget experiment.
- * Records compaction count in state and logs to compactions.jsonl.
+ * MPL Compaction Tracker — thin wrapper (Move #12).
+ *
+ * Delegates the boundary record + jsonl/checkpoint writes to
+ * `lib/observability/trackers.mjs::handleCompactionTracker`. The wrapper
+ * applies the side effects the handler returns as intents:
+ *   - state.compaction_count += 1                   (always)
+ *   - RUNBOOK row append                            (intents[].runbook.append)
+ *   - F-38 rotation: predictBudget → session-handoff.json + state flip
+ *     when compaction_count >= 3 and budget says non-`continue`, or
+ *     compaction_count >= 4 unconditionally        (intents[].rotate.maybe)
+ *
+ * Legacy verbatim impl preserved in `mpl-compaction-tracker.legacy.mjs`.
  */
 
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { existsSync, appendFileSync, mkdirSync, writeFileSync } from 'fs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const { isMplActive, readState, writeState } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
 );
-
-const { readStdin } = await import(
-  pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+const { handleCompactionTracker } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'observability', 'trackers.mjs')).href
 );
-
 const { appendRunbookRow, parseRunbookRows, summarizeGates, wallMinutes } = await import(
   pathToFileURL(join(__dirname, 'lib', 'mpl-runbook.mjs')).href
 );
 
-const PROFILE_DIR = '.mpl/mpl/profile';
-const COMPACTIONS_FILE = 'compactions.jsonl';
-const CHECKPOINTS_DIR = '.mpl/mpl/checkpoints';
-
 async function main() {
   const input = await readStdin();
-
   let data;
-  try {
-    data = JSON.parse(input);
-  } catch {
-    // No valid input, skip
-    return;
-  }
+  try { data = JSON.parse(input); } catch { return; }
 
   const cwd = data.cwd || data.directory || process.cwd();
   if (!isMplActive(cwd)) return;
-
   const state = readState(cwd);
   if (!state) return;
 
-  // G2 (#113): RUNBOOK snapshot BEFORE compaction. The Stop hook only
-  // appends on phase transitions; if compaction lands mid-phase the
-  // last-known phase context can be lost without a row to chain off
-  // (R-OBSERVABILITY-GAP). Write an open-ended row marking the
-  // boundary so /mpl-status' timeline view stays continuous after
-  // resume. `ended_at` is left empty: this is an "in-flight" marker,
-  // distinct from a finalized phase transition.
+  // Runbook snapshot BEFORE the handler's file writes (legacy order).
   try {
     const rows = parseRunbookRows(cwd);
     const startedAt = (rows[0]?.ended_at) || state?.started_at || '';
-    const compactionMark = `compaction-${(state.compaction_count || 0) + 1}`;
+    const mark = `compaction-${(state.compaction_count || 0) + 1}`;
     appendRunbookRow(cwd, {
-      phase: `${state.current_phase || 'unknown'} (${compactionMark})`,
+      phase: `${state.current_phase || 'unknown'} (${mark})`,
       started_at: startedAt,
       ended_at: new Date().toISOString(),
       gates: summarizeGates(state),
       wall_min: wallMinutes(startedAt, new Date().toISOString()),
       fix_loops: state.fix_loop_count || 0,
     });
-  } catch {
-    // Non-fatal: RUNBOOK snapshot is observability, must not block compaction.
-  }
+  } catch { /* non-fatal */ }
 
-  // Increment compaction count in state
-  const currentCount = state.compaction_count || 0;
-  const newCount = currentCount + 1;
-  writeState(cwd, { compaction_count: newCount });
+  const decision = handleCompactionTracker({ cwd, state, raw: data });
+  if (!decision || decision.action !== 'tracked') return;
 
-  // Log to compactions.jsonl
-  const profileDir = join(cwd, PROFILE_DIR);
-  if (!existsSync(profileDir)) {
-    mkdirSync(profileDir, { recursive: true });
-  }
+  // Apply state increment.
+  if (decision.stateMutations) writeState(cwd, decision.stateMutations);
 
-  const record = {
-    timestamp: new Date().toISOString(),
-    pipeline_id: state.pipeline_id || null,
-    compaction_count: newCount,
-    trigger: data.trigger || 'unknown',
-    current_phase: state.current_phase || null,
-    total_tokens_at_compaction: state.cost?.total_tokens || 0,
-    fix_loop_count: state.fix_loop_count || 0,
-  };
-
-  appendFileSync(
-    join(profileDir, COMPACTIONS_FILE),
-    JSON.stringify(record) + '\n'
-  );
-
-  // Create compaction checkpoint file
-  const checkpointsDir = join(cwd, CHECKPOINTS_DIR);
-  if (!existsSync(checkpointsDir)) {
-    mkdirSync(checkpointsDir, { recursive: true });
-  }
-
-  const checkpointContent = [
-    `# Compaction Checkpoint #${newCount}`,
-    `- **Timestamp**: ${record.timestamp}`,
-    `- **Current Phase**: ${record.current_phase}`,
-    `- **Compaction Count**: ${newCount}`,
-    `- **Context Usage**: triggered at compaction threshold`,
-    ``,
-    `## Recovery Instructions`,
-    `Resume from current phase. Read state-summary.md from previous phases if context was lost.`,
-  ].join('\n');
-
-  writeFileSync(
-    join(checkpointsDir, `compaction-${newCount}.md`),
-    checkpointContent + '\n'
-  );
-
-  // F-38: Auto context rotation — write handoff signal on high compaction count
-  // or when budget predictor recommends pause
-  if (newCount >= 3) {
+  // F-38 rotation: consult budget predictor + flip state.
+  const rotate = (decision.intents || []).find((i) => i && i.kind === 'rotate.maybe');
+  if (rotate) {
     try {
-      // Import budget predictor
       const { predictBudget } = await import(
         pathToFileURL(join(__dirname, 'lib', 'mpl-budget-predictor.mjs')).href
       );
-
       const budget = predictBudget(cwd);
-
-      // Write handoff signal if budget is insufficient or compaction is excessive
-      if (budget.recommendation !== 'continue' || newCount >= 4) {
+      if (budget.recommendation !== 'continue' || rotate.hard_limit) {
         const signalsDir = join(cwd, '.mpl', 'signals');
         if (!existsSync(signalsDir)) mkdirSync(signalsDir, { recursive: true });
-
         const handoff = {
           pipeline_id: state.pipeline_id || null,
           resume_from_phase: state.current_phase,
           completed_phases: state.phases_completed || 0,
-          remaining_phases: [], // will be filled by orchestrator if available
+          remaining_phases: [],
           rotation_count: state.rotation_count || 0,
-          pause_reason: newCount >= 4
-            ? `compaction_limit_exceeded (${newCount})`
+          pause_reason: rotate.hard_limit
+            ? `compaction_limit_exceeded (${rotate.compaction_count})`
             : `budget_insufficient (${budget.remaining_pct}% remaining, ${budget.estimated_needed_pct}% needed)`,
           budget_snapshot: budget,
           timestamp: new Date().toISOString(),
         };
-
-        writeFileSync(
-          join(signalsDir, 'session-handoff.json'),
-          JSON.stringify(handoff, null, 2) + '\n'
-        );
-
-        // Update state for resume
+        writeFileSync(join(signalsDir, 'session-handoff.json'), JSON.stringify(handoff, null, 2) + '\n');
         writeState(cwd, {
           session_status: 'paused_budget',
           pause_reason: handoff.pause_reason,
           rotation_count: (state.rotation_count || 0) + 1,
         });
-
         console.error(`[MPL] Context rotation triggered: ${handoff.pause_reason}`);
       }
     } catch (err) {

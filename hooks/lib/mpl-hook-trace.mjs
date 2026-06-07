@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'fs';
-import { basename, dirname, join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import { missingBlockedHookFields } from './mpl-blocked-hook.mjs';
 import { CURRENT_SCHEMA_VERSION } from './mpl-state.mjs';
+import { registeredRouteRows } from './route-introspection.mjs';
 
 // Read .mpl/state.json byte-for-byte without invoking readState() — that
 // helper persists schema migrations and can archive/remove the legacy
@@ -69,6 +70,7 @@ const PURPOSES = {
   'mpl-quality-gate': 'adversarial quality gate',
   'mpl-validate-output': 'agent output validation/token tracking',
   'mpl-validate-seed': 'phase seed validation',
+  'mpl-phase-receipt': 'phase-runner receipt handoff recording',
   'mpl-sentinel-s0': 'sentinel S0 guard',
   'mpl-sentinel-s1': 'sentinel S1 guard',
   'mpl-sentinel-s3': 'sentinel S3 guard',
@@ -131,33 +133,23 @@ const STATE_FOCUS = new Set([
   'mpl-finalize-gate',
 ]);
 
-function readHooksConfig(pluginRoot = DEFAULT_PLUGIN_ROOT) {
-  const path = join(pluginRoot, 'hooks', 'hooks.json');
-  return JSON.parse(readFileSync(path, 'utf-8'));
+// Move #15: hooks/hooks.json was collapsed to one mpl-engine entry per
+// event. The SSOT for "which hook ids the engine routes" is now
+// lib/route-introspection.mjs::registeredRouteRows(), which expands the
+// dispatch.mjs ROUTES registry into the legacy (event, matcher, hookId)
+// shape this file used to scrape out of hooks.json.
+async function readRegisteredRows() {
+  return await registeredRouteRows();
 }
 
 // #237 D1: regression hook so tests can audit PURPOSES against the
-// live hooks.json registry. Returns the list of hook ids registered
-// in hooks.json that are missing from the PURPOSES map. An empty
-// array means every registered hook has a concrete label.
-export function findPurposeGaps(pluginRoot = DEFAULT_PLUGIN_ROOT) {
-  const config = readHooksConfig(pluginRoot);
-  const registered = new Set();
-  for (const regs of Object.values(config.hooks || {})) {
-    for (const r of regs || []) {
-      for (const h of r.hooks || []) {
-        registered.add(hookIdFromCommand(h.command));
-      }
-    }
-  }
+// live registered-route table. Returns the list of hook ids that the
+// engine routes but PURPOSES does not label. Empty array means every
+// registered hook has a concrete label.
+export async function findPurposeGaps(_pluginRoot = DEFAULT_PLUGIN_ROOT) {
+  const rows = await readRegisteredRows();
+  const registered = new Set(rows.map((r) => r.hookId));
   return [...registered].filter((id) => !(id in PURPOSES)).sort();
-}
-
-function hookIdFromCommand(command) {
-  if (typeof command !== 'string') return 'unknown';
-  const match = command.match(/\/([^/\s"']+\.mjs)\b/);
-  const file = match ? match[1] : basename(command.trim().split(/\s+/).pop() || 'unknown');
-  return file.replace(/\.mjs$/, '');
 }
 
 function matcherTools(matcher) {
@@ -291,15 +283,20 @@ function blockStatusFor(hookId, state, targetPath) {
   return 'registered_blocking_other_artifact';
 }
 
-export function traceHookChain({
+export async function traceHookChain({
   targetPath,
   cwd = process.cwd(),
   pluginRoot = DEFAULT_PLUGIN_ROOT,
-  hooksConfig = null,
+  // Move #15: `hooksConfig` is no longer the SSOT — dispatch.mjs ROUTES is.
+  // The parameter is preserved for backwards compatibility but ignored when
+  // present. Callers that want to inject a specific row set can pass
+  // `routes` (a pre-computed array from registeredRouteRows()).
+  hooksConfig: _hooksConfig = null, // eslint-disable-line no-unused-vars
+  routes = null,
   state = null,
 } = {}) {
   const resolvedTarget = targetPath || DECOMPOSITION_PATH;
-  const config = hooksConfig || readHooksConfig(pluginRoot);
+  const registered = routes || await registeredRouteRows();
   // state can be either a parsed state object (when caller injects one)
   // or null / { error, ... } / { state } from readStateRaw.
   let activeState = null;
@@ -339,24 +336,21 @@ export function traceHookChain({
     ? String(activeState.blocked_by_hook || '').trim()
     : null;
 
-  for (const [eventName, registrations] of Object.entries(config.hooks || {})) {
-    for (const registration of registrations || []) {
-      const matcher = registration.matcher || null;
-      for (const hook of registration.hooks || []) {
-        const hookId = hookIdFromCommand(hook.command);
-        const isActiveBlocker = activeBlockHookId && hookId === activeBlockHookId;
-        if (!isActiveBlocker && !shouldIncludeHook({ eventName, matcher, hookId, category })) continue;
-        rows.push({
-          event: eventName,
-          matcher: matcher || '*',
-          hook_id: hookId,
-          command: hook.command,
-          timeout: hook.timeout ?? null,
-          purpose: PURPOSES[hookId] || 'registered hook',
-          status: blockStatusFor(hookId, activeState, resolvedTarget),
-        });
-      }
-    }
+  for (const r of registered) {
+    const eventName = r.event;
+    const matcher = r.matcher || null;
+    const hookId = r.hookId;
+    const isActiveBlocker = activeBlockHookId && hookId === activeBlockHookId;
+    if (!isActiveBlocker && !shouldIncludeHook({ eventName, matcher, hookId, category })) continue;
+    rows.push({
+      event: eventName,
+      matcher: matcher || '*',
+      hook_id: hookId,
+      command: r.command,
+      timeout: r.timeout ?? null,
+      purpose: PURPOSES[hookId] || 'registered hook',
+      status: blockStatusFor(hookId, activeState, resolvedTarget),
+    });
   }
 
   // Codex r7 on PR #216 + #217: synthetic row when the active blocker
@@ -437,7 +431,8 @@ function parseArgs(argv) {
 if (process.argv[1] && resolve(process.argv[1]) === __filename) {
   const args = parseArgs(process.argv.slice(2));
   const target = args.targetPath || DECOMPOSITION_PATH;
-  const trace = traceHookChain({
+  // Move #15: traceHookChain is now async (it walks dispatch.mjs ROUTES).
+  const trace = await traceHookChain({
     targetPath: target,
     cwd: args.cwd,
     pluginRoot: args.pluginRoot,

@@ -1,0 +1,215 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mpl.config.yaml/v2",
+  "title": "MPL v2 Config Schema",
+  "description": "Validates the v2-specific sections of mpl.config.yaml. Legacy-only fields pass through (additionalProperties: true) — this YAML is an explicit superset of the legacy JSON DEFAULTS, not a stricter schema.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [2]
+    },
+    "legacy_json_compat": {
+      "type": "boolean"
+    },
+    "parallelism": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "max_phase_workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled":             { "type": "boolean" },
+        "mode":                { "type": "string", "enum": ["wave_batch", "continuous_frontier"] },
+        "tier_mutex_enabled":  { "type": "boolean" },
+        "dispatch_owner":      { "type": "string", "enum": ["single_orchestrator"] },
+        "route_to_phase":      { "type": "array", "items": { "type": "string", "enum": ["env_ctx", "cwd_match", "file_path_match", "current_phase_fallback"] } },
+        "fail_closed_when_running": { "type": "boolean" }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mode":             { "type": "string", "enum": ["pool", "single_tenant"] },
+        "pool_root":        { "type": ["string", "null"] },
+        "reject_high_risk": { "type": "boolean" },
+        "contract_freeze":  { "type": "array", "items": { "type": "string" } },
+        "impact_drift": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled":         { "type": "boolean" },
+            "block_on_drift":  { "type": "boolean" }
+          }
+        },
+        "heartbeat": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "refresh_ms":    { "type": "integer", "minimum": 1 },
+            "staleness_ms":  { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "strict": { "type": "boolean" },
+        "direct_source_edit":              { "$ref": "#/definitions/ruleAction" },
+        "phase_scope_violation":           { "$ref": "#/definitions/ruleAction" },
+        "missing_gate_evidence":           { "$ref": "#/definitions/ruleAction" },
+        "missing_artifact_schema":         { "$ref": "#/definitions/ruleAction" },
+        "anti_pattern_match":              { "$ref": "#/definitions/ruleAction" },
+        "state_invariant_violation":       { "$ref": "#/definitions/ruleAction" },
+        "bash_timeout_violation":          { "$ref": "#/definitions/ruleAction" },
+        "audit_residual":                  { "$ref": "#/definitions/ruleAction" },
+        "missing_phase_evidence":          { "$ref": "#/definitions/ruleAction" },
+        "missing_finalize_artifacts":      { "$ref": "#/definitions/ruleAction" },
+        "missing_completed_phase_immutability": { "$ref": "#/definitions/ruleAction" },
+        "missing_decomposition_delta":     { "$ref": "#/definitions/ruleAction" },
+        "missing_chain_assignment":        { "$ref": "#/definitions/ruleAction" },
+        "missing_e2e_evidence":            { "$ref": "#/definitions/ruleAction" },
+        "e2e_authenticity_invalid":        { "$ref": "#/definitions/ruleAction" },
+        "missing_whole_goal_closure":      { "$ref": "#/definitions/ruleAction" },
+        "finalize_gate_failures":          { "$ref": "#/definitions/ruleAction" },
+        "pp_schema_invalid":               { "$ref": "#/definitions/ruleAction" },
+        "small_plan_scope_conflict":       { "$ref": "#/definitions/ruleAction" },
+        "fast_track_phase0_artifacts_missing": { "$ref": "#/definitions/ruleAction" },
+        "overrides": { "type": "array" }
+      }
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allowed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path":         { "type": "string" },
+              "writers":      { "type": "array", "items": { "type": "string" } },
+              "category":     { "type": "string" },
+              "schema":       { "type": "string" },
+              "append_only":  { "type": "boolean" }
+            }
+          }
+        },
+        "immutable_when": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "match":       { "type": "string" },
+              "when":        { "type": "string", "enum": [
+                                "always",
+                                "always_after_first_write",
+                                "baseline_renewal_sentinel_absent",
+                                "phase_lifecycle.phase_id_completed",
+                                "completed_phase_block_unchanged"
+                              ]},
+              "applies_to":  { "type": "string", "enum": ["phase_id", "contract_phase_id"] }
+            }
+          }
+        },
+        "forbidden_patterns": { "type": "array", "items": { "type": "string" } },
+        "immutable_paths":    { "type": "array", "items": { "type": "string" } },
+        "writable_paths":     { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "chain_assignment":          { "$ref": "#/definitions/requiredFlag" },
+        "coverage":                  { "$ref": "#/definitions/requiredFlag" },
+        "decomposition": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "require_delta": { "type": "boolean" }
+          }
+        },
+        "goal_trace":                { "$ref": "#/definitions/requiredFlag" },
+        "test_agent": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "brief_required":  { "type": "boolean" },
+            "pass_required":   { "type": "boolean" }
+          }
+        },
+        "reviewer":                  { "$ref": "#/definitions/requiredFlag" },
+        "e2e":                       { "$ref": "#/definitions/requiredFlag" },
+        "e2e_authenticity":          { "$ref": "#/definitions/requiredFlag" },
+        "finalize_artifacts":        { "$ref": "#/definitions/requiredFlag" },
+        "whole_goal_closure":        { "$ref": "#/definitions/requiredFlag" },
+        "phase_contract_graph":      { "$ref": "#/definitions/requiredFlag" },
+        "phase_evidence":            { "$ref": "#/definitions/requiredFlag" },
+        "completed_phase_immutability": { "$ref": "#/definitions/requiredFlag" }
+      }
+    },
+    "evidence":  {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allow_legacy_text_fallback": { "type": "boolean" },
+        "unknown_token_action": { "type": "string", "enum": ["block", "warn", "off"] },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "token":             { "type": "string" },
+              "structural_check":  { "type": "boolean" },
+              "fallback_allowed":  { "type": "boolean" },
+              "state_path":        { "type": "string" },
+              "artifact_paths":    { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["token"]
+          }
+        }
+      }
+    },
+    "gates":     { "type": "object", "additionalProperties": true },
+    "permit":    {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "unknown_bash": { "$ref": "#/definitions/permitAction" }
+      }
+    },
+    "schemas":   { "type": "object", "additionalProperties": true },
+    "audit":     { "type": "object", "additionalProperties": true }
+  },
+  "definitions": {
+    "ruleAction": {
+      "type": "string",
+      "enum": ["warn", "block", "off"]
+    },
+    "requiredFlag": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "required": { "type": "boolean" }
+      }
+    },
+    "permitAction": {
+      "type": "string",
+      "enum": ["pass-through", "block-strict", "allow-loose"]
+    }
+  }
+}

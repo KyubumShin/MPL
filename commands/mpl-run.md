@@ -133,23 +133,9 @@ The orchestrator emits `<remember priority>` after every phase completion with: 
 
 ---
 
-## Hat Model (PP-Proximity)
+## Pipeline Depth (post-v0.17)
 
-Each phase is classified by its proximity to Pivot Points. This determines the quality depth and retry budget.
-
-| PP-Proximity | Gates Applied | Retry Budget | Description |
-|-------------|---------------|-------------|-------------|
-| **PP-core** | 3 Hard + Advisory | 3 | Directly modifies PP-referenced files |
-| **PP-adjacent** | 3 Hard + Advisory | 2 | Modifies files that depend on PP-core, or handles security/data |
-| **Non-PP** | Floor only (3 Hard) | 1 | No PP relationship |
-
-**Classification heuristic** (Decomposer assigns per-phase):
-- PP-core: phase impact files overlap with files referenced in `pivot-points.md`
-- PP-adjacent: phase impact files import/depend on PP-core files, OR phase handles security/data regardless of PP
-- Non-PP: everything else
-- User override: `pp_proximity_override` in decomposition.yaml per phase
-
-**Security/data escalation**: phases touching auth, encryption, database schema, or PII always get PP-adjacent or above, regardless of PP proximity.
+The Hat Model / PP-Proximity router was removed in v0.17 (#55). Every prompt now enters at full pipeline depth — see [`mpl-run-phase0.md`](./mpl-run-phase0.md) for the canonical entry flow. The decomposer sizes the pipeline (phase count, `execution_tiers`, `resource_locks`); there is no per-phase `pp_proximity` tier, no `pp_proximity_override`, and no front-door keyword bias.
 
 ## Phase-Specific Protocols (MUST Read)
 

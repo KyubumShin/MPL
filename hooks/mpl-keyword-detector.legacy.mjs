@@ -1,0 +1,292 @@
+#!/usr/bin/env node
+/**
+ * MPL Keyword Detector Hook (UserPromptSubmit)
+ * Detects "mpl" keyword in user input and initializes MPL pipeline state.
+ *
+ * Based on: design doc section 9.2 hook 4 + OMC keyword-detector.mjs pattern
+ *
+ * When "mpl" is detected:
+ * 1. Initialize .mpl/state.json with default state
+ * 2. Return [MAGIC KEYWORD: MPL] message to trigger MPL skill
+ */
+
+import { dirname, join } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { existsSync, readFileSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Import shared MPL state utility
+const { initState, isMplActive, readState, writeState } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'mpl-state.mjs')).href
+);
+
+/**
+ * G6 (#114): honest auto-mode telemetry. When the pipeline is active
+ * AND run_mode === 'auto', every UserPromptSubmit counts as a user
+ * intervention — sleeps, nudges, cancels, status checks, anything that
+ * required the operator to type. Best-effort; failures are swallowed
+ * because telemetry must never break the user's prompt flow.
+ */
+function maybeIncrementInterventionCount(cwd) {
+  try {
+    const state = readState(cwd);
+    if (!state) return;
+    if (state.current_phase === 'completed' || state.current_phase === 'cancelled') return;
+    // PR #133 review nit: also gate on session_status='cancelled' for
+    // symmetry. mpl-cancel sets BOTH current_phase and session_status,
+    // but a future cancel-soft path (or any race that touches only one)
+    // would otherwise keep counting after the pipeline is done. Pause /
+    // hang statuses are intentionally NOT excluded — those prompts ARE
+    // operator interventions per spec ("sleeps, nudges 모두 카운트").
+    if (state.session_status === 'cancelled') return;
+    if (state.run_mode !== 'auto') return;
+    const before = (typeof state.user_intervention_count === 'number')
+      ? state.user_intervention_count
+      : 0;
+    writeState(cwd, { user_intervention_count: before + 1 });
+  } catch {
+    // Non-fatal — telemetry must not block prompts.
+  }
+}
+
+// Import shared stdin reader
+const { readStdin } = await import(
+  pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href
+);
+
+/**
+ * Extract prompt text from hook input JSON
+ */
+function extractPrompt(input) {
+  try {
+    const data = JSON.parse(input);
+    if (data.prompt) return data.prompt;
+    if (data.message?.content) return data.message.content;
+    if (Array.isArray(data.parts)) {
+      return data.parts
+        .filter(p => p.type === 'text')
+        .map(p => p.text)
+        .join(' ');
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Claude Code delivers background Task/Agent completions as user-role
+ * `<task-notification>` XML. They can contain "mpl" in agent names/results,
+ * but they are not human prompts and must never initialize/reset MPL state.
+ */
+function isTaskNotificationPrompt(prompt) {
+  return /^<task-notification(?:\s|>)/i.test(String(prompt || '').trimStart());
+}
+
+/**
+ * Sanitize text for keyword detection (strip code blocks, URLs, paths)
+ */
+function sanitize(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]+`/g, '')
+    .replace(/https?:\/\/[^\s)>\]]+/g, '')
+    .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.-]+\/)+[\w.-]+/gm, '');
+}
+
+/**
+ * Extract feature name from user prompt
+ */
+function extractFeatureName(prompt) {
+  // Try to extract a meaningful name from the prompt
+  const cleaned = prompt.replace(/\bmpl\b/gi, '').trim();
+  if (!cleaned) return 'unnamed';
+
+  // Take first few meaningful words
+  const words = cleaned
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !/^(the|and|for|with|this|that|from|into)$/i.test(w))
+    .slice(0, 4);
+
+  return words.join('-').toLowerCase()
+    .replace(/[^a-z0-9가-힣ぁ-ゔァ-ヴ\u4e00-\u9fff-]/g, '')
+    .replace(/^[-]+|[-]+$/g, '') || 'task';
+}
+
+async function main() {
+  try {
+    const input = await readStdin();
+    if (!input.trim()) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    let data = {};
+    try { data = JSON.parse(input); } catch {}
+    const cwd = data.cwd || data.directory || process.cwd();
+
+    const prompt = extractPrompt(input);
+    if (!prompt) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // #43: Background Task/Agent completion notifications are routed through
+    // UserPromptSubmit as user-role XML. Skip before telemetry and keyword
+    // activation so harness/coordinator notifications cannot reset state.
+    if (isTaskNotificationPrompt(prompt)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // G6 (#114): record the intervention BEFORE any of the content-based
+    // branches return. Counting only some prompts would defeat the
+    // "honest auto-mode telemetry" framing.
+    maybeIncrementInterventionCount(cwd);
+
+    // v0.14.1 #36: Non-initializing MPL slash commands must NOT reset state.json.
+    // These commands read or transform existing state — they never start a new pipeline.
+    // (Init command NOT in this list: `/mpl:mpl`)
+    const SLASH_NO_INIT = /^\s*\/mpl:mpl-(resume|cancel|status|doctor|setup|version-bump|pivot|gap-analysis)\b/i;
+    if (SLASH_NO_INIT.test(prompt)) {
+      // Let the slash command skill manage state. Keep state.json untouched.
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    const cleanPrompt = sanitize(prompt).toLowerCase();
+
+    // Detect "mpl" keyword (word boundary to avoid false positives)
+    if (!/\bmpl\b/i.test(cleanPrompt)) {
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
+
+    // Detect standalone research invocation: "mpl research|investigate|survey"
+    // Must check BEFORE isMplActive — standalone research doesn't need full pipeline
+    const isResearchRun = /\bmpl[\s-]*(research|investigate|survey)\b/i.test(cleanPrompt);
+
+    if (isResearchRun) {
+      // Check for active pipeline — block standalone research during pipeline
+      if (isMplActive(cwd)) {
+        console.log(JSON.stringify({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'UserPromptSubmit',
+            additionalContext: '[MPL] Pipeline research in progress. Use `/mpl:mpl-status` to check.'
+          }
+        }));
+        return;
+      }
+
+      // BUG-4 fix: Check for research lock file (another standalone research running)
+      const lockPath = join(cwd, '.mpl', 'research', '.lock');
+      if (existsSync(lockPath)) {
+        console.log(JSON.stringify({
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'UserPromptSubmit',
+            additionalContext: '[MPL] Another standalone research is in progress. Wait for it to complete or delete .mpl/research/.lock to force.'
+          }
+        }));
+        return;
+      }
+
+      // Trigger standalone research skill (no full pipeline init)
+      const researchTopic = prompt.replace(/\bmpl[\s-]*(research|investigate|survey)\b/gi, '').trim();
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: `[MAGIC KEYWORD: MPL-RESEARCH]
+
+MPL Standalone Research activated.
+
+You MUST invoke the skill using the Skill tool:
+
+Skill: mpl-research
+
+User request:
+${prompt}
+
+Research topic: ${researchTopic || 'as described in user request'}
+
+IMPORTANT: Run the standalone research protocol. Results will be saved to .mpl/research/.`
+        }
+      }));
+      return;
+    }
+
+    // Check if MPL is already active
+    if (isMplActive(cwd)) {
+      // MPL already running - don't re-initialize
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: '[MPL] Pipeline already active. Use current session or cancel first.'
+        }
+      }));
+      return;
+    }
+
+    // v0.17 (#55): Triage / Quick Scope Scan removed. Phase 0 no longer
+    // branches on pp_proximity — decomposer expresses scope via phase count.
+
+    // v0.14.1 #36: Capture prior pipeline state BEFORE initState overwrites it.
+    // If the previous run was cancelled or paused, surface the recovery path in the
+    // announcement so the user notices that a resume option existed.
+    let priorStateHint = '';
+    try {
+      const prevStatePath = join(cwd, '.mpl', 'state.json');
+      if (existsSync(prevStatePath)) {
+        const prev = JSON.parse(readFileSync(prevStatePath, 'utf-8'));
+        const pausedLike = prev.session_status === 'cancelled'
+          || prev.session_status === 'paused_budget'
+          || prev.session_status === 'paused_checkpoint'
+          || prev.current_phase === 'cancelled';
+        if (pausedLike && prev.pipeline_id) {
+          const what = prev.session_status || prev.current_phase || 'unknown';
+          priorStateHint = `\n\n⚠️ Previous pipeline "${prev.pipeline_id}" was "${what}". Archived to .mpl/archive/${prev.pipeline_id}/.\n   If you meant to recover it, cancel this run and type \`/mpl:mpl-resume\` instead.`;
+        }
+      }
+    } catch {
+      // Non-fatal — recovery hint is best-effort
+    }
+
+    // Initialize MPL state — always single entry point
+    const featureName = extractFeatureName(prompt);
+    initState(cwd, featureName, 'auto');
+
+    // v0.17 (#55): single-track Phase 0 — no proximity classification
+    const message = `[MAGIC KEYWORD: MPL]
+
+MPL Pipeline activated. State initialized at .mpl/state.json (run_mode: "auto").${priorStateHint}
+
+You MUST invoke the skill using the Skill tool:
+
+Skill: mpl
+
+User request:
+${prompt}
+
+IMPORTANT: Load the MPL orchestration protocol via /mpl:mpl-run command, then begin Step 0 Pre-flight.`;
+
+    console.log(JSON.stringify({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: message
+      }
+    }));
+
+  } catch (error) {
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+  }
+}
+
+main();
+
+export { extractPrompt, isTaskNotificationPrompt, sanitize, extractFeatureName };

@@ -10,7 +10,7 @@
 
 ### Recently Completed (Post-v0.16 — 2026-04-21 ~ 2026-04-26)
 
-Moved out of "pending" because they were merged in the v0.17 + P1/P2 hardening stream. Detail in `docs/design.md` §9 + `docs/roadmap/overview.md` "Post-v0.16" section.
+Moved out of "pending" because they were merged in the v0.17 + P1/P2 hardening stream. Start from the closed issue / PR trail for detailed archaeology; use `docs/roadmap/overview.md` "Post-v0.16" as the index.
 
 | ID / PR | Item | Resolution |
 |---|---|---|

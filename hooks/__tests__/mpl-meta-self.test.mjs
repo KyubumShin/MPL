@@ -16,7 +16,9 @@ import {
 } from '../lib/mpl-meta-self.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
-const CLI_PATH = join(dirname(__filename), '..', 'mpl-doctor-meta-self.mjs');
+// Move #15: mpl-doctor-meta-self.mjs relocated from hooks/ to cli/. The
+// import path now traverses up two levels (cli/ is a sibling of hooks/).
+const CLI_PATH = join(dirname(__filename), '..', '..', 'cli', 'mpl-doctor-meta-self.mjs');
 const REAL_PLUGIN_ROOT = join(dirname(__filename), '..', '..');
 
 /* Synthetic plugin root scaffold ------------------------------------------- */

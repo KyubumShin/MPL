@@ -3,7 +3,7 @@
 > Remaining 10 items organized into 4 Sprints, starting from Sprint 1 completion criteria.
 > Written: 2026-03-08
 >
-> **Currency note (2026-04-26)**: Sprints 1-7 below describe the v3.2 → v0.13.x work and are completed as recorded. Releases since then (v0.14 → v0.16.0 → v0.17 simplification + the P1/P2 hardening stream #80/#82/#84/#87/#88) are tracked release-by-release, not sprint-by-sprint, and live in `docs/design.md` §9 + `docs/roadmap/overview.md` "Post-v0.16" section. F-22 (Sprint 2) is **REMOVED in v0.17** — routing-pattern recall no longer runs at start. Acceptance criteria for F-22 are historical.
+> **Currency note (2026-06-06)**: Sprints 1-7 below describe the v3.2 → v0.13.x work and are completed as recorded. Releases since then are best traced through closed issues / PRs, with `docs/roadmap/overview.md` and `docs/changelog.md` as indexes. F-22 (Sprint 2) is **REMOVED in v0.17** — routing-pattern recall no longer runs at start. Acceptance criteria for F-22 are historical.
 
 ---
 
