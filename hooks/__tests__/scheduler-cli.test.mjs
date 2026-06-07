@@ -125,6 +125,28 @@ describe('scheduler-cli — plan-tier', () => {
     assert.deepEqual(r.waves[1].wave_state.queue, ['p2']);
     assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p2' && x.code === 'file_overlap'));
   });
+
+  it('drops HIGH-risk phases while continuing to plan retryable blocked phases', () => {
+    const r = subPlanTier({
+      cwd: '/repo',
+      run_id: '2026-06-01T00:00:00Z',
+      tier: 1,
+      phase_ids: ['p1', 'p2', 'p3', 'p4'],
+      phases: [
+        { id: 'p1', risk_level: 'HIGH', dependencies: [], impact: { create: ['src/high.ts'] } },
+        { id: 'p2', risk_level: 'LOW', dependencies: [], impact: { create: ['src/a.ts'] } },
+        { id: 'p3', risk_level: 'LOW', dependencies: [], impact: { create: ['src/a.ts'] } },
+        { id: 'p4', risk_level: 'LOW', dependencies: ['p2'], impact: { create: ['src/b.ts'] } },
+      ],
+      completed_phase_ids: [],
+      config: { parallelism: { max_phase_workers: 2 } },
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.waves.map((w) => w.wave_state.queue), [['p2'], ['p3', 'p4']]);
+    assert.deepEqual(r.unplanned_phase_ids, []);
+    assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p1' && x.code === 'high_risk_phase_rejected'));
+    assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p3' && x.code === 'file_overlap'));
+  });
 });
 
 describe('scheduler-cli — validate-wave', () => {
