@@ -30,8 +30,8 @@ v2 정책 엔진 통합 완료, 병렬 인프라 활성화 완료, 알려진 gap
 - ✅ **detectImpactDrift를 git diff로 wire** — detectImpactDriftFromGit이 spawnSync('git', ['diff', '--name-only', base_ref])를 worktree 안에서 실행. (commit 3321f69)
 - ✅ **config.scheduler / .isolation 활성화** — yaml-mini parse 해결로 runtime에서 정의됨. (commit 37a0f6b)
 
-### 알려진 P2b 후속 (작음)
-- ⚠️ **multi-wave-per-tier**: 현재 plan-wave가 tier당 단일 wave만 emit. orchestrator가 completed_phase_ids를 반영해 plan-wave 재호출하면 multi-wave 됨. 작은 follow-up.
+### 알려진 P2b 후속
+- ✅ **multi-wave-per-tier**: `scheduler-cli plan-tier`가 tier 안의 dependency frontier를 반복 계획하고 file-overlap loser를 후속 wave로 재계획한다. `commands/mpl-run-execute.md` Step 4.0은 `plan-tier`를 production call-site로 사용한다.
 
 ---
 
@@ -109,6 +109,7 @@ cmux-control smoke로 검증된 것 (2026-06-01, `~/playground/ygg-exp23`):
 post-merge local smoke로 검증된 것 (2026-06-07, PR #266 merge 후 `main`):
 - ✅ statusline (`cli/mpl-hud.mjs`) 실 렌더링: temp `.mpl/state.json` + Claude statusline stdin shape에서 phase, TODO, gate, fix loop, token, context 표시 확인
 - ✅ MCP 도구 직접 호출: stdio server `dist/index.js`에서 `mpl_state_read`/`mpl_state_write` 호출 성공, I13 artifact guard 거부 케이스도 확인
+- ✅ scheduler stdio 직접 호출: `scheduler-cli plan-tier`가 dependency frontier multi-wave와 file-overlap 후속 wave를 계획하는 black-box stdin/stdout 경로 확인
 
 남은 미검증 (Production smoke 확대 필요):
 ```
@@ -154,7 +155,7 @@ post-merge local smoke로 검증된 것 (2026-06-07, PR #266 merge 후 `main`):
 |---|---|---|
 | ~~🔴 P1~~ | ~~§9 local harness regression — macOS tmpdir vs isolation safe-path~~ | ✅ closed 2026-06-02 |
 | 🟠 P1 | §5 production smoke 확대 — 작은 task로 `/mpl run` 사이클 한 바퀴 | 시간 (수동) |
-| 🟢 P3 | §1 P2b multi-wave-per-tier follow-up | 작음 |
+| ~~🟢 P3~~ | ~~§1 P2b multi-wave-per-tier follow-up~~ | ✅ closed 2026-06-07 |
 | 🟢 P3 | §4 #6 phase_seed_required dispatcher 빌드 (Pass 3) | 중간 |
 | 🟢 P3 | §4 #8 gate-recorder bridge careful port (회귀 위험 있음) | 중간 |
 | 🟢 P3 | §4 #9 wave-reducer RFC-6902 move/copy (사용 시점에) | 작음 |

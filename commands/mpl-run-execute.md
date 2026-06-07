@@ -21,7 +21,7 @@ algorithm. Skipping the CLI calls is detectable by the finalize gate
 (no `selected_mode:"parallel"` event in `.mpl/mpl/profile/phase-scheduler.jsonl`).
 
 The CLIs:
-- `hooks/lib/policy/scheduler-cli.mjs` — `plan-wave`, `record-event`, `classify-wave-failure`
+- `hooks/lib/policy/scheduler-cli.mjs` — `plan-tier`, `plan-wave`, `record-event`, `classify-wave-failure`
 - `hooks/lib/policy/isolation-cli.mjs` — `assert-clean`, `acquire-slot`, `release-slot`, `detect-drift`
 - `hooks/lib/state/wave-reducer-cli.mjs` — `merge`
 
@@ -97,15 +97,16 @@ echo '{"cwd":"'$cwd'"}' \
   | node hooks/lib/policy/isolation-cli.mjs assert-clean
 // → { "ok": true } or exit non-zero + announce + halt this tier.
 
-// 1. Plan the wave via the Node scheduler. plan-wave runs
-//    validateWaveComposition + buildWaveState in one call. The CLI
-//    emits the queue with overlap/HIGH-risk losers pruned, plus the
-//    ready_but_blocked list for the rejection telemetry.
+// 1. Plan every reachable wave in this tier via the Node scheduler.
+//    plan-tier repeatedly calls the same validateWaveComposition +
+//    buildWaveState composite as plan-wave, treating earlier accepted
+//    waves as completed for later dependency-frontier planning. File
+//    overlap losers can therefore move into a later same-tier wave instead
+//    of forcing the orchestrator to manually recompose the tier.
 plan_input = {
   cwd: cwd,
   run_id: state.started_at,
   tier: tier.tier,
-  wave_index: 0,   // single-pass; the plan returns one wave_state
   phase_ids: phase_ids,
   phases: decomposition.phases
     .filter(p => phase_ids.includes(p.id))
@@ -119,21 +120,20 @@ plan_input = {
     .filter(p => p.status === "COMPLETED").map(p => p.id),
   config: config
 }
-plan_result = `echo '$plan_input' | node hooks/lib/policy/scheduler-cli.mjs plan-wave`
-wave_state = plan_result.wave_state
-wave_index = wave_state.wave_index   // mirror for telemetry
+plan_result = `echo '$plan_input' | node hooks/lib/policy/scheduler-cli.mjs plan-tier`
+waves = plan_result.waves
 
-announce: "[MPL] Tier {tier.tier}: planning wave (queue={wave_state.queue.length}, blocked={plan_result.ready_but_blocked.length})"
+announce: "[MPL] Tier {tier.tier}: planned {waves.length} wave(s), blocked={plan_result.ready_but_blocked.length}, unplanned={plan_result.unplanned_phase_ids.length}"
 
-// 2. Branch on wave size.
-if wave_state.queue.length == 0:
-  // Every phase blocked by the composer → emit parallel_rejected + run sequentially.
+// 2. Branch on tier plan size.
+if waves.length == 0:
+  // Every phase blocked by the composer/frontier → emit parallel_rejected + run sequentially.
   emit_event({
     pipeline_id: state.pipeline_id,
     run_started_at: state.started_at,
     recompose_count: decomposition.recompose_count,
     tier: tier.tier,
-    wave_index: wave_index,
+    wave_index: 0,
     phases: phase_ids,
     selected_mode: "parallel_rejected",
     parallel_requested: true,
@@ -145,143 +145,150 @@ if wave_state.queue.length == 0:
     execute_single_phase(phase_id)
   continue
 
-if wave_state.queue.length == 1:
-  // Singleton wave (post-overlap pruning) → emit parallel_rejected:single_ready_phase, run sequentially.
-  only_phase = wave_state.queue[0]
-  emit_event({
-    pipeline_id: state.pipeline_id,
-    run_started_at: state.started_at,
-    recompose_count: decomposition.recompose_count,
-    tier: tier.tier,
-    wave_index: wave_index,
-    phases: phase_ids,
-    selected_mode: "parallel_rejected",
-    parallel_requested: true,
-    worker_cap: max_phase_workers,
-    rejection_reasons_by_phase: [{phase_id: only_phase, code: "single_ready_phase"}],
-    worktree_slots: []
-  })
-  execute_single_phase(only_phase)
-  continue
+for each planned_wave in waves:
+  wave_state = planned_wave.wave_state
+  wave_index = wave_state.wave_index   // mirror for telemetry
+
+  if wave_state.queue.length == 1:
+    // Singleton wave (post-overlap pruning) → emit parallel_rejected:single_ready_phase, run sequentially.
+    only_phase = wave_state.queue[0]
+    emit_event({
+      pipeline_id: state.pipeline_id,
+      run_started_at: state.started_at,
+      recompose_count: decomposition.recompose_count,
+      tier: tier.tier,
+      wave_index: wave_index,
+      phases: wave_state.queue,
+      selected_mode: "parallel_rejected",
+      parallel_requested: true,
+      worker_cap: max_phase_workers,
+      rejection_reasons_by_phase: [{phase_id: only_phase, code: "single_ready_phase"}],
+      worktree_slots: []
+    })
+    execute_single_phase(only_phase)
+    continue wave loop
+
+  run_parallel_wave(wave_state, planned_wave)
 
 // 3. Parallel wave — acquire slots, dispatch one phase-runner per slot.
-acquired_slots = []
-try:
-  for slot_id in range(min(wave_state.max_phase_workers, wave_state.queue.length)):
-    phase_id = wave_state.queue[slot_id]
-    acq_input = {
-      cwd: cwd, phase_id: phase_id, slot_id: slot_id,
-      run_id: state.started_at, base_ref: base_sha
-    }
-    acq = `echo '$acq_input' | node hooks/lib/policy/isolation-cli.mjs acquire-slot`
-    if not acq.ok:
-      throw new Error("worktree_setup_error: " + acq.error)
-    acquired_slots.append({
-      slot_id: slot_id,
-      phase_id: phase_id,
-      worktree_root: acq.worktree_root,
-      branch: acq.branch,
-      base_sha: acq.acquired_base_sha  // captured by acquireSlot
+function run_parallel_wave(wave_state, planned_wave):
+  acquired_slots = []
+  try:
+    for slot_id in range(min(wave_state.max_phase_workers, wave_state.queue.length)):
+      phase_id = wave_state.queue[slot_id]
+      acq_input = {
+        cwd: cwd, phase_id: phase_id, slot_id: slot_id,
+        run_id: state.started_at, base_ref: base_sha
+      }
+      acq = `echo '$acq_input' | node hooks/lib/policy/isolation-cli.mjs acquire-slot`
+      if not acq.ok:
+        throw new Error("worktree_setup_error: " + acq.error)
+      acquired_slots.append({
+        slot_id: slot_id,
+        phase_id: phase_id,
+        worktree_root: acq.worktree_root,
+        branch: acq.branch,
+        base_sha: acq.acquired_base_sha  // captured by acquireSlot
+      })
+      // Mirror to state.worktree_pool_history (replaces in-prompt append).
+      mpl_state_write({
+        worktree_pool_history: [
+          ...prev_history,
+          {
+            tier: tier.tier, phase_id: phase_id, slot_id: slot_id,
+            worktree_path: acq.worktree_root, base_ref: base_sha,
+            started_at: now_iso(), completed_at: null
+          }
+        ]
+      })
+
+    // Dispatch phase-runner subagents in parallel (one Task per slot, run_in_background=true).
+    task_handles = []
+    for slot in acquired_slots:
+      handle = Task(
+        subagent_type="mpl-phase-runner", model="sonnet",
+        prompt=assemble_context(slot.phase_id, isolation_root=slot.worktree_root),
+        run_in_background=true
+      )
+      task_handles.append({slot: slot, handle: handle})
+
+    // Wait for all handles to finish (BashOutput polling loop already documented).
+    results = wait_all(task_handles)
+    if any(r.failed for r in results):
+      throw new Error("wave_execution_error: " + first_failure_message(results))
+
+    // 4. Wave reduce — merge shards via wave-reducer-cli (inside the try so
+    //    merge_error flows through the canonical failure_code path).
+    merge_result = `echo '{"cwd":"$cwd","wave_id":"$wave_state.wave_id"}' | node hooks/lib/state/wave-reducer-cli.mjs merge`
+    if not merge_result.ok:
+      throw new Error(merge_result.failure_code + ": " + merge_result.error_message)
+
+    // 5. Per-slot drift check (declared vs git diff inside the slot).
+    for slot in acquired_slots:
+      declared = state.execution.phase_details.find(p => p.id == slot.phase_id).impact
+      drift_input = {
+        worktree_root: slot.worktree_root,
+        base_ref: slot.base_sha,
+        declared: declared
+      }
+      drift = `echo '$drift_input' | node hooks/lib/policy/isolation-cli.mjs detect-drift`
+      if drift.drift:
+        // NON-FATAL by default (declarations are forward commitments — see
+        // detectImpactDrift contract in scheduler.mjs). Append to the
+        // join-reconciliation artifact's undeclared_writes_by_phase and continue.
+        // A future config.scheduler.drift_policy = "block" can flip this.
+        append join_reconciliation.undeclared_writes_by_phase[slot.phase_id] = drift.undeclared
+
+    // 6. Emit proof-of-execution event. selected_mode:"parallel" means the
+    //    wave actually ran in parallel (writer side; finalize counts only
+    //    this toward tiers_parallel_executed).
+    emit_event({
+      pipeline_id: state.pipeline_id,
+      run_started_at: state.started_at,
+      recompose_count: decomposition.recompose_count,
+      tier: tier.tier,
+      wave_index: wave_index,
+      phases: wave_state.queue,
+      selected_mode: "parallel",
+      parallel_requested: true,
+      worker_cap: max_phase_workers,
+      rejection_reasons_by_phase: planned_wave.ready_but_blocked,
+      worktree_slots: acquired_slots.map(s => s.slot_id)
     })
-    // Mirror to state.worktree_pool_history (replaces in-prompt append).
-    mpl_state_write({
-      worktree_pool_history: [
-        ...prev_history,
-        {
-          tier: tier.tier, phase_id: phase_id, slot_id: slot_id,
-          worktree_path: acq.worktree_root, base_ref: base_sha,
-          started_at: now_iso(), completed_at: null
-        }
-      ]
+
+    // 7. Release slots.
+    for slot in acquired_slots:
+      `echo '{"cwd":"$cwd","worktree_root":"$slot.worktree_root","branch":"$slot.branch","delete_branch":true}' | node hooks/lib/policy/isolation-cli.mjs release-slot`
+      // Update worktree_pool_history[].completed_at for this slot.
+
+  catch err:
+    // 8. Classified failure path — every error_message routes through
+    //    classify-wave-failure so the canonical failure_code lands in the
+    //    parallel_failed event. The aggregator surfaces failure_codes as an
+    //    independent axis from rejection_reasons (paraphrase-resistant).
+    classify = `echo '{"error_message":"$err.message"}' | node hooks/lib/policy/scheduler-cli.mjs classify-wave-failure`
+    failure_code = classify.failure_code
+
+    // Force-release any acquired slots so the pool doesn't leak.
+    for slot in acquired_slots:
+      `echo '{"cwd":"$cwd","worktree_root":"$slot.worktree_root","force":true,"delete_branch":true,"branch":"$slot.branch"}' | node hooks/lib/policy/isolation-cli.mjs release-slot`
+
+    emit_event({
+      pipeline_id: state.pipeline_id,
+      run_started_at: state.started_at,
+      recompose_count: decomposition.recompose_count,
+      tier: tier.tier,
+      wave_index: wave_index,
+      phases: wave_state.queue,
+      selected_mode: "parallel_failed",
+      parallel_requested: true,
+      worker_cap: max_phase_workers,
+      rejection_reasons_by_phase: planned_wave.ready_but_blocked,
+      worktree_slots: [],
+      failure_code: failure_code,
+      failure_reason: err.message
     })
-
-  // Dispatch phase-runner subagents in parallel (one Task per slot, run_in_background=true).
-  task_handles = []
-  for slot in acquired_slots:
-    handle = Task(
-      subagent_type="mpl-phase-runner", model="sonnet",
-      prompt=assemble_context(slot.phase_id, isolation_root=slot.worktree_root),
-      run_in_background=true
-    )
-    task_handles.append({slot: slot, handle: handle})
-
-  // Wait for all handles to finish (BashOutput polling loop already documented).
-  results = wait_all(task_handles)
-  if any(r.failed for r in results):
-    throw new Error("wave_execution_error: " + first_failure_message(results))
-
-  // 4. Wave reduce — merge shards via wave-reducer-cli (inside the try so
-  //    merge_error flows through the canonical failure_code path).
-  merge_result = `echo '{"cwd":"$cwd","wave_id":"$wave_state.wave_id"}' | node hooks/lib/state/wave-reducer-cli.mjs merge`
-  if not merge_result.ok:
-    throw new Error(merge_result.failure_code + ": " + merge_result.error_message)
-
-  // 5. Per-slot drift check (declared vs git diff inside the slot).
-  for slot in acquired_slots:
-    declared = state.execution.phase_details.find(p => p.id == slot.phase_id).impact
-    drift_input = {
-      worktree_root: slot.worktree_root,
-      base_ref: slot.base_sha,
-      declared: declared
-    }
-    drift = `echo '$drift_input' | node hooks/lib/policy/isolation-cli.mjs detect-drift`
-    if drift.drift:
-      // NON-FATAL by default (declarations are forward commitments — see
-      // detectImpactDrift contract in scheduler.mjs). Append to the
-      // join-reconciliation artifact's undeclared_writes_by_phase and continue.
-      // A future config.scheduler.drift_policy = "block" can flip this.
-      append join_reconciliation.undeclared_writes_by_phase[slot.phase_id] = drift.undeclared
-
-  // 6. Emit proof-of-execution event. selected_mode:"parallel" means the
-  //    wave actually ran in parallel (writer side; finalize counts only
-  //    this toward tiers_parallel_executed).
-  emit_event({
-    pipeline_id: state.pipeline_id,
-    run_started_at: state.started_at,
-    recompose_count: decomposition.recompose_count,
-    tier: tier.tier,
-    wave_index: wave_index,
-    phases: phase_ids,
-    selected_mode: "parallel",
-    parallel_requested: true,
-    worker_cap: max_phase_workers,
-    rejection_reasons_by_phase: plan_result.ready_but_blocked,
-    worktree_slots: acquired_slots.map(s => s.slot_id)
-  })
-
-  // 7. Release slots.
-  for slot in acquired_slots:
-    `echo '{"cwd":"$cwd","worktree_root":"$slot.worktree_root","branch":"$slot.branch","delete_branch":true}' | node hooks/lib/policy/isolation-cli.mjs release-slot`
-    // Update worktree_pool_history[].completed_at for this slot.
-
-catch err:
-  // 8. Classified failure path — every error_message routes through
-  //    classify-wave-failure so the canonical failure_code lands in the
-  //    parallel_failed event. The aggregator surfaces failure_codes as an
-  //    independent axis from rejection_reasons (paraphrase-resistant).
-  classify = `echo '{"error_message":"$err.message"}' | node hooks/lib/policy/scheduler-cli.mjs classify-wave-failure`
-  failure_code = classify.failure_code
-
-  // Force-release any acquired slots so the pool doesn't leak.
-  for slot in acquired_slots:
-    `echo '{"cwd":"$cwd","worktree_root":"$slot.worktree_root","force":true,"delete_branch":true,"branch":"$slot.branch"}' | node hooks/lib/policy/isolation-cli.mjs release-slot`
-
-  emit_event({
-    pipeline_id: state.pipeline_id,
-    run_started_at: state.started_at,
-    recompose_count: decomposition.recompose_count,
-    tier: tier.tier,
-    wave_index: wave_index,
-    phases: phase_ids,
-    selected_mode: "parallel_failed",
-    parallel_requested: true,
-    worker_cap: max_phase_workers,
-    rejection_reasons_by_phase: plan_result.ready_but_blocked,
-    worktree_slots: [],
-    failure_code: failure_code,
-    failure_reason: err.message
-  })
-  raise
+    raise
 
 // emit_event(row) is the canonical shorthand for:
 //   `echo '{"cwd":"$cwd","event":$row}' | node hooks/lib/policy/scheduler-cli.mjs record-event`
