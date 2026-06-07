@@ -148,6 +148,24 @@ describe('scheduler-cli — plan-tier', () => {
     assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p1' && x.code === 'high_risk_phase_rejected'));
     assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p3' && x.code === 'file_overlap'));
   });
+
+  it('leaves phase ids missing from the phase payload unplanned', () => {
+    const r = subPlanTier({
+      cwd: '/repo',
+      run_id: '2026-06-01T00:00:00Z',
+      tier: 1,
+      phase_ids: ['p1', 'missing-phase'],
+      phases: [
+        { id: 'p1', risk_level: 'LOW', dependencies: [], impact: { create: ['src/a.ts'] } },
+      ],
+      completed_phase_ids: [],
+      config: { parallelism: { max_phase_workers: 2 } },
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.waves.map((w) => w.wave_state.queue), [['p1']]);
+    assert.deepEqual(r.rejected_phase_ids, []);
+    assert.deepEqual(r.unplanned_phase_ids, ['missing-phase']);
+  });
 });
 
 describe('scheduler-cli — validate-wave', () => {

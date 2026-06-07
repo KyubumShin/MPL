@@ -178,7 +178,10 @@ function subPlanTier(input) {
   let wave_index = Number.isInteger(start_wave_index) ? start_wave_index : 0;
 
   for (let i = 0; i < maxIterations && remaining.size > 0; i++) {
-    const readyIds = [...remaining].filter((id) => phaseDepsClosed(phaseById.get(id), completed));
+    const readyIds = [...remaining].filter((id) => {
+      if (!phaseById.has(id)) return false;
+      return phaseDepsClosed(phaseById.get(id), completed);
+    });
 
     if (readyIds.length === 0) break;
 
