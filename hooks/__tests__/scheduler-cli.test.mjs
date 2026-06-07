@@ -143,6 +143,7 @@ describe('scheduler-cli — plan-tier', () => {
     });
     assert.equal(r.ok, true);
     assert.deepEqual(r.waves.map((w) => w.wave_state.queue), [['p2'], ['p3', 'p4']]);
+    assert.deepEqual(r.rejected_phase_ids, ['p1']);
     assert.deepEqual(r.unplanned_phase_ids, []);
     assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p1' && x.code === 'high_risk_phase_rejected'));
     assert.ok(r.ready_but_blocked.some((x) => x.phase_id === 'p3' && x.code === 'file_overlap'));

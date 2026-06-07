@@ -171,6 +171,7 @@ function subPlanTier(input) {
   const phaseById = new Map(phases.filter((p) => p && typeof p.id === 'string').map((p) => [p.id, p]));
   const completed = new Set(completed_phase_ids || []);
   const remaining = new Set(phase_ids);
+  const rejected = new Set();
   const waves = [];
   const ready_but_blocked = [];
   const maxIterations = phase_ids.length + 1;
@@ -195,6 +196,7 @@ function subPlanTier(input) {
       // HIGH-risk phases cannot become parallel-ready in a later wave.
       if (row.code === WAVE_REJECTION_CODES.HIGH_RISK_PHASE && row.phase_id) {
         remaining.delete(row.phase_id);
+        rejected.add(row.phase_id);
       }
     }
 
@@ -224,6 +226,9 @@ function subPlanTier(input) {
     ok: true,
     waves,
     ready_but_blocked,
+    rejected_phase_ids: [...rejected],
+    // Phases still in `remaining` are blocked by unresolved dependency
+    // frontier, not permanently rejected from parallel planning.
     unplanned_phase_ids,
     completed_phase_ids_after_plan: [...completed],
   };
